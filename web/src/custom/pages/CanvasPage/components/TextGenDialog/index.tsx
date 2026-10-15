@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
-import { ArrowUp, ChevronDown, SlidersHorizontal, X } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { ArrowUp, SlidersHorizontal, X } from 'lucide-react';
 import { fetchGenerationModels, type GenerationModel } from '@/custom/api/generation';
 import { promptMaxLengthOf } from '@/custom/utils/prompt-max-length';
-import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
+import Select from '@/custom/components/Select';
 import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../followDialog';
 import type { ImageTextAttachment } from '../ImageDialog';
 import styles from './index.module.css';
@@ -28,10 +28,6 @@ export default function TextGenDialog({
   const [inputValue, setInputValue] = useState(initialText ?? '');
   const [modelList, setModelList] = useState<GenerationModel[]>([]);
   const [selectedModel, setSelectedModel] = useState('');
-  const [modelOpen, setModelOpen] = useState(false);
-  const modelWrapRef = useRef<HTMLDivElement>(null);
-
-  useDismissOnOutside([{ open: modelOpen, ref: modelWrapRef, dismiss: () => setModelOpen(false) }]);
 
   useEffect(() => {
     let cancelled = false;
@@ -97,35 +93,22 @@ export default function TextGenDialog({
 
           <div className={styles.bottomBar}>
             <div className={styles.barLeft}>
-              <div className={styles.selectWrap} ref={modelWrapRef}>
-                <button
-                  type="button"
-                  className={styles.configBtn}
-                  onClick={() => setModelOpen((open) => !open)}
-                >
-                  <SlidersHorizontal size={14} strokeWidth={2} />
-                  <span>{currentModel?.model_label ?? '选择模型'}</span>
-                  <ChevronDown size={12} strokeWidth={2} />
-                </button>
-                {modelOpen && (
-                  <div className={styles.selectDropdown}>
-                    {modelList.map((item) => (
-                      <button
-                        key={item.model_id}
-                        type="button"
-                        className={`${styles.selectOption} ${item.model_id === selectedModel ? styles.selectOptionActive : ''}`}
-                        onClick={() => {
-                          setSelectedModel(item.model_id);
-                          onParamsChange?.({ modelId: item.model_id });
-                          setModelOpen(false);
-                        }}
-                      >
-                        {item.model_label}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
+              <Select
+                value={selectedModel}
+                onChange={(modelId) => {
+                  setSelectedModel(modelId);
+                  onParamsChange?.({ modelId });
+                }}
+                size="sm"
+                side="top"
+                placeholder="选择模型"
+                leading={<SlidersHorizontal size={14} strokeWidth={2} />}
+                triggerClassName={styles.configBtn}
+                options={modelList.map((item) => ({
+                  value: item.model_id,
+                  label: item.model_label,
+                }))}
+              />
             </div>
             <button
               type="button"

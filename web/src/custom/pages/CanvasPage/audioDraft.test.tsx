@@ -6,6 +6,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Node } from '@xyflow/react';
 import CanvasPage from './index';
+import { clickSelectOption } from './testing/radixSelect';
 import type { AudioDialogProps } from './components/AudioDialog';
 import { typePromptRefText, readPromptRefText, promptRefReadOnly } from './testing/promptRefEditor';
 import { Toaster, toast } from 'sonner';
@@ -433,11 +434,7 @@ describe('IKDMQT 音频草稿创建与编辑', () => {
         .find((b) => b.textContent?.includes('测试音频模型'))!
         .click();
     });
-    await act(async () => {
-      [...container.querySelectorAll<HTMLButtonElement>('button')]
-        .find((b) => b.textContent === '测试音频模型二')!
-        .click();
-    });
+    await clickSelectOption('测试音频模型二');
     expect(draft().data.draftModelId).toBe('a-test-2');
 
     await vi.waitFor(
@@ -812,8 +809,7 @@ describe('IKJUGX 音频与音乐页面接线和入口边界', () => {
     expect(container.querySelector('[data-testid="audio-input"]')).toBeNull();
     const musicMode = Array.from(container.querySelectorAll('button')).find(button => button.textContent?.trim() === 'AI 音乐')!;
     await act(async () => { musicMode.click(); });
-    const audioMode = Array.from(container.querySelectorAll('button')).find(button => button.textContent?.trim() === '音频生成')!;
-    await act(async () => { audioMode.click(); });
+    await clickSelectOption('音频生成');
     await waitModelReady();
     expect(readPromptRefText(container)).toBe('');
     expect(audioDialogProps.current?.draftBinding).toBeUndefined();

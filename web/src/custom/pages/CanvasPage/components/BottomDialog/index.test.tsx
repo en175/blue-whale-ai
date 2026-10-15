@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GenerationModel } from '@/custom/api/generation';
 import BottomDialog from './index';
 import styles from './index.module.css';
+import { clickSelectOption } from '../../testing/radixSelect';
 import { typePromptRefText } from '../../testing/promptRefEditor';
 import { silenceApiConsoleInfo } from '../../testing/silenceApiLogs';
 import { installFetchGuard } from '../../testing/fetchGuard';
@@ -98,6 +99,16 @@ async function renderDialog(onClose = vi.fn()) {
   return onClose;
 }
 
+function selectTrigger(label: string): HTMLButtonElement | undefined {
+  return [...mountNode.querySelectorAll<HTMLButtonElement>('[role="combobox"]')].find((button) =>
+    button.textContent?.includes(label),
+  );
+}
+
+function selectTriggers(): HTMLButtonElement[] {
+  return [...mountNode.querySelectorAll<HTMLButtonElement>('[role="combobox"]')];
+}
+
 async function openConfigAndModelDropdown() {
   const configBtn = [...mountNode.querySelectorAll('button')].find((button) =>
     button.textContent?.includes('16:9'),
@@ -108,15 +119,13 @@ async function openConfigAndModelDropdown() {
   });
   expect(mountNode.textContent).toContain('模型与质量');
 
-  const modelBtn = [...mountNode.querySelectorAll<HTMLButtonElement>(`.${styles.selectBtn}`)].find((button) =>
-    button.textContent?.includes('Seedance 2.0'),
-  );
+  const modelBtn = selectTrigger('Seedance 2.0');
   expect(modelBtn).toBeTruthy();
   await act(async () => {
     modelBtn?.click();
   });
-  expect(mountNode.querySelector(`.${styles.selectDropdown}`)).not.toBeNull();
-  expect(mountNode.textContent).toContain('Kling');
+  expect(document.body.querySelector('[role="listbox"]')).not.toBeNull();
+  expect(document.body.textContent).toContain('Kling');
 }
 
 beforeEach(() => {
@@ -138,7 +147,7 @@ describe('BottomDialog nested overlays (IKBO6M)', () => {
       document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
     });
 
-    expect(mountNode.querySelector(`.${styles.selectDropdown}`)).toBeNull();
+    expect(document.body.querySelector('[role="listbox"]')).toBeNull();
     expect(mountNode.querySelector(`.${styles.configPanel}`)).toBeNull();
     expect(mountNode.textContent).not.toContain('模型与质量');
     expect(mountNode.querySelector(`.${styles.dialog}`)).not.toBeNull();
@@ -377,7 +386,7 @@ function sampleSwitch(): HTMLButtonElement | null {
 }
 
 function sizeButton(): HTMLButtonElement | undefined {
-  return [...mountNode.querySelectorAll<HTMLButtonElement>(`.${styles.selectBtn}`)][1];
+  return selectTriggers()[1];
 }
 
 async function typePrompt(text: string) {
@@ -440,17 +449,13 @@ describe('BottomDialog 样片模式开关（IKIZQB）', () => {
     await act(async () => { sampleSwitch()!.click(); });
     expect(sampleSwitch()!.getAttribute('aria-checked')).toBe('true');
 
-    const modelBtn = [...mountNode.querySelectorAll<HTMLButtonElement>(`.${styles.selectBtn}`)][0]!;
+    const modelBtn = selectTriggers()[0]!;
     await act(async () => { modelBtn.click(); });
-    const klingOption = [...mountNode.querySelectorAll<HTMLButtonElement>(`.${styles.selectDropdown} button`)]
-      .find((b) => b.textContent?.includes('Kling'))!;
-    await act(async () => { klingOption.click(); });
+    await clickSelectOption('Kling');
     expect(sampleSwitch()).toBeNull();
 
     await act(async () => { modelBtn.click(); });
-    const backOption = [...mountNode.querySelectorAll<HTMLButtonElement>(`.${styles.selectDropdown} button`)]
-      .find((b) => b.textContent?.includes('Seedance 2.5'))!;
-    await act(async () => { backOption.click(); });
+    await clickSelectOption('Seedance 2.5');
     expect(sampleSwitch()).toBeTruthy();
     expect(sampleSwitch()!.getAttribute('aria-checked')).toBe('false');
   });
@@ -462,11 +467,10 @@ describe('BottomDialog 样片模式开关（IKIZQB）', () => {
     await act(async () => { sampleSwitch()!.click(); });
 
     for (const label of ['全能参考', '首尾帧', '图生视频', '文生视频']) {
-      const modeBtn = [...mountNode.querySelectorAll('button')]
+      const modeBtn = [...mountNode.querySelectorAll<HTMLButtonElement>('[role="combobox"]')]
         .find((b) => ['文生视频', '全能参考', '图片参考', '首尾帧', '图生视频', '视频编辑', '视频延长'].includes(b.textContent ?? ''));
       await act(async () => { modeBtn!.click(); });
-      const option = [...mountNode.querySelectorAll('button')].find((b) => b.textContent === label);
-      await act(async () => { option!.click(); });
+      await clickSelectOption(label);
       expect(sampleSwitch()?.getAttribute('aria-checked')).toBe('true');
     }
   });

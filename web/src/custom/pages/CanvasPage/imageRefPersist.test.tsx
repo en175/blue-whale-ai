@@ -6,6 +6,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Node } from '@xyflow/react';
 import CanvasPage from './index';
+import { clickSelectOption } from './testing/radixSelect';
 import { ATTACHMENT_ACTION_PICK_CANVAS_TITLE } from './components/AttachmentActionBar';
 import { readPromptRefText, typePromptRefRaw, typePromptRefText } from './testing/promptRefEditor';
 import type { GenerationModel, ModelFeatures } from '@/custom/api/generation';
@@ -346,10 +347,7 @@ describe('IKFDFT 图片参考即时保存与编辑恢复', () => {
       )!;
     }
     await act(async () => { selectBtn.click(); });
-    const option = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
-      (b) => b.textContent === targetLabel,
-    )!;
-    await act(async () => { option.click(); });
+    await clickSelectOption(targetLabel);
     const toggle = [...container.querySelectorAll<HTMLButtonElement>('button')].find(
       (b) => (b.textContent ?? '').includes(targetLabel) && (b.textContent ?? '').includes(':'),
     )!;

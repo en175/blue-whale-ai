@@ -5,7 +5,6 @@ import {
   MoreHorizontal,
   Eye,
   Search,
-  ChevronDown,
   Store,
   BookMarked,
   AtSign,
@@ -31,6 +30,7 @@ import {
   type SkillRecord,
 } from '@/custom/api/skills';
 import { isApiError } from '@/shared/api/http';
+import Select from '@/custom/components/Select';
 import ConfirmModal from '@/custom/components/ConfirmModal';
 
 interface SkillModalProps {
@@ -71,7 +71,6 @@ export default function SkillModal({ open, onClose, onUseSkill }: SkillModalProp
   const [searchInput, setSearchInput] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [sortKey, setSortKey] = useState<(typeof sortOptions)[number]['key']>('featured');
-  const [sortOpen, setSortOpen] = useState(false);
   const [category, setCategory] = useState('all');
   const [categoryList, setCategoryList] = useState<string[]>([]);
   const [libraryList, setLibraryList] = useState<SkillRecord[]>([]);
@@ -369,31 +368,21 @@ export default function SkillModal({ open, onClose, onUseSkill }: SkillModalProp
                 搜索
               </button>
               <div className={styles.sortWrap}>
-                <button className={styles.sortBtn} onClick={() => setSortOpen(!sortOpen)}>
-                  <span className={styles.sortLabel}>排序</span>
-                  <span>{currentSort?.label}</span>
-                  <ChevronDown
-                    size={13}
-                    strokeWidth={2}
-                    className={`${styles.sortArrow} ${sortOpen ? styles.sortArrowUp : ''}`}
-                  />
-                </button>
-                {sortOpen && (
-                  <div className={styles.sortDropdown}>
-                    {sortOptions.map((opt) => (
-                      <button
-                        key={opt.key}
-                        className={`${styles.sortOption} ${opt.key === sortKey ? styles.sortOptionActive : ''}`}
-                        onClick={() => {
-                          setSortKey(opt.key);
-                          setSortOpen(false);
-                        }}
-                      >
-                        {opt.label}
-                      </button>
-                    ))}
-                  </div>
-                )}
+                <Select
+                  value={sortKey}
+                  onChange={(next) => setSortKey(next as (typeof sortOptions)[number]['key'])}
+                  size="sm"
+                  side="bottom"
+                  ariaLabel="排序方式"
+                  triggerClassName={styles.sortBtn}
+                  triggerRender={
+                    <>
+                      <span className={styles.sortLabel}>排序</span>
+                      <span>{currentSort?.label}</span>
+                    </>
+                  }
+                  options={sortOptions.map((opt) => ({ value: opt.key, label: opt.label }))}
+                />
               </div>
             </div>
 

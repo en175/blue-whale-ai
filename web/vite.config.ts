@@ -162,6 +162,7 @@ export default defineConfig(({ command, mode }) => {
     ],
     test: {
       forceExit: true,
+      setupFiles: ['./vitest.setup.ts'],
     },
     resolve: {
       alias: {

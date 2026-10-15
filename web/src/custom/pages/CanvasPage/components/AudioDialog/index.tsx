@@ -1,10 +1,11 @@
 import { type MediaGenStatus } from '@/custom/enums';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { X, AudioLines, ChevronDown, ArrowUp, Maximize2, Minimize2 } from 'lucide-react';
+import { X, AudioLines, ArrowUp, Maximize2, Minimize2 } from 'lucide-react';
 import { fetchGenerationModels, type GenerationModel } from '@/custom/api/generation';
 import { checkAddAudioRef, audioRefItemMediaTypeOf } from '../../audioMediaRefs';
 import { checkReferenceLimits, audioReferenceMaxOf, imageReferenceMaxOfForAudio } from '@/custom/utils/model-reference-limits';
 import { remoteImageCrossOrigin, resolveMediaSrc } from '@/shared/utils/remoteImageCors';
+import Select from '@/custom/components/Select';
 import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
 import { useAudioDurations } from '../../hooks/useAudioDurations';
 
@@ -124,11 +125,9 @@ export default function AudioDialog({
   const [models, setModels] = useState<GenerationModel[]>([]);
   const [modelId, setModelId] = useState(initialModelId ?? '');
   const [modelsLoaded, setModelsLoaded] = useState(false);
-  const [modelOpen, setModelOpen] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [refs, setRefs] = useState<AudioRefItem[]>(initialRefs ?? []);
   const [pickerOpen, setPickerOpen] = useState(false);
-  const modelWrapRef = useRef<HTMLDivElement>(null);
   const sourceWrapRef = useRef<HTMLDivElement>(null);
 
   const durationSources = useMemo(
@@ -138,7 +137,6 @@ export default function AudioDialog({
   const durations = useAudioDurations(durationSources);
 
   useDismissOnOutside([
-    { open: modelOpen, ref: modelWrapRef, dismiss: () => setModelOpen(false) },
     { open: pickerOpen, ref: sourceWrapRef, dismiss: () => setPickerOpen(false) },
   ]);
 
@@ -179,7 +177,6 @@ export default function AudioDialog({
 
   const handleModelSelect = (id: string) => {
     setModelId(id);
-    setModelOpen(false);
     draftBinding?.onParamsChange({ modelId: id });
   };
 
@@ -518,33 +515,18 @@ export default function AudioDialog({
           </div>
 
           {}
-          <div className={styles.modeWrap} ref={modelWrapRef}>
-            <button
-              className={styles.modeBtn}
-              onClick={() => setModelOpen((v) => !v)}
+          <div className={styles.modeWrap}>
+            <Select
+              value={modelId}
+              onChange={handleModelSelect}
+              size="sm"
+              side="top"
               disabled={readOnly || pickLocked}
-              title={pickLocked ? '选取进行中，完成选取后再调整模型配置' : undefined}
-            >
-              <span>{currentModel?.model_label ?? '选择模型'}</span>
-              <ChevronDown
-                size={10}
-                strokeWidth={2}
-                className={`${styles.modeArrow} ${modelOpen ? styles.modeArrowUp : ''}`}
-              />
-            </button>
-            {modelOpen && (
-              <div className={styles.modeDropdown}>
-                {models.map((opt) => (
-                  <button
-                    key={opt.model_id}
-                    className={`${styles.modeOption} ${opt.model_id === modelId ? styles.modeOptionActive : ''}`}
-                    onClick={() => handleModelSelect(opt.model_id)}
-                  >
-                    {opt.model_label}
-                  </button>
-                ))}
-              </div>
-            )}
+              triggerTitle={pickLocked ? '选取进行中，完成选取后再调整模型配置' : undefined}
+              ariaLabel="选择模型"
+              placeholder="选择模型"
+              options={models.map((opt) => ({ value: opt.model_id, label: opt.model_label }))}
+            />
           </div>
         </div>
 

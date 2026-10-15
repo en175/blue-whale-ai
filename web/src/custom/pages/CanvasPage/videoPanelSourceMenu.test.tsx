@@ -17,6 +17,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Node } from '@xyflow/react';
 import CanvasPage from './index';
+import { clickSelectOption } from './testing/radixSelect';
 import { REF_SOURCE_ENTRY_TITLE } from './components/RefSourceMenu';
 import {
   ATTACHMENT_ACTION_PICK_ASSETS_TITLE,
@@ -396,9 +397,7 @@ async function switchMode(label: '全能参考' | '图片参考' | '首尾帧') 
   if (modeButtons().length <= 1) {
     await act(async () => { modeButtons()[0]!.click(); });
   }
-  await act(async () => {
-    [...container.querySelectorAll('button')].find((b) => b.textContent === label)!.click();
-  });
+  await clickSelectOption(label);
   await act(async () => { await Promise.resolve(); });
 }
 

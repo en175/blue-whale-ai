@@ -9,6 +9,7 @@ import { Plus, ChevronUp, ChevronDown, Music, BookOpen, BookText, X, Upload, Fol
 import SkillModal from '../SkillModal';
 import LoginModal from '@/custom/components/LoginModal';
 import RatioIcon from '@/custom/components/RatioIcon';
+import Select from '@/custom/components/Select';
 import AssetsPickerModal from '@/custom/pages/CanvasPage/components/AssetsPickerModal';
 
 import {
@@ -142,17 +143,9 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
     { file?: File; preview: string; name?: string; assetId?: string | number }[]
   >([]);
 
-  const creationRef = useRef<HTMLDivElement>(null);
   const tabBarRef = useRef<HTMLDivElement>(null);
   const tabRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
-  const videoModelRef = useRef<HTMLDivElement>(null);
-  const videoModeRef = useRef<HTMLDivElement>(null);
-  const ratioRef = useRef<HTMLDivElement>(null);
-  const resRef = useRef<HTMLDivElement>(null);
   const durationRef = useRef<HTMLDivElement>(null);
-  const imgModelRef = useRef<HTMLDivElement>(null);
-  const imgRatioRef = useRef<HTMLDivElement>(null);
-  const imgResRef = useRef<HTMLDivElement>(null);
   const imageFileInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const firstSlotRef = useRef<HTMLButtonElement>(null);
@@ -262,15 +255,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
   }, [updateUnderline]);
 
   useDismissOnOutside([
-    { open: openDropdown === 'creation', ref: creationRef, dismiss: () => setOpenDropdown(null) },
-    { open: openDropdown === 'videoModel', ref: videoModelRef, dismiss: () => setOpenDropdown(null) },
-    { open: openDropdown === 'videoMode', ref: videoModeRef, dismiss: () => setOpenDropdown(null) },
-    { open: openDropdown === 'ratio', ref: ratioRef, dismiss: () => setOpenDropdown(null) },
-    { open: openDropdown === 'res', ref: resRef, dismiss: () => setOpenDropdown(null) },
     { open: openDropdown === 'duration', ref: durationRef, dismiss: () => setOpenDropdown(null) },
-    { open: openDropdown === 'imgModel', ref: imgModelRef, dismiss: () => setOpenDropdown(null) },
-    { open: openDropdown === 'imgRatio', ref: imgRatioRef, dismiss: () => setOpenDropdown(null) },
-    { open: openDropdown === 'imgRes', ref: imgResRef, dismiss: () => setOpenDropdown(null) },
     { open: refMenu !== null, ref: [refMenuRef, refCardRef], dismiss: () => setRefMenu(null) },
   ]);
 
@@ -505,17 +490,8 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
 
   const creationModelOptions = videoModelOptions;
 
-  const currentCreationModel =
-    creationModelOptions.find((m) => m.key === creationModel)?.label ?? '';
-
-  const currentVideoModel =
-    videoModelOptions.find((m) => m.key === videoModel)?.label ?? '';
-
   const isVideoTab = activeTab === 'video';
   const isImageTab = activeTab === 'image';
-
-  const currentImageModel =
-    imageModelOptions.find((m) => m.key === imageModel)?.label ?? '';
 
   const selectedImageModel = imageModelList.find((m) => m.model_id === imageModel);
   const imageRatioOptions = selectedImageModel
@@ -525,8 +501,6 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
     imageRatioOptions.find((ratio) => ratio.id === imageAspectRatio)?.label ?? imageAspectRatio;
   const imageSizeItems =
     selectedImageModel?.supported_sizes.map((s) => ({ key: s.id, label: s.label })) ?? [];
-  const currentImageResolution =
-    imageSizeItems.find((s) => s.key === imageResolution)?.label ?? imageResolution;
 
   const selectedVideoModel = videoModelList.find((m) => m.model_id === videoModel);
 
@@ -551,8 +525,6 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
   const videoConfiguredModes = configuredVideoModes(selectedVideoModel?.features);
   const videoEnabledModes = enabledVideoModes(videoRefsProjection, videoConfiguredModes);
   const videoModeOptions = videoConfiguredModes.map((key) => ({ key, label: VIDEO_MODE_LABEL[key] }));
-  const currentVideoMode =
-    videoModeOptions.find((m) => m.key === videoMode)?.label ?? VIDEO_MODE_LABEL[videoMode];
   const videoRatioLocked = lockedRatioOf(selectedVideoModel?.features, videoMode);
   const videoDurationLocked = lockedDurationOf(selectedVideoModel?.features, videoMode);
 
@@ -1055,112 +1027,72 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
             <div className={styles.videoParamBar}>
               <div className={styles.videoParamsLeft}>
                 { }
-                <div className={styles.dropdownWrap} ref={videoModelRef}>
-                  <button
-                    className={styles.paramBtn}
-                    onClick={() => toggleDropdown('videoModel')}
-                  >
-                    <span>{currentVideoModel}</span>
-                    <ChevronDown size={12} strokeWidth={2} />
-                  </button>
-                  {openDropdown === 'videoModel' && (
-                    <div className={styles.dropdownMenuDown}>
-                      {videoModelOptions.map((m) => (
-                        <button
-                          key={m.key}
-                          className={`${styles.dropdownItem} ${videoModel === m.key ? styles.dropdownItemActive : ''}`}
-                          onClick={() => {
-                            setVideoModel(m.key);
-                            setOpenDropdown(null);
-                            const full = videoModelList.find((x) => x.model_id === m.key);
-                            if (full) setAspectRatio(pickDefaultVideoRatio(full.supported_aspect_ratios, full.default_aspect_ratio));
-                          }}
-                        >
-                          {m.label}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
+                <Select
+                  value={videoModel}
+                  onChange={(key) => {
+                    setVideoModel(key);
+                    const full = videoModelList.find((x) => x.model_id === key);
+                    if (full) setAspectRatio(pickDefaultVideoRatio(full.supported_aspect_ratios, full.default_aspect_ratio));
+                  }}
+                  size="sm"
+                  side="bottom"
+                  ariaLabel="选择视频模型"
+                  triggerClassName={styles.paramBtn}
+                  options={videoModelOptions.map((m) => ({ value: m.key, label: m.label }))}
+                />
 
                 { }
-                <div className={styles.dropdownWrap} ref={videoModeRef}>
-                  <button
-                    className={styles.paramBtn}
-                    onClick={() => toggleDropdown('videoMode')}
-                  >
-                    <span>{currentVideoMode}</span>
-                    <ChevronDown size={12} strokeWidth={2} />
-                  </button>
-                  {openDropdown === 'videoMode' && (
-                    <div className={styles.dropdownMenuDown}>
-                      {videoModeOptions.map((m) => (
-                        <button
-                          key={m.key}
-                          className={`${styles.dropdownItem} ${videoMode === m.key ? styles.dropdownItemActive : ''}`}
-                          disabled={!videoEnabledModes.includes(m.key)}
-                          onClick={() => handleVideoModeChange(m.key)}
-                        >
-                          {m.label}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
+                <Select
+                  value={videoMode}
+                  onChange={handleVideoModeChange}
+                  size="sm"
+                  side="bottom"
+                  ariaLabel="选择生成模式"
+                  triggerClassName={styles.paramBtn}
+                  options={videoModeOptions.map((m) => ({
+                    value: m.key,
+                    label: m.label,
+                    disabled: !videoEnabledModes.includes(m.key),
+                  }))}
+                />
 
                 { }
                 {!videoRatioLocked && (
-                  <div className={styles.dropdownWrap} ref={ratioRef}>
-                    <button
-                      className={styles.paramBtn}
-                      onClick={() => toggleDropdown('ratio')}
-                    >
-                      <RatioIcon ratio={aspectRatio} size={22} />
-                      { }
-                      <span>{videoRatioText(aspectRatio)}</span>
-                      <ChevronDown size={12} strokeWidth={2} />
-                    </button>
-                    {openDropdown === 'ratio' && (
-                      <div className={styles.dropdownMenuDown}>
-                        {videoRatioOptions.map((ratio) => (
-                          <button
-                            key={ratio.id}
-                            className={`${styles.dropdownItem} ${aspectRatio === ratio.id ? styles.dropdownItemActive : ''}`}
-                            onClick={() => { setAspectRatio(ratio.id); setOpenDropdown(null); }}
-                          >
-                            <RatioIcon ratio={ratio.id} size={22} />
-                            { }
-                            <span>{videoRatioLabel(ratio.label)}</span>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
+                  <Select
+                    value={aspectRatio}
+                    onChange={setAspectRatio}
+                    size="sm"
+                    side="bottom"
+                    ariaLabel="选择画面比例"
+                    triggerClassName={styles.paramBtn}
+                    triggerRender={
+                      <>
+                        <RatioIcon ratio={aspectRatio} size={22} />
+                        <span>{videoRatioText(aspectRatio)}</span>
+                      </>
+                    }
+                    options={videoRatioOptions.map((ratio) => ({
+                      value: ratio.id,
+                      label: (
+                        <>
+                          <RatioIcon ratio={ratio.id} size={22} />
+                          <span>{videoRatioLabel(ratio.label)}</span>
+                        </>
+                      ),
+                    }))}
+                  />
                 )}
 
                 { }
-                <div className={styles.dropdownWrap} ref={resRef}>
-                  <button
-                    className={styles.paramBtn}
-                    onClick={() => toggleDropdown('res')}
-                  >
-                    <span>{resolution}</span>
-                    <ChevronDown size={12} strokeWidth={2} />
-                  </button>
-                  {openDropdown === 'res' && (
-                    <div className={styles.dropdownMenuDown}>
-                      {videoSizeItems.map((r) => (
-                        <button
-                          key={r.key}
-                          className={`${styles.dropdownItem} ${resolution === r.key ? styles.dropdownItemActive : ''}`}
-                          onClick={() => { setResolution(r.key); setOpenDropdown(null); }}
-                        >
-                          {r.label}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
+                <Select
+                  value={resolution}
+                  onChange={setResolution}
+                  size="sm"
+                  side="bottom"
+                  ariaLabel="选择清晰度"
+                  triggerClassName={styles.paramBtn}
+                  options={videoSizeItems.map((r) => ({ value: r.key, label: r.label }))}
+                />
 
                 { }
                 <div className={styles.dropdownWrap} ref={durationRef}>
@@ -1281,89 +1213,60 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
             <div className={styles.videoParamBar}>
               <div className={styles.videoParamsLeft}>
                 { }
-                <div className={styles.dropdownWrap} ref={imgModelRef}>
-                  <button
-                    className={styles.paramBtn}
-                    onClick={() => toggleDropdown('imgModel')}
-                  >
-                    <span>{currentImageModel}</span>
-                    <ChevronDown size={12} strokeWidth={2} />
-                  </button>
-                  {openDropdown === 'imgModel' && (
-                    <div className={styles.dropdownMenuDown}>
-                      {imageModelOptions.map((m) => (
-                        <button
-                          key={m.key}
-                          className={`${styles.dropdownItem} ${imageModel === m.key ? styles.dropdownItemActive : ''}`}
-                          onClick={() => {
-                            const full = imageModelList.find((x) => x.model_id === m.key);
-                            if (full) applyImageModel(full);
-                            else setImageModel(m.key);
-                            setOpenDropdown(null);
-                          }}
-                        >
-                          {m.label}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
+                <Select
+                  value={imageModel}
+                  onChange={(key) => {
+                    const full = imageModelList.find((x) => x.model_id === key);
+                    if (full) applyImageModel(full);
+                    else setImageModel(key);
+                  }}
+                  size="sm"
+                  side="bottom"
+                  ariaLabel="选择图片模型"
+                  triggerClassName={styles.paramBtn}
+                  options={imageModelOptions.map((m) => ({ value: m.key, label: m.label }))}
+                />
 
                 { }
-                <div className={styles.dropdownWrap} ref={imgRatioRef}>
-                  <button
-                    className={styles.paramBtn}
-                    onClick={() => toggleDropdown('imgRatio')}
-                  >
-                    <RatioIcon ratio={imageAspectRatio} size={22} />
-                    <span>{imageRatioLabel}</span>
-                    <ChevronDown size={12} strokeWidth={2} />
-                  </button>
-                  {openDropdown === 'imgRatio' && (
-                    <div className={styles.dropdownMenuDown}>
-                      {imageRatioOptions.map((ratio) => (
-                        <button
-                          key={ratio.id}
-                          className={`${styles.dropdownItem} ${imageAspectRatio === ratio.id ? styles.dropdownItemActive : ''}`}
-                          onClick={() => { setImageAspectRatio(ratio.id); setOpenDropdown(null); }}
-                        >
-                          <RatioIcon ratio={ratio.id} size={22} />
-                          <span>{ratio.label}</span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
+                <Select
+                  value={imageAspectRatio}
+                  onChange={setImageAspectRatio}
+                  size="sm"
+                  side="bottom"
+                  ariaLabel="选择画面比例"
+                  triggerClassName={styles.paramBtn}
+                  triggerRender={
+                    <>
+                      <RatioIcon ratio={imageAspectRatio} size={22} />
+                      <span>{imageRatioLabel}</span>
+                    </>
+                  }
+                  options={imageRatioOptions.map((ratio) => ({
+                    value: ratio.id,
+                    label: (
+                      <>
+                        <RatioIcon ratio={ratio.id} size={22} />
+                        <span>{ratio.label}</span>
+                      </>
+                    ),
+                  }))}
+                />
 
                 { }
-                <div className={styles.dropdownWrap} ref={imgResRef}>
-                  <button
-                    className={styles.paramBtn}
-                    onClick={() => toggleDropdown('imgRes')}
-                  >
-                    <span>{currentImageResolution}</span>
-                    <ChevronDown size={12} strokeWidth={2} />
-                  </button>
-                  {openDropdown === 'imgRes' && (
-                    <div className={styles.dropdownMenuDown}>
-                      {imageSizeItems.map((r) => (
-                        <button
-                          key={r.key}
-                          className={`${styles.dropdownItem} ${imageResolution === r.key ? styles.dropdownItemActive : ''}`}
-                          onClick={() => {
-                            setImageResolution(r.key);
-                            if (selectedImageModel) {
-                              setImageAspectRatio(pickRatioForSize(selectedImageModel, r.key, imageAspectRatio));
-                            }
-                            setOpenDropdown(null);
-                          }}
-                        >
-                          {r.label}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
+                <Select
+                  value={imageResolution}
+                  onChange={(key) => {
+                    setImageResolution(key);
+                    if (selectedImageModel) {
+                      setImageAspectRatio(pickRatioForSize(selectedImageModel, key, imageAspectRatio));
+                    }
+                  }}
+                  size="sm"
+                  side="bottom"
+                  ariaLabel="选择清晰度"
+                  triggerClassName={styles.paramBtn}
+                  options={imageSizeItems.map((r) => ({ value: r.key, label: r.label }))}
+                />
               </div>
 
               <div className={styles.videoParamsRight}>
@@ -1491,31 +1394,15 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                 </button>
 
                 { }
-                <div className={styles.dropdownWrap} ref={creationRef}>
-                  <button
-                    className={styles.modelBtn}
-                    onClick={() => toggleDropdown('creation')}
-                  >
-                    <span>{currentCreationModel}</span>
-                    <ChevronDown size={12} strokeWidth={2} />
-                  </button>
-                  {openDropdown === 'creation' && (
-                    <div className={styles.dropdownMenu}>
-                      {creationModelOptions.map((m) => (
-                        <button
-                          key={m.key}
-                          className={`${styles.dropdownItem} ${creationModel === m.key ? styles.dropdownItemActive : ''}`}
-                          onClick={() => {
-                            setCreationModel(m.key);
-                            setOpenDropdown(null);
-                          }}
-                        >
-                          {m.label}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
+                <Select
+                  value={creationModel}
+                  onChange={setCreationModel}
+                  size="sm"
+                  side="top"
+                  ariaLabel="选择生成模型"
+                  triggerClassName={styles.modelBtn}
+                  options={creationModelOptions.map((m) => ({ value: m.key, label: m.label }))}
+                />
               </div>
 
               { }

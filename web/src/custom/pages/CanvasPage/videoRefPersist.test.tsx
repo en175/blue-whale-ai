@@ -6,6 +6,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Node } from '@xyflow/react';
 import CanvasPage from './index';
+import { clickSelectOption } from './testing/radixSelect';
 import { readPromptRefText, typePromptRefRaw, typePromptRefText } from './testing/promptRefEditor';
 import type { GenerationModel, ModelFeatures } from '@/custom/api/generation';
 import { Toaster, toast } from 'sonner';
@@ -392,9 +393,7 @@ async function switchModel(currentLabel: string, targetLabel: string) {
   await act(async () => {
     [...container.querySelectorAll('button')].find((b) => b.textContent === currentLabel)!.click();
   });
-  await act(async () => {
-    [...container.querySelectorAll('button')].find((b) => b.textContent === targetLabel)!.click();
-  });
+  await clickSelectOption(targetLabel);
   await act(async () => { summaryOf(targetLabel).click(); });
 }
 

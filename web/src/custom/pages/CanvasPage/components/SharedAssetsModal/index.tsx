@@ -13,7 +13,6 @@ import {
   Type,
   Box,
   BarChart3,
-  ChevronDown,
   Plus,
   Trash2,
   ExternalLink,
@@ -25,6 +24,7 @@ import {
 import { fetchSharedAssetList, removeSharedAsset, addSceneToProject, type SharedAssetView, type SharedAssetKind, type SharedAssetListQuery, type SharedAssetMediaSnapshot, type SharedAssetCardSnapshot, type SharedAssetGoodsSnapshot, type SharedAssetTextSnapshot, type SharedAssetSceneSnapshot } from '@/custom/api/sharedAssets';
 import { isApiError } from '@/shared/api/http';
 import { remoteImageCrossOrigin, resolveMediaSrc } from '@/shared/utils/remoteImageCors';
+import Select from '@/custom/components/Select';
 import styles from './index.module.css';
 
 const TABS: { key: string; label: string; assetType?: SharedAssetType; kind?: SharedAssetKind; icon: typeof ImageIcon }[] = [
@@ -166,7 +166,6 @@ export default function SharedAssetsModal({
   const [tab, setTab] = useState(defaultTab ?? 'image');
 
   const [cardFilter, setCardFilter] = useState<CardFilter>(defaultCardFilter ?? 'all');
-  const [cardOpen, setCardOpen] = useState(false);
   const [keyword, setKeyword] = useState('');
   const [items, setItems] = useState<AssetListItem[]>([]);
   const [total, setTotal] = useState(0);
@@ -332,43 +331,24 @@ export default function SharedAssetsModal({
         <div className={styles.tabRow}>
           <div className={styles.tabs}>
             { }
-            <button
-              className={`${styles.tab} ${cardFilter !== 'all' ? styles.tabActive : ''}`}
-              onClick={() => setCardOpen((v) => !v)}
-            >
-              <ImageIcon size={14} strokeWidth={2} />
-              <span>资产</span>
-              <ChevronDown
-                size={12}
-                strokeWidth={2}
-                className={`${styles.tabArrow} ${cardOpen ? styles.tabArrowUp : ''}`}
-              />
-            </button>
-            {cardOpen && (
-              <div className={styles.subDropdown}>
-                <button
-                  className={`${styles.subOption} ${cardFilter === 'all-assets' ? styles.subOptionActive : ''}`}
-                  onClick={() => {
-                    setCardFilter('all-assets');
-                    setCardOpen(false);
-                  }}
-                >
-                  全部资产
-                </button>
-                {CARD_KINDS.map((s) => (
-                  <button
-                    key={s}
-                    className={`${styles.subOption} ${cardFilter === s ? styles.subOptionActive : ''}`}
-                    onClick={() => {
-                      setCardFilter(s);
-                      setCardOpen(false);
-                    }}
-                  >
-                    {CARD_KIND_LABEL[s]}
-                  </button>
-                ))}
-              </div>
-            )}
+            <Select
+              value={cardFilter}
+              onChange={(next) => setCardFilter(next as CardFilter)}
+              size="sm"
+              side="bottom"
+              triggerClassName={`${styles.tab} ${cardFilter !== 'all' ? styles.tabActive : ''}`}
+              ariaLabel="资产筛选"
+              triggerRender={
+                <>
+                  <ImageIcon size={14} strokeWidth={2} />
+                  <span>资产</span>
+                </>
+              }
+              options={[
+                { value: 'all-assets', label: '全部资产' },
+                ...CARD_KINDS.map((s) => ({ value: s, label: CARD_KIND_LABEL[s] })),
+              ]}
+            />
             {TABS.map((t) => {
               const Icon = t.icon;
               return (
@@ -378,7 +358,6 @@ export default function SharedAssetsModal({
                   onClick={() => {
                     setTab(t.key);
                     setCardFilter('all');
-                    setCardOpen(false);
                   }}
                 >
                   <Icon size={14} strokeWidth={2} />

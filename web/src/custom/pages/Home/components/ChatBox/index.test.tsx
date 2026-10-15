@@ -6,6 +6,7 @@ import type { GenerationModel } from '@/custom/api/generation';
 import ChatBox from './index';
 import styles from './index.module.css';
 import { OMNI_REFERENCE_FOLLOW_HINT } from '@/custom/utils/video-reference-hints';
+import { selectOptionByText } from '@/custom/pages/CanvasPage/testing/radixSelect';
 
 
 const { fetchGenerationModels, navigate, pickerOnSelect } = vi.hoisted(() => ({
@@ -147,7 +148,9 @@ describe('IKJ794 全能参考被动提示行（ChatBox）', () => {
     await renderChatBox();
     await act(async () => { buttonByLabel('AI 视频').click(); });
     await act(async () => { buttonByLabel('文生视频').click(); });
-    await act(async () => { buttonByLabel('首尾帧').click(); });
+    await act(async () => {
+      selectOptionByText('首尾帧')!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
     await act(async () => { buttonByLabel('首帧').click(); });
     const fromAssets = [...document.body.querySelectorAll<HTMLButtonElement>('button')]
       .find((b) => b.textContent === '从资产中选择')!;

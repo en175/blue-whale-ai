@@ -5,7 +5,6 @@ import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
-  ChevronDown,
   X,
   SlidersHorizontal,
   ArrowUp,
@@ -17,6 +16,7 @@ import { pickDefaultVideoRatio, videoRatioLabel } from '@/custom/utils/video-asp
 import { aspectRatioOptions, hasAspectRatio } from '@/custom/utils/image-size-ratios';
 import { generationQuoteOptions } from '@/custom/api/generationQuote';
 import RatioIcon from '@/custom/components/RatioIcon';
+import Select from '@/custom/components/Select';
 import GenerationQuoteBadge from '../GenerationQuoteBadge';
 import { buildVideoJobReferences } from '../../videoJobReferences';
 import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
@@ -207,9 +207,7 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
   const [selectedMode, setSelectedMode] = useState<VideoMode>(
     () => normalizeVideoMode(initialParams?.mode) ?? 'text2video',
   );
-  const [modeOpen, setModeOpen] = useState(false);
   const [showConfig, setShowConfig] = useState(false);
-
   const [expanded, setExpanded] = useState(false);
   const [modelList, setModelList] = useState<GenerationModel[]>([]);
   const [modelsLoaded, setModelsLoaded] = useState(false);
@@ -226,17 +224,9 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
   const [sampleMode, setSampleMode] = useState(initialParams?.sampleMode === true);
 
   const normalSizeRef = useRef<string>('');
-  const [modelOpen, setModelOpen] = useState(false);
-  const [sizeOpen, setSizeOpen] = useState(false);
-  const modelWrapRef = useRef<HTMLDivElement>(null);
-  const sizeWrapRef = useRef<HTMLDivElement>(null);
-  const modeWrapRef = useRef<HTMLDivElement>(null);
   const configPanelRef = useRef<HTMLDivElement>(null);
 
   useDismissOnOutside([
-    { open: modelOpen, ref: modelWrapRef, dismiss: () => setModelOpen(false) },
-    { open: sizeOpen, ref: sizeWrapRef, dismiss: () => setSizeOpen(false) },
-    { open: modeOpen, ref: modeWrapRef, dismiss: () => setModeOpen(false) },
     { open: showConfig, ref: configPanelRef, dismiss: () => setShowConfig(false) },
   ]);
 
@@ -360,7 +350,6 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
   const canAddLast = !videoMediaRefs.last;
   const canAddReference = !!caps?.referenceImage;
 
-  const currentMode = modeOptions.find((m) => m.key === selectedMode);
   const isKeyframe = isFrameMode(selectedMode);
   const supportsAdaptiveRatio = !!hasAspectRatio(currentModel?.supported_aspect_ratios, 'adaptive');
   const ratioLocked = lockedRatioOf(currentModel?.features, selectedMode);
@@ -486,7 +475,6 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
   const hasInvalidRef = docHasInvalidRef(promptDoc);
 
   const handleModeChange = (key: string) => {
-    setModeOpen(false);
     if (!isVideoMode(key) || !enabledModes.includes(key)) return;
     if (key === selectedMode) return;
     const hasFrames = !!(videoMediaRefs.first || videoMediaRefs.last);
@@ -941,73 +929,34 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
           { }
           <span className={styles.configLabel}>模型与质量</span>
           <div className={styles.configRow}>
-            <div className={styles.selectWrap} ref={modelWrapRef}>
-              <button
-                className={styles.selectBtn}
-                disabled={readOnly}
-                onClick={() => { setModelOpen(!modelOpen); setSizeOpen(false); }}
-              >
-                <span>{currentModel?.model_label ?? '选择模型'}</span>
-                <ChevronDown
-                  size={14}
-                  strokeWidth={2}
-                  className={`${styles.configArrow} ${modelOpen ? styles.configArrowUp : ''}`}
-                />
-              </button>
-              {modelOpen && (
-                <div className={styles.selectDropdown}>
-                  {modelOptions.map((m) => (
-                    <button
-                      key={m.key}
-                      className={`${styles.selectOption} ${m.key === selectedModel ? styles.selectOptionActive : ''}`}
-                      onClick={() => {
-                        const gen = modelList.find((x) => x.model_id === m.key);
-                        if (gen) {
-                          syncDraftParams(applyModelDefaults(gen));
-                          syncModeToModel(gen);
-                        }
-                        setModelOpen(false);
-            }}
-                    >
-                      {m.label}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
+            <Select
+              value={selectedModel}
+              onChange={(key) => {
+                const gen = modelList.find((x) => x.model_id === key);
+                if (gen) {
+                  syncDraftParams(applyModelDefaults(gen));
+                  syncModeToModel(gen);
+                }
+              }}
+              disabled={readOnly}
+              side="top"
+              placeholder="选择模型"
+              ariaLabel="选择模型"
+              options={modelOptions.map((m) => ({ value: m.key, label: m.label }))}
+            />
 
-            <div className={styles.selectWrap} ref={sizeWrapRef}>
-              <button
-                className={styles.selectBtn}
-                disabled={readOnly || sampleMode}
-                title={sampleMode ? '样片模式固定 480p，关闭样片后可调整清晰度' : undefined}
-                onClick={() => { setSizeOpen(!sizeOpen); setModelOpen(false); }}
-              >
-                <span>{currentSizeLabel}</span>
-                <ChevronDown
-                  size={14}
-                  strokeWidth={2}
-                  className={`${styles.configArrow} ${sizeOpen ? styles.configArrowUp : ''}`}
-                />
-              </button>
-              {sizeOpen && (
-                <div className={styles.selectDropdown}>
-                  {sizeOptions.map((s) => (
-                    <button
-                      key={s.key}
-                      className={`${styles.selectOption} ${s.key === selectedSize ? styles.selectOptionActive : ''}`}
-                      onClick={() => {
-                        setSelectedSize(s.key);
-                        syncDraftParams({ size: s.key });
-                        setSizeOpen(false);
-            }}
-                    >
-                      {s.label}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
+            <Select
+              value={selectedSize}
+              onChange={(key) => {
+                setSelectedSize(key);
+                syncDraftParams({ size: key });
+              }}
+              disabled={readOnly || sampleMode}
+              side="top"
+              triggerTitle={sampleMode ? '样片模式固定 480p，关闭样片后可调整清晰度' : undefined}
+              ariaLabel="选择分辨率"
+              options={sizeOptions.map((s) => ({ value: s.key, label: s.label }))}
+            />
           </div>
 
           {
@@ -1268,38 +1217,22 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
         { }
         <div className={styles.barLeft}>
           { }
-          <div className={styles.modeWrap} ref={modeWrapRef}>
-            <button
-              className={styles.modeBtn}
+          <div className={styles.modeWrap}>
+            <Select
+              value={selectedMode}
+              onChange={handleModeChange}
+              size="sm"
+              side="top"
               disabled={readOnly || pickLocked}
-              title={pickLocked ? '选取进行中，完成选取后再切换模式' : undefined}
-              onClick={() => setModeOpen((v) => !v)}
-            >
-              <span>{currentMode?.label ?? '选择模式'}</span>
-              <ChevronDown
-                size={12}
-                strokeWidth={2}
-                className={`${styles.modeArrow} ${modeOpen ? styles.modeArrowUp : ''}`}
-              />
-            </button>
-            {modeOpen && (
-              <div className={styles.modeDropdown}>
-                {modeOptions.map((opt) => {
-                  const disabled = !enabledModes.includes(opt.key);
-                  return (
-                    <button
-                      key={opt.key}
-                      type="button"
-                      disabled={disabled}
-                      className={`${styles.modeOption} ${opt.key === selectedMode ? styles.modeOptionActive : ''} ${disabled ? styles.modeOptionDisabled : ''}`}
-                      onClick={() => handleModeChange(opt.key)}
-                    >
-                      {opt.label}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
+              triggerTitle={pickLocked ? '选取进行中，完成选取后再切换模式' : undefined}
+              ariaLabel="选择生成模式"
+              placeholder="选择模式"
+              options={modeOptions.map((opt) => ({
+                value: opt.key,
+                label: opt.label,
+                disabled: !enabledModes.includes(opt.key),
+              }))}
+            />
           </div>
 
           { }

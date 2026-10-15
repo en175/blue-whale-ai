@@ -22,6 +22,7 @@
     "@icon-park/react": "^1.4.2",
     "@lexical/react": "^0.49.0",
     "@radix-ui/react-dialog": "1.1.23",
+    "@radix-ui/react-select": "2.4.1",
     "@tanstack/react-query": "^5.102.8",
     "@xyflow/react": "^12.11.2",
     "dayjs": "1.11.23",

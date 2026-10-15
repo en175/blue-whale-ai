@@ -6,6 +6,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Edge, Node } from '@xyflow/react';
 import CanvasPage from './index';
+import { clickSelectOption } from './testing/radixSelect';
 import type { GenerationDockDefinition } from './generationDockCoordinator';
 import { createTextGenerationDock } from './textGenerationDock';
 import TextGenerationDockPanel from './textGenerationDockPanel';
@@ -794,8 +795,7 @@ describe('IKJUGY 文生文真实页面接线', () => {
     expect(fullNode('tg1').data.prompt).toBe('新的正文');
     const model = Array.from(container.querySelectorAll('button')).find(button => button.textContent?.trim() === '默认文本模型')!;
     await act(async () => { model.click(); });
-    const stored = Array.from(container.querySelectorAll('button')).find(button => button.textContent?.trim() === '旧文本模型')!;
-    await act(async () => { stored.click(); });
+    await clickSelectOption('旧文本模型');
     expect(fullNode('tg1').data.draftModelId).toBe('stored-text-model');
     await act(async () => { container.querySelector<HTMLButtonElement>('button[title="发送"]')!.click(); });
     expect(fullNode('tg1').data).toMatchObject({ text: '附件正文\n\n新的正文', prompt: '新的正文', draftModelId: 'stored-text-model' });
@@ -892,6 +892,37 @@ describe('IKJUH5 注册扩展的真实页面契约', () => {
     await act(async () => {
       neutral.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: 10, clientY: 10 }));
       neutral.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: 10, clientY: 10 }));
+    });
+    expect(addedDock.active()).toBeNull();
+  });
+
+  it('面板领土内按下、click 被重定向到 body：不收起面板（IKM0TP Radix 下拉开合）', async () => {
+    await renderPage();
+    await act(async () => { addedDock.open(); });
+    const territory = document.body.querySelector<HTMLElement>('[data-gen-panel-territory]')!;
+    expect(territory).toBeTruthy();
+    await act(async () => {
+      territory.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: 10, clientY: 10 }));
+      document.body.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: 10, clientY: 10 }));
+    });
+    expect(addedDock.active()).toBe('added');
+  });
+
+  it('无配对 mousedown 的重定向 click（Radix 触发器 preventDefault 抑制 mousedown）不收起面板', async () => {
+    await renderPage();
+    await act(async () => { addedDock.open(); });
+    await act(async () => {
+      document.documentElement.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: 10, clientY: 10 }));
+    });
+    expect(addedDock.active()).toBe('added');
+  });
+
+  it('真实点画布空白（有 mousedown 起点、不在领土内）仍收起面板', async () => {
+    await renderPage();
+    await act(async () => { addedDock.open(); });
+    await act(async () => {
+      document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: 10, clientY: 10 }));
+      document.body.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: 10, clientY: 10 }));
     });
     expect(addedDock.active()).toBeNull();
   });

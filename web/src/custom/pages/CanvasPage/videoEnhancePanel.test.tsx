@@ -244,7 +244,8 @@ async function pressEscape() {
 }
 async function clickOutside() {
   await act(async () => {
-    document.body.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: 10, clientY: 10 }));
+    document.body.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: 10, clientY: 10 }));
   });
 }
 async function selectOther() {
