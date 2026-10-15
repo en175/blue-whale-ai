@@ -30,14 +30,12 @@ function stripComments(source: string): string {
 
 const backendGate = read("./constants.ts");
 const webFormKeys = read("../../../../web/src/admin/pages/ModelList/model-form.ts");
-const webFormLabels = read(
-  "../../../../web/src/admin/pages/ModelList/feature-fields.ts",
-);
+const webFormLabels = read("../../../../web/src/admin/enums/model.ts");
 
 const SOURCES = {
   "backend 写闸门 constants.ts": backendGate,
   "web 可编辑键白名单 model-form.ts": webFormKeys,
-  "web 表单标签表 feature-fields.ts": webFormLabels,
+  "web 表单标签表 admin/enums/model.ts": webFormLabels,
 };
 
 describe("IKHEXG 参考上限键族守卫", () => {
