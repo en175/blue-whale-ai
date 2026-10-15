@@ -98,17 +98,17 @@ describe('RatioIcon 接入点收敛', () => {
   const cropDialog = readSrc('pages/CanvasPage/components/CropDialog/index.tsx');
 
   it('ImageDialog 引用共享组件且不再保留本地实现', () => {
-    expect(imageDialog).toMatch(/import RatioIcon from '@\/components\/RatioIcon'/);
+    expect(imageDialog).toMatch(/import RatioIcon from '@\/app\/components\/RatioIcon'/);
     expect(imageDialog).not.toMatch(/function RatioIcon/);
   });
 
   it('BottomDialog 引用共享组件且不再保留本地实现', () => {
-    expect(bottomDialog).toMatch(/import RatioIcon from '@\/components\/RatioIcon'/);
+    expect(bottomDialog).toMatch(/import RatioIcon from '@\/app\/components\/RatioIcon'/);
     expect(bottomDialog).not.toMatch(/function RatioIcon/);
   });
 
   it('ChatBox 引用共享组件并以 size={22} 调用，查表法已拆除', () => {
-    expect(chatBox).toMatch(/import RatioIcon from '@\/components\/RatioIcon'/);
+    expect(chatBox).toMatch(/import RatioIcon from '@\/app\/components\/RatioIcon'/);
     expect(chatBox).not.toMatch(/function RatioIcon/);
     expect(chatBox).not.toMatch(/ratioDims/);
     const calls = chatBox.match(/<RatioIcon ratio=\{[^}]+\} size=\{22\} \/>/g) ?? [];
@@ -116,7 +116,7 @@ describe('RatioIcon 接入点收敛', () => {
   });
 
   it('CropDialog（IKGW1N 裁切比例选项）引用共享组件且不保留本地实现', () => {
-    expect(cropDialog).toMatch(/import RatioIcon from '@\/components\/RatioIcon'/);
+    expect(cropDialog).toMatch(/import RatioIcon from '@\/app\/components\/RatioIcon'/);
     expect(cropDialog).not.toMatch(/function RatioIcon/);
   });
 

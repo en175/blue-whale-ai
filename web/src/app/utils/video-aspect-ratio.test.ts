@@ -47,13 +47,13 @@ describe('pickDefaultVideoRatio', () => {
 
 describe('IKJ4W6 显示映射消费点', () => {
   const consumers = [
-    ['首页下拉', 'app/pages/Home/components/ChatBox/index.tsx'],
-    ['画布面板', 'app/pages/CanvasPage/components/BottomDialog/index.tsx'],
+    ['首页下拉', 'pages/Home/components/ChatBox/index.tsx'],
+    ['画布面板', 'pages/CanvasPage/components/BottomDialog/index.tsx'],
   ] as const;
 
   it.each(consumers)('%s 经 videoRatioLabel 渲染，并默认走 pickDefaultVideoRatio', (_name, rel) => {
     const src = readSrc(rel);
-    expect(src).toMatch(/import \{[^}]*videoRatioLabel[^}]*\} from '@\/utils\/video-aspect-ratio'/);
+    expect(src).toMatch(/import \{[^}]*videoRatioLabel[^}]*\} from '@\/app\/utils\/video-aspect-ratio'/);
     expect((src.match(/videoRatioLabel\(/g) ?? []).length).toBeGreaterThanOrEqual(2);
     expect(src).toMatch(/pickDefaultVideoRatio\(/);
   });
