@@ -102,9 +102,9 @@ export function SolutionCardBlock({
             )}
             {!changing && segments.length > 1 && (
               <SolutionField label={SOLUTION_FIELD_LABELS.segments}>
-                <ol className={styles.solutionList}>
+                <ol className={styles.solutionSegments}>
                   {segments.map((one, i) => (
-                    <li key={one.segment_id ?? i}>{withSeconds(one.content, one.seconds)}</li>
+                    <li key={one.segment_id ?? i}>{`第 ${i + 1} 段：${withSeconds(one.content, one.seconds)}`}</li>
                   ))}
                 </ol>
               </SolutionField>

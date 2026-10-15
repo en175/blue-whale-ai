@@ -167,8 +167,8 @@ describe('方案卡在对话里', () => {
     mount();
     const text = solutionCard()!.textContent ?? '';
     expect(text).toContain('分几段拍');
-    expect(text).toContain('清晨街道，红裙女孩走入画面（5 秒）');
-    expect(text).toContain('正午咖啡馆窗边侧脸（5 秒）');
+    expect(text).toContain('第 1 段：清晨街道，红裙女孩走入画面（5 秒）');
+    expect(text).toContain('第 2 段：正午咖啡馆窗边侧脸（5 秒）');
     expect(solutionCard()!.querySelectorAll('ol li')).toHaveLength(2);
   });
 
