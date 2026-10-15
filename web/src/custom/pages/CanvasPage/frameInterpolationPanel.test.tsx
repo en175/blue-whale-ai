@@ -180,9 +180,9 @@ describe('IKHLKR 点插帧建草稿卡与面板跟随', () => {
     expect(panelFps(60)!.className).toMatch(/Active/);
     expect(panelFps(30)).toBeTruthy();
     expect(panelFps(120)).toBeTruthy();
-    expect(document.body.textContent).toContain('视频插帧');
-    expect(document.body.textContent).toContain('目标帧率');
-    expect(document.body.textContent).toContain('本期免费');
+    await vi.waitFor(() => expect(document.body.textContent).toContain('视频插帧'), { timeout: 3000 });
+    await vi.waitFor(() => expect(document.body.textContent).toContain('目标帧率'), { timeout: 3000 });
+    await vi.waitFor(() => expect(document.body.textContent).toContain('本期免费'), { timeout: 3000 });
     expect(panelSend()!.getAttribute('title')).toBe('智能补帧，最高可至 120fps');
     expect(fileNameOf(mediaNode('v1'))).toBe('素材视频');
     expect(identityOf(mediaNode('v1'))).toBeUndefined();

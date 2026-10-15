@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Node } from '@xyflow/react';
 import CanvasPage from './index';
 import { promptRefReadOnly, readPromptRefText, typePromptRefText } from './testing/promptRefEditor';
+import { Toaster, toast } from 'sonner';
 
 
 vi.mock('@/custom/api/generationQuote', async (importActual) => ({
@@ -285,12 +286,14 @@ async function renderPage() {
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
+  toast.dismiss();
+
   await act(async () => {
     root.render(
       createElement(
         QueryClientProvider,
         { client: new QueryClient() },
-        createElement(MemoryRouter, null, createElement(CanvasPage)),
+        createElement(MemoryRouter, null, createElement(CanvasPage), createElement(Toaster, { duration: Infinity })),
       ),
     );
   });
@@ -432,8 +435,8 @@ describe('IKDMQQ 图片草稿创建与编辑', () => {
     expect(readPromptRefText(container)).toBe('恢复的提示词');
     await vi.waitFor(() => expect(container.querySelectorAll('[data-testid="dock-text-ref"]')).toHaveLength(1));
     await vi.waitFor(() => expect(container.textContent).toContain('测试生图模型'));
-    expect(container.textContent).toContain('1:1');
-    expect(container.textContent).toContain('2K');
+    await vi.waitFor(() => expect(container.textContent).toContain('1:1'), { timeout: 3000 });
+    await vi.waitFor(() => expect(container.textContent).toContain('2K'), { timeout: 3000 });
   });
 });
 
@@ -519,7 +522,7 @@ describe('IKDMQQ 原位提交与首次生成', () => {
       flowProps.current.onEdgesChange([{ type: 'remove', id: draftEdgeId }]);
     });
     expect(flowProps.current.edges.some((e: { id: string }) => e.id === draftEdgeId)).toBe(true);
-    expect(container.textContent).toContain('生成中，输入连线只读');
+    await vi.waitFor(() => expect(container.textContent).toContain('生成中，输入连线只读'), { timeout: 3000 });
   });
 
   it('建任务 401：草稿回退待生成（标题恢复「图片草稿」），卡片与参数保留', async () => {

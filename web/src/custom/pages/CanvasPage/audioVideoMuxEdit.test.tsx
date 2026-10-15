@@ -239,13 +239,13 @@ describe('IKIHPK 点「音视频合成」建草稿卡与面板跟随', () => {
     expect(audioEdge.data).toEqual({ origin: AUDIO_VIDEO_MUX_EDGE_ORIGIN });
 
     expect(panel()).toBeTruthy();
-    expect(document.body.textContent).toContain('原声处理');
+    await vi.waitFor(() => expect(document.body.textContent).toContain('原声处理'), { timeout: 3000 });
     expect(reserveBtn(true)!.className).toMatch(/Active/);
     expect(reserveBtn(false)).toBeTruthy();
     expect(syncBtn('none')!.className).toMatch(/Active/);
     expect(syncBtn('video')).toBeTruthy();
     expect(syncBtn('audio')).toBeTruthy();
-    expect(document.body.textContent).toContain('本期免费');
+    await vi.waitFor(() => expect(document.body.textContent).toContain('本期免费'), { timeout: 3000 });
     expect(sendBtn()!.disabled).toBe(true);
     expect(sendBtn()!.getAttribute('title')).toBe('先选择视频');
     expect(slot()!.textContent).toContain('拖线到本卡');
@@ -410,7 +410,7 @@ describe('IKIHPK 拖线落点按目标卡身份分流', () => {
     await dropWire('a1', 'm1');
     expect(edges().filter((e) => e.source === 'a1' && e.target === 'm1')).toHaveLength(1);
     expect(identityOf(mediaNode('m1'))!.video).toBeUndefined();
-    expect(document.body.textContent).toContain('仅支持绑定视频卡');
+    await vi.waitFor(() => expect(document.body.textContent).toContain('仅支持绑定视频卡'), { timeout: 3000 });
   });
 
   it('拖到空白不绑定：草稿卡身份不变、无新增边', async () => {
@@ -556,7 +556,7 @@ describe('IKIHPK 语义边守卫（固定音频线不可单独删、绑定线删
       flowProps.current.onEdgesChange([{ id: 'e-mux-audio', type: 'remove' }]);
     });
     expect(edges().some((e) => e.id === 'e-mux-audio')).toBe(true);
-    expect(document.body.textContent).toContain('不可移除');
+    await vi.waitFor(() => expect(document.body.textContent).toContain('不可移除'), { timeout: 3000 });
 
     await act(async () => {
       flowProps.current.onEdgesChange([{ id: 'e-mux-bind', type: 'remove' }]);

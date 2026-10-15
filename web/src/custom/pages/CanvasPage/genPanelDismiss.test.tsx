@@ -786,7 +786,7 @@ describe('IKJUGY 文生文真实页面接线', () => {
     await vi.waitFor(() => expect(container.textContent).toContain('默认文本模型'));
     const input = container.querySelector<HTMLTextAreaElement>('textarea')!;
     expect(input.value).toBe('原描述');
-    expect(container.textContent).toContain('附加文案：附件正文');
+    await vi.waitFor(() => expect(container.textContent).toContain('附加文案：附件正文'), { timeout: 3000 });
     await act(async () => {
       Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(input, '新的正文');
       input.dispatchEvent(new Event('input', { bubbles: true }));

@@ -8,6 +8,7 @@ import type { Node } from '@xyflow/react';
 import CanvasPage from './index';
 import { AUDIO_MIX_EDGE_ORIGIN } from './audioMix';
 import type { GenerationModel } from '@/custom/api/generation';
+import { Toaster, toast } from 'sonner';
 
 vi.mock('@/custom/api/generationQuote', async (importActual) => ({
   ...(await importActual<typeof import('@/custom/api/generationQuote')>()),
@@ -209,12 +210,14 @@ async function renderPage() {
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
+  toast.dismiss();
+
   await act(async () => {
     root.render(
       createElement(
         QueryClientProvider,
         { client: new QueryClient({ defaultOptions: { queries: { retry: false } } }) },
-        createElement(MemoryRouter, null, createElement(CanvasPage)),
+        createElement(MemoryRouter, null, createElement(CanvasPage), createElement(Toaster, { duration: Infinity })),
       ),
     );
   });
@@ -365,7 +368,7 @@ describe('IKI68X 三来源与多段提交', () => {
     expect(sendBar()).not.toBeNull();
     expect(bodyBtn('audio-mix-add').textContent).toContain('2/100');
     expect(bodyBtn('audio-mix-format-trigger').textContent).toContain('flac');
-    expect(document.body.textContent).toContain('素材关联项目失败');
+    await vi.waitFor(() => expect(document.body.textContent).toContain('素材关联项目失败'), { timeout: 3000 });
     expect(apiMocks.createAudioMix).not.toHaveBeenCalled();
     expect(flowProps.current.edges).toEqual([]);
   });

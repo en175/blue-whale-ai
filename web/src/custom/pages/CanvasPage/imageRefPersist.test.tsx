@@ -9,6 +9,7 @@ import CanvasPage from './index';
 import { ATTACHMENT_ACTION_PICK_CANVAS_TITLE } from './components/AttachmentActionBar';
 import { readPromptRefText, typePromptRefRaw, typePromptRefText } from './testing/promptRefEditor';
 import type { GenerationModel, ModelFeatures } from '@/custom/api/generation';
+import { Toaster, toast } from 'sonner';
 
 vi.mock('@/custom/api/generationQuote', async (importActual) => ({
   ...(await importActual<typeof import('@/custom/api/generationQuote')>()),
@@ -217,12 +218,14 @@ async function renderPage() {
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
+  toast.dismiss();
+
   await act(async () => {
     root.render(
       createElement(
         QueryClientProvider,
         { client: new QueryClient() },
-        createElement(MemoryRouter, null, createElement(CanvasPage)),
+        createElement(MemoryRouter, null, createElement(CanvasPage), createElement(Toaster, { duration: Infinity })),
       ),
     );
   });
@@ -436,7 +439,7 @@ describe('IKFDFT 图片参考即时保存与编辑恢复', () => {
     await vi.waitFor(() => expect(dockRefImages()).toEqual(['素材图一', '素材图二']));
     expect(readPromptRefText(container)).toBe('保留我的编辑');
     await vi.waitFor(() => expect(container.textContent).toContain('高清模型'));
-    expect(container.textContent).toContain('4K');
+    await vi.waitFor(() => expect(container.textContent).toContain('4K'), { timeout: 3000 });
   });
 
   it('点击空白隐藏面板后重开：参考与提示词保留，选取模式不恢复', async () => {
@@ -703,7 +706,7 @@ describe('IKFR4X 图片参考持续选取与完整退出闭环', () => {
     await clickNode('m1');
     expect(edgePairs()).toEqual([`m1->${draftId}`]);
     expect(pickMarks()).toEqual(['m1']);
-    expect(container.textContent).toContain('该素材已连入当前草稿');
+    await vi.waitFor(() => expect(container.textContent).toContain('该素材已连入当前草稿'), { timeout: 3000 });
     expect(pickLock()).toBe(true);
   });
 
@@ -717,7 +720,7 @@ describe('IKFR4X 图片参考持续选取与完整退出闭环', () => {
     expect(edgePairs()).toEqual([]);
     expect(pickLock()).toBe(true);
     expect(panelOpen()).toBe(true);
-    expect(container.textContent).toContain('图片参考仅支持图片素材');
+    await vi.waitFor(() => expect(container.textContent).toContain('图片参考仅支持图片素材'), { timeout: 3000 });
 
     await clickNode('m1');
     expect(edgePairs()).toEqual(['m1->d1']);

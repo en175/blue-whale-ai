@@ -6,6 +6,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Node } from '@xyflow/react';
 import CanvasPage from './index';
+import { Toaster, toast } from 'sonner';
 
 vi.setConfig({ testTimeout: 20_000, hookTimeout: 60_000 });
 const WAIT_TIMEOUT_MS = 10_000;
@@ -315,12 +316,14 @@ async function renderPage() {
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
+  toast.dismiss();
+
   await act(async () => {
     root.render(
       createElement(
         QueryClientProvider,
         { client: new QueryClient() },
-        createElement(MemoryRouter, null, createElement(CanvasPage)),
+        createElement(MemoryRouter, null, createElement(CanvasPage), createElement(Toaster, { duration: Infinity })),
       ),
     );
   });
@@ -432,7 +435,7 @@ describe('IKDMQS 视频草稿创建与编辑', () => {
     });
 
     expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();
-    expect(container.textContent).toContain('文生视频');
+    await vi.waitFor(() => expect(container.textContent).toContain('文生视频'), { timeout: 3000 });
     expect([...container.querySelectorAll('button')].some((b) => b.textContent === '参考')).toBe(true);
     expect(container.querySelector('button[title="从资产中选择 / 从节点添加素材"]')).toBeNull();
   });
@@ -462,7 +465,7 @@ describe('IKDMQS 视频草稿创建与编辑', () => {
     await act(async () => { toolbarProps.current.onToggleVideoDialog(); });
     await waitFor(() => expect(videoDrafts()).toHaveLength(3));
     expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();
-    expect(container.textContent).toContain('文生视频');
+    await vi.waitFor(() => expect(container.textContent).toContain('文生视频'), { timeout: 3000 });
   });
 
   it('点击已保存的视频草稿卡重开绑定面板', async () => {
@@ -472,7 +475,7 @@ describe('IKDMQS 视频草稿创建与编辑', () => {
       type: 'mediaNode',
       data: { draft: true, mediaType: 'video', genStatus: 'draft' },
     });
-    expect(container.textContent).toContain('文生视频');
+    await vi.waitFor(() => expect(container.textContent).toContain('文生视频'), { timeout: 3000 });
     expect([...container.querySelectorAll('button')].some((b) => b.textContent === '参考')).toBe(true);
     expect(container.querySelector('button[title="从资产中选择 / 从节点添加素材"]')).toBeNull();
   });
@@ -627,7 +630,7 @@ describe('IKDMQS 提交推导与组合约束', () => {
     await clickNode({ id: 'd1', type: 'mediaNode', data: { draft: true, mediaType: 'video' } });
     await waitModelReady();
     await typePrompt('混用输入');
-    expect(container.textContent).toContain('首尾帧与普通参考不能混用');
+    await vi.waitFor(() => expect(container.textContent).toContain('首尾帧与普通参考不能混用'), { timeout: 3000 });
     expect(sendButton().disabled).toBe(true);
     await act(async () => { sendButton().click(); });
     expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();
@@ -723,13 +726,13 @@ describe('IKFQ5S 首尾帧 adaptive 按模型门控', () => {
 
   it('模型不支持 adaptive（2.0）：首尾帧仍用固定比例（状态栏可见），不内置 adaptive', async () => {
     await openKeyframeWith(['16:9', '9:16', '1:1']);
-    expect(container.textContent).toContain('测试视频模型|16:9|720p');
+    await vi.waitFor(() => expect(container.textContent).toContain('测试视频模型|16:9|720p'), { timeout: 3000 });
     expect(container.textContent).not.toContain('adaptive');
   });
 
   it('模型支持 adaptive（2.5）：首尾帧隐去比例项（内置 adaptive，用户不可见）', async () => {
     await openKeyframeWith(['16:9', 'adaptive']);
-    expect(container.textContent).toContain('测试视频模型|720p');
+    await vi.waitFor(() => expect(container.textContent).toContain('测试视频模型|720p'), { timeout: 3000 });
   });
 });
 
@@ -839,7 +842,7 @@ describe('IKDWL8 视频失效引用保护', () => {
     await clickNode({ id: 'd1', type: 'mediaNode', data: { draft: true, mediaType: 'video', genStatus: 'draft' } });
     await waitModelReady();
     await typePrompt('保留参考意图');
-    expect(container.textContent).toContain('生成失败的卡片不能作为参考');
+    await vi.waitFor(() => expect(container.textContent).toContain('生成失败的卡片不能作为参考'), { timeout: 3000 });
     expect(sendButton().disabled).toBe(true);
     expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();
     expect(flowProps.current.edges).toHaveLength(1);
@@ -916,7 +919,7 @@ describe('IKFC1T 文生视频入口与媒体参考自动切换', () => {
     await connect('m1', 'd1');
 
     await expectMode('图片参考');
-    expect(container.textContent).toContain('已根据当前素材切换生成模式');
+    await vi.waitFor(() => expect(container.textContent).toContain('已根据当前素材切换生成模式'), { timeout: 3000 });
     expect(container.querySelectorAll('[data-testid="dock-text-ref"]')).toHaveLength(1);
     await waitFor(() => expect(draftDataOf('d1').draftMode).toBe('image_reference'));
     await waitFor(() => expect(draftDataOf('d1').prompt).toBe('海边日落'));
@@ -1049,7 +1052,7 @@ describe('IKK1T9 视频编辑/延长（ADR-0124 模式配置化）', () => {
     await connect('v1', 'd1');
 
     await expectMode('视频编辑');
-    expect(container.textContent).toContain('跟随原视频');
+    await vi.waitFor(() => expect(container.textContent).toContain('跟随原视频'), { timeout: 3000 });
 
     await typePrompt('把背景换成夜晚');
     await act(async () => { sendButton().click(); });
@@ -1074,7 +1077,7 @@ describe('IKK1T9 视频编辑/延长（ADR-0124 模式配置化）', () => {
     await act(async () => { modeOption('图生视频')!.click(); });
 
     await expectMode('图片参考');
-    expect(container.textContent).toContain('图生视频模式最多 1 张图片');
+    await vi.waitFor(() => expect(container.textContent).toContain('图生视频模式最多 1 张图片'), { timeout: 3000 });
     expect(container.textContent).not.toContain('请补充尾帧');
     expect(container.textContent).not.toContain('首尾帧模式最多');
   });
@@ -1086,7 +1089,7 @@ describe('IKK1T9 视频编辑/延长（ADR-0124 模式配置化）', () => {
     await waitModelReady();
     await connect('v1', 'd1');
     await expectMode('视频编辑');
-    expect(container.textContent).toContain('跟随原视频');
+    await vi.waitFor(() => expect(container.textContent).toContain('跟随原视频'), { timeout: 3000 });
 
     await openModeMenu();
     await act(async () => { modeOption('全能参考')!.click(); });
@@ -1292,7 +1295,7 @@ describe('IKJ4W6 画布视频比例显示 auto 并默认选中', () => {
     await renderPage();
     await act(async () => { toolbarProps.current.onToggleVideoDialog(); });
     await waitModelReady();
-    expect(container.textContent).toContain('测试视频模型|auto|720p');
+    await vi.waitFor(() => expect(container.textContent).toContain('测试视频模型|auto|720p'), { timeout: 3000 });
     expect(container.textContent).not.toContain('adaptive');
   });
 
@@ -1322,7 +1325,7 @@ describe('IKJ4W6 画布视频比例显示 auto 并默认选中', () => {
     await renderPage();
     await act(async () => { toolbarProps.current.onToggleVideoDialog(); });
     await waitModelReady();
-    expect(container.textContent).toContain('测试视频模型|16:9|720p');
+    await vi.waitFor(() => expect(container.textContent).toContain('测试视频模型|16:9|720p'), { timeout: 3000 });
     expect(container.textContent).not.toContain('auto');
   });
 });
@@ -1336,7 +1339,7 @@ describe('IKIPSX 视频草稿默认模式 draftMode 写入', () => {
     await waitFor(() => expect(videoDrafts()).toHaveLength(2));
     const newDraft = videoDrafts().find((n) => n.id !== 'd1')!;
     expect((newDraft.data as Record<string, unknown>).draftMode).toBe('text2video');
-    expect(container.textContent).toContain('文生视频');
+    await vi.waitFor(() => expect(container.textContent).toContain('文生视频'), { timeout: 3000 });
 
     await typePrompt('新建草稿保存');
     await waitFor(() => {
@@ -1457,7 +1460,7 @@ describe('IKIZQB 样片模式提交与样片卡', () => {
     await waitModelReady();
     const configBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('16:9'))!;
     await act(async () => { configBtn.click(); });
-    expect(container.textContent).toContain('模型与质量');
+    await vi.waitFor(() => expect(container.textContent).toContain('模型与质量'), { timeout: 3000 });
     expect(container.querySelector('[data-testid="sample-mode-switch"]')).toBeNull();
   });
 
@@ -1475,7 +1478,7 @@ describe('IKIZQB 样片模式提交与样片卡', () => {
     expect(sw.getAttribute('aria-checked')).toBe('false');
     await act(async () => { sw.click(); });
     expect(sw.getAttribute('aria-checked')).toBe('true');
-    expect(container.textContent).toContain('成片另行计费');
+    await vi.waitFor(() => expect(container.textContent).toContain('成片另行计费'), { timeout: 3000 });
 
 
     await waitFor(() => expect(sendButton().disabled).toBe(false));
@@ -1529,7 +1532,7 @@ describe('IKIZQB 样片模式提交与样片卡', () => {
     await act(async () => { clickNode(done); });
     const reopenConfigBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('16:9'))!;
     await act(async () => { reopenConfigBtn.click(); });
-    expect(container.textContent).toContain('模型与质量');
+    await vi.waitFor(() => expect(container.textContent).toContain('模型与质量'), { timeout: 3000 });
     await waitFor(() =>
       expect(container.querySelector('[data-testid="sample-mode-switch"]')?.getAttribute('aria-checked')).toBe('true'),
     );

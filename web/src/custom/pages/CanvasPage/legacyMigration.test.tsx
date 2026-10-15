@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import CanvasPage from './index';
+import { Toaster, toast } from 'sonner';
 
 
 vi.mock('@/custom/api/generationQuote', async (importActual) => ({
@@ -161,12 +162,14 @@ async function renderPage() {
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
+  toast.dismiss();
+
   await act(async () => {
     root.render(
       createElement(
         QueryClientProvider,
         { client: new QueryClient() },
-        createElement(MemoryRouter, null, createElement(CanvasPage)),
+        createElement(MemoryRouter, null, createElement(CanvasPage), createElement(Toaster, { duration: Infinity })),
       ),
     );
   });
@@ -189,7 +192,7 @@ describe('旧生成卡迁移报告与历史入口（IKDLQK）', () => {
   it('本轮发生迁移时提示转换数量', async () => {
     seedDoc({ legacyMigration: { migrated: ['card-1', 'card-2'], failed: [] } });
     await renderPage();
-    expect(container.textContent).toContain('已将 2 张旧生成卡转换为普通文本节点');
+    await vi.waitFor(() => expect(container.textContent).toContain('已将 2 张旧生成卡转换为普通文本节点'), { timeout: 3000 });
   });
 
   it('存在失败卡时给出警告提示（含标题与原因，说明原卡片已保留）', async () => {
@@ -200,10 +203,10 @@ describe('旧生成卡迁移报告与历史入口（IKDLQK）', () => {
       },
     });
     await renderPage();
-    expect(container.textContent).toContain('1 张旧生成卡未能迁移');
-    expect(container.textContent).toContain('镜头 9');
-    expect(container.textContent).toContain('提示词缺失或已损坏');
-    expect(container.textContent).toContain('原卡片已保留');
+    await vi.waitFor(() => expect(container.textContent).toContain('1 张旧生成卡未能迁移'), { timeout: 3000 });
+    await vi.waitFor(() => expect(container.textContent).toContain('镜头 9'), { timeout: 3000 });
+    await vi.waitFor(() => expect(container.textContent).toContain('提示词缺失或已损坏'), { timeout: 3000 });
+    await vi.waitFor(() => expect(container.textContent).toContain('原卡片已保留'), { timeout: 3000 });
   });
 
   it('无迁移报告时不提示', async () => {

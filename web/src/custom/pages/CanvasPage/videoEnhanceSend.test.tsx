@@ -909,7 +909,7 @@ describe('IKJP8Q 失败卡重试与面板发送互斥', () => {
       rejectNew(new Error('new network'));
       await new Promise((resolve) => setTimeout(resolve, 20));
     });
-    expect(document.body.textContent).toContain('HD 高清任务创建失败，请重试');
+    expect(toast.error).toHaveBeenCalledWith('HD 高清任务创建失败，请重试');
     expect(panelSend()!.disabled).toBe(true);
     expect(panelResolution('2k')!.disabled).toBe(true);
     await act(async () => { panelSend()!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
@@ -1039,7 +1039,7 @@ describe('IKJP8Q 失败卡重试与面板发送互斥', () => {
         rejectA(new Error('network down'));
         await new Promise((resolve) => setTimeout(resolve, 20));
       });
-      expect(document.body.textContent).toContain('HD 高清任务创建失败，请重试');
+      expect(toast.error).toHaveBeenCalledWith('HD 高清任务创建失败，请重试');
       expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(1);
       expect(panelSend()!.disabled).toBe(false);
     });
@@ -1142,7 +1142,7 @@ describe('IKJP8Q 失败卡重试与面板发送互斥', () => {
 
       expect(toast.error).toHaveBeenCalledTimes(1);
       expect(toast.error).toHaveBeenCalledWith('分辨率档不可用');
-      expect(document.body.textContent).toContain('分辨率档不可用');
+      expect(toast.error).toHaveBeenCalledWith('分辨率档不可用');
       expect(panelSend()!.disabled).toBe(false);
     });
 
@@ -1181,7 +1181,7 @@ describe('IKJP8Q 失败卡重试与面板发送互斥', () => {
         rejectA(new Error('network down'));
         await new Promise((resolve) => setTimeout(resolve, 20));
       });
-      expect(document.body.textContent).toContain('HD 高清任务创建失败，请重试');
+      expect(toast.error).toHaveBeenCalledWith('HD 高清任务创建失败，请重试');
       expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(1);
     });
 
@@ -1202,7 +1202,7 @@ describe('IKJP8Q 失败卡重试与面板发送互斥', () => {
         rejectA(new Error('network down'));
         await new Promise((resolve) => setTimeout(resolve, 20));
       });
-      expect(document.body.textContent).toContain('HD 高清任务创建失败，请重试');
+      expect(toast.error).toHaveBeenCalledWith('HD 高清任务创建失败，请重试');
       expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(1);
     });
   });
@@ -1379,7 +1379,7 @@ describe('IKJP8Q 失败卡重试与面板发送互斥', () => {
         rejectB(new Error('network down'));
         await new Promise((resolve) => setTimeout(resolve, 20));
       });
-      expect(document.body.textContent).toContain('HD 高清任务创建失败，请重试');
+      expect(toast.error).toHaveBeenCalledWith('HD 高清任务创建失败，请重试');
       expect(panelSend()!.disabled).toBe(false);
       expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(1);
     });
@@ -1407,7 +1407,7 @@ describe('IKJP8Q 失败卡重试与面板发送互斥', () => {
         rejectB(new Error('network down'));
         await new Promise((resolve) => setTimeout(resolve, 20));
       });
-      expect(document.body.textContent).toContain('HD 高清任务创建失败，请重试');
+      expect(toast.error).toHaveBeenCalledWith('HD 高清任务创建失败，请重试');
       expect(panelSend()!.disabled).toBe(false);
       expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(1);
     });
@@ -1443,7 +1443,7 @@ describe('IKJP8Q 失败卡重试与面板发送互斥', () => {
         rejectA(new Error('network down'));
         await new Promise((resolve) => setTimeout(resolve, 20));
       });
-      expect(document.body.textContent).toContain('HD 高清任务创建失败，请重试');
+      expect(toast.error).toHaveBeenCalledWith('HD 高清任务创建失败，请重试');
       expect(apiMocks.createVideoEnhancement).toHaveBeenCalledTimes(1);
     });
   });

@@ -9,7 +9,6 @@ import type { MediaNodeData } from './components/MediaNode';
 import type { UploadedFile } from './components/ImageDialog';
 import type { AssetCardNodeData } from './components/AssetCardNode';
 import CanvasHeader from './components/CanvasHeader';
-import CanvasToast, { type ToastState } from './components/CanvasToast';
 import CanvasToolbar from './components/CanvasToolbar';
 import CanvasBottomLeftActions from './components/CanvasBottomLeftActions';
 import CanvasPickHint from './components/CanvasPickHint';
@@ -59,7 +58,6 @@ interface CanvasPageShellProps {
     currentId: string | null;
     handleCopySelectedNodes: FlowProps['onCopySelected'];
     handlePasteClipboard: FlowProps['onPasteClipboard'];
-    toast: ToastState | null;
     toolSessions: ReturnType<typeof createCanvasToolSessions>;
     navigate: (to: string) => void;
     generationDock: { render: () => ReactNode; renderedToolKinds: ReadonlySet<string> };
@@ -616,7 +614,6 @@ export default function CanvasPageShell(props: CanvasPageShellProps) {
         items={projectHandlers.legacyHistory ?? []}
         onClose={() => projectHandlers.setShowLegacyHistory(false)}
       />
-      <CanvasToast toast={shellTop.toast} />
     </div>
   );
 }

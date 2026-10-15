@@ -8,6 +8,7 @@ import type { Node } from '@xyflow/react';
 import CanvasPage from './index';
 import { ApiError } from '@/shared/api/http';
 import type { GenerationModel } from '@/custom/api/generation';
+import { Toaster, toast } from 'sonner';
 
 vi.mock('@/custom/api/generationQuote', async (importActual) => ({
   ...(await importActual<typeof import('@/custom/api/generationQuote')>()),
@@ -188,12 +189,14 @@ async function renderPage() {
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
+  toast.dismiss();
+
   await act(async () => {
     root.render(
       createElement(
         QueryClientProvider,
         { client: new QueryClient() },
-        createElement(MemoryRouter, null, createElement(CanvasPage)),
+        createElement(MemoryRouter, null, createElement(CanvasPage), createElement(Toaster, { duration: Infinity })),
       ),
     );
   });
@@ -456,7 +459,7 @@ describe('IKI8L7 当前有效会话：发送/退出/重试行为不变', () => {
     await click('erase-send-btn');
     encode.release(null);
     await flush();
-    expect(document.body.textContent).toContain('遮罩生成失败，请重试');
+    await vi.waitFor(() => expect(document.body.textContent).toContain('遮罩生成失败，请重试'), { timeout: 3000 });
     expect(toolbar()).not.toBeNull();
     expect(bodyBtn('erase-send-btn').disabled).toBe(false);
     await click('erase-send-btn');
@@ -476,7 +479,7 @@ describe('IKI8L7 当前有效会话：发送/退出/重试行为不变', () => {
     await click('erase-send-btn');
     encode.release(new Blob(['mask'], { type: 'image/png' }));
     await flush();
-    expect(document.body.textContent).toContain('遮罩上传失败，请重试');
+    await vi.waitFor(() => expect(document.body.textContent).toContain('遮罩上传失败，请重试'), { timeout: 3000 });
     expect(toolbar()).not.toBeNull();
     expect(bodyBtn('erase-send-btn').disabled).toBe(false);
     await click('erase-send-btn');
@@ -498,7 +501,7 @@ describe('IKI8L7 当前有效会话：发送/退出/重试行为不变', () => {
     await click('erase-send-btn');
     encode.release(new Blob(['mask'], { type: 'image/png' }));
     await flush();
-    expect(document.body.textContent).toContain('图片长边超过 2560');
+    await vi.waitFor(() => expect(document.body.textContent).toContain('图片长边超过 2560'), { timeout: 3000 });
     expect(toolbar()).not.toBeNull();
     expect(bodyBtn('erase-send-btn').disabled).toBe(false);
     await click('erase-send-btn');

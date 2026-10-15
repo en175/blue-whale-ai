@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Node } from '@xyflow/react';
 import type { FetchJobsParams, FrameInterpolationCurrentData, JobListData } from '@/custom/api/jobs';
 import type { GenerationModel } from '@/custom/api/generation';
-import { toast } from 'sonner';
+import { toast, Toaster } from 'sonner';
 import { useAuthStore } from '@/shared/stores/auth';
 import { useAuthPromptStore } from '@/shared/stores/authPrompt';
 import { silenceApiConsoleInfo } from './testing/silenceApiLogs';
@@ -62,18 +62,10 @@ vi.mock('@/custom/components/UserDropdown/RechargeModal', () => ({ default: () =
 vi.mock('@/custom/pages/Assets/components/AssetDetailModal', () => ({ default: () => null }));
 
 
-vi.mock('sonner', () => ({
-  toast: {
-    error: vi.fn(),
-    success: vi.fn(),
-    info: vi.fn(),
-    warning: vi.fn(),
-    message: vi.fn(),
-    loading: vi.fn(),
-    dismiss: vi.fn(),
-  },
-  Toaster: () => null,
-}));
+vi.mock('sonner', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('sonner')>();
+  return { ...actual, toast: { ...actual.toast, error: vi.fn() } };
+});
 
 
 const projectMocks = vi.hoisted(() => ({
@@ -221,12 +213,14 @@ async function renderPage() {
   document.body.appendChild(container);
   const createdRoot = createRoot(container);
   root = createdRoot;
+  toast.dismiss();
+
   await act(async () => {
     createdRoot.render(
       createElement(
         QueryClientProvider,
         { client: new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } }) },
-        createElement(MemoryRouter, { initialEntries: ['/canvas?project=p1'] }, createElement(CanvasPage)),
+        createElement(MemoryRouter, { initialEntries: ['/canvas?project=p1'] }, createElement(CanvasPage), createElement(Toaster, { duration: Infinity })),
       ),
     );
   });
@@ -441,8 +435,8 @@ describe('IKI8L7 擦除（真实 API/HTTP 链）：当前有效会话失败单�
     await click('erase-send-btn');
     encode.release(new Blob([pngBytes()], { type: 'image/png' }));
     await flush();
-    expect(document.body.textContent).toContain('上传服务繁忙，请稍后重试');
-    expect(toast.error).not.toHaveBeenCalled();
+    expect(toast.error).toHaveBeenCalledTimes(1);
+    expect(toast.error).toHaveBeenCalledWith('上传服务繁忙，请稍后重试');
     expect(toolbar()).not.toBeNull();
     expect(bodyBtn('erase-send-btn').disabled).toBe(false);
     defaultRoutes();
@@ -462,8 +456,8 @@ describe('IKI8L7 擦除（真实 API/HTTP 链）：当前有效会话失败单�
     await click('erase-send-btn');
     encode.release(new Blob([pngBytes()], { type: 'image/png' }));
     await flush();
-    expect(document.body.textContent).toContain('擦除服务维护中');
-    expect(toast.error).not.toHaveBeenCalled();
+    expect(toast.error).toHaveBeenCalledTimes(1);
+    expect(toast.error).toHaveBeenCalledWith('擦除服务维护中');
     expect(toolbar()).not.toBeNull();
     expect(bodyBtn('erase-send-btn').disabled).toBe(false);
     expect(mediaNodes().length).toBe(1);

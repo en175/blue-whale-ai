@@ -35,7 +35,7 @@ import { useCanvasNodeFactories } from './hooks/useCanvasNodeFactories';
 import { useCanvasSave } from './hooks/useCanvasSave';
 import { useCanvasSaveSession } from './hooks/useCanvasSaveSession';
 import { useCanvasSessionBootstrap } from './hooks/useCanvasSessionBootstrap';
-import { useCanvasToast } from './hooks/useCanvasToast';
+import { showToast } from '@/custom/utils/toast';
 import { useCanvasViewportSurface } from './hooks/useCanvasViewportSurface';
 import { useCanvasGenerationModels } from './hooks/useCanvasGenerationModels';
 import { useCanvasProjectRoute } from './hooks/useCanvasProjectRoute';
@@ -110,7 +110,6 @@ export default function CanvasPage() {
     cancelAgentCandidate,
     agentContext, setAgentContext,
   } = useCanvasAgentSurface();
-  const { toast, showToast } = useCanvasToast();
   const {
     canvasWrapperRef,
     wrapperSize,
@@ -1482,7 +1481,7 @@ export default function CanvasPage() {
     <CanvasPageShell
       shellTop={{
         canvasWrapperRef, currentId, applying, assetImageRefMax,
-        toast, toolSessions, handleCopySelectedNodes, handlePasteClipboard,
+        toolSessions, handleCopySelectedNodes, handlePasteClipboard,
         navigate, generationDock,
       }}
       canvas={{

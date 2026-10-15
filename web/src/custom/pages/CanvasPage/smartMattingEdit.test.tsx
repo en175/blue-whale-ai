@@ -566,7 +566,7 @@ describe('IKHK9N 发送闭环（先退会话 → 占位卡 → job_id → 轮询
     expect(sendBar()).toBeNull();
     const placeholder = placeholderNode()!;
     expect(placeholder.data.genStatus).toBe('failed');
-    expect(document.body.querySelector('[data-testid="canvas-toast"]')).toBeNull();
+    expect(document.querySelector('[data-sonner-toast]')).toBeNull();
   });
 });
 

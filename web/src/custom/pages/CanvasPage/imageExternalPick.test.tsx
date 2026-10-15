@@ -421,7 +421,7 @@ describe('IKF5KE 自由生图面板选取事件一次消费', () => {
 
     await pickFromAssets([10, 11, 12, 13, 14, 15, 16, 17, 18, 19].map(asset));
     await vi.waitFor(() => expect(refImages()).toHaveLength(9));
-    expect(container.textContent).toContain('图片最多 9 张');
+    await vi.waitFor(() => expect(container.textContent).toContain('图片最多 9 张'), { timeout: 3000 });
   });
 
   it('生成请求只包含本轮实际保留的参考：删除后不携带，保留时携带', async () => {

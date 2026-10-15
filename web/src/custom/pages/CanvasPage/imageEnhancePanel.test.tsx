@@ -419,7 +419,7 @@ describe('IKGM9O 生成中重开面板只读', () => {
       flowProps.current.onNodeClick(mediaNode(draftId));
     });
     expect(panelSend()).toBeTruthy();
-    expect(document.body.textContent).toContain('生成中，参数只读');
+    await vi.waitFor(() => expect(document.body.textContent).toContain('生成中，参数只读'), { timeout: 3000 });
     expect(
       (document.body.querySelector('[data-testid="enhance-send-btn"]') as HTMLButtonElement).disabled,
     ).toBe(true);

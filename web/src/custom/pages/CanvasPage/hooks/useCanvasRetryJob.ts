@@ -1,7 +1,5 @@
 import type { RefObject } from 'react';
 import type { Node } from '@xyflow/react';
-import { toast as globalToast } from 'sonner';
-import { isApiError } from '@/shared/api/http';
 import { apiErrorMessage, isSilentAuthError } from '../toolSessionCapture';
 import { isAudioMixNodeId } from '../audioMix';
 import { audioVideoMuxIdentityOf } from '../audioVideoMux';
@@ -93,7 +91,6 @@ export function useCanvasRetryJob(host: CanvasRetryJobHost): CanvasRetryJobHandl
         onCreateFailure: hdRetry ? (error: unknown) => {
           finishHd?.();
           if (!isSilentAuthError(error) && ownsHdSession?.() && !isVideoEnhanceCardInFlight(nodeId)) {
-            if (isApiError(error)) globalToast.error(error.message);
             showToast('error', apiErrorMessage(error, 'HD 高清任务创建失败，请重试'));
           }
           return false;
