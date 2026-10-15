@@ -136,54 +136,12 @@
 }
 
 .configBtn {
-  display: flex;
-  align-items: center;
-  gap: 6px;
   padding: 4px 10px;
   border-radius: 8px;
   background-color: #2a2a2a;
   border: 1px solid #3a3a3a;
   color: #ddd;
   font-size: 12px;
-  cursor: pointer;
-}
-
-.configBtn:hover {
-  background-color: #333;
-}
-
-.selectWrap {
-  position: relative;
-}
-
-.selectDropdown {
-  position: absolute;
-  bottom: calc(100% + 6px);
-  left: 0;
-  min-width: 160px;
-  padding: 6px;
-  background: #2a2a2a;
-  border: 1px solid #3a3a3a;
-  border-radius: 10px;
-  z-index: 4;
-}
-
-.selectOption {
-  display: block;
-  width: 100%;
-  text-align: left;
-  padding: 6px 10px;
-  border: none;
-  border-radius: 6px;
-  background: transparent;
-  color: #ddd;
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.selectOption:hover,
-.selectOptionActive {
-  background: #3a3a3a;
 }
 
 .sendBtn {

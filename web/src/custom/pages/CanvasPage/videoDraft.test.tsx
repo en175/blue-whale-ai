@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Node } from '@xyflow/react';
 import CanvasPage from './index';
 import { Toaster, toast } from 'sonner';
+import { clickSelectOption, selectOptionByText } from './testing/radixSelect';
 
 vi.setConfig({ testTimeout: 20_000, hookTimeout: 60_000 });
 const WAIT_TIMEOUT_MS = 10_000;
@@ -364,9 +365,7 @@ async function selectMode(label: string) {
   await act(async () => {
     [...container.querySelectorAll('button')].find((b) => modeLabels.includes(b.textContent ?? ''))!.click();
   });
-  await act(async () => {
-    [...container.querySelectorAll('button')].find((b) => b.textContent === label)!.click();
-  });
+  await clickSelectOption(label);
 }
 
 async function selectKeyframeMode() {
@@ -871,8 +870,8 @@ async function openModeMenu() {
   await act(async () => { modeButtons()[0]!.click(); });
 }
 
-function modeOption(label: string): HTMLButtonElement | undefined {
-  return [...container.querySelectorAll('button')].find((b) => b.textContent === label);
+function modeOption(label: string): HTMLElement | undefined {
+  return selectOptionByText(label);
 }
 
 function draftDataOf(nodeId: string): Record<string, unknown> {
@@ -962,18 +961,18 @@ describe('IKFC1T 文生视频入口与媒体参考自动切换', () => {
     await expectMode('图片参考');
 
     await openModeMenu();
-    expect(modeOption('文生视频')!.disabled).toBe(true);
+    expect(modeOption('文生视频')!.hasAttribute('data-disabled')).toBe(true);
 
     const removeButtons = () => container.querySelectorAll<HTMLButtonElement>('[data-testid="dock-video-ref"] button[title="移除"]');
     await act(async () => { removeButtons()[0]!.click(); });
     await openModeMenu();
-    expect(modeOption('文生视频')!.disabled).toBe(true);
+    expect(modeOption('文生视频')!.hasAttribute('data-disabled')).toBe(true);
 
     await act(async () => { removeButtons()[0]!.click(); });
     await waitFor(() => expect(flowProps.current.edges).toHaveLength(0));
     await expectMode('文生视频');
     await openModeMenu();
-    expect(modeOption('文生视频')!.disabled).toBe(false);
+    expect(modeOption('文生视频')!.hasAttribute('data-disabled')).toBe(false);
   });
 
   it('草稿恢复保持已保存模式：首尾帧草稿恢复首尾帧，文生视频草稿无媒体恢复文生视频', async () => {
@@ -1122,8 +1121,7 @@ describe('IKK1T9 视频编辑/延长（ADR-0124 模式配置化）', () => {
     await act(async () => { configBtn.click(); });
     const modelTrigger = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('测试视频模型 20'))!;
     await act(async () => { modelTrigger.click(); });
-    const option = [...container.querySelectorAll('button')].find((b) => b.textContent === '测试视频模型 25')!;
-    await act(async () => { option.click(); });
+    await clickSelectOption('测试视频模型 25');
     await expectMode('视频编辑');
   });
 

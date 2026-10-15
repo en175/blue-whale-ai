@@ -3,7 +3,6 @@ import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ImageEnhanceDialog from './index';
-import styles from './index.module.css';
 import { freezeImageEnhanceParams, imageEnhanceTierGateReason, pickImageEnhanceTier } from '../../imageEnhance';
 
 let root: Root | null = null;
@@ -26,6 +25,8 @@ function renderPanel(props: Partial<Parameters<typeof ImageEnhanceDialog>[0]> = 
 }
 
 const btn = (testId: string) => container!.querySelector<HTMLButtonElement>(`[data-testid="${testId}"]`)!;
+const option = (testId: string) =>
+  document.body.querySelector<HTMLElement>(`[role="option"][data-testid="${testId}"]`)!;
 
 async function click(node: Element | null) {
   await act(async () => {
@@ -64,10 +65,12 @@ describe('IKGM9O 面板选项渲染与默认值', () => {
     renderPanel();
     await openModelMenu();
     for (const tier of ['lite', 'pro', 'max']) {
-      expect(btn(`enhance-model-option-${tier}`)).toBeTruthy();
+      expect(option(`enhance-model-option-${tier}`)).toBeTruthy();
     }
     await click(btn('enhance-provider-btn'));
-    const providerOptions = [...container!.querySelectorAll(`.${styles.selectOption}`)] as HTMLButtonElement[];
+    const providerOptions = [
+      ...document.body.querySelectorAll('[role="option"][data-testid^="enhance-provider-option-"]'),
+    ] as HTMLElement[];
     expect(providerOptions.length).toBe(1);
     expect(providerOptions[0]!.textContent).toBe('MediaKit');
   });
@@ -95,7 +98,7 @@ describe('IKGM9O 置灰与悬停原因', () => {
   it('选 Lite：增强策略置灰并悬停说明不支持；展示冻结值生成度优先', async () => {
     renderPanel();
     await openModelMenu();
-    await click(btn('enhance-model-option-lite'));
+    await click(option('enhance-model-option-lite'));
     const modeBtn = btn('enhance-mode-generative_first');
     expect(modeBtn.getAttribute('aria-disabled')).toBe('true');
     expect(modeBtn.getAttribute('title')).toBe('Lite 版本不支持增强策略');
@@ -110,7 +113,7 @@ describe('IKGM9O 置灰与悬停原因', () => {
     expect(row.getAttribute('title')).toBe('仅 Max 版本支持色彩校正');
     expect((container!.querySelector('[data-testid="enhance-color-toggle"]') as HTMLInputElement).checked).toBe(false);
     await openModelMenu();
-    await click(btn('enhance-model-option-max'));
+    await click(option('enhance-model-option-max'));
     const rowMax = container!.querySelector('[data-testid="enhance-color-row"]')!;
     expect(rowMax.getAttribute('aria-disabled')).toBeNull();
     expect((container!.querySelector('[data-testid="enhance-color-toggle"]') as HTMLInputElement).checked).toBe(true);
@@ -136,7 +139,7 @@ describe('IKGM9O 尺寸预检各档边界', () => {
   it('不满足门槛的档在下拉置灰并悬停原因；点置灰档不切换', async () => {
     renderPanel({ sourceDims: { width: 1024, height: 100 } });
     await openModelMenu();
-    const pro = btn('enhance-model-option-pro');
+    const pro = option('enhance-model-option-pro');
     expect(pro.getAttribute('aria-disabled')).toBe('true');
     expect(pro.getAttribute('title')).toContain('Pro 版本门槛');
     await click(pro);
@@ -193,7 +196,7 @@ describe('IKGM9O 提交 payload 冻结口径', () => {
   it('Max 档尊重用户开关：关掉后提交 enable_correct_color=false；开则 true', async () => {
     renderPanel();
     await openModelMenu();
-    await click(btn('enhance-model-option-max'));
+    await click(option('enhance-model-option-max'));
     const toggle = container!.querySelector('[data-testid="enhance-color-toggle"]') as HTMLInputElement;
     await act(async () => {
       toggle.dispatchEvent(new MouseEvent('click', { bubbles: true }));

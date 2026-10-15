@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GenerationModel } from '@/custom/api/generation';
 import BottomDialog from './index';
+import { clickSelectOption } from '../../testing/radixSelect';
 import styles from './index.module.css';
 import { REF_SOURCE_ENTRY_TITLE } from '../RefSourceMenu';
 import type { VideoMediaRef, VideoMediaRefs } from '../../videoMediaRefs';
@@ -244,7 +245,7 @@ describe('IKDMQS 角色槽能力约束', () => {
   it('切换首尾帧模式后，空首帧和尾帧入口同时显示（统一入口具名槽位）', async () => {
     await renderDialog({ mode: 'omni', mediaRefs: { reference: [] } });
     await act(async () => { menuItem('全能参考')!.click(); });
-    await act(async () => { menuItem('首尾帧')!.click(); });
+    await clickSelectOption('首尾帧');
     expect(slotButton('添加首帧（从资产中选择 / 从节点添加素材）')).toBeTruthy();
     expect(slotButton('添加尾帧（从资产中选择 / 从节点添加素材）')).toBeTruthy();
   });
@@ -266,11 +267,11 @@ describe('IKDMQS 角色显式指定与移除', () => {
 
     const pickCanvas = () => [...mountNode.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === '参考')!;
     await act(async () => { menuItem('首尾帧')!.click(); });
-    await act(async () => { menuItem('全能参考')!.click(); });
+    await clickSelectOption('全能参考');
     await act(async () => { pickCanvas().click(); });
     expect(handlers.onPickFromCanvas).toHaveBeenCalledWith('video', 'reference');
     await act(async () => { menuItem('全能参考')!.click(); });
-    await act(async () => { menuItem('图生视频')!.click(); });
+    await clickSelectOption('图生视频');
     await act(async () => { pickCanvas().click(); });
     expect(handlers.onPickFromCanvas).toHaveBeenLastCalledWith('image', 'first');
   });

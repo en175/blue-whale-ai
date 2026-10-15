@@ -5,7 +5,6 @@ import { useState, useRef, useEffect, useMemo } from 'react';
 import type { Node } from '@xyflow/react';
 import {
   X,
-  ChevronDown,
   Maximize2,
   Minimize2,
   SlidersHorizontal,
@@ -19,6 +18,7 @@ import {
   promptMaxLengthOf,
 } from '@/custom/utils/prompt-max-length';
 import RatioIcon from '@/custom/components/RatioIcon';
+import Select from '@/custom/components/Select';
 import GenerationQuoteBadge from '../GenerationQuoteBadge';
 import { buildImageJobReferences } from '../../videoJobReferences';
 import {
@@ -128,20 +128,14 @@ export default function ImageDialog({ projectId, onClose, onSend, initialText, i
   const [selectedRatio, setSelectedRatio] = useState('');
   const [showConfig, setShowConfig] = useState(false);
   const [expanded, setExpanded] = useState(false);
-  const [modelOpen, setModelOpen] = useState(false);
-  const [resOpen, setResOpen] = useState(false);
   const [files, setFiles] = useState<UploadedFile[]>(initialFiles ?? []);
   const [uploading, setUploading] = useState(false);
-  const modelWrapRef = useRef<HTMLDivElement>(null);
-  const resWrapRef = useRef<HTMLDivElement>(null);
   const configPanelRef = useRef<HTMLDivElement>(null);
   const mentionMenuRef = useRef<HTMLDivElement>(null);
   const [replaceTarget, setReplaceTarget] = useState<string | null>(null);
   const replaceMenuRef = useRef<HTMLDivElement>(null);
 
   useDismissOnOutside([
-    { open: modelOpen, ref: modelWrapRef, dismiss: () => setModelOpen(false) },
-    { open: resOpen, ref: resWrapRef, dismiss: () => setResOpen(false) },
     { open: showConfig, ref: configPanelRef, dismiss: () => setShowConfig(false) },
     { open: replaceTarget !== null, ref: replaceMenuRef, dismiss: () => setReplaceTarget(null) },
   ]);
@@ -536,77 +530,36 @@ export default function ImageDialog({ projectId, onClose, onSend, initialText, i
           <div className={styles.configSection}>
             <span className={styles.configLabel}>模型与质量</span>
             <div className={styles.configRow}>
-              <div className={styles.selectWrap} ref={modelWrapRef}>
-                <button
-                  className={styles.selectBtn}
-                  onClick={() => { setModelOpen(!modelOpen); setResOpen(false); }}
-                  disabled={readOnly}
-                >
-                  <span>{currentModel?.label ?? '选择模型'}</span>
-                  <ChevronDown
-                    size={14}
-                    strokeWidth={2}
-                    className={`${styles.configArrow} ${modelOpen ? styles.configArrowUp : ''}`}
-                  />
-                </button>
-                {modelOpen && (
-                  <div className={styles.selectDropdown}>
-                    {modelOptions.map((m) => (
-                      <button
-                        key={m.key}
-                        disabled={readOnly}
-                        className={`${styles.selectOption} ${m.key === selectedModel ? styles.selectOptionActive : ''}`}
-                        onClick={() => {
-                          const gen = modelList.find((x) => x.model_id === m.key);
-                          if (gen) syncDraftParams(applyModelDefaults(gen));
-                          else {
-                            setSelectedModel(m.key);
-                            syncDraftParams({ modelId: m.key });
-                          }
-                          setModelOpen(false);
-              }}
-                      >
-                        {m.label}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
+              <Select
+                value={selectedModel}
+                onChange={(key) => {
+                  const gen = modelList.find((x) => x.model_id === key);
+                  if (gen) syncDraftParams(applyModelDefaults(gen));
+                  else {
+                    setSelectedModel(key);
+                    syncDraftParams({ modelId: key });
+                  }
+                }}
+                disabled={readOnly}
+                side="top"
+                placeholder="选择模型"
+                ariaLabel="选择模型"
+                options={modelOptions.map((m) => ({ value: m.key, label: m.label }))}
+              />
 
-              <div className={styles.selectWrap} ref={resWrapRef}>
-                <button
-                  className={styles.selectBtn}
-                  onClick={() => { setResOpen(!resOpen); setModelOpen(false); }}
-                  disabled={readOnly}
-                >
-                  <span>{currentResolutionLabel}</span>
-                  <ChevronDown
-                    size={14}
-                    strokeWidth={2}
-                    className={`${styles.configArrow} ${resOpen ? styles.configArrowUp : ''}`}
-                  />
-                </button>
-                {resOpen && (
-                  <div className={styles.selectDropdown}>
-                    {resolutionOptions.map((r) => (
-                      <button
-                        key={r.key}
-                        disabled={readOnly}
-                        className={`${styles.selectOption} ${r.key === selectedResolution ? styles.selectOptionActive : ''}`}
-                        onClick={() => {
-                          setSelectedResolution(r.key);
-                          const nextRatio = currentGen ? pickRatioForSize(currentGen, r.key, selectedRatio) : selectedRatio;
-                          if (currentGen) setSelectedRatio(nextRatio);
-                          syncDraftParams({ size: r.key, ratio: nextRatio });
-                          setResOpen(false);
-              }}
-                      >
-                        {r.label}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
+              <Select
+                value={selectedResolution}
+                onChange={(key) => {
+                  setSelectedResolution(key);
+                  const nextRatio = currentGen ? pickRatioForSize(currentGen, key, selectedRatio) : selectedRatio;
+                  if (currentGen) setSelectedRatio(nextRatio);
+                  syncDraftParams({ size: key, ratio: nextRatio });
+                }}
+                disabled={readOnly}
+                side="top"
+                ariaLabel="选择分辨率"
+                options={resolutionOptions.map((r) => ({ value: r.key, label: r.label }))}
+              />
             </div>
           </div>
 

@@ -6,6 +6,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Edge, Node } from '@xyflow/react';
 import CanvasPage from './index';
+import { clickSelectOption } from './testing/radixSelect';
 import type { GenerationDockDefinition } from './generationDockCoordinator';
 import { createTextGenerationDock } from './textGenerationDock';
 import TextGenerationDockPanel from './textGenerationDockPanel';
@@ -794,8 +795,7 @@ describe('IKJUGY 文生文真实页面接线', () => {
     expect(fullNode('tg1').data.prompt).toBe('新的正文');
     const model = Array.from(container.querySelectorAll('button')).find(button => button.textContent?.trim() === '默认文本模型')!;
     await act(async () => { model.click(); });
-    const stored = Array.from(container.querySelectorAll('button')).find(button => button.textContent?.trim() === '旧文本模型')!;
-    await act(async () => { stored.click(); });
+    await clickSelectOption('旧文本模型');
     expect(fullNode('tg1').data.draftModelId).toBe('stored-text-model');
     await act(async () => { container.querySelector<HTMLButtonElement>('button[title="发送"]')!.click(); });
     expect(fullNode('tg1').data).toMatchObject({ text: '附件正文\n\n新的正文', prompt: '新的正文', draftModelId: 'stored-text-model' });

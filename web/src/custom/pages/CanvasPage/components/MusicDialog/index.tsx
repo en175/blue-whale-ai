@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { X, AudioLines, Upload, Move, ChevronDown, Music, ArrowUp } from 'lucide-react';
+import { X, AudioLines, Upload, Move, Music, ArrowUp } from 'lucide-react';
 import { toast } from '@/custom/components/Toast';
 import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
 import { useAudioDurations } from '../../hooks/useAudioDurations';
@@ -9,6 +9,7 @@ import { docHasInvalidRef, type PromptDoc } from '@/custom/utils/prompt-doc';
 import AudioPromptEditor, { type AudioPromptEditorHandle } from '../AudioDialog/AudioPromptEditor';
 import RefThumbnail from '../RefThumbnail';
 import { arrayMove, useRefStripDrag } from '../RefThumbnail/strip-dnd';
+import Select from '@/custom/components/Select';
 import styles from './index.module.css';
 
 const MAX_INPUT = 1000;
@@ -56,16 +57,10 @@ export default function MusicDialog({
   const [sourceOpen, setSourceOpen] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [model, setModel] = useState(MODEL_OPTIONS[0].key);
-  const [modelOpen, setModelOpen] = useState(false);
-  const [modeOpen, setModeOpen] = useState(false);
-  const [speedOpen, setSpeedOpen] = useState(false);
   const [instrumental, setInstrumental] = useState(false);
   const [speed, setSpeed] = useState(1);
   const audioInputRef = useRef<HTMLInputElement>(null);
   const sourceWrapRef = useRef<HTMLDivElement>(null);
-  const modeWrapRef = useRef<HTMLDivElement>(null);
-  const modelWrapRef = useRef<HTMLDivElement>(null);
-  const speedWrapRef = useRef<HTMLDivElement>(null);
 
   const durationSources = useMemo(
     () => refs.map((r) => ({ key: `${r.source}-${r.id}`, src: r.src })),
@@ -76,9 +71,6 @@ export default function MusicDialog({
   useDismissOnOutside([
     { open: sourceOpen, ref: sourceWrapRef, dismiss: () => setSourceOpen(false) },
     { open: pickerOpen, ref: sourceWrapRef, dismiss: () => setPickerOpen(false) },
-    { open: modeOpen, ref: modeWrapRef, dismiss: () => setModeOpen(false) },
-    { open: modelOpen, ref: modelWrapRef, dismiss: () => setModelOpen(false) },
-    { open: speedOpen, ref: speedWrapRef, dismiss: () => setSpeedOpen(false) },
   ]);
 
   const currentModel = MODEL_OPTIONS.find((m) => m.key === model);
@@ -296,60 +288,37 @@ export default function MusicDialog({
       <div className={styles.bottomBar}>
         <div className={styles.barLeft}>
           {}
-          <div className={styles.modeWrap} ref={modeWrapRef}>
-            <button className={styles.modeBtn} onClick={() => setModeOpen((v) => !v)}>
-              <Music size={14} strokeWidth={2} />
-              <span>AI 音乐</span>
-              <ChevronDown
-                size={10}
-                strokeWidth={2}
-                className={`${styles.modeArrow} ${modeOpen ? styles.modeArrowUp : ''}`}
-              />
-            </button>
-            {modeOpen && (
-              <div className={styles.modeDropdown}>
-                <button
-                  className={styles.modeOption}
-                  onClick={() => {
-                    setModeOpen(false);
-                    onSwitchToAudio();
-                  }}
-                >
-                  音频生成
-                </button>
-                <button className={`${styles.modeOption} ${styles.modeOptionActive}`} onClick={() => setModeOpen(false)}>
-                  AI 音乐
-                </button>
-              </div>
-            )}
+          <div className={styles.modeWrap}>
+            <Select
+              value="music"
+              onChange={() => onSwitchToAudio()}
+              size="sm"
+              side="top"
+              ariaLabel="切换生成类型"
+              triggerRender={
+                <>
+                  <Music size={14} strokeWidth={2} />
+                  <span>AI 音乐</span>
+                </>
+              }
+              options={[
+                { value: 'audio', label: '音频生成' },
+                { value: 'music', label: 'AI 音乐' },
+              ]}
+            />
           </div>
 
           {}
-          <div className={styles.modeWrap} ref={modelWrapRef}>
-            <button className={styles.modeBtn} onClick={() => setModelOpen((v) => !v)}>
-              <span>{currentModel?.label ?? '音乐模型（mock）'}</span>
-              <ChevronDown
-                size={10}
-                strokeWidth={2}
-                className={`${styles.modeArrow} ${modelOpen ? styles.modeArrowUp : ''}`}
-              />
-            </button>
-            {modelOpen && (
-              <div className={styles.modeDropdown}>
-                {MODEL_OPTIONS.map((opt) => (
-                  <button
-                    key={opt.key}
-                    className={`${styles.modeOption} ${opt.key === model ? styles.modeOptionActive : ''}`}
-                    onClick={() => {
-                      setModel(opt.key);
-                      setModelOpen(false);
-                    }}
-                  >
-                    {opt.label}
-                  </button>
-                ))}
-              </div>
-            )}
+          <div className={styles.modeWrap}>
+            <Select
+              value={model}
+              onChange={setModel}
+              size="sm"
+              side="top"
+              ariaLabel="选择音乐模型"
+              placeholder="音乐模型（mock）"
+              options={MODEL_OPTIONS.map((opt) => ({ value: opt.key, label: opt.label }))}
+            />
           </div>
 
           {}
@@ -367,31 +336,15 @@ export default function MusicDialog({
           </div>
 
           {}
-          <div className={styles.modeWrap} ref={speedWrapRef}>
-            <button className={styles.modeBtn} onClick={() => setSpeedOpen((v) => !v)}>
-              <span>{speed}x</span>
-              <ChevronDown
-                size={10}
-                strokeWidth={2}
-                className={`${styles.modeArrow} ${speedOpen ? styles.modeArrowUp : ''}`}
-              />
-            </button>
-            {speedOpen && (
-              <div className={styles.modeDropdown}>
-                {SPEED_OPTIONS.map((s) => (
-                  <button
-                    key={s}
-                    className={`${styles.modeOption} ${s === speed ? styles.modeOptionActive : ''}`}
-                    onClick={() => {
-                      setSpeed(s);
-                      setSpeedOpen(false);
-                    }}
-                  >
-                    {s}x
-                  </button>
-                ))}
-              </div>
-            )}
+          <div className={styles.modeWrap}>
+            <Select
+              value={String(speed)}
+              onChange={(next) => setSpeed(Number(next))}
+              size="sm"
+              side="top"
+              ariaLabel="选择倍速"
+              options={SPEED_OPTIONS.map((s) => ({ value: String(s), label: `${s}x` }))}
+            />
           </div>
         </div>
 

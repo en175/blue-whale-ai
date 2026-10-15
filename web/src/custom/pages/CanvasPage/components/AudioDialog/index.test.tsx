@@ -5,6 +5,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import AudioDialog, { type AudioRefItem } from './index';
+import { clickSelectOption } from '../../testing/radixSelect';
 import type { ImageTextAttachment } from '../ImageDialog';
 import { INSERT_REF_AT_SELECTION_TITLE } from '../RefThumbnail';
 import { readPromptRefText, typePromptRefText, typePromptRefRaw, promptRefEditorInstance } from '../../testing/promptRefEditor';
@@ -500,16 +501,16 @@ describe('IKFR51 音频文本参考', () => {
     ]);
     await mountRefs([imageRef, { ...imageRef, id: 'image-2', assetId: '702' }]);
     const send = container.querySelector<HTMLButtonElement>('[data-testid="audio-send"]')!;
-    const clickLabel = async (label: string) => act(async () => {
-      [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === label)!.click();
+    const openModelMenu = async () => act(async () => {
+      [...container.querySelectorAll<HTMLButtonElement>('[role="combobox"]')][0]!.click();
     });
     expect(send.disabled).toBe(false);
-    await clickLabel('测试音频模型');
-    await clickLabel('严格模型');
+    await openModelMenu();
+    await clickSelectOption('严格模型');
     expect(send.disabled).toBe(true);
     expect(container.textContent).toContain('参考图最多 1 个');
-    await clickLabel('严格模型');
-    await clickLabel('测试音频模型');
+    await openModelMenu();
+    await clickSelectOption('测试音频模型');
     expect(send.disabled).toBe(false);
   });
 });
