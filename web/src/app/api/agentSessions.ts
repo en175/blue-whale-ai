@@ -231,7 +231,14 @@ export interface SolutionCard {
   execution_route?: SolutionExecutionRoute;
   delivery_spec?: SolutionDeliverySpec;
   next_steps?: string;
-  scope?: { kind: 'whole' | 'continuation' | 'new_task'; label: string; derived_from?: string };
+  scope?: { kind: 'whole' | 'continuation' | 'new_task' | 'change' | 'revise'; label: string; derived_from?: string; effect?: string };
+  segments?: SolutionSegment[];
+}
+
+export interface SolutionSegment {
+  content: string;
+  seconds?: number;
+  segment_id?: string;
 }
 
 export interface RequirementUnderstanding {

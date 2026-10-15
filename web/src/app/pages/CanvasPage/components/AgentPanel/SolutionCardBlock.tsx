@@ -15,7 +15,13 @@ const SOLUTION_FIELD_LABELS = {
   delivery_spec: '出片参数',
   scope: '这张卡管的范围',
   derived_from: '承接上一张',
+  change: '这次改什么',
+  segments: '分几段拍',
 } as const;
+
+function withSeconds(content: string, seconds?: number): string {
+  return seconds !== undefined ? `${content}（${seconds} 秒）` : content;
+}
 
 function SolutionField({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -44,6 +50,8 @@ export function SolutionCardBlock({
   const pending = understanding.status === 'awaiting_confirmation';
   const route = card?.execution_route;
   const spec = card?.delivery_spec;
+  const segments = card?.segments ?? [];
+  const changing = card?.scope?.kind === 'change';
   const specParts = [
     spec?.aspect_ratio,
     spec?.duration_seconds !== undefined ? `${spec.duration_seconds} 秒` : undefined,
@@ -78,6 +86,27 @@ export function SolutionCardBlock({
             {(card.scope?.kind === 'continuation' || card.scope?.kind === 'new_task') && (
               <SolutionField label={SOLUTION_FIELD_LABELS.scope}>
                 <div className={styles.solutionFieldValue}>{card.scope.label}</div>
+              </SolutionField>
+            )}
+            {changing && (
+              <SolutionField label={SOLUTION_FIELD_LABELS.change}>
+                <div className={styles.solutionFieldValue}>{card.scope?.effect ?? card.scope?.label}</div>
+                {segments.length > 0 && (
+                  <ul className={styles.solutionList}>
+                    {segments.map((one, i) => (
+                      <li key={one.segment_id ?? i}>{withSeconds(one.content, one.seconds)}</li>
+                    ))}
+                  </ul>
+                )}
+              </SolutionField>
+            )}
+            {!changing && segments.length > 1 && (
+              <SolutionField label={SOLUTION_FIELD_LABELS.segments}>
+                <ol className={styles.solutionList}>
+                  {segments.map((one, i) => (
+                    <li key={one.segment_id ?? i}>{withSeconds(one.content, one.seconds)}</li>
+                  ))}
+                </ol>
               </SolutionField>
             )}
             {}
