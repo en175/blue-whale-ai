@@ -35,7 +35,7 @@ import { useCanvasNodeFactories } from './hooks/useCanvasNodeFactories';
 import { useCanvasSave } from './hooks/useCanvasSave';
 import { useCanvasSaveSession } from './hooks/useCanvasSaveSession';
 import { useCanvasSessionBootstrap } from './hooks/useCanvasSessionBootstrap';
-import { showToast } from '@/custom/utils/toast';
+import { showToast } from '@/custom/components/Toast';
 import { useCanvasViewportSurface } from './hooks/useCanvasViewportSurface';
 import { useCanvasGenerationModels } from './hooks/useCanvasGenerationModels';
 import { useCanvasProjectRoute } from './hooks/useCanvasProjectRoute';

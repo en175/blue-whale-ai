@@ -2,7 +2,7 @@ import { useRef, useState, useCallback, useEffect } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { useSoloNodeSelected } from '../../useSoloNodeSelected';
 import { AtSign, Upload, X, Box, MousePointerClick, ImageOff, Plus } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/custom/components/Toast';
 import { uploadAssetFile } from '@/custom/utils/upload';
 import { remoteImageCrossOrigin, resolveMediaSrc } from '@/shared/utils/remoteImageCors';
 import { isFileRejected } from '@/custom/utils/fileSignature';

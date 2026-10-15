@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { X, AudioLines, Upload, Move, ChevronDown, Music, ArrowUp } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/custom/components/Toast';
 import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
 import { useAudioDurations } from '../../hooks/useAudioDurations';
 import type { AudioRefItem, CanvasPickItem } from '../AudioDialog';

@@ -1,7 +1,7 @@
 import { type VideoRefRole } from '@/custom/enums';
 import { useMemo, useRef, type Dispatch, type RefObject, type SetStateAction } from 'react';
 import type { Edge, Node } from '@xyflow/react';
-import { toast as globalToast } from 'sonner';
+import { toast as globalToast } from '@/custom/components/Toast';
 import { isApiError } from '@/shared/api/http';
 import { newIdempotencyKey } from '@/shared/api/idempotencyKey';
 import { uploadAssetFile } from '@/custom/utils/upload';
