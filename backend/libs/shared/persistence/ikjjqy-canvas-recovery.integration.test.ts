@@ -41,6 +41,7 @@ import {
   resolveCanvasRecoveryItems,
 } from "./generation-canvas-recovery-repo.js";
 import { saveCanvasWithRecovery } from "./canvas-recovery-save.js";
+import { createCanvasRepo } from "./canvas-repo.js";
 import { multiResultNodeId } from "./canvas-recovery-multi-output.js";
 import { createJobWithinTx } from "./generation-command-repo.js";
 import { VideoSceneSplitsService } from "@lib/shared/video-scene-splits/video-scene-splits.service.js";
@@ -408,6 +409,7 @@ describe.skipIf(!databaseUrl)("多结果任务逐项恢复与删除（IKJJQY）"
   });
 
   it("任务 3416 日志恢复四段、原子替换占位并保存删除，三次回读不复活", async () => {
+    const canvasRepo = createCanvasRepo(prisma);
     const created = await acceptJob({
       submissionId: UUID_A, node: "scene-node-3416", revision: 0,
       type: "video_scene_split",
@@ -454,7 +456,7 @@ describe.skipIf(!databaseUrl)("多结果任务逐项恢复与删除（IKJJQY）"
       ],
     }), 422, RECOVERY_REASONS.documentMismatch);
     expect((await listCanvasRecoveryPage(prisma, PROJECT_ID, 50, null)).records).toEqual(page.records);
-    expect(await prisma.canvas.findFirst({ where: { project_id: BigInt(PROJECT_ID) } })).toBeNull();
+    expect(await canvasRepo.getByProject(PROJECT_ID)).toMatchObject({ id: null, version: null, nodes: null });
 
     const saved = await save({
       commandId: UUID_D, version: null, nodes,
@@ -481,9 +483,9 @@ describe.skipIf(!databaseUrl)("多结果任务逐项恢复与删除（IKJJQY）"
         ["$target", "replaced", 2], ["segment:1", "present", 1], ["segment:2", "removed", 2],
         ["segment:3", "present", 1], ["segment:4", "present", 1],
       ]);
-      const document = await prisma.canvas.findFirst({ where: { project_id: BigInt(PROJECT_ID) } });
-      expect(document?.nodes_json).toEqual(remainingNodes);
-      expect(document?.version).toBe(removed.version);
+      const document = await canvasRepo.getByProject(PROJECT_ID);
+      expect(JSON.parse(document.nodes ?? "null")).toEqual(remainingNodes);
+      expect(document.version).toBe(removed.version);
       const resolved = await resolveCanvasRecoveryItems(prisma, PROJECT_ID, [recoveryItemId(UUID_A, "segment:2")]);
       expect(resolved[0]!.items).toEqual([expect.objectContaining({ state: "removed", revision: 2 })]);
     }
