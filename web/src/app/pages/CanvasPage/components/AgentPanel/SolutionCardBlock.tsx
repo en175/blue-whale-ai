@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { BookText } from 'lucide-react';
 import styles from './index.module.css';
-import type { RequirementUnderstanding } from '@/api/agentSessions';
+import type { RequirementUnderstanding } from '@/app/api/agentSessions';
 import { Markdown } from './Markdown';
 
 const SOLUTION_FIELD_LABELS = {

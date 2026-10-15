@@ -1,5 +1,5 @@
-import Modal from '@/components/Modal';
-import type { LegacyCardHistoryItem } from '@/api/canvas';
+import Modal from '@/app/components/Modal';
+import type { LegacyCardHistoryItem } from '@/app/api/canvas';
 import styles from './index.module.css';
 
 interface LegacyHistoryModalProps {

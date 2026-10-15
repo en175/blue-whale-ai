@@ -1,11 +1,11 @@
 import { memo, useEffect, useRef, useState, useCallback, useLayoutEffect, type RefObject } from 'react';
 import { useInfiniteLoader, useMasonry, usePositioner, useResizeObserver, type RenderComponentProps } from 'masonic';
 import { Trash2, RotateCw, AlertCircle, Check, ZoomIn } from 'lucide-react';
-import type { AssetRecord } from '@/api/assets';
-import Skeleton from '@/components/Skeleton';
+import type { AssetRecord } from '@/app/api/assets';
+import Skeleton from '@/app/components/Skeleton';
 import AudioPlayer, { type AudioPlayerHandle } from '../AudioPlayer';
 import { assetMediaDisplay } from '../../assetMediaSrc';
-import { remoteImageCrossOrigin } from '@/utils/remoteImageCors';
+import { remoteImageCrossOrigin } from '@/shared/utils/remoteImageCors';
 import { assetAspectRatio, typeLabel } from '../../assetGrid';
 import { startVideoPreview, stopVideoPreview } from '../../videoPreview';
 import styles from '../../index.module.css';

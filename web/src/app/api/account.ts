@@ -1,4 +1,4 @@
-import { apiRequest } from '@/api/http';
+import { apiRequest } from '@/shared/api/http';
 
 export interface ConsumptionRecord {
   id: string;

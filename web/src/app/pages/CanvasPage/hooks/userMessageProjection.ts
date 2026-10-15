@@ -1,4 +1,4 @@
-import type { SessionContentBlock, SessionMessage } from '@/api/agentSessions';
+import type { SessionContentBlock, SessionMessage } from '@/app/api/agentSessions';
 import type { ChatMessage } from './useAgentSession';
 
 export const textOf = (blocks: SessionMessage['content'] | undefined): string =>

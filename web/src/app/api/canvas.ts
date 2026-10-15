@@ -1,7 +1,7 @@
 import type { PromptBinding } from '@lib/contracts/prompt-target';
 import type { PromptPreviewSource } from '@lib/contracts/prompt-preview';
 import type { LegacyCardHistoryItem, LegacyMigrationReport } from '@lib/contracts/legacy-card-migration';
-import { apiRequest, isApiError } from '@/api/http';
+import { apiRequest, isApiError } from '@/shared/api/http';
 import { queryOptions } from '@tanstack/react-query';
 import type { Edge, Node, Viewport } from '@xyflow/react';
 

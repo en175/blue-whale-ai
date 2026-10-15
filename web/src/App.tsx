@@ -1,10 +1,10 @@
 import { useEffect } from 'react';
 import { RouterProvider } from 'react-router-dom';
 import { Toaster } from 'sonner';
-import router from '@/router';
-import AuthExpiredGate from '@/components/AuthExpiredGate';
-import { fetchMe, toSessionUser } from '@/api/auth';
-import { updateUser } from '@/utils/auth';
+import router from '@/app/router';
+import AuthExpiredGate from '@/app/components/AuthExpiredGate';
+import { fetchMe, toSessionUser } from '@/app/api/auth';
+import { updateUser } from '@/shared/utils/auth';
 
 let meSyncStarted = false;
 

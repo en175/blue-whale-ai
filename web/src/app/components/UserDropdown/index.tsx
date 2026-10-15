@@ -7,13 +7,13 @@ import {
   LogOut,
 } from 'lucide-react';
 import styles from './index.module.css';
-import { getCurrentUser, subscribe, isAdmin, setSession } from '@/utils/auth';
-import { logout, fetchCredits } from '@/api/auth';
-import { useAuthStore } from '@/stores/auth';
-import { useRechargeUiStore } from '@/stores/recharge';
+import { getCurrentUser, subscribe, isAdmin, setSession } from '@/shared/utils/auth';
+import { logout, fetchCredits } from '@/app/api/auth';
+import { useAuthStore } from '@/shared/stores/auth';
+import { useRechargeUiStore } from '@/app/stores/recharge';
 import AccountModal from './AccountModal';
 import RechargeModal from './RechargeModal';
-import LoginModal from '@/components/LoginModal';
+import LoginModal from '@/app/components/LoginModal';
 import { USER_DROPDOWN_MENU_ITEMS } from './menuItems';
 
 const menuIcons = {

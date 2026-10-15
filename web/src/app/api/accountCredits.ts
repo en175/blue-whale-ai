@@ -1,6 +1,6 @@
 import { queryOptions } from '@tanstack/react-query';
-import { ApiError, API_PREFIX, apiRequest, readApiErrorMessage } from '@/api/http';
-import { getSessionToken } from '@/api/sessionToken';
+import { ApiError, API_PREFIX, apiRequest, readApiErrorMessage } from '@/shared/api/http';
+import { getSessionToken } from '@/shared/api/sessionToken';
 
 export interface UsageTokenLot {
   credits: number;

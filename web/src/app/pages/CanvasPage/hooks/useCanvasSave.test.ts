@@ -8,15 +8,15 @@ import { useCanvasSave, type CanvasSaveHost } from './useCanvasSave';
 
 const saveCanvasDoc = vi.hoisted(() => vi.fn());
 const putCanvasDocWithRecovery = vi.hoisted(() => vi.fn());
-vi.mock('@/api/canvas', () => ({
+vi.mock('@/app/api/canvas', () => ({
   readCanvasConflictVersion: (error: unknown) =>
     (error as { conflictVersion?: number } | null)?.conflictVersion,
   saveCanvasDoc,
   serializeNodes: (nodes: Node[]) => JSON.stringify(nodes.map((n) => n.id)),
   serializeEdges: (edges: Edge[]) => JSON.stringify(edges.map((e) => `${e.source}-${e.target}`)),
 }));
-vi.mock('@/api/canvasRecovery', () => ({ putCanvasDocWithRecovery }));
-vi.mock('@/api/http', () => ({
+vi.mock('@/app/api/canvasRecovery', () => ({ putCanvasDocWithRecovery }));
+vi.mock('@/shared/api/http', () => ({
   isApiError: (e: unknown) => Boolean((e as { apiError?: boolean } | null)?.apiError),
 }));
 

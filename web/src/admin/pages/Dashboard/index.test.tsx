@@ -3,17 +3,17 @@ import { act, createElement, type ReactElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider, notifyManager } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { beijingToday } from '@/api/adminDashboard';
+import { beijingToday } from '@/admin/api/adminDashboard';
 import Dashboard from './index';
 
 const api = vi.hoisted(() => ({ fetchAdminDashboard: vi.fn() }));
 
-vi.mock('@/api/adminDashboard', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/api/adminDashboard')>();
+vi.mock('@/admin/api/adminDashboard', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/admin/api/adminDashboard')>();
   return {
     ...actual,
     fetchAdminDashboard: api.fetchAdminDashboard,
-    adminDashboardOptions: (range: import('@/api/adminDashboard').DashboardRangeQuery) => ({
+    adminDashboardOptions: (range: import('@/admin/api/adminDashboard').DashboardRangeQuery) => ({
       queryKey: actual.adminDashboardKeys.stats(range),
       queryFn: () => api.fetchAdminDashboard(range),
     }),

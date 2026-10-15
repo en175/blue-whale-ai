@@ -2,15 +2,15 @@
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { sendCode } from '@/api/auth';
+import { sendCode } from '@/app/api/auth';
 import {
   PLATFORM_PRIVACY_POLICY_HREF,
   USER_SERVICES_AGREEMENT_HREF,
 } from './agreements';
 import LoginModal from './index';
 
-vi.mock('@/api/auth', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/api/auth')>();
+vi.mock('@/app/api/auth', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/app/api/auth')>();
   return {
     ...actual,
     sendCode: vi.fn(async () => null),

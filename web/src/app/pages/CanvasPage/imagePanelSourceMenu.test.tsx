@@ -14,8 +14,8 @@ import {
 import barStyles from './components/AttachmentActionBar/index.module.css';
 import dialogStyles from './components/ImageDialog/index.module.css';
 
-vi.mock('@/api/generationQuote', async (importActual) => ({
-  ...(await importActual<typeof import('@/api/generationQuote')>()),
+vi.mock('@/app/api/generationQuote', async (importActual) => ({
+  ...(await importActual<typeof import('@/app/api/generationQuote')>()),
   generationQuoteOptions: vi.fn(() => ({
     queryKey: ['generation-quote', 'mock'],
     staleTime: Infinity,
@@ -23,8 +23,8 @@ vi.mock('@/api/generationQuote', async (importActual) => ({
   })),
 }));
 
-vi.mock('@/api/canvasRecovery', async (importActual) => ({
-  ...(await importActual<typeof import('@/api/canvasRecovery')>()),
+vi.mock('@/app/api/canvasRecovery', async (importActual) => ({
+  ...(await importActual<typeof import('@/app/api/canvasRecovery')>()),
   generationRecoveryPageOptions: vi.fn(() => ({
     queryKey: ['generation-recovery', 'mock'],
     staleTime: Infinity,
@@ -73,11 +73,11 @@ vi.mock('./components/ProjectSelector', () => ({
   default: () => createElement('div', { 'data-testid': 'project-selector' }),
 }));
 
-vi.mock('@/components/UserDropdown/RechargeModal', () => ({ default: () => null }));
-vi.mock('@/pages/Assets/components/AssetDetailModal', () => ({ default: () => null }));
+vi.mock('@/app/components/UserDropdown/RechargeModal', () => ({ default: () => null }));
+vi.mock('@/app/pages/Assets/components/AssetDetailModal', () => ({ default: () => null }));
 
 const genHandoffMock = vi.hoisted(() => ({ current: null as Record<string, unknown> | null }));
-vi.mock('@/utils/gen-handoff', () => ({
+vi.mock('@/app/utils/gen-handoff', () => ({
   setGenHandoff: vi.fn(),
   takeGenHandoff: () => {
     const h = genHandoffMock.current;
@@ -129,7 +129,7 @@ const apiMocks = vi.hoisted(() => ({
   ]),
 }));
 
-vi.mock('@/api/projects', () => ({
+vi.mock('@/app/api/projects', () => ({
   touchProjectLastOpened: vi.fn(async () => undefined),
   pinProject: vi.fn(async () => undefined),
   fetchProjects: apiMocks.fetchProjects,
@@ -138,13 +138,13 @@ vi.mock('@/api/projects', () => ({
   deleteProject: apiMocks.deleteProject,
 }));
 
-vi.mock('@/api/auth', () => ({
+vi.mock('@/app/api/auth', () => ({
   fetchMe: apiMocks.fetchMe,
   fetchCredits: apiMocks.fetchCredits,
   toSessionUser: apiMocks.toSessionUser,
 }));
 
-vi.mock('@/api/assets', () => ({
+vi.mock('@/app/api/assets', () => ({
   UPLOAD_SIZE_LIMIT: 100 * 1024 * 1024,
   fetchUploadPresign: vi.fn(),
   putToPresignedUrl: vi.fn(),
@@ -154,7 +154,7 @@ vi.mock('@/api/assets', () => ({
   linkAssetToProject: vi.fn().mockResolvedValue(undefined),
 }));
 
-vi.mock('@/api/canvas', () => ({
+vi.mock('@/app/api/canvas', () => ({
   applyPromptPreview: vi.fn(),
   listLegacyCardHistory: vi.fn(async () => ({ items: [] })),
   createConversationQuote: vi.fn(),
@@ -168,7 +168,7 @@ vi.mock('@/api/canvas', () => ({
   ),
 }));
 
-vi.mock('@/api/jobs', () => ({
+vi.mock('@/app/api/jobs', () => ({
   createGenerationJob: apiMocks.createGenerationJob,
   cancelGenerationJob: apiMocks.cancelGenerationJob,
   retryGenerationJob: apiMocks.retryGenerationJob,
@@ -179,9 +179,9 @@ vi.mock('@/api/jobs', () => ({
   readJobFailText: apiMocks.readJobFailText,
 }));
 
-vi.mock('@/api/sharedAssets', () => ({ saveSharedAsset: vi.fn() }));
+vi.mock('@/app/api/sharedAssets', () => ({ saveSharedAsset: vi.fn() }));
 
-vi.mock('@/api/generation', () => ({
+vi.mock('@/app/api/generation', () => ({
   fetchGenerationModels: apiMocks.fetchGenerationModels,
 }));
 

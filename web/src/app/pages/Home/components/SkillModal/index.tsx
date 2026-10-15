@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { remoteImageCrossOrigin, resolveMediaSrc } from '@/utils/remoteImageCors';
+import { remoteImageCrossOrigin, resolveMediaSrc } from '@/shared/utils/remoteImageCors';
 import styles from './index.module.css';
 import {
   fetchSkillContent,
@@ -29,9 +29,9 @@ import {
   formatPersonalSkill,
   fetchPersonalSkill,
   type SkillRecord,
-} from '@/api/skills';
-import { isApiError } from '@/api/http';
-import ConfirmModal from '@/components/ConfirmModal';
+} from '@/app/api/skills';
+import { isApiError } from '@/shared/api/http';
+import ConfirmModal from '@/app/components/ConfirmModal';
 
 interface SkillModalProps {
   open: boolean;

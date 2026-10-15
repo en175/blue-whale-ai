@@ -1,5 +1,5 @@
-import type { SessionContentBlock } from '@/api/agentSessions';
-import type { ConversationQuote } from '@/api/canvas';
+import type { SessionContentBlock } from '@/app/api/agentSessions';
+import type { ConversationQuote } from '@/app/api/canvas';
 import { PROMPT_TEXT_LIMITS } from '@lib/contracts/prompt-text-limits';
 import { previewSourceSchema, type PromptPreviewSource } from '@lib/contracts/prompt-preview';
 

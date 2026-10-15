@@ -4,8 +4,8 @@ import { Search } from 'lucide-react';
 import {
   operationLogsOptions,
   type OperationLog as OperationLogRow,
-} from '@/api/adminOperationLogs';
-import { isApiError } from '@/api/http';
+} from '@/admin/api/adminOperationLogs';
+import { isApiError } from '@/shared/api/http';
 import { Badge, Button, Empty, Input, Page, PageHeader, Select, Table, Toolbar } from '../../ui';
 
 const BREAK_ANY = { overflowWrap: 'anywhere' } as const;

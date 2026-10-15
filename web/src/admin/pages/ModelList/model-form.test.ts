@@ -21,7 +21,7 @@ import {
   type FormSnapshot,
   type RatioForm,
 } from './model-form';
-import type { AdminModel } from '@/api/adminModels';
+import type { AdminModel } from '@/admin/api/adminModels';
 
 function ratioRows(...ids: string[]): RatioForm[] {
   return ids.map((id) => ({ id }));

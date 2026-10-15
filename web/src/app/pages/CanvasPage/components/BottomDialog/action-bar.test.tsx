@@ -3,7 +3,7 @@ import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { GenerationModel } from '@/api/generation';
+import type { GenerationModel } from '@/app/api/generation';
 import BottomDialog from './index';
 import {
   ATTACHMENT_ACTION_PICK_ASSETS_TITLE,
@@ -17,7 +17,7 @@ import type { VideoMediaRef, VideoMediaRefs } from '../../videoMediaRefs';
 
 const fetchGenerationModels = vi.hoisted(() => vi.fn());
 
-vi.mock('@/api/generation', () => ({ fetchGenerationModels }));
+vi.mock('@/app/api/generation', () => ({ fetchGenerationModels }));
 
 vi.mock('../PromptRefEditor', async () => {
   const { forwardRef, useImperativeHandle } = await import('react');

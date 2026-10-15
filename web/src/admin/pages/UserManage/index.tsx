@@ -6,10 +6,10 @@ import {
   manageAdminUser,
   type AdminUserRow,
   type UserManageAction,
-} from '@/api/adminUsers';
-import { operationLogsOptions, type OperationLog } from '@/api/adminOperationLogs';
-import { isApiError } from '@/api/http';
-import { newIdempotencyKey } from '@/api/idempotencyKey';
+} from '@/admin/api/adminUsers';
+import { operationLogsOptions, type OperationLog } from '@/admin/api/adminOperationLogs';
+import { isApiError } from '@/shared/api/http';
+import { newIdempotencyKey } from '@/shared/api/idempotencyKey';
 import { formatLogIp } from '@/admin/formatLogIp';
 import { normalizeAdminUserKeyword } from './userSearch';
 import AdminQueryTable, {

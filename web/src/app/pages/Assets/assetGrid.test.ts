@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { AssetRecord } from '@/api/assets';
+import type { AssetRecord } from '@/app/api/assets';
 import { appendUniqueAssets, assetAspectRatio, hasNextAssetPage } from './assetGrid';
 
 const image = (id: number, width: number | null, height: number | null): AssetRecord => ({

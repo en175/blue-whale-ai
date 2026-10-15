@@ -5,7 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ImageDialog, { type ImageTextAttachment } from './index';
 import { composeImageSendPrompt } from './composeImageSendPrompt';
-import type { PromptDoc } from '@/utils/prompt-doc';
+import type { PromptDoc } from '@/app/utils/prompt-doc';
 import { readPromptRefText, typePromptRefRaw } from '../../testing/promptRefEditor';
 
 const fetchGenerationModels = vi.hoisted(() =>
@@ -30,7 +30,7 @@ const fetchGenerationModels = vi.hoisted(() =>
   ]),
 );
 
-vi.mock('@/api/generation', () => ({ fetchGenerationModels }));
+vi.mock('@/app/api/generation', () => ({ fetchGenerationModels }));
 
 const ATT_STYLE: ImageTextAttachment = { nodeId: 'text-1-style', title: '风格要求', text: '赛博朋克，霓虹灯' };
 const ATT_POSE: ImageTextAttachment = { nodeId: 'text-2-pose', title: '姿势说明', text: '站立微笑' };

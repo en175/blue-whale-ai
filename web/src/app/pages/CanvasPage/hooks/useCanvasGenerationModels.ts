@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
-import { imageReferenceMaxOf } from '@/utils/model-reference-limits';
+import { fetchGenerationModels, type GenerationModel } from '@/app/api/generation';
+import { imageReferenceMaxOf } from '@/app/utils/model-reference-limits';
 
 export function useCanvasGenerationModels() {
   const [videoModels, setVideoModels] = useState<GenerationModel[]>([]);

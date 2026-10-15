@@ -9,7 +9,7 @@ const fetchAssetDetail = vi.hoisted(() => vi.fn(async (): Promise<{ id: string; 
   throw new Error('asset not found');
 }));
 
-vi.mock('@/api/assets', () => ({
+vi.mock('@/app/api/assets', () => ({
   fetchAssetDetail,
 }));
 

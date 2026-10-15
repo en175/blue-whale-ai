@@ -1,5 +1,5 @@
 import { queryOptions } from '@tanstack/react-query';
-import { apiRequestWithMeta } from '@/api/http';
+import { apiRequestWithMeta } from '@/shared/api/http';
 import type { TopupTierPermission } from './admin';
 
 export interface AdminRechargeCustomConfig {

@@ -1,12 +1,12 @@
 import type { Dispatch, SetStateAction, RefObject } from 'react';
 import type { Edge, Node } from '@xyflow/react';
-import { linkAssetToProject, type AssetRecord } from '@/api/assets';
-import type { SessionContentBlock } from '@/api/agentSessions';
-import { refOverflowToast } from '@/utils/ref-overflow';
+import { linkAssetToProject, type AssetRecord } from '@/app/api/assets';
+import type { SessionContentBlock } from '@/app/api/agentSessions';
+import { refOverflowToast } from '@/app/utils/ref-overflow';
 import {
   VIDEO_REFERENCE_NOT_APPROVED_MESSAGE,
   isUnapprovedVideoMaterialStatus,
-} from '@/utils/video-reference-compliance';
+} from '@/app/utils/video-reference-compliance';
 import type { UploadedFile } from '../components/ImageDialog';
 import type { AudioRefItem } from '../components/AudioDialog';
 import type { MediaDims } from '../components/MediaNode/mediaContentSize';

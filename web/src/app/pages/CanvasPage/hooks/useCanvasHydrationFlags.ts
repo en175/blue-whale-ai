@@ -1,5 +1,5 @@
 import { useRef } from 'react';
-import type { CanvasDoc } from '@/api/canvas';
+import type { CanvasDoc } from '@/app/api/canvas';
 
 export function useCanvasHydrationFlags() {
   const hydratedDocRef = useRef<CanvasDoc | null>(null);

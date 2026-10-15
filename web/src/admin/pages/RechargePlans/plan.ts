@@ -1,4 +1,4 @@
-import type { TopupTier, TopupTierPermission, TopupTierStatus } from '@/api/adminTopupTiers';
+import type { TopupTier, TopupTierPermission, TopupTierStatus } from '@/admin/api/adminTopupTiers';
 import { DEFAULT_BUTTON_TEXT, DEFAULT_CREDITS_VALID_MONTHS } from './tierForm';
 
 export interface Plan {

@@ -5,8 +5,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import RechargePlans from './index';
 import { baseCreditsFormError, tierCardFormError, tierFormError } from './tierForm';
-import { ApiError } from '@/api/http';
-import { topupTierPreviewKeys, type TopupTier } from '@/api/adminTopupTiers';
+import { ApiError } from '@/shared/api/http';
+import { topupTierPreviewKeys, type TopupTier } from '@/admin/api/adminTopupTiers';
 
 const adminApi = vi.hoisted(() => ({
   fetchTopupTiers: vi.fn(),
@@ -23,8 +23,8 @@ const toastApi = vi.hoisted(() => ({
   success: vi.fn(),
 }));
 
-vi.mock('@/api/adminTopupTiers', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/api/adminTopupTiers')>();
+vi.mock('@/admin/api/adminTopupTiers', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/admin/api/adminTopupTiers')>();
   return {
     ...actual,
     ...adminApi,

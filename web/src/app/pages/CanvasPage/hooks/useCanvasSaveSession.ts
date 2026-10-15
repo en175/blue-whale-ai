@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState, type RefObject } from 'react';
 import type { Edge, Node, Viewport } from '@xyflow/react';
-import type { RecoveryChange } from '@/api/canvasRecovery';
+import type { RecoveryChange } from '@/app/api/canvasRecovery';
 import type { CanvasGraph } from './useCanvasGraph';
 
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';

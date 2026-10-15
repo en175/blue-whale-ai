@@ -1,8 +1,8 @@
 import { useEffect } from 'react';
 import type { Dispatch, RefObject, SetStateAction } from 'react';
 import type { Edge, Node, Viewport } from '@xyflow/react';
-import type { CanvasDoc } from '@/api/canvas';
-import type { SnapshotAsset } from '@/api/projects';
+import type { CanvasDoc } from '@/app/api/canvas';
+import type { SnapshotAsset } from '@/app/api/projects';
 import type { CanvasGroup } from '../canvasGroups';
 import type { GenerationRuntime } from '../generationRuntime/runtime';
 

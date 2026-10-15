@@ -17,8 +17,8 @@ const api = vi.hoisted(() => ({
   removeMySkill: vi.fn(),
 }));
 
-vi.mock('@/api/skills', () => api);
-vi.mock('@/api/http', () => ({ isApiError: () => false }));
+vi.mock('@/app/api/skills', () => api);
+vi.mock('@/shared/api/http', () => ({ isApiError: () => false }));
 
 let root: Root;
 let mountNode: HTMLDivElement;

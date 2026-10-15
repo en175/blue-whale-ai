@@ -5,8 +5,8 @@ import { MemoryRouter } from 'react-router-dom';
 import CanvasPageNavProbe from './CanvasPageNavProbe';
 import { beforeAll, vi } from 'vitest';
 import type { Node } from '@xyflow/react';
-import type { GenerationModel } from '@/api/generation';
-import type { FetchJobsParams, FrameInterpolationCurrentData, JobListData } from '@/api/jobs';
+import type { GenerationModel } from '@/app/api/generation';
+import type { FetchJobsParams, FrameInterpolationCurrentData, JobListData } from '@/app/api/jobs';
 
 vi.mock('../components/AgentPanel', () => ({
   default: ({ initialCardLabel }: { initialCardLabel?: string }) =>
@@ -30,8 +30,8 @@ vi.mock('../components/CanvasHeader', () => ({
 vi.mock('../components/ProjectSelector', () => ({
   default: () => createElement('div', { 'data-testid': 'project-selector' }),
 }));
-vi.mock('@/components/UserDropdown/RechargeModal', () => ({ default: () => null }));
-vi.mock('@/pages/Assets/components/AssetDetailModal', () => ({ default: () => null }));
+vi.mock('@/app/components/UserDropdown/RechargeModal', () => ({ default: () => null }));
+vi.mock('@/app/pages/Assets/components/AssetDetailModal', () => ({ default: () => null }));
 
 export const apiMocks = {
   fetchProjects: vi.fn(async () => [{ id: 'p1', name: '项目一' }]),
@@ -60,21 +60,21 @@ export const apiMocks = {
   createAudioTrim: vi.fn(),
 };
 
-vi.mock('@/api/projects', () => ({
+vi.mock('@/app/api/projects', () => ({
   fetchProjects: apiMocks.fetchProjects,
   createProject: apiMocks.createProject,
   renameProject: apiMocks.renameProject,
   deleteProject: apiMocks.deleteProject,
   touchProjectLastOpened: apiMocks.touchProjectLastOpened,
 }));
-vi.mock('@/api/auth', () => ({
+vi.mock('@/app/api/auth', () => ({
   fetchMe: apiMocks.fetchMe,
   fetchCredits: apiMocks.fetchCredits,
   toSessionUser: apiMocks.toSessionUser,
 }));
 export const assetLibraryRecords: { current: Array<Record<string, unknown>> } = { current: [] };
 
-vi.mock('@/api/assets', () => ({
+vi.mock('@/app/api/assets', () => ({
   UPLOAD_SIZE_LIMIT: 100 * 1024 * 1024,
   fetchUploadPresign: vi.fn(),
   putToPresignedUrl: vi.fn(),
@@ -94,8 +94,8 @@ vi.mock('@/api/assets', () => ({
     getNextPageParam: () => undefined,
   }),
 }));
-vi.mock('@/api/canvas', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@/api/canvas')>()),
+vi.mock('@/app/api/canvas', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/app/api/canvas')>()),
   applyPromptPreview: apiMocks.applyPromptPreview,
   listLegacyCardHistory: vi.fn(async () => ({ items: [] })),
   createConversationQuote: vi.fn(),
@@ -108,10 +108,10 @@ vi.mock('@/api/canvas', async (importOriginal) => ({
     JSON.stringify(edges.map((e) => ({ id: e.id, source: e.source, target: e.target, data: e.data }))),
   ),
 }));
-vi.mock('@/api/idempotencyKey', () => ({
+vi.mock('@/shared/api/idempotencyKey', () => ({
   newIdempotencyKey: apiMocks.newIdempotencyKey,
 }));
-vi.mock('@/api/jobs', () => ({
+vi.mock('@/app/api/jobs', () => ({
   createGenerationJob: vi.fn(),
   cancelGenerationJob: apiMocks.cancelGenerationJob,
   retryGenerationJob: apiMocks.retryGenerationJob,
@@ -129,8 +129,8 @@ vi.mock('@/api/jobs', () => ({
   createVocalSplit: vi.fn(),
   readJobFailText: vi.fn(() => ''),
 }));
-vi.mock('@/api/sharedAssets', () => ({ saveSharedAsset: vi.fn() }));
-vi.mock('@/api/generation', () => ({
+vi.mock('@/app/api/sharedAssets', () => ({ saveSharedAsset: vi.fn() }));
+vi.mock('@/app/api/generation', () => ({
   fetchGenerationModels: apiMocks.fetchGenerationModels,
 }));
 

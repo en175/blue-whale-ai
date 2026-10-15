@@ -2,7 +2,7 @@
 import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Edge, Node } from '@xyflow/react';
-import type { GenerationModel } from '@/api/generation';
+import type { GenerationModel } from '@/app/api/generation';
 import {
   apiMocks,
   canvasDocMock,
@@ -13,8 +13,8 @@ import {
   unmountPage,
 } from './testing/canvasPageTestHarness';
 
-vi.mock('@/api/generationQuote', async (importActual) => ({
-  ...(await importActual<typeof import('@/api/generationQuote')>()),
+vi.mock('@/app/api/generationQuote', async (importActual) => ({
+  ...(await importActual<typeof import('@/app/api/generationQuote')>()),
   generationQuoteOptions: vi.fn(() => ({
     queryKey: ['generation-quote', 'mock'],
     staleTime: Infinity,
@@ -22,8 +22,8 @@ vi.mock('@/api/generationQuote', async (importActual) => ({
   })),
 }));
 
-vi.mock('@/api/canvasRecovery', async (importActual) => ({
-  ...(await importActual<typeof import('@/api/canvasRecovery')>()),
+vi.mock('@/app/api/canvasRecovery', async (importActual) => ({
+  ...(await importActual<typeof import('@/app/api/canvasRecovery')>()),
   generationRecoveryPageOptions: vi.fn(() => ({
     queryKey: ['generation-recovery', 'mock'],
     staleTime: Infinity,

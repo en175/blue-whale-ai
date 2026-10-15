@@ -3,8 +3,8 @@ import type { KeyboardEvent } from 'react';
 import { type InfiniteData, useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { Check, ImageOff, MoreHorizontal, Pencil, Pin, PinOff, Plus, Trash2 } from 'lucide-react';
-import Modal from '@/components/Modal';
-import Skeleton from '@/components/Skeleton';
+import Modal from '@/app/components/Modal';
+import Skeleton from '@/app/components/Skeleton';
 import {
   batchDeleteProjects,
   createProject,
@@ -15,10 +15,10 @@ import {
   renameProject,
   type ProjectPageData,
   type ProjectRecord,
-} from '@/api/projects';
-import { isApiError } from '@/api/http';
-import { defaultProjectName } from '@/utils/projectName';
-import { remoteImageCrossOrigin, resolveMediaSrc } from '@/utils/remoteImageCors';
+} from '@/app/api/projects';
+import { isApiError } from '@/shared/api/http';
+import { defaultProjectName } from '@/app/utils/projectName';
+import { remoteImageCrossOrigin, resolveMediaSrc } from '@/shared/utils/remoteImageCors';
 import styles from './index.module.css';
 
 function formatProjectDate(value: string): string {

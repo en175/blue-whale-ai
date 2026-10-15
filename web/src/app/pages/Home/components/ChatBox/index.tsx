@@ -3,22 +3,22 @@
 
 import { useState, useRef, useEffect, useCallback, useLayoutEffect, useMemo, useSyncExternalStore } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useDismissOnOutside } from '@/pages/CanvasPage/hooks/useDismissOnOutside';
+import { useDismissOnOutside } from '@/app/pages/CanvasPage/hooks/useDismissOnOutside';
 import { createPortal } from 'react-dom';
 import { Plus, ChevronUp, ChevronDown, Music, BookOpen, BookText, X, Upload, FolderOpen } from 'lucide-react';
 import SkillModal from '../SkillModal';
-import LoginModal from '@/components/LoginModal';
-import RatioIcon from '@/components/RatioIcon';
-import AssetsPickerModal from '@/pages/CanvasPage/components/AssetsPickerModal';
-import { PANEL_REF_MEDIA_TYPES } from '@/pages/CanvasPage/refSourceTypes';
+import LoginModal from '@/app/components/LoginModal';
+import RatioIcon from '@/app/components/RatioIcon';
+import AssetsPickerModal from '@/app/pages/CanvasPage/components/AssetsPickerModal';
+import { PANEL_REF_MEDIA_TYPES } from '@/app/pages/CanvasPage/refSourceTypes';
 import {
   defaultVideoModeFor,
   enabledVideoModes,
   nextVideoModeOnRefsChange,
   resolveVideoMode,
   videoModeRefsSignature,
-} from '@/pages/CanvasPage/videoModes';
-import type { VideoMediaRef, VideoMediaRefs } from '@/pages/CanvasPage/videoMediaRefs';
+} from '@/app/pages/CanvasPage/videoModes';
+import type { VideoMediaRef, VideoMediaRefs } from '@/app/pages/CanvasPage/videoMediaRefs';
 import {
   VIDEO_MODE_LABEL,
   configuredVideoModes,
@@ -28,23 +28,23 @@ import {
   lockedDurationOf,
   lockedRatioOf,
   type VideoMode,
-} from '@/utils/video-modes';
-import { type AssetRecord } from '@/api/assets';
-import { getCurrentUser, subscribe } from '@/utils/auth';
-import { remoteImageCrossOrigin, resolveMediaSrc } from '@/utils/remoteImageCors';
+} from '@/app/utils/video-modes';
+import { type AssetRecord } from '@/app/api/assets';
+import { getCurrentUser, subscribe } from '@/shared/utils/auth';
+import { remoteImageCrossOrigin, resolveMediaSrc } from '@/shared/utils/remoteImageCors';
 import styles from './index.module.css';
-import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
-import { aspectRatioOptions, hasAspectRatio, pickRatioForSize, ratiosForSelectedSize } from '@/utils/image-size-ratios';
-import { pickDefaultVideoRatio, videoRatioLabel } from '@/utils/video-aspect-ratio';
-import { type SkillRecord } from '@/api/skills';
-import { createProject } from '@/api/projects';
-import { setGenHandoff } from '@/utils/gen-handoff';
-import { setAgentHandoff } from '@/utils/agent-handoff';
-import { classifyRefOverflow } from '@/utils/ref-overflow';
-import { videoReferenceMaxOf, audioReferenceMaxOf, imageReferenceMaxOf, supportsVideoReferenceOf, UNRESOLVED_IMAGE_REFERENCE_LIMIT } from '@/utils/model-reference-limits';
-import { promptCharCountLabel, promptMaxLengthOf } from '@/utils/prompt-max-length';
-import { VIDEO_REFERENCE_NOT_APPROVED_MESSAGE, isUnapprovedVideoMaterialStatus } from '@/utils/video-reference-compliance';
-import { OMNI_REFERENCE_FOLLOW_HINT } from '@/utils/video-reference-hints';
+import { fetchGenerationModels, type GenerationModel } from '@/app/api/generation';
+import { aspectRatioOptions, hasAspectRatio, pickRatioForSize, ratiosForSelectedSize } from '@/app/utils/image-size-ratios';
+import { pickDefaultVideoRatio, videoRatioLabel } from '@/app/utils/video-aspect-ratio';
+import { type SkillRecord } from '@/app/api/skills';
+import { createProject } from '@/app/api/projects';
+import { setGenHandoff } from '@/app/utils/gen-handoff';
+import { setAgentHandoff } from '@/app/utils/agent-handoff';
+import { classifyRefOverflow } from '@/app/utils/ref-overflow';
+import { videoReferenceMaxOf, audioReferenceMaxOf, imageReferenceMaxOf, supportsVideoReferenceOf, UNRESOLVED_IMAGE_REFERENCE_LIMIT } from '@/app/utils/model-reference-limits';
+import { promptCharCountLabel, promptMaxLengthOf } from '@/app/utils/prompt-max-length';
+import { VIDEO_REFERENCE_NOT_APPROVED_MESSAGE, isUnapprovedVideoMaterialStatus } from '@/app/utils/video-reference-compliance';
+import { OMNI_REFERENCE_FOLLOW_HINT } from '@/app/utils/video-reference-hints';
 import DurationSlider from './DurationSlider';
 import { resolveHomeLoginResume, type HomePendingAction } from './homeLoginResume';
 import { limitPromptInput } from './promptInput';

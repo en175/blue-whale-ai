@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Dispatch, RefObject, SetStateAction } from 'react';
 import type { Edge, Node } from '@xyflow/react';
-import { envelopeErrorCode, isApiError } from '@/api/http';
+import { envelopeErrorCode, isApiError } from '@/shared/api/http';
 import {
   quoteSampleRegenerate,
   quoteVideoFinalize,
@@ -10,11 +10,11 @@ import {
   type GenerationRefItem,
   type ImageJobParameters,
   type VideoJobParameters,
-} from '@/api/jobs';
-import { flattenPromptDocForSend, type PromptDoc } from '@/utils/prompt-doc';
-import { normalizeVideoMode, type VideoMode } from '@/utils/video-modes';
-import { useAuthPromptStore } from '@/stores/authPrompt';
-import { blockIfCreditsInsufficient, openRechargeForCreditsError } from '@/utils/creditsGate';
+} from '@/app/api/jobs';
+import { flattenPromptDocForSend, type PromptDoc } from '@/app/utils/prompt-doc';
+import { normalizeVideoMode, type VideoMode } from '@/app/utils/video-modes';
+import { useAuthPromptStore } from '@/shared/stores/authPrompt';
+import { blockIfCreditsInsufficient, openRechargeForCreditsError } from '@/app/utils/creditsGate';
 import { composeImageSendPrompt } from '../components/ImageDialog/composeImageSendPrompt';
 import type { ImageTextAttachment } from '../components/ImageDialog';
 import type { MediaGenStatus, MediaNodeData } from '../components/MediaNode';

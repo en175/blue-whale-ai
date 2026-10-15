@@ -3,7 +3,7 @@ import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AssetRecord } from '@/api/assets';
+import type { AssetRecord } from '@/app/api/assets';
 import { usePreviewAsset } from './previewAsset';
 
 

@@ -1,4 +1,4 @@
-import { createAsset, waitAssetReady, MaterialAssetFailedError, type MaterialAssetType } from '@/api/material';
+import { createAsset, waitAssetReady, MaterialAssetFailedError, type MaterialAssetType } from '@/app/api/material';
 
 export const COMPLIANCE_SUCCESS_TOAST = '校验通过，可用于seedance视频生成';
 export const COMPLIANCE_FAILED_TOAST = 'seedance合规校验失败，不可用于视频生成';

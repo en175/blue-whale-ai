@@ -2,10 +2,10 @@
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { GenerationModel } from '@/api/generation';
+import type { GenerationModel } from '@/app/api/generation';
 import ChatBox from './index';
 import styles from './index.module.css';
-import { OMNI_REFERENCE_FOLLOW_HINT } from '@/utils/video-reference-hints';
+import { OMNI_REFERENCE_FOLLOW_HINT } from '@/app/utils/video-reference-hints';
 
 
 const { fetchGenerationModels, navigate, pickerOnSelect } = vi.hoisted(() => ({
@@ -14,11 +14,11 @@ const { fetchGenerationModels, navigate, pickerOnSelect } = vi.hoisted(() => ({
   pickerOnSelect: { current: null as null | ((assets: unknown[]) => void) },
 }));
 
-vi.mock('@/api/generation', () => ({ fetchGenerationModels }));
+vi.mock('@/app/api/generation', () => ({ fetchGenerationModels }));
 
 vi.mock('react-router-dom', () => ({ useNavigate: () => navigate }));
 
-vi.mock('@/utils/auth', () => {
+vi.mock('@/shared/utils/auth', () => {
   const user = { id: 'u1', name: 'tester' };
   return {
     getCurrentUser: () => user,
@@ -26,12 +26,12 @@ vi.mock('@/utils/auth', () => {
   };
 });
 
-vi.mock('@/api/projects', () => ({ createProject: vi.fn() }));
+vi.mock('@/app/api/projects', () => ({ createProject: vi.fn() }));
 
 vi.mock('../SkillModal', () => ({ default: () => null }));
-vi.mock('@/components/LoginModal', () => ({ default: () => null }));
+vi.mock('@/app/components/LoginModal', () => ({ default: () => null }));
 
-vi.mock('@/pages/CanvasPage/components/AssetsPickerModal', async () => {
+vi.mock('@/app/pages/CanvasPage/components/AssetsPickerModal', async () => {
   const { useEffect } = await import('react');
   function PickerStub({ onSelect }: { onSelect: (assets: unknown[]) => void }) {
     useEffect(() => { pickerOnSelect.current = onSelect; });

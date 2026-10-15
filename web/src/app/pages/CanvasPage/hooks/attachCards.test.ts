@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import type { PromptCardRecord, PromptCardRevision } from '@/api/agentSessions';
+import type { PromptCardRecord, PromptCardRevision } from '@/app/api/agentSessions';
 import { attachCards, type ChatMessage } from './useAgentSession';
 
 function assistant(id: string, runId: string, sequence: number): ChatMessage {

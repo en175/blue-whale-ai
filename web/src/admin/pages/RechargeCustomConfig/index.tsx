@@ -5,9 +5,9 @@ import {
   adminRechargeCustomConfigKeys,
   adminRechargeCustomConfigOptions,
   saveAdminRechargeCustomConfig,
-} from '@/api/adminRechargeCustomConfig';
-import { isApiError } from '@/api/http';
-import { customPriceFen, formatCredits, formatPriceYuan } from '@/utils/customRecharge';
+} from '@/admin/api/adminRechargeCustomConfig';
+import { isApiError } from '@/shared/api/http';
+import { customPriceFen, formatCredits, formatPriceYuan } from '@/shared/utils/customRecharge';
 import { TIER_PERMISSION_LABEL } from '../RechargePlans/plan';
 import {
   Alert,

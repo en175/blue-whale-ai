@@ -1,26 +1,9 @@
 import { defineConfig, loadEnv, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import { codeInspectorPlugin } from 'code-inspector-plugin'
-import fs from 'node:fs'
 import path from 'path'
 
 const __dirname = import.meta.dirname;
-
-const SHARED_API_MODULES = new Set(['http', 'idempotencyKey', 'sessionToken', 'homepageHeroes']);
-
-function apiCompatAliases(): Record<string, string> {
-  const aliases: Record<string, string> = {};
-  const apiDir = path.resolve(__dirname, './src/api');
-  for (const file of fs.readdirSync(apiDir)) {
-    if (!file.endsWith('.ts') || file.endsWith('.test.ts')) continue;
-    const stem = file.slice(0, -3);
-    const folder = SHARED_API_MODULES.has(stem) ? 'shared' : stem.startsWith('admin') ? 'admin' : 'app';
-    const implementation = path.resolve(__dirname, `./src/${folder}/api/${file}`);
-    aliases[`@/api/${stem}`] = implementation;
-    aliases[path.resolve(apiDir, file)] = implementation;
-  }
-  return aliases;
-}
 
 function tosUploadProxy(): Plugin {
   const ROUTE = '/__tos-upload'
@@ -182,11 +165,9 @@ export default defineConfig(({ command, mode }) => {
     },
     resolve: {
       alias: {
-        ...apiCompatAliases(),
-        '@/pages': path.resolve(__dirname, './src/app/pages'),
-        '@/components': path.resolve(__dirname, './src/app/components'),
-        '@/layouts': path.resolve(__dirname, './src/app/layouts'),
-        '@/styles': path.resolve(__dirname, './src/app/styles'),
+        '@/app': path.resolve(__dirname, './src/app'),
+        '@/admin': path.resolve(__dirname, './src/admin'),
+        '@/shared': path.resolve(__dirname, './src/shared'),
         '@': path.resolve(__dirname, './src'),
         '@lib': path.resolve(__dirname, '../backend/libs'),
       },

@@ -10,16 +10,16 @@ import {
 } from './testing/canvasPageTestHarness';
 
 const recoveryPageMock = vi.hoisted(() => ({ current: null as null | { records: unknown[] } }));
-vi.mock('@/api/generationQuote', async (importActual) => ({
-  ...(await importActual<typeof import('@/api/generationQuote')>()),
+vi.mock('@/app/api/generationQuote', async (importActual) => ({
+  ...(await importActual<typeof import('@/app/api/generationQuote')>()),
   generationQuoteOptions: vi.fn(() => ({
     queryKey: ['generation-quote', 'mock'],
     staleTime: Infinity,
     queryFn: async () => ({ credits: null, quote_revision: null }),
   })),
 }));
-vi.mock('@/api/canvasRecovery', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/api/canvasRecovery')>();
+vi.mock('@/app/api/canvasRecovery', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/app/api/canvasRecovery')>();
   const fetchPage = vi.fn(async (_projectId: string, _options?: { limit?: number; cursor?: string | null }) => recoveryPageMock.current ?? {
     protocol_version: 1, canvas_version: null, records: [], next_cursor: null,
   });

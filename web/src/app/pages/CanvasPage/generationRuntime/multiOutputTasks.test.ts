@@ -8,7 +8,7 @@ const apiMocks = vi.hoisted(() => ({
   fetchJobStatus: vi.fn(),
 }));
 
-vi.mock('@/api/jobs', () => ({
+vi.mock('@/app/api/jobs', () => ({
   createVideoSceneSplit: apiMocks.createVideoSceneSplit,
   createVocalSplit: apiMocks.createVocalSplit,
   cancelGenerationJob: apiMocks.cancelGenerationJob,
@@ -16,7 +16,7 @@ vi.mock('@/api/jobs', () => ({
   readJobFailText: vi.fn((error: { msg?: string } | null | undefined) => error?.msg ?? ''),
   isApiError: vi.fn(() => false),
 }));
-vi.mock('@/api/idempotencyKey', () => ({ newIdempotencyKey: vi.fn(() => 'fresh-token') }));
+vi.mock('@/shared/api/idempotencyKey', () => ({ newIdempotencyKey: vi.fn(() => 'fresh-token') }));
 
 import {
   sceneSplitTask, vocalSplitTask, isSceneSplitCard, isVocalSplitCard,
@@ -25,7 +25,7 @@ import {
 import { isNormalGenerationCard } from './normalGeneration';
 import { createGenerationRuntime } from './runtime';
 import type { GenerationRuntimeHost, RuntimeNodeView } from './types';
-import type { GenerationRecoveryPage, GenerationRecoveryRecord } from '@/api/canvasRecovery';
+import type { GenerationRecoveryPage, GenerationRecoveryRecord } from '@/app/api/canvasRecovery';
 
 const SUBMISSION = '11111111-1111-4111-8111-111111111111';
 const BINDING = {

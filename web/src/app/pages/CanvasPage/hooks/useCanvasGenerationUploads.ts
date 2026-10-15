@@ -1,8 +1,8 @@
 import type { RefObject } from 'react';
 import type { Edge, Node } from '@xyflow/react';
-import { fetchUploadPresign, putToPresignedUrl, completeUpload, type AssetType, type UploadCompleteData } from '@/api/assets';
-import { probeMediaMeta } from '@/utils/upload';
-import { checkFileBeforeUpload } from '@/utils/fileSignature';
+import { fetchUploadPresign, putToPresignedUrl, completeUpload, type AssetType, type UploadCompleteData } from '@/app/api/assets';
+import { probeMediaMeta } from '@/app/utils/upload';
+import { checkFileBeforeUpload } from '@/app/utils/fileSignature';
 import { fetchUrlAsFile } from '../canvasPureNodeHelpers';
 import { isImageDraftNode } from '../mediaRefs';
 import { mergedImageRefsOf } from '../textIndexSync';

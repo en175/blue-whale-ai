@@ -1,8 +1,8 @@
 import { vi } from 'vitest';
 import { canvasBindingSchema } from '@lib/contracts/canvas-recovery';
-import { ApiError } from '@/api/http';
-import { retryAudioMix, retryAudioVideoMux, type JobDetail } from '@/api/jobs';
-import type { GenerationRecoveryRecord } from '@/api/canvasRecovery';
+import { ApiError } from '@/shared/api/http';
+import { retryAudioMix, retryAudioVideoMux, type JobDetail } from '@/app/api/jobs';
+import type { GenerationRecoveryRecord } from '@/app/api/canvasRecovery';
 import { createGenerationRuntime, type GenerationRuntimeDeps } from './runtime';
 import { audioMixTask, audioVideoMuxTask } from './mixMuxTasks';
 import type { GenerationRuntimeHost, RuntimeNodeView } from './types';

@@ -3,7 +3,7 @@ import { FloatingPortal, autoUpdate, flip, offset, shift, useFloating } from '@f
 import type { NodeKey } from 'lexical';
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext';
 import { AlertTriangle, AudioLines } from 'lucide-react';
-import { remoteImageCrossOrigin, resolveMediaSrc } from '@/utils/remoteImageCors';
+import { remoteImageCrossOrigin, resolveMediaSrc } from '@/shared/utils/remoteImageCors';
 import { PromptRefContext } from './AssetRefNode';
 import styles from '../mediaChip.module.css';
 

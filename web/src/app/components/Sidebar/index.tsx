@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Home, FolderOpen, Image, History as HistoryIcon, Layout } from 'lucide-react';
-import { useAppStore } from '@/stores';
-import { getCurrentUser, subscribe } from '@/utils/auth';
-import LoginModal from '@/components/LoginModal';
+import { useAppStore } from '@/app/stores';
+import { getCurrentUser, subscribe } from '@/shared/utils/auth';
+import LoginModal from '@/app/components/LoginModal';
 import styles from './index.module.css';
 
 const menuItems = [

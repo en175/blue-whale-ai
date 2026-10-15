@@ -1,9 +1,9 @@
 import { useEffect, useRef } from 'react';
-import type { CanvasDoc } from '@/api/canvas';
-import { linkAssetToProject, type UploadCompleteData } from '@/api/assets';
-import { takeGenHandoff, type GenHandoff } from '@/utils/gen-handoff';
+import type { CanvasDoc } from '@/app/api/canvas';
+import { linkAssetToProject, type UploadCompleteData } from '@/app/api/assets';
+import { takeGenHandoff, type GenHandoff } from '@/app/utils/gen-handoff';
 import type { VideoGenSeedParams } from '../components/BottomDialog';
-import { isFrameMode } from '@/utils/video-modes';
+import { isFrameMode } from '@/app/utils/video-modes';
 import type { VideoRefRole } from '../videoMediaRefs';
 import { fetchUrlAsFile } from '../canvasPureNodeHelpers';
 import { buildImageJobReferences, buildVideoJobReferencesFromList } from '../videoJobReferences';

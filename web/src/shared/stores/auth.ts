@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { UsageTokenData } from '@/api/auth';
+import type { UsageTokenData } from '@/app/api/auth';
 
 export function totalCreditsOf(data: UsageTokenData): number {
   const items = data.by_source;

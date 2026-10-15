@@ -2,27 +2,27 @@ import { createElement } from 'react';
 import { renderToString } from 'react-dom/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Edge, Node } from '@xyflow/react';
-import { ApiError } from '@/api/http';
-import { useAuthStore } from '@/stores/auth';
+import { ApiError } from '@/shared/api/http';
+import { useAuthStore } from '@/shared/stores/auth';
 import {
   useCanvasGenerationSubmission,
   type CanvasGenerationSubmissionHandles,
   type CanvasGenerationSubmissionHost,
 } from './useCanvasGenerationSubmission';
 
-vi.mock('@/utils/creditsGate', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/utils/creditsGate')>();
+vi.mock('@/app/utils/creditsGate', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/app/utils/creditsGate')>();
   return {
     ...actual,
     blockIfCreditsInsufficient: vi.fn(() => false),
     openRechargeForCreditsError: vi.fn(() => false),
   };
 });
-vi.mock('@/stores/authPrompt', () => ({
+vi.mock('@/shared/stores/authPrompt', () => ({
   useAuthPromptStore: { getState: () => ({ addResume: vi.fn() }) },
 }));
 
-const { blockIfCreditsInsufficient, openRechargeForCreditsError } = await import('@/utils/creditsGate');
+const { blockIfCreditsInsufficient, openRechargeForCreditsError } = await import('@/app/utils/creditsGate');
 
 function mediaNode(id: string, data: Record<string, unknown> = {}): Node {
   return { id, type: 'mediaNode', position: { x: 0, y: 0 }, data };

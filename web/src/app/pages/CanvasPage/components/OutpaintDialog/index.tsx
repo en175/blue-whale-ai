@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { X, ArrowUp, ChevronDown } from 'lucide-react';
-import RatioIcon from '@/components/RatioIcon';
+import RatioIcon from '@/app/components/RatioIcon';
 import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../followDialog';
 import {
   OUTPAINT_PRESET_LABELS,

@@ -8,8 +8,8 @@ import {
   type AdminRechargeRecord,
   type AdminRechargeRecordQuery,
   type AdminRechargeStatus,
-} from '@/api/adminRechargeRecords';
-import { isApiError } from '@/api/http';
+} from '@/admin/api/adminRechargeRecords';
+import { isApiError } from '@/shared/api/http';
 import AdminQueryTable, {
   type Column,
   type OffsetPaginationState,

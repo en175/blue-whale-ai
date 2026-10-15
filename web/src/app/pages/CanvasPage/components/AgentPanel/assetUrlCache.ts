@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { fetchAssetDetail } from '@/api/assets';
-import type { SessionContentBlock } from '@/api/agentSessions';
+import { fetchAssetDetail } from '@/app/api/assets';
+import type { SessionContentBlock } from '@/app/api/agentSessions';
 import { isCanvasNodeVideo, isSidebarUploadedVideo } from './composerImagePreview';
 
 const urlCache = new Map<string, string>();

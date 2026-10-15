@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { X } from 'lucide-react';
-import { bindPhone, sendCode } from '@/api/auth';
-import { isApiError } from '@/api/http';
+import { bindPhone, sendCode } from '@/app/api/auth';
+import { isApiError } from '@/shared/api/http';
 import styles from './index.module.css';
 
 interface BindPhoneModalProps {

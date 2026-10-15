@@ -1,6 +1,6 @@
 import { useEffect, useRef, type Dispatch, type SetStateAction } from 'react';
-import type { SessionContentBlock } from '@/api/agentSessions';
-import { takeAgentHandoff } from '@/utils/agent-handoff';
+import type { SessionContentBlock } from '@/app/api/agentSessions';
+import { takeAgentHandoff } from '@/app/utils/agent-handoff';
 import { rememberAssetUrl } from '../components/AgentPanel/assetUrlCache';
 
 export function useCanvasHomeAgentInject(input: {

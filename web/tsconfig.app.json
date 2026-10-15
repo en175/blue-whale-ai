@@ -24,10 +24,9 @@
 
     /* Path aliases */
     "paths": {
-      "@/pages/*": ["./src/app/pages/*"],
-      "@/components/*": ["./src/app/components/*"],
-      "@/layouts/*": ["./src/app/layouts/*"],
-      "@/styles/*": ["./src/app/styles/*"],
+      "@/app/*": ["./src/app/*"],
+      "@/admin/*": ["./src/admin/*"],
+      "@/shared/*": ["./src/shared/*"],
       "@/*": ["./src/*"],
       "@lib/*": ["../backend/libs/*"]
     }

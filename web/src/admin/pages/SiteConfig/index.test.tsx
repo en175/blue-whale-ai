@@ -14,8 +14,8 @@ const api = vi.hoisted(() => ({
   uploadHomepageHeroFile: vi.fn(),
 }));
 
-vi.mock('@/api/homepageHeroes', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/api/homepageHeroes')>();
+vi.mock('@/shared/api/homepageHeroes', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/shared/api/homepageHeroes')>();
   return {
     ...actual,
     fetchAdminHomepageHeroes: api.fetchAdminHomepageHeroes,

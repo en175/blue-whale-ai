@@ -22,14 +22,14 @@ import {
   type PromptCardRecord,
   type PromptCardRevision,
   type GenerationCardBlock,
-} from '@/api/agentSessions';
-import { cardsFromRevision, cardsOfRevision, taskLabelsOf } from '@/api/promptCardMapping';
-import { isApiError } from '@/api/http';
-import { blockIfCreditsInsufficient, openRechargeForCreditsError } from '@/utils/creditsGate';
+} from '@/app/api/agentSessions';
+import { cardsFromRevision, cardsOfRevision, taskLabelsOf } from '@/app/api/promptCardMapping';
+import { isApiError } from '@/shared/api/http';
+import { blockIfCreditsInsufficient, openRechargeForCreditsError } from '@/app/utils/creditsGate';
 import { estimateOutputTokens, parseRunContextCapacity, parseRunTokenUsage } from './runStatusLine';
 import type { RunContextCapacity, RunOutcome, RunTokenUsage } from './runStatusLine';
 import { collectMissingQuoteIds, mergeConfirmedUser, patchQuoteTexts, projectMessage } from './userMessageProjection';
-import { listConversationQuotes } from '@/api/canvas';
+import { listConversationQuotes } from '@/app/api/canvas';
 import {
   EMPTY_SESSION_STATE,
   accountOfRun,
@@ -75,8 +75,8 @@ export interface ChatMessage {
   inputBatchId?: string | null;
   sourceRunId?: string;
   optimistic?: boolean;
-  skill_ref?: import('@/api/agentSessions').OutboundSkillRef;
-  resource_ref?: import('@/api/agentSessions').SessionContentBlock[];
+  skill_ref?: import('@/app/api/agentSessions').OutboundSkillRef;
+  resource_ref?: import('@/app/api/agentSessions').SessionContentBlock[];
   chips?: { id: string; label: string }[];
 }
 
@@ -650,9 +650,9 @@ export function useAgentSession(projectId: string) {
 
   const sendMessage = useCallback(
     async (
-      content: import('@/api/agentSessions').SessionContentBlock[],
+      content: import('@/app/api/agentSessions').SessionContentBlock[],
       forcedSkillId?: string,
-      resourceRef?: import('@/api/agentSessions').SessionContentBlock[],
+      resourceRef?: import('@/app/api/agentSessions').SessionContentBlock[],
       skillName?: string,
       userText?: string,
       chips?: { id: string; label: string }[],

@@ -1,10 +1,10 @@
 import type { ReactNode } from 'react';
 import type { Edge, Node } from '@xyflow/react';
-import { restorePromptDoc, type StoredPromptDoc, type PromptDoc } from '@/utils/prompt-doc';
-import { composedPromptLimitError } from '@/utils/prompt-max-length';
+import { restorePromptDoc, type StoredPromptDoc, type PromptDoc } from '@/app/utils/prompt-doc';
+import { composedPromptLimitError } from '@/app/utils/prompt-max-length';
 import type { UploadedFile } from './components/ImageDialog';
 import { composeImageSendPrompt } from './components/ImageDialog/composeImageSendPrompt';
-import type { GenerationRefItem } from '@/api/jobs';
+import type { GenerationRefItem } from '@/app/api/jobs';
 import { buildImageJobReferences } from './videoJobReferences';
 import { imageTextIndexSendError, mergedImageRefsOf, DEFAULT_IMAGE_REFERENCE_LIMIT } from './textIndexSync';
 import { imageRefSourceError } from './mediaRefs';

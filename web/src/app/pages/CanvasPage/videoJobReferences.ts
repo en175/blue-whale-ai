@@ -1,4 +1,4 @@
-import type { GenerationRefItem } from '@/api/jobs';
+import type { GenerationRefItem } from '@/app/api/jobs';
 import type { VideoMediaRef, VideoMediaRefs, VideoRefRole } from './videoMediaRefs';
 
 function toJobRef(

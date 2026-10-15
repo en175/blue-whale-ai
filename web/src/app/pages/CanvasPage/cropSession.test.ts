@@ -2,7 +2,7 @@ import { openOtherTool } from './testing/openOtherTool';
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from 'vitest';
 import type { Node } from '@xyflow/react';
-import type { UploadCompleteData } from '@/api/assets';
+import type { UploadCompleteData } from '@/app/api/assets';
 import { createToolSessionRuntime } from './toolSessionRuntime';
 import { type ToolSessionDeps } from './toolSessionCoordinator';
 import { createCropSession, applyCropPreset } from './cropSession';

@@ -2,7 +2,7 @@ import type { MutableRefObject, RefObject } from 'react';
 import type { Node } from '@xyflow/react';
 import { toast as globalToast } from 'sonner';
 import type { ImageOutpaintInput } from '@lib/contracts/image-outpaint';
-import { uploadAssetFile } from '@/utils/upload';
+import { uploadAssetFile } from '@/app/utils/upload';
 import { newNodeId } from '../nodeId';
 import { imageToolTargetBesideSource } from '../canvasPureNodeHelpers';
 import { hasCustomName } from '../canvasNodeUtils';

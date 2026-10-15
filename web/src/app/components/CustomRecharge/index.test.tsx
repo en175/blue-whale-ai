@@ -7,7 +7,7 @@ import CustomRecharge from './index';
 
 const rechargeApi = vi.hoisted(() => ({ fetchRechargeCustomConfig: vi.fn() }));
 
-vi.mock('@/api/recharge', () => rechargeApi);
+vi.mock('@/app/api/recharge', () => rechargeApi);
 
 const CONFIG = {
   enabled: true,

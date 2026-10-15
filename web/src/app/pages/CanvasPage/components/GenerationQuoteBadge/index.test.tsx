@@ -3,7 +3,7 @@ import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { GenerationRefItem } from '@/api/jobs';
+import type { GenerationRefItem } from '@/app/api/jobs';
 import GenerationQuoteBadge from './index';
 import { silenceApiConsoleInfo } from '../../testing/silenceApiLogs';
 import { installFetchGuard } from '../../testing/fetchGuard';

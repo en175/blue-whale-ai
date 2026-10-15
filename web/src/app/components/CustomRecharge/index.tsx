@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react';
-import { fetchRechargeCustomConfig, type RechargeCustomConfig } from '@/api/recharge';
+import { fetchRechargeCustomConfig, type RechargeCustomConfig } from '@/app/api/recharge';
 import {
   customPriceFen,
   formatCredits,
   formatPriceYuan,
   snapCredits,
   validateCredits,
-} from '@/utils/customRecharge';
+} from '@/shared/utils/customRecharge';
 import styles from './index.module.css';
 
 export interface CustomRechargeProps {

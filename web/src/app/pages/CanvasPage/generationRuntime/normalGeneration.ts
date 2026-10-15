@@ -1,5 +1,5 @@
-import { createGenerationJob, retryGenerationJob, cancelGenerationJob, type CreateJobPayload } from '@/api/jobs';
-import type { GenerationRecoveryRecord } from '@/api/canvasRecovery';
+import { createGenerationJob, retryGenerationJob, cancelGenerationJob, type CreateJobPayload } from '@/app/api/jobs';
+import type { GenerationRecoveryRecord } from '@/app/api/canvasRecovery';
 import { isAudioMixNodeId } from '../audioMix';
 import { isAudioSpeedNodeId } from '../audioSpeed';
 import { isAudioTrimNodeId } from '../audioTrim';

@@ -17,7 +17,7 @@ const { fetchGenerationModels, editorPendingCalls } = vi.hoisted(() => ({
   editorPendingCalls: [] as Array<{ kind: string; id: string }>,
 }));
 
-vi.mock('@/api/generation', () => ({ fetchGenerationModels }));
+vi.mock('@/app/api/generation', () => ({ fetchGenerationModels }));
 
 fetchGenerationModels.mockImplementation(async () => [
   {

@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { Star } from 'lucide-react';
-import { topupTierPreviewOptions, type TopupTierPreview } from '@/api/adminTopupTiers';
-import { isApiError } from '@/api/http';
+import { topupTierPreviewOptions, type TopupTierPreview } from '@/admin/api/adminTopupTiers';
+import { isApiError } from '@/shared/api/http';
 import { Badge, Button, Card, Empty, Hint, Modal, Stat } from '../../ui';
 import { discountLabel, fmtMoney, fmtPoints } from './plan';
 

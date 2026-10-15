@@ -1,9 +1,9 @@
 import {
   createAudioMix, retryAudioMix, createAudioVideoMux, retryAudioVideoMux,
   cancelGenerationJob, type CreateAudioVideoMuxPayload, type DedicatedRetryCreatedData,
-} from '@/api/jobs';
+} from '@/app/api/jobs';
 import type { AudioMixCreate } from '@lib/contracts/audio-mix';
-import type { GenerationRecoveryRecord } from '@/api/canvasRecovery';
+import type { GenerationRecoveryRecord } from '@/app/api/canvasRecovery';
 import { isAudioMixNodeId, buildAudioMixPlaceholderNode, audioMixSourceError, AUDIO_MIX_EDGE_ORIGIN, AUDIO_MIX_FORMATS, type AudioMixFormat } from '../audioMix';
 import { audioVideoMuxIdentityOf, buildAudioVideoMuxPlaceholderNode } from '../audioVideoMux';
 import type { Node } from '@xyflow/react';

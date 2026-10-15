@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { ArrowUp, Film, Video, X, Zap } from 'lucide-react';
-import { assetPageQueryOptions } from '@/api/assets';
-import { resolveMediaSrc } from '@/utils/remoteImageCors';
+import { assetPageQueryOptions } from '@/app/api/assets';
+import { resolveMediaSrc } from '@/shared/utils/remoteImageCors';
 import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../followDialog';
 import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
 import {

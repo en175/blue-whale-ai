@@ -19,11 +19,11 @@ import {
   uploadHomepageHeroFile,
   type HomepageHeroAdmin,
   type HomepageHeroPayload,
-} from '@/api/homepageHeroes';
-import { isApiError } from '@/api/http';
+} from '@/shared/api/homepageHeroes';
+import { isApiError } from '@/shared/api/http';
 import ConfirmModal from '../../components/ConfirmModal';
-import { remoteImageCrossOrigin, resolveMediaSrc } from '@/utils/remoteImageCors';
-import auroraPoster from '@/assets/home-hero/aurora-poster.jpg';
+import { remoteImageCrossOrigin, resolveMediaSrc } from '@/shared/utils/remoteImageCors';
+import auroraPoster from '@/shared/assets/home-hero/aurora-poster.jpg';
 import { Alert, Badge, Button, Checkbox, Empty, Modal, Page, PageHeader, Table } from '../../ui';
 
 const fmtTime = (iso: string) => new Date(iso).toLocaleString('zh-CN', { hour12: false });
@@ -147,7 +147,7 @@ export default function SiteConfig() {
             <p style={{ margin: 0 }}>
               GET /api/site/homepage-heroes 仅返回已启用的后台条目，不包含此默认图。没有可播放条目时首页使用这张内置静态图；视频没有封面时也以它作为加载封面。
             </p>
-            <code>web/src/assets/home-hero/aurora-poster.jpg</code>
+            <code>web/src/shared/assets/home-hero/aurora-poster.jpg</code>
           </div>
         </div>
       </Alert>

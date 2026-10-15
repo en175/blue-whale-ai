@@ -1,6 +1,6 @@
-import { apiRequest } from '@/api/http';
-import { newIdempotencyKey } from '@/api/idempotencyKey';
-import { handleUnauthorized } from '@/utils/auth';
+import { apiRequest } from '@/shared/api/http';
+import { newIdempotencyKey } from '@/shared/api/idempotencyKey';
+import { handleUnauthorized } from '@/shared/utils/auth';
 
 export interface MentionPayload {
   type: 'asset' | 'scene_card';

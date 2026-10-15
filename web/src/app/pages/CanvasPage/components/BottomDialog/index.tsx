@@ -22,11 +22,11 @@ import {
   Maximize2,
   Minimize2,
 } from 'lucide-react';
-import { fetchGenerationModels, type GenerationModel } from '@/api/generation';
-import { pickDefaultVideoRatio, videoRatioLabel } from '@/utils/video-aspect-ratio';
-import { aspectRatioOptions, hasAspectRatio } from '@/utils/image-size-ratios';
-import { generationQuoteOptions } from '@/api/generationQuote';
-import RatioIcon from '@/components/RatioIcon';
+import { fetchGenerationModels, type GenerationModel } from '@/app/api/generation';
+import { pickDefaultVideoRatio, videoRatioLabel } from '@/app/utils/video-aspect-ratio';
+import { aspectRatioOptions, hasAspectRatio } from '@/app/utils/image-size-ratios';
+import { generationQuoteOptions } from '@/app/api/generationQuote';
+import RatioIcon from '@/app/components/RatioIcon';
 import GenerationQuoteBadge from '../GenerationQuoteBadge';
 import { buildVideoJobReferences } from '../../videoJobReferences';
 import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
@@ -39,7 +39,7 @@ import {
   type PromptDoc,
   type PromptRefKey,
   type StoredPromptDoc,
-} from '@/utils/prompt-doc';
+} from '@/app/utils/prompt-doc';
 import PromptRefEditor, {
   type MentionState,
   type PromptRefEditorHandle,
@@ -56,7 +56,7 @@ import {
   composedPromptLimitError,
   promptCharCountLabel,
   promptMaxLengthOf,
-} from '@/utils/prompt-max-length';
+} from '@/app/utils/prompt-max-length';
 import type { MediaGenStatus } from '../MediaNode';
 import {
   canAddRefRole,
@@ -75,8 +75,8 @@ import {
   supportsAudioReferenceOf,
   supportsVideoReferenceOf,
   checkReferenceLimits,
-} from '@/utils/model-reference-limits';
-import { OMNI_REFERENCE_FOLLOW_HINT } from '@/utils/video-reference-hints';
+} from '@/app/utils/model-reference-limits';
+import { OMNI_REFERENCE_FOLLOW_HINT } from '@/app/utils/video-reference-hints';
 import AtMentionMenu from '../AtMentionMenu';
 import { type AtMentionItem } from '../../atMention';
 import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../followDialog';
@@ -100,7 +100,7 @@ import {
   lockedRatioOf,
   normalizeVideoMode,
   type VideoMode,
-} from '@/utils/video-modes';
+} from '@/app/utils/video-modes';
 import styles from './index.module.css';
 
 

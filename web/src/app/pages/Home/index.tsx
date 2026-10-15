@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import UserDropdown from '@/components/UserDropdown';
+import UserDropdown from '@/app/components/UserDropdown';
 import CreditsBadge from './components/CreditsBadge';
 import CreditsShopButton from './components/CreditsShopButton';
 import ChatBox from './components/ChatBox';

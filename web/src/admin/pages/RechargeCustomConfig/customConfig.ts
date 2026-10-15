@@ -1,8 +1,8 @@
-import type { TopupTierPermission } from '@/api/adminTopupTiers';
+import type { TopupTierPermission } from '@/admin/api/adminTopupTiers';
 import type {
   AdminRechargeCustomConfig,
   SaveRechargeCustomConfigParams,
-} from '@/api/adminRechargeCustomConfig';
+} from '@/admin/api/adminRechargeCustomConfig';
 
 export const MAX_DENIED_HINT_LENGTH = 255;
 

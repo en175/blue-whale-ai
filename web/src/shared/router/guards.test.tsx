@@ -4,7 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { RequireAuth } from './guards';
-import { setSession, type SessionUser } from '@/utils/auth';
+import { setSession, type SessionUser } from '@/shared/utils/auth';
 
 const loggedInUser: SessionUser = {
   userId: 1,

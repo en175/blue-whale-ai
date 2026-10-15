@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { SkillRecord } from '@/api/skills';
+import type { SkillRecord } from '@/app/api/skills';
 import { resolveHomeLoginResume, type HomePendingAction } from './homeLoginResume';
 
 const skill: SkillRecord = {

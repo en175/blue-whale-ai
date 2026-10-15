@@ -9,7 +9,7 @@ import type { FollowDialogAnchor } from './followDialog';
 import type { AssetsPickerTarget } from './assetsPickerTargets';
 import { audioRefItemMediaTypeOf } from './audioMediaRefs';
 import { fetchUrlAsFile } from './canvasPureNodeHelpers';
-import { promptMaxLengthOfModel } from '@/utils/prompt-max-length';
+import { promptMaxLengthOfModel } from '@/app/utils/prompt-max-length';
 import type { ImageGenerationDockHost } from './imageGenerationDock';
 import type { VideoGenerationDockHost } from './videoGenerationDock';
 import type { AudioGenerationDockHost, MusicGenerationDockHost } from './audioMusicGenerationDock';

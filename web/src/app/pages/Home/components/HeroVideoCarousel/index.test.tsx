@@ -8,7 +8,7 @@ import {
   HERO_TRANSITION_LEAD_SECONDS,
   HERO_TRANSITION_MS,
 } from './index';
-import type { HeroSlide } from '@/api/homepageHeroes';
+import type { HeroSlide } from '@/shared/api/homepageHeroes';
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 

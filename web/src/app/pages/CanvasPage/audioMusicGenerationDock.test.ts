@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { PromptDoc } from '@/utils/prompt-doc';
+import type { PromptDoc } from '@/app/utils/prompt-doc';
 import type { Edge, Node } from '@xyflow/react';
 import { createGenerationDockCoordinator } from './generationDockCoordinator';
 import { createAudioMusicGenerationDocks, type AudioGenerationDockHost, type AudioDockTask, type MusicGenerationDockHost } from './audioMusicGenerationDock';

@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
-import type { GenerationRecoveryPage, GenerationRecoveryRecord } from '@/api/canvasRecovery';
-import type { JobDetail } from '@/api/jobs';
+import type { GenerationRecoveryPage, GenerationRecoveryRecord } from '@/app/api/canvasRecovery';
+import type { JobDetail } from '@/app/api/jobs';
 import { createGenerationRuntime } from './runtime';
 import { sceneSplitTask } from './multiOutputTasks';
 import { normalGenerationTask } from './normalGeneration';

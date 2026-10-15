@@ -1,12 +1,12 @@
 import type { ReactNode } from 'react';
 import type { Edge, Node } from '@xyflow/react';
-import { restorePromptDoc } from '@/utils/prompt-doc';
+import { restorePromptDoc } from '@/app/utils/prompt-doc';
 import { draftSeedEquals, type VideoDraftSeed } from './draftSeed';
 import { hasGenerationRecord } from './mediaReEdit';
 import { mediaDockSelectionVisibility, holdGenerationDockSubmission, reportGenerationDockSubmissionError, runSynchronousGenerationDockSubmission, type DockSelection, type GenerationDockSubmissionHost } from './generationDockCoordinator';
-import type { PromptDoc } from '@/utils/prompt-doc';
-import type { GenerationRefItem, VideoJobParameters } from '@/api/jobs';
-import { composedPromptLimitError } from '@/utils/prompt-max-length';
+import type { PromptDoc } from '@/app/utils/prompt-doc';
+import type { GenerationRefItem, VideoJobParameters } from '@/app/api/jobs';
+import { composedPromptLimitError } from '@/app/utils/prompt-max-length';
 import { composeImageSendPrompt } from './components/ImageDialog/composeImageSendPrompt';
 import { orderRefStripItems, videoRefStripKey } from './components/RefThumbnail/strip-dnd';
 import { buildVideoJobReferences } from './videoJobReferences';

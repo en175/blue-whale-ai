@@ -1,8 +1,8 @@
 import { useCallback, useRef } from 'react';
 import type { Dispatch, RefObject, SetStateAction } from 'react';
 import type { Edge, Node } from '@xyflow/react';
-import { fetchJobStatus, readJobFailText } from '@/api/jobs';
-import type { SnapshotAsset } from '@/api/projects';
+import { fetchJobStatus, readJobFailText } from '@/app/api/jobs';
+import type { SnapshotAsset } from '@/app/api/projects';
 import { audioMixTerminalPatch, isAudioMixNodeId } from '../audioMix';
 import { audioSpeedTerminalPatch, isAudioSpeedNodeId } from '../audioSpeed';
 import { audioTrimTerminalPatch, isAudioTrimNodeId } from '../audioTrim';

@@ -9,7 +9,7 @@ import {
   type VideoEnhanceInput,
   type VideoEnhanceResolution,
 } from '@lib/contracts/video-enhance';
-import { readJobFailText } from '@/api/jobs';
+import { readJobFailText } from '@/app/api/jobs';
 import { mediaContentBox } from './components/MediaNode/mediaContentSize';
 
 export const VIDEO_ENHANCE_EDGE_ORIGIN = 'video-enhance';

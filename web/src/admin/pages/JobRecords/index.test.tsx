@@ -7,12 +7,12 @@ import JobRecords from './index';
 
 const api = vi.hoisted(() => ({ fetchAdminJobRecords: vi.fn() }));
 
-vi.mock('@/api/adminJobRecords', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/api/adminJobRecords')>();
+vi.mock('@/admin/api/adminJobRecords', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/admin/api/adminJobRecords')>();
   return {
     ...actual,
     fetchAdminJobRecords: api.fetchAdminJobRecords,
-    adminJobRecordsOptions: (query: import('@/api/adminJobRecords').AdminJobRecordQuery) => ({
+    adminJobRecordsOptions: (query: import('@/admin/api/adminJobRecords').AdminJobRecordQuery) => ({
       queryKey: actual.adminJobRecordKeys.list(query),
       queryFn: () => api.fetchAdminJobRecords(query),
     }),

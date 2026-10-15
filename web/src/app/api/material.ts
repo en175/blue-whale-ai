@@ -1,7 +1,7 @@
 
 import { toast } from 'sonner';
-import { ApiError } from '@/api/http';
-import { handleUnauthorized } from '@/utils/auth';
+import { ApiError } from '@/shared/api/http';
+import { handleUnauthorized } from '@/shared/utils/auth';
 
 
 export type GroupType = 'AIGC' | 'LivenessFace';

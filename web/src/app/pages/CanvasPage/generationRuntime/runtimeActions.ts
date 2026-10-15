@@ -1,6 +1,6 @@
-import { isApiError, envelopeErrorCode } from '@/api/http';
-import type { JobDetail } from '@/api/jobs';
-import type { CanvasBinding } from '@/api/canvasRecovery';
+import { isApiError, envelopeErrorCode } from '@/shared/api/http';
+import type { JobDetail } from '@/app/api/jobs';
+import type { CanvasBinding } from '@/app/api/canvasRecovery';
 import type {
   GenerationTaskDefinition, SubmitOptions, TaskSubmissionInput, CreateJobOutcome,
 } from './types';

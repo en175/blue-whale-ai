@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react';
 import { Plus, BookText } from 'lucide-react';
 import styles from './index.module.css';
-import type { SessionContentBlock } from '@/api/agentSessions';
+import type { SessionContentBlock } from '@/app/api/agentSessions';
 import type { PartialCardPreview } from '../../hooks/partialCardPreview';
 import { isProcessItem, itemsFromBlocks, itemsFromLive, type TimelineItem, type Turn } from '../../hooks/sessionTimeline';
 import type { KnownAsset } from './assetMentions';

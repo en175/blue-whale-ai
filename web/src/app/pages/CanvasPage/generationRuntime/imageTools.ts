@@ -1,8 +1,8 @@
 import {
   createImageEnhancement, createImageErase, createImageCutout, createImageOutpaint,
   cancelGenerationJob, type ImageToolBindingView, type ImageToolCreateInit,
-} from '@/api/jobs';
-import type { CanvasBinding, GenerationRecoveryRecord } from '@/api/canvasRecovery';
+} from '@/app/api/jobs';
+import type { CanvasBinding, GenerationRecoveryRecord } from '@/app/api/canvasRecovery';
 import type { ImageEnhanceInput } from '@lib/contracts/image-enhance';
 import type { ImageEraseInput } from '@lib/contracts/image-erase';
 import type { ImageCutoutInput } from '@lib/contracts/image-cutout';

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
-import Modal from '@/components/Modal';
-import { changePassword } from '@/api/auth';
-import { isApiError } from '@/api/http';
+import Modal from '@/app/components/Modal';
+import { changePassword } from '@/app/api/auth';
+import { isApiError } from '@/shared/api/http';
 import styles from './index.module.css';
 import {
   canSubmitPasswordChange,

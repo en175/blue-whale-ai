@@ -1,13 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Edge, Node } from '@xyflow/react';
-import { retryAudioMix } from '@/api/jobs';
-import { serializeNodes, serializeEdges } from '@/api/canvas';
+import { retryAudioMix } from '@/app/api/jobs';
+import { serializeNodes, serializeEdges } from '@/app/api/canvas';
 import { canvasBindingSchema } from '@lib/contracts/canvas-recovery';
 import { audioMixTerminalPatch, buildAudioMixPlaceholderNode, AUDIO_MIX_EDGE_ORIGIN } from '../audioMix';
 import { setupAudioMixRecovery, bindingView, deferred, flush } from './audioMixRecoveryTestKit';
 
-vi.mock('@/api/jobs', async (importOriginal) => ({
-  ...await importOriginal<typeof import('@/api/jobs')>(), retryAudioMix: vi.fn(),
+vi.mock('@/app/api/jobs', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/app/api/jobs')>(), retryAudioMix: vi.fn(),
 }));
 
 const SUBMISSION = 'a571aabb-7c22-43cf-aac6-b5d237282c9c';

@@ -1,5 +1,5 @@
-import LoginModal from '@/components/LoginModal';
-import { useAuthPromptStore } from '@/stores/authPrompt';
+import LoginModal from '@/app/components/LoginModal';
+import { useAuthPromptStore } from '@/shared/stores/authPrompt';
 
 export default function AuthExpiredGate() {
   const open = useAuthPromptStore((s) => s.open);

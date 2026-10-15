@@ -2,7 +2,7 @@ import { type Dispatch, type RefObject, type SetStateAction } from 'react';
 import type { Node } from '@xyflow/react';
 import { unifiedTextNodeText } from '@lib/contracts/text-node-markdown';
 import { type MediaMention, type MediaRef } from '@lib/contracts/text-node-media';
-import { type SharedAssetView } from '@/api/sharedAssets';
+import { type SharedAssetView } from '@/app/api/sharedAssets';
 import type { AssetCardKind } from '../components/AssetCardNode';
 import type { CanvasGalleryRef } from '../collectMediaBlocks';
 import type { MediaDims } from '../components/MediaNode/mediaContentSize';

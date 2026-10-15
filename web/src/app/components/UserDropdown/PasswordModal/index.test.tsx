@@ -2,7 +2,7 @@
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ApiError } from '@/api/http';
+import { ApiError } from '@/shared/api/http';
 import PasswordModal from './index';
 import { NEW_PASSWORD_PLACEHOLDER } from './password';
 
@@ -10,7 +10,7 @@ const authApi = vi.hoisted(() => ({
   changePassword: vi.fn(),
 }));
 
-vi.mock('@/api/auth', () => authApi);
+vi.mock('@/app/api/auth', () => authApi);
 
 let root: Root;
 let mountNode: HTMLDivElement;

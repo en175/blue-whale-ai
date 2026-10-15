@@ -11,8 +11,8 @@ import {
   deleteAdminModel,
   type AdminModel,
   type CreateAdminModelParams,
-} from '@/api/adminModels';
-import { isApiError } from '@/api/http';
+} from '@/admin/api/adminModels';
+import { isApiError } from '@/shared/api/http';
 import ConfirmModal from '../../components/ConfirmModal';
 import ModelFormModal from './ModelFormModal';
 import { TYPE_TABS, typeName, type ModelType } from './model-form';

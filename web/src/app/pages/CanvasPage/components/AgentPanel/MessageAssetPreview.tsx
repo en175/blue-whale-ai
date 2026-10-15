@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { SessionContentBlock } from '@/api/agentSessions';
+import type { SessionContentBlock } from '@/app/api/agentSessions';
 import { ImageMentionChip } from '../ImageMentionChip';
 import { VideoMentionChip } from '../VideoMentionChip';
 import { isCanvasNodeVideo, isSidebarUploadedVideo } from './composerImagePreview';

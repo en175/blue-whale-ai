@@ -1,5 +1,5 @@
 import { infiniteQueryOptions } from '@tanstack/react-query';
-import { apiRequest, type ApiRequestInit } from '@/api/http';
+import { apiRequest, type ApiRequestInit } from '@/shared/api/http';
 import type { LegacyMigrationReport } from '@lib/contracts/legacy-card-migration';
 
 export interface ProjectRecord {

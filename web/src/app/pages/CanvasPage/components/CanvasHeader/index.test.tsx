@@ -13,15 +13,15 @@ vi.mock('../ProjectSelector', () => ({
   default: () => createElement('div', { 'data-testid': 'project-selector' }),
 }));
 
-vi.mock('@/components/UserDropdown', () => ({
+vi.mock('@/app/components/UserDropdown', () => ({
   default: () => createElement('div', { 'data-testid': 'user-dropdown' }, '个人信息'),
 }));
 
-vi.mock('@/components/UserDropdown/RechargeModal', () => ({
+vi.mock('@/app/components/UserDropdown/RechargeModal', () => ({
   default: () => createElement('div', { 'data-testid': 'recharge-modal' }),
 }));
 
-vi.mock('@/stores/recharge', () => ({
+vi.mock('@/app/stores/recharge', () => ({
   useRechargeUiStore: (selector: (state: { open: boolean; closeRecharge: () => void }) => unknown) =>
     selector({ open: false, closeRecharge: () => {} }),
 }));

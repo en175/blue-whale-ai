@@ -1,5 +1,5 @@
-import type { GenerationRecoveryRecord } from '@/api/canvasRecovery';
-import type { JobDetail } from '@/api/jobs';
+import type { GenerationRecoveryRecord } from '@/app/api/canvasRecovery';
+import type { JobDetail } from '@/app/api/jobs';
 import { isJobInFlight, type GenerationTaskDefinition, type RecoveryRecordFacts } from './types';
 import { TARGET_OUTPUT_KEY, type ActiveExecution, type RuntimeContext } from './runtimeState';
 

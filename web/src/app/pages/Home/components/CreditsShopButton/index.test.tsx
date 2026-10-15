@@ -2,8 +2,8 @@
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { useAuthStore, type SessionUser } from '@/stores/auth';
-import { useRechargeUiStore } from '@/stores/recharge';
+import { useAuthStore, type SessionUser } from '@/shared/stores/auth';
+import { useRechargeUiStore } from '@/app/stores/recharge';
 import CreditsShopButton from './index';
 
 const USER: SessionUser = {

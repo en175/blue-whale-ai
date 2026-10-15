@@ -1,4 +1,4 @@
-import type { RecoveryChange } from '@/api/canvasRecovery';
+import type { RecoveryChange } from '@/app/api/canvasRecovery';
 import type { LedgerEntry } from './types';
 import { TARGET_OUTPUT_KEY, type RuntimeContext } from './runtimeState';
 

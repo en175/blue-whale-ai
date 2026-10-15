@@ -3,17 +3,17 @@ import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { setSession, type SessionUser } from '@/utils/auth';
+import { setSession, type SessionUser } from '@/shared/utils/auth';
 import UserDropdown from './index';
 
-vi.mock('@/api/auth', () => ({
+vi.mock('@/app/api/auth', () => ({
   fetchCredits: vi.fn(async () => ({ credits: 10 })),
   logout: vi.fn(async () => null),
 }));
 
 vi.mock('./AccountModal', () => ({ default: () => null }));
 vi.mock('./RechargeModal', () => ({ default: () => null }));
-vi.mock('@/components/LoginModal', () => ({ default: () => null }));
+vi.mock('@/app/components/LoginModal', () => ({ default: () => null }));
 
 const USER: SessionUser = {
   userId: 1,

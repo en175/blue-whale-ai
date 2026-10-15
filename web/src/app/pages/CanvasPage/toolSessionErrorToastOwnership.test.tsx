@@ -5,11 +5,11 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Node } from '@xyflow/react';
-import type { GenerationModel } from '@/api/generation';
-import type { FetchJobsParams, FrameInterpolationCurrentData, JobListData } from '@/api/jobs';
+import type { GenerationModel } from '@/app/api/generation';
+import type { FetchJobsParams, FrameInterpolationCurrentData, JobListData } from '@/app/api/jobs';
 import { toast } from 'sonner';
-import { useAuthStore } from '@/stores/auth';
-import { useAuthPromptStore } from '@/stores/authPrompt';
+import { useAuthStore } from '@/shared/stores/auth';
+import { useAuthPromptStore } from '@/shared/stores/authPrompt';
 import { silenceApiConsoleInfo } from './testing/silenceApiLogs';
 import { installFetchGuard } from './testing/fetchGuard';
 
@@ -24,15 +24,15 @@ const fetchGuard = installFetchGuard([
 
 
 export const flowProps: { current: Record<string, any> } = { current: {} };
-vi.mock('@/api/generationQuote', async (importActual) => ({
-  ...(await importActual<typeof import('@/api/generationQuote')>()),
+vi.mock('@/app/api/generationQuote', async (importActual) => ({
+  ...(await importActual<typeof import('@/app/api/generationQuote')>()),
   generationQuoteOptions: vi.fn(() => ({
     queryKey: ['generation-quote', 'mock'],
     staleTime: Infinity,
     queryFn: async () => ({ credits: null, quote_revision: null }),
   })),
 }));
-vi.mock('@/api/canvasRecovery', () => ({
+vi.mock('@/app/api/canvasRecovery', () => ({
   fetchGenerationRecoveryPage: vi.fn(async () => ({ protocol_version: 1, canvas_version: null, records: [], next_cursor: null })),
   resolveGenerationRecovery: vi.fn(async () => ({ protocol_version: 1, records: [] })),
   generationRecoveryPageOptions: vi.fn(() => ({
@@ -60,8 +60,8 @@ vi.mock('./components/CanvasHeader', () => ({
 vi.mock('./components/ProjectSelector', () => ({
   default: () => createElement('div', { 'data-testid': 'project-selector' }),
 }));
-vi.mock('@/components/UserDropdown/RechargeModal', () => ({ default: () => null }));
-vi.mock('@/pages/Assets/components/AssetDetailModal', () => ({ default: () => null }));
+vi.mock('@/app/components/UserDropdown/RechargeModal', () => ({ default: () => null }));
+vi.mock('@/app/pages/Assets/components/AssetDetailModal', () => ({ default: () => null }));
 
 
 vi.mock('sonner', () => ({
@@ -92,7 +92,7 @@ const canvasMocks = vi.hoisted(() => ({
   saveCanvasDoc: vi.fn(async () => ({ id: 11, project_id: 1, version: 4, viewport: '{}', nodes: '[]' })),
 }));
 
-vi.mock('@/api/projects', () => ({
+vi.mock('@/app/api/projects', () => ({
   fetchProjects: projectMocks.fetchProjects,
   createProject: vi.fn(),
   renameProject: vi.fn(),
@@ -100,12 +100,12 @@ vi.mock('@/api/projects', () => ({
   touchProjectLastOpened: projectMocks.touchProjectLastOpened,
   pinProject: vi.fn(),
 }));
-vi.mock('@/api/auth', () => ({
+vi.mock('@/app/api/auth', () => ({
   fetchMe: authMocks.fetchMe,
   fetchCredits: authMocks.fetchCredits,
   toSessionUser: authMocks.toSessionUser,
 }));
-vi.mock('@/api/assets', () => ({
+vi.mock('@/app/api/assets', () => ({
   UPLOAD_SIZE_LIMIT: 100 * 1024 * 1024,
   fetchUploadPresign: vi.fn(),
   putToPresignedUrl: vi.fn(),
@@ -114,7 +114,7 @@ vi.mock('@/api/assets', () => ({
   fetchAssetDetail: vi.fn(),
   linkAssetToProject: vi.fn(),
 }));
-vi.mock('@/api/canvas', () => ({
+vi.mock('@/app/api/canvas', () => ({
   applyPromptPreview: canvasMocks.applyPromptPreview,
   listLegacyCardHistory: vi.fn(async () => ({ items: [] })),
   createConversationQuote: vi.fn(),
@@ -127,8 +127,8 @@ vi.mock('@/api/canvas', () => ({
     JSON.stringify(edges.map((e) => ({ id: e.id, source: e.source, target: e.target, data: e.data }))),
   ),
 }));
-vi.mock('@/api/sharedAssets', () => ({ saveSharedAsset: vi.fn() }));
-vi.mock('@/api/generation', () => ({
+vi.mock('@/app/api/sharedAssets', () => ({ saveSharedAsset: vi.fn() }));
+vi.mock('@/app/api/generation', () => ({
   fetchGenerationModels: vi.fn(async (): Promise<GenerationModel[]> => []),
 }));
 
@@ -141,11 +141,11 @@ const jobMocks = vi.hoisted(() => ({
   createFrameInterpolation: vi.fn(),
   fetchFrameInterpolationCurrent: vi.fn(async (): Promise<FrameInterpolationCurrentData | null> => null),
 }));
-vi.mock('@/api/idempotencyKey', () => ({
+vi.mock('@/shared/api/idempotencyKey', () => ({
   newIdempotencyKey: jobMocks.newIdempotencyKey,
 }));
-vi.mock('@/api/jobs', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/api/jobs')>();
+vi.mock('@/app/api/jobs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/app/api/jobs')>();
   return {
     ...actual,
     fetchJobs: jobMocks.fetchJobs,

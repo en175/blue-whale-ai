@@ -1,6 +1,6 @@
 import type { Edge, Node } from '@xyflow/react';
-import { isApiError } from '@/api/http';
-import type { AssetRecord } from '@/api/assets';
+import { isApiError } from '@/shared/api/http';
+import type { AssetRecord } from '@/app/api/assets';
 import {
   promptBindingList,
   promptBindingsSchema,
@@ -18,7 +18,7 @@ import type { SpawnBox } from './draftSpawn';
 import { isConnectableSource, sourceKindOf } from './connectAbility';
 import type { AtMentionItem } from './atMention';
 import type { CanvasPickItem } from './components/AudioDialog';
-import type { GenerationCardBlock } from '@/api/agentSessions';
+import type { GenerationCardBlock } from '@/app/api/agentSessions';
 
 export const nodeBoxOf = (n: Node): SpawnBox => {
   const d = (n.data ?? {}) as Record<string, unknown>;

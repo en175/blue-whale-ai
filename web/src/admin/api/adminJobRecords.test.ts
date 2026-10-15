@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const http = vi.hoisted(() => ({ apiRequest: vi.fn() }));
 
-vi.mock('@/api/http', () => ({ apiRequest: http.apiRequest }));
+vi.mock('@/shared/api/http', () => ({ apiRequest: http.apiRequest }));
 
 import { fetchAdminJobRecords } from './adminJobRecords';
 

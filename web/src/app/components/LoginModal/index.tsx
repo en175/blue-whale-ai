@@ -7,12 +7,12 @@ import {
   sendCode,
   toSessionUser,
   type LoginData,
-} from '@/api/auth';
-import { fetchAdminSession } from '@/api/adminSession';
-import { isApiError } from '@/api/http';
-import Modal from '@/components/Modal';
-import { useAuthStore, type SessionUser } from '@/stores/auth';
-import { updateUser } from '@/utils/auth';
+} from '@/app/api/auth';
+import { fetchAdminSession } from '@/admin/api/adminSession';
+import { isApiError } from '@/shared/api/http';
+import Modal from '@/app/components/Modal';
+import { useAuthStore, type SessionUser } from '@/shared/stores/auth';
+import { updateUser } from '@/shared/utils/auth';
 import styles from './index.module.css';
 import {
   PLATFORM_PRIVACY_POLICY_HREF,

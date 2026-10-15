@@ -1,4 +1,4 @@
-import { apiRequest, envelopeErrorCode, isApiError, silentInit, type ApiError } from '@/api/http';
+import { apiRequest, envelopeErrorCode, isApiError, silentInit, type ApiError } from '@/shared/api/http';
 import type { CanvasBinding } from './canvasRecovery';
 import type { ImageEnhanceInput } from '@lib/contracts/image-enhance';
 import type { ImageEraseInput } from '@lib/contracts/image-erase';

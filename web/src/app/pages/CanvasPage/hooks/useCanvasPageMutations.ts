@@ -1,6 +1,6 @@
 import { useMutation } from '@tanstack/react-query';
-import { linkAssetToProject } from '@/api/assets';
-import { applyPromptPreview } from '@/api/canvas';
+import { linkAssetToProject } from '@/app/api/assets';
+import { applyPromptPreview } from '@/app/api/canvas';
 
 export function useCanvasPageMutations() {
   const applyMutation = useMutation({ mutationFn: applyPromptPreview });

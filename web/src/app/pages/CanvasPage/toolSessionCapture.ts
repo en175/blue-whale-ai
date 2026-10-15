@@ -1,5 +1,5 @@
 import type { Node } from '@xyflow/react';
-import { isApiError } from '@/api/http';
+import { isApiError } from '@/shared/api/http';
 import { readAssetId } from './mediaRefs';
 
 export interface ProjectCheckHost {

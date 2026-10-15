@@ -3,8 +3,8 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { GenerationRecoveryRecord } from '@/api/canvasRecovery';
-import type { JobDetail } from '@/api/jobs';
+import type { GenerationRecoveryRecord } from '@/app/api/canvasRecovery';
+import type { JobDetail } from '@/app/api/jobs';
 import { apiMocks, canvasDocMock, flowProps, mediaNodes, renderPage, unmountPage } from './testing/canvasPageTestHarness';
 import { sceneSplitTask } from './generationRuntime/multiOutputTasks';
 
@@ -12,16 +12,16 @@ const captured = JSON.parse(readFileSync(resolve('src/app/pages/CanvasPage/gener
   page: { records: GenerationRecoveryRecord[] }; detail: JobDetail;
 };
 const recoveryApi = vi.hoisted(() => ({ page: { current: { records: [] as GenerationRecoveryRecord[] } }, put: vi.fn() }));
-vi.mock('@/api/generationQuote', async (importActual) => ({
-  ...(await importActual<typeof import('@/api/generationQuote')>()),
+vi.mock('@/app/api/generationQuote', async (importActual) => ({
+  ...(await importActual<typeof import('@/app/api/generationQuote')>()),
   generationQuoteOptions: vi.fn(() => ({
     queryKey: ['generation-quote', 'mock'],
     staleTime: Infinity,
     queryFn: async () => ({ credits: null, quote_revision: null }),
   })),
 }));
-vi.mock('@/api/canvasRecovery', async importOriginal => {
-  const actual = await importOriginal<typeof import('@/api/canvasRecovery')>();
+vi.mock('@/app/api/canvasRecovery', async importOriginal => {
+  const actual = await importOriginal<typeof import('@/app/api/canvasRecovery')>();
   const fetchPage = vi.fn(async () => ({ protocol_version: 1, canvas_version: 3, next_cursor: null, ...recoveryApi.page.current }));
   return {
     ...actual, fetchGenerationRecoveryPage: fetchPage,

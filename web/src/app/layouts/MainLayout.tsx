@@ -1,7 +1,7 @@
 import { Outlet, useLocation } from 'react-router-dom';
-import Sidebar from '@/components/Sidebar';
-import { useDocumentTitle } from '@/seo/useDocumentTitle';
-import HeroVideoCarousel from '@/pages/Home/components/HeroVideoCarousel';
+import Sidebar from '@/app/components/Sidebar';
+import { useDocumentTitle } from '@/shared/seo/useDocumentTitle';
+import HeroVideoCarousel from '@/app/pages/Home/components/HeroVideoCarousel';
 import styles from './index.module.css';
 
 export default function MainLayout() {

@@ -1,4 +1,4 @@
-import type { SkillRecord } from '@/api/skills';
+import type { SkillRecord } from '@/app/api/skills';
 
 export type HomePendingAction =
   | { kind: 'open-skill' }

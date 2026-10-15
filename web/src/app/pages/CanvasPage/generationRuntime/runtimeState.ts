@@ -1,10 +1,10 @@
-import { fetchJobStatus } from '@/api/jobs';
-import { isApiError } from '@/api/http';
+import { fetchJobStatus } from '@/app/api/jobs';
+import { isApiError } from '@/shared/api/http';
 import {
   fetchGenerationRecoveryPage, resolveGenerationRecovery,
   type CanvasBinding, type GenerationRecoveryRecord,
-} from '@/api/canvasRecovery';
-import { newIdempotencyKey } from '@/api/idempotencyKey';
+} from '@/app/api/canvasRecovery';
+import { newIdempotencyKey } from '@/shared/api/idempotencyKey';
 import { readMarker } from './types';
 import type {
   GenerationRecoveryMarker, GenerationRuntimeHost, GenerationTaskDefinition,

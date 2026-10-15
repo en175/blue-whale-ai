@@ -16,8 +16,8 @@ import {
 
 vi.setConfig({ testTimeout: 20_000, hookTimeout: 60_000 });
 
-vi.mock('@/api/generationQuote', async (importActual) => ({
-  ...(await importActual<typeof import('@/api/generationQuote')>()),
+vi.mock('@/app/api/generationQuote', async (importActual) => ({
+  ...(await importActual<typeof import('@/app/api/generationQuote')>()),
   generationQuoteOptions: vi.fn(() => ({
     queryKey: ['generation-quote', 'mock'],
     staleTime: Infinity,
@@ -25,8 +25,8 @@ vi.mock('@/api/generationQuote', async (importActual) => ({
   })),
 }));
 
-vi.mock('@/api/canvasRecovery', async (importActual) => ({
-  ...(await importActual<typeof import('@/api/canvasRecovery')>()),
+vi.mock('@/app/api/canvasRecovery', async (importActual) => ({
+  ...(await importActual<typeof import('@/app/api/canvasRecovery')>()),
   generationRecoveryPageOptions: vi.fn(() => ({
     queryKey: ['generation-recovery', 'mock'],
     staleTime: Infinity,

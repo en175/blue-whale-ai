@@ -10,8 +10,8 @@ import {
   type SystemRateLimit,
   type SystemSettings,
   type SystemUpstream,
-} from '@/api/adminSettings';
-import { isApiError } from '@/api/http';
+} from '@/admin/api/adminSettings';
+import { isApiError } from '@/shared/api/http';
 import {
   Hint,
   Alert,

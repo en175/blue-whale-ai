@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { remoteImageCrossOrigin, resolveMediaSrc } from '@/utils/remoteImageCors';
+import { remoteImageCrossOrigin, resolveMediaSrc } from '@/shared/utils/remoteImageCors';
 
 export interface AudioDurationSource {
   key: string;

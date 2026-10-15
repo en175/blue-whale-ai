@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { formFromConfig, previewIssue, toSaveParams, validateCustomConfigForm, type CustomConfigForm } from './customConfig';
-import type { AdminRechargeCustomConfig } from '@/api/adminRechargeCustomConfig';
+import type { AdminRechargeCustomConfig } from '@/admin/api/adminRechargeCustomConfig';
 
 const CONFIG: AdminRechargeCustomConfig = {
   minCredits: 600,

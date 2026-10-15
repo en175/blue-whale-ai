@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { FloatingPortal, autoUpdate, flip, offset, shift, useFloating } from '@floating-ui/react';
 import { AtSign, AudioLines, Crosshair, FileText, X } from 'lucide-react';
-import { remoteImageCrossOrigin, resolveMediaSrc } from '@/utils/remoteImageCors';
+import { remoteImageCrossOrigin, resolveMediaSrc } from '@/shared/utils/remoteImageCors';
 import styles from './index.module.css';
 import type { StripDragItemProps } from './strip-dnd';
 

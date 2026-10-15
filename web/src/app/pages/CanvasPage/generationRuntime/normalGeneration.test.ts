@@ -7,7 +7,7 @@ const apiMocks = vi.hoisted(() => ({
   fetchJobStatus: vi.fn(),
 }));
 
-vi.mock('@/api/jobs', () => ({
+vi.mock('@/app/api/jobs', () => ({
   createGenerationJob: apiMocks.createGenerationJob,
   retryGenerationJob: apiMocks.retryGenerationJob,
   cancelGenerationJob: apiMocks.cancelGenerationJob,
@@ -20,7 +20,7 @@ import {
 import { createGenerationRuntime } from './runtime';
 import { isRecoveryTargetSettled } from './types';
 import type { GenerationRuntimeHost, RuntimeNodeView } from './types';
-import type { GenerationRecoveryPage, GenerationRecoveryRecord } from '@/api/canvasRecovery';
+import type { GenerationRecoveryPage, GenerationRecoveryRecord } from '@/app/api/canvasRecovery';
 
 const BINDING = {
   protocol_version: 1 as const,

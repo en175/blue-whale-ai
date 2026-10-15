@@ -7,8 +7,8 @@ import {
   type AssetRecord,
   type AssetType,
   type UploadCompleteData,
-} from '@/api/assets';
-import { computeFileMd5, probeMediaMeta } from '@/utils/upload';
+} from '@/app/api/assets';
+import { computeFileMd5, probeMediaMeta } from '@/app/utils/upload';
 import { fetchRemoteMedia } from './fetchRemoteMedia';
 import { isMaterialLibraryId } from './mediaRefs';
 

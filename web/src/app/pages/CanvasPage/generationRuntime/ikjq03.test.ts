@@ -1,16 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Node, Edge } from '@xyflow/react';
-import { createAudioMix, retryAudioMix, type JobDetail } from '@/api/jobs';
-import { serializeNodes, serializeEdges } from '@/api/canvas';
-import type { CanvasBinding, GenerationRecoveryRecord } from '@/api/canvasRecovery';
+import { createAudioMix, retryAudioMix, type JobDetail } from '@/app/api/jobs';
+import { serializeNodes, serializeEdges } from '@/app/api/canvas';
+import type { CanvasBinding, GenerationRecoveryRecord } from '@/app/api/canvasRecovery';
 import { audioMixCreateSchema } from '@lib/contracts/audio-mix';
 import { canvasBindingSchema } from '@lib/contracts/canvas-recovery';
 import { audioMixTerminalPatch, AUDIO_MIX_EDGE_ORIGIN } from '../audioMix';
 import { audioMixTask } from './mixMuxTasks';
 import { deferred, flush, setupAudioMixRecovery } from './audioMixRecoveryTestKit';
 
-vi.mock('@/api/jobs', async (importOriginal) => ({
-  ...await importOriginal<typeof import('@/api/jobs')>(),
+vi.mock('@/app/api/jobs', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/app/api/jobs')>(),
   createAudioMix: vi.fn(),
   retryAudioMix: vi.fn(),
   cancelGenerationJob: vi.fn(),

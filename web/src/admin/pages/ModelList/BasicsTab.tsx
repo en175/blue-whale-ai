@@ -1,4 +1,4 @@
-import type { AdminModel } from '@/api/adminModels';
+import type { AdminModel } from '@/admin/api/adminModels';
 import { Checkbox, Field, Hint, Input, MetaRow, Select } from '../../ui';
 import { FULL, GRID2, GRID3, LABEL } from './formLayout';
 import {

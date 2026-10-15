@@ -1,15 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { ApiError } from '@/api/http';
-import { createAudioMix } from '@/api/jobs';
+import { ApiError } from '@/shared/api/http';
+import { createAudioMix } from '@/app/api/jobs';
 import { audioMixCreateSchema } from '@lib/contracts/audio-mix';
-import type { CanvasBinding, GenerationRecoveryRecord } from '@/api/canvasRecovery';
+import type { CanvasBinding, GenerationRecoveryRecord } from '@/app/api/canvasRecovery';
 import { AUDIO_MIX_EDGE_ORIGIN, isAudioMixNodeId } from '../audioMix';
 import {
   DEPS, flush, deferred, bindingView, mixCreated, setupAudioMixRecovery, type MixCreateResult,
 } from './audioMixRecoveryTestKit';
 
-vi.mock('@/api/jobs', async (importOriginal) => ({
-  ...await importOriginal<typeof import('@/api/jobs')>(),
+vi.mock('@/app/api/jobs', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/app/api/jobs')>(),
   createAudioMix: vi.fn(),
   retryAudioMix: vi.fn(),
   cancelGenerationJob: vi.fn(),

@@ -1,4 +1,4 @@
-import { newIdempotencyKey } from '@/api/idempotencyKey';
+import { newIdempotencyKey } from '@/shared/api/idempotencyKey';
 
 export interface SubmitIntentKeys {
   keyFor(scope: string, signature: string): string;

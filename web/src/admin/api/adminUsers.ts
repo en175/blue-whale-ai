@@ -1,6 +1,6 @@
 import { queryOptions } from '@tanstack/react-query';
-import { apiRequest } from '@/api/http';
-import { useAuthStore } from '@/stores/auth';
+import { apiRequest } from '@/shared/api/http';
+import { useAuthStore } from '@/shared/stores/auth';
 
 export interface AdminUserRow {
   userId: number;

@@ -7,7 +7,7 @@ import {
   type AtMentionKind,
 } from '../../atMention';
 import { computeFlyoutOffset } from './flyoutAnchor';
-import { remoteImageCrossOrigin, resolveMediaSrc } from '@/utils/remoteImageCors';
+import { remoteImageCrossOrigin, resolveMediaSrc } from '@/shared/utils/remoteImageCors';
 import styles from './index.module.css';
 
 const KIND_META: Array<{ kind: AtMentionKind; label: string }> = [

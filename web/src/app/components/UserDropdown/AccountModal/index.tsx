@@ -5,7 +5,7 @@ import styles from './index.module.css';
 import PasswordModal from '../PasswordModal';
 import AccountRecordsModal from '../AccountRecordsModal';
 import BindPhoneModal from '../BindPhoneModal';
-import { updateUser } from '@/utils/auth';
+import { updateUser } from '@/shared/utils/auth';
 
 interface AccountModalProps {
   userId: number;

@@ -1,10 +1,10 @@
 import type { RefObject } from 'react';
 import type { Edge, Node, Viewport } from '@xyflow/react';
 import type { PromptPreviewSource } from '@lib/contracts/prompt-preview';
-import type { GenerationCardBlock } from '@/api/agentSessions';
-import type { CanvasDoc, CanvasRecord } from '@/api/canvas';
-import { saveCanvasDoc } from '@/api/canvas';
-import type { SnapshotAsset } from '@/api/projects';
+import type { GenerationCardBlock } from '@/app/api/agentSessions';
+import type { CanvasDoc, CanvasRecord } from '@/app/api/canvas';
+import { saveCanvasDoc } from '@/app/api/canvas';
+import type { SnapshotAsset } from '@/app/api/projects';
 import { newNodeId } from '../nodeId';
 import { appliedPlanAssetIds, dropReversedTextIndexEdges, replaceMissingPlanMediaNodes, textIndexEdgesForAppliedPlan } from '../planApplyEdges';
 

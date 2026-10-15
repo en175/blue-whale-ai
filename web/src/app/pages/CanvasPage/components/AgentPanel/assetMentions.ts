@@ -1,4 +1,4 @@
-import type { SessionContentBlock } from '@/api/agentSessions';
+import type { SessionContentBlock } from '@/app/api/agentSessions';
 import type { ChatMessage } from '../../hooks/useAgentSession';
 import type { Turn } from '../../hooks/sessionTimeline';
 

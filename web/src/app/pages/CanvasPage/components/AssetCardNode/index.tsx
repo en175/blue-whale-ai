@@ -5,12 +5,12 @@
 import { useRef, useState, useCallback, useEffect } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { AtSign, Upload, WandSparkles, Info, Music, X, MousePointerClick, ImageOff, Plus } from 'lucide-react';
-import type { GenerationCardBlock } from '@/api/agentSessions';
+import type { GenerationCardBlock } from '@/app/api/agentSessions';
 import { toast } from 'sonner';
-import { uploadAssetFile } from '@/utils/upload';
-import { remoteImageCrossOrigin, resolveMediaSrc } from '@/utils/remoteImageCors';
-import { isFileRejected } from '@/utils/fileSignature';
-import type { UploadCompleteData } from '@/api/assets';
+import { uploadAssetFile } from '@/app/utils/upload';
+import { remoteImageCrossOrigin, resolveMediaSrc } from '@/shared/utils/remoteImageCors';
+import { isFileRejected } from '@/app/utils/fileSignature';
+import type { UploadCompleteData } from '@/app/api/assets';
 import type { CanvasGalleryRef } from '../../collectMediaBlocks';
 import { useAssetImageRefLimit } from '../../modelCaps';
 import { KIND_META, assetCardKindOf, type AssetCardKind } from './toolbarVisibility';

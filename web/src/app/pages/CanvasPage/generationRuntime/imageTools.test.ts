@@ -11,7 +11,7 @@ const apiMocks = vi.hoisted(() => ({
   retryGenerationJob: vi.fn(async () => ({ generation_job_id: 'j2', cursor: 2 })),
 }));
 
-vi.mock('@/api/jobs', () => ({
+vi.mock('@/app/api/jobs', () => ({
   createImageEnhancement: apiMocks.createImageEnhancement,
   createImageErase: apiMocks.createImageErase,
   createImageCutout: apiMocks.createImageCutout,
@@ -24,7 +24,7 @@ vi.mock('@/api/jobs', () => ({
 
 import { createImageToolsTask, isImageToolsCard } from './imageTools';
 import { createGenerationRuntime, type GenerationRuntimeDeps } from './runtime';
-import type { GenerationRecoveryRecord } from '@/api/canvasRecovery';
+import type { GenerationRecoveryRecord } from '@/app/api/canvasRecovery';
 import type { GenerationRuntimeHost, RuntimeNodeView } from './types';
 
 const BINDING = {

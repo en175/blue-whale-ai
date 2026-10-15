@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import { QueryClient } from '@tanstack/react-query';
-import { ApiError } from '@/api/http';
+import { ApiError } from '@/shared/api/http';
 import { createGenerationRuntime, type GenerationRuntimeDeps } from './runtime';
 import { normalGenerationTask } from './normalGeneration';
 import type { GenerationRuntimeHost, GenerationTaskDefinition, RuntimeNodeView } from './types';
-import { generationRecoveryKeys, generationRecoveryPageOptions, type GenerationRecoveryPage, type GenerationRecoveryRecord } from '@/api/canvasRecovery';
+import { generationRecoveryKeys, generationRecoveryPageOptions, type GenerationRecoveryPage, type GenerationRecoveryRecord } from '@/app/api/canvasRecovery';
 
 class ManualClock {
   now = 0;

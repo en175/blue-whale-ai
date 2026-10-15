@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { fetchAssetDetail, type AssetRecord } from '@/api/assets';
+import { fetchAssetDetail, type AssetRecord } from '@/app/api/assets';
 
 const STALE_AFTER_MS = 30_000;
 

@@ -4,7 +4,7 @@ import {
   adminConsumptionRecordsOptions,
   type AdminConsumptionRecord,
   type AdminConsumptionRecordQuery,
-} from '@/api/adminConsumptionRecords';
+} from '@/admin/api/adminConsumptionRecords';
 import AdminQueryTable, {
   type Column,
   type OffsetPaginationState,

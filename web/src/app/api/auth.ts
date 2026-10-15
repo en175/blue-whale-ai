@@ -1,6 +1,6 @@
-import { apiRequest } from '@/api/http';
-import { clearSessionToken, getSessionToken, setSessionToken } from '@/api/sessionToken';
-import type { SessionUser } from '@/utils/auth';
+import { apiRequest } from '@/shared/api/http';
+import { clearSessionToken, getSessionToken, setSessionToken } from '@/shared/api/sessionToken';
+import type { SessionUser } from '@/shared/utils/auth';
 
 export interface LoginData {
   token: string;

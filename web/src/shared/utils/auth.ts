@@ -1,6 +1,6 @@
-import { clearSessionToken } from '@/api/sessionToken';
-import { useAuthStore, type SessionUser } from '@/stores/auth';
-import { useAuthPromptStore } from '@/stores/authPrompt';
+import { clearSessionToken } from '@/shared/api/sessionToken';
+import { useAuthStore, type SessionUser } from '@/shared/stores/auth';
+import { useAuthPromptStore } from '@/shared/stores/authPrompt';
 
 export type { SessionUser };
 

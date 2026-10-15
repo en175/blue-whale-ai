@@ -1,12 +1,12 @@
 import { type ReactNode, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import auroraPoster from '@/assets/home-hero/aurora-poster.jpg';
+import auroraPoster from '@/shared/assets/home-hero/aurora-poster.jpg';
 import {
   publicHomepageHeroesOptions,
   selectPlayableHeroSlides,
   type HeroSlide,
-} from '@/api/homepageHeroes';
-import { remoteImageCrossOrigin, resolveMediaSrc } from '@/utils/remoteImageCors';
+} from '@/shared/api/homepageHeroes';
+import { remoteImageCrossOrigin, resolveMediaSrc } from '@/shared/utils/remoteImageCors';
 import styles from './index.module.css';
 
 export const HERO_TRANSITION_MS = 600;

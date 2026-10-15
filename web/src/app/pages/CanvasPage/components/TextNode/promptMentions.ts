@@ -3,7 +3,7 @@ import { parseMarkdownBlocks, renderMarkdownInline } from '@lib/contracts/text-n
 import { deriveMediaMentionLabels, deriveMediaMentionLabelsInOrder, type MediaMention, type MediaRef } from '@lib/contracts/text-node-media';
 import chipStyles from '../mediaChip.module.css';
 import textNodeStyles from './index.module.css';
-import { resolveMediaSrc } from '@/utils/remoteImageCors';
+import { resolveMediaSrc } from '@/shared/utils/remoteImageCors';
 
 
 const MENTION_PLACEHOLDER = '￼';

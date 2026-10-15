@@ -8,7 +8,7 @@ const accountApi = vi.hoisted(() => ({
   fetchConsumptions: vi.fn(),
 }));
 
-vi.mock('@/api/account', () => accountApi);
+vi.mock('@/app/api/account', () => accountApi);
 
 let root: Root;
 let mountNode: HTMLDivElement;

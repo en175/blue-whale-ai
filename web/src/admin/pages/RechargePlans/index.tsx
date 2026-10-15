@@ -21,8 +21,8 @@ import {
   type TopupTier,
   type TopupTierList,
   type TopupTierStatus,
-} from '@/api/adminTopupTiers';
-import { isApiError } from '@/api/http';
+} from '@/admin/api/adminTopupTiers';
+import { isApiError } from '@/shared/api/http';
 import ConfirmModal from '../../components/ConfirmModal';
 import { Alert, Badge, Button, Empty, Page, PageHeader, Select, Table } from '../../ui';
 import PlanFormModal from './PlanFormModal';

@@ -1,6 +1,6 @@
 import type { Node } from '@xyflow/react';
-import { resolveMediaSrc } from '@/utils/remoteImageCors';
-import type { UploadCompleteData } from '@/api/assets';
+import { resolveMediaSrc } from '@/shared/utils/remoteImageCors';
+import type { UploadCompleteData } from '@/app/api/assets';
 import { apiErrorMessage, cloneSourceNode } from './toolSessionCapture';
 import { mediaContentBox, MEDIA_CONTENT_TOP_OFFSET } from './components/MediaNode/mediaContentSize';
 import { fullCropRect, cropPresetRatio, inscribeCropRect, clampCropRect, minCropSideDisplay, cropOutputFormat, cropRectToNatural, type CropNaturalRect, type CropOutputFormat, type CropCoordinateSpace, type CropRect, type CropPresetKey } from './imageCrop';

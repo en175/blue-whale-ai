@@ -1,6 +1,6 @@
 import {
   finalizeVideoJob, regenerateSampleJob,
-} from '@/api/jobs';
+} from '@/app/api/jobs';
 import type { CreateJobOutcome, GenerationTaskDefinition, TaskSubmissionInput } from './types';
 
 export interface StoryboardPayload {

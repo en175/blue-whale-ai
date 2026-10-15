@@ -1,5 +1,5 @@
-import { useAuthStore } from '@/stores/auth';
-import { useRechargeUiStore } from '@/stores/recharge';
+import { useAuthStore } from '@/shared/stores/auth';
+import { useRechargeUiStore } from '@/app/stores/recharge';
 import CoinIcon from './CoinIcon';
 import styles from './index.module.css';
 

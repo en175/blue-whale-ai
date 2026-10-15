@@ -1,13 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { ApiError } from '@/api/http';
-import { retryAudioMix, retryAudioVideoMux } from '@/api/jobs';
+import { ApiError } from '@/shared/api/http';
+import { retryAudioMix, retryAudioVideoMux } from '@/app/api/jobs';
 import {
   NODE_ID, MUX_NODE_ID, SID_A, SID_B, SID_C,
   flush, conflict, bindingView, setupRecoveryScenario,
 } from './recoveryTestKit';
 
-vi.mock('@/api/jobs', async (importOriginal) => ({
-  ...await importOriginal<typeof import('@/api/jobs')>(),
+vi.mock('@/app/api/jobs', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/app/api/jobs')>(),
   createAudioMix: vi.fn(),
   retryAudioMix: vi.fn(),
   createAudioVideoMux: vi.fn(),

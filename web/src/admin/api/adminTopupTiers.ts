@@ -1,5 +1,5 @@
 import { queryOptions } from '@tanstack/react-query';
-import { http, apiRequestWithMeta } from '@/api/http';
+import { http, apiRequestWithMeta } from '@/shared/api/http';
 
 export type TopupTierStatus = 'draft' | 'active' | 'inactive';
 

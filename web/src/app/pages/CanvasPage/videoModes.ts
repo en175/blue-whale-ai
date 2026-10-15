@@ -3,7 +3,7 @@ import {
   isFrameMode,
   normalizeVideoMode,
   type VideoMode,
-} from '@/utils/video-modes';
+} from '@/app/utils/video-modes';
 import type { VideoPromptRefItem } from './videoPromptRefs';
 import { hasAnyMediaRef, type VideoMediaRef, type VideoMediaRefs } from './videoMediaRefs';
 
