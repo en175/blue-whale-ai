@@ -143,6 +143,9 @@ public class BillingGrpcService extends BillingServiceGrpc.BillingServiceImplBas
                 if (item.generationJobId() != null) {
                     row.setGenerationJobId(item.generationJobId());
                 }
+                if (item.chargeState() != null) {
+                    row.setChargeState(item.chargeState());
+                }
                 if (item.lotSource() != null) {
                     row.setLotSource(item.lotSource());
                 }

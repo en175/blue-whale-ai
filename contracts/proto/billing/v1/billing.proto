@@ -198,6 +198,7 @@ message UserTransaction {
   optional int64 generation_job_id = 9;
   string lot_source     = 10;
   string lot_created_at = 11;
+  string charge_state = 12;
 }
 
 message ListLotsRequest {

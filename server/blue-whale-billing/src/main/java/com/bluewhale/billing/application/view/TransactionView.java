@@ -16,7 +16,8 @@ public record TransactionView(
         LocalDateTime createdAt,
         LocalDateTime settledAt,
         String lotSource,
-        LocalDateTime lotCreatedAt
+        LocalDateTime lotCreatedAt,
+        String chargeState
 ) {
 
     public record Page(List<TransactionView> items, long total) {
