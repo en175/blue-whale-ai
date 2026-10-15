@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
 import { X } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/custom/components/Toast';
 import { assetKeys, assetPageQueryOptions, deleteAsset, fetchAssetReferences, type AssetRecord } from '@/custom/api/assets';
 import { isApiError } from '@/shared/api/http';
 import {

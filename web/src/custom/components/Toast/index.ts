@@ -1,5 +1,7 @@
 import { toast } from 'sonner';
 
+export { toast };
+
 export type ToastKind = 'success' | 'error' | 'warn';
 
 export function showToast(type: ToastKind, msg: string): void {

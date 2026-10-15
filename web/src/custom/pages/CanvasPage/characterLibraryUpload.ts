@@ -1,4 +1,4 @@
-import { toast } from 'sonner';
+import { toast } from '@/custom/components/Toast';
 import { createAsset } from '@/custom/api/material';
 import { isApiError } from '@/shared/api/http';
 import { uploadAssetFile } from '@/custom/utils/upload';

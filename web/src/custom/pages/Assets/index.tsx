@@ -7,7 +7,7 @@ import { assetKeys, assetPageQueryOptions, deleteAsset, removeCachedAssetPages, 
 import { createAsset as createMaterialAsset } from '@/custom/api/material';
 import { uploadAssetFile } from '@/custom/utils/upload';
 import { isFileRejected } from '@/custom/utils/fileSignature';
-import { toast } from 'sonner';
+import { toast } from '@/custom/components/Toast';
 import { isApiError } from '@/shared/api/http';
 import ConfirmModal from '@/custom/components/ConfirmModal';
 import Skeleton from '@/custom/components/Skeleton';

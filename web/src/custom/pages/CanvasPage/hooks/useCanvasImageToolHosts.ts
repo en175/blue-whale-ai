@@ -1,6 +1,6 @@
 import type { MutableRefObject, RefObject } from 'react';
 import type { Node } from '@xyflow/react';
-import { toast as globalToast } from 'sonner';
+import { toast as globalToast } from '@/custom/components/Toast';
 import type { ImageOutpaintInput } from '@lib/contracts/image-outpaint';
 import { uploadAssetFile } from '@/custom/utils/upload';
 import { newNodeId } from '../nodeId';

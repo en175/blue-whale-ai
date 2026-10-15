@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Check, CreditCard, CheckCircle2, XCircle, Clock } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
-import { toast } from 'sonner';
+import { toast } from '@/custom/components/Toast';
 import Modal from '@/custom/components/Modal';
 import CustomRecharge from '@/custom/components/CustomRecharge';
 import styles from './index.module.css';

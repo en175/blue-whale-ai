@@ -18,7 +18,7 @@ import {
   type MaterialAsset,
 } from '@/custom/api/material';
 import { isApiError } from '@/shared/api/http';
-import { toast } from 'sonner';
+import { toast } from '@/custom/components/Toast';
 import { uploadMaterialLibraryFiles } from '../../characterLibraryUpload';
 import { VIDEO_REFERENCE_NOT_APPROVED_MESSAGE } from '@/custom/utils/video-reference-compliance';
 import { resolveMediaSrc } from '@/shared/utils/remoteImageCors';

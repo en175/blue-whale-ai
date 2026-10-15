@@ -36,7 +36,7 @@ import { videoReferenceMaxOf, audioReferenceMaxOf, imageReferenceMaxOf, supports
 import { promptCharCountLabel, promptMaxLengthOf } from '@/custom/utils/prompt-max-length';
 import { VIDEO_REFERENCE_NOT_APPROVED_MESSAGE, isUnapprovedVideoMaterialStatus } from '@/custom/utils/video-reference-compliance';
 import { OMNI_REFERENCE_FOLLOW_HINT } from '@/custom/utils/video-reference-hints';
-import { showToast as pushToast } from '@/custom/utils/toast';
+import { showToast as pushToast } from '@/custom/components/Toast';
 import DurationSlider from './DurationSlider';
 import { resolveHomeLoginResume, type HomePendingAction } from './homeLoginResume';
 import { limitPromptInput } from './promptInput';
