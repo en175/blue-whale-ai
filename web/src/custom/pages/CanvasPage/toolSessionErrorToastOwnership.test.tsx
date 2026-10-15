@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Node } from '@xyflow/react';
 import type { GenerationModel } from '@/custom/api/generation';
 import type { FetchJobsParams, FrameInterpolationCurrentData, JobListData } from '@/custom/api/jobs';
-import { toast } from 'sonner';
+import { toast, Toaster } from 'sonner';
 import { useAuthStore } from '@/shared/stores/auth';
 import { useAuthPromptStore } from '@/shared/stores/authPrompt';
 import { silenceApiConsoleInfo } from './testing/silenceApiLogs';
@@ -64,18 +64,10 @@ vi.mock('@/custom/components/UserDropdown/RechargeModal', () => ({ default: () =
 vi.mock('@/custom/pages/Assets/components/AssetDetailModal', () => ({ default: () => null }));
 
 
-vi.mock('sonner', () => ({
-  toast: {
-    error: vi.fn(),
-    success: vi.fn(),
-    info: vi.fn(),
-    warning: vi.fn(),
-    message: vi.fn(),
-    loading: vi.fn(),
-    dismiss: vi.fn(),
-  },
-  Toaster: () => null,
-}));
+vi.mock('sonner', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('sonner')>();
+  return { ...actual, toast: { ...actual.toast, error: vi.fn() } };
+});
 
 
 const projectMocks = vi.hoisted(() => ({
@@ -199,12 +191,14 @@ async function renderPage() {
   document.body.appendChild(container);
   const createdRoot = createRoot(container);
   root = createdRoot;
+  toast.dismiss();
+
   await act(async () => {
     createdRoot.render(
       createElement(
         QueryClientProvider,
         { client: new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } }) },
-        createElement(MemoryRouter, { initialEntries: ['/canvas?project=p1'] }, createElement(CanvasPage)),
+        createElement(MemoryRouter, { initialEntries: ['/canvas?project=p1'] }, createElement(CanvasPage), createElement(Toaster, { duration: Infinity })),
       ),
     );
   });
@@ -439,8 +433,8 @@ describe('IKI8L8 音频混合（真实 API/HTTP 链）：错误提示归属发�
     await armMix('a1', 'b1');
     await clickSend(mixSendBtn());
     await flush();
-    expect(document.body.textContent).toContain('混音服务开小差了');
-    expect(toast.error).not.toHaveBeenCalled();
+    expect(toast.error).toHaveBeenCalledTimes(1);
+    expect(toast.error).toHaveBeenCalledWith('混音服务开小差了');
     expect(mixSendBar()).not.toBeNull();
     expect(mixSendBtn()!.disabled).toBe(false);
   });
@@ -516,7 +510,7 @@ describe('抠像真实HTTP链：沿用全局提示呈现，运行时判断反馈
     expect(mattingCard().data.genStatus).toBe('failed');
     expect(toast.error).not.toHaveBeenCalled();
     expect(String(mattingCard().data.errorText)).toContain(failure === 'network' ? '网络请求失败' : '抠像业务失败');
-    expect(document.body.querySelector('[data-testid="canvas-toast"]')).toBeNull();
+    expect(document.querySelector('[data-sonner-toast]')).toBeNull();
   });
 
   it.each(['business', 'network'] as const)('同卡重开后旧 %s 失败全链路静默，任务失败仍落卡', async (failure) => {
@@ -533,7 +527,7 @@ describe('抠像真实HTTP链：沿用全局提示呈现，运行时判断反馈
     expect(mattingBar()).not.toBeNull();
     expect(mattingSend()!.disabled).toBe(false);
     expect(toast.error).not.toHaveBeenCalled();
-    expect(document.body.querySelector('[data-testid="canvas-toast"]')).toBeNull();
+    expect(document.querySelector('[data-sonner-toast]')).toBeNull();
     expect(mattingCard().data.genStatus).toBe('failed');
   });
 
@@ -547,14 +541,14 @@ describe('抠像真实HTTP链：沿用全局提示呈现，运行时判断反馈
     await flush();
     expect(toast.error).not.toHaveBeenCalled();
     expect(mattingCard().data.errorText).toBe('重试抠像拒绝');
-    expect(document.body.querySelector('[data-testid="canvas-toast"]')).toBeNull();
+    expect(document.querySelector('[data-sonner-toast]')).toBeNull();
   });
 
   it('401继续走登录续接，不新增错误提示', async () => {
     fetchMock.mockImplementationOnce(async () => jsonFail('请重新登录', 401));
     await renderPage(); await enterMatting(); await clickSend(mattingSend()); await flush();
     expect(toast.error).not.toHaveBeenCalled();
-    expect(document.body.querySelector('[data-testid="canvas-toast"]')).toBeNull();
+    expect(document.querySelector('[data-sonner-toast]')).toBeNull();
   });
 });
 
@@ -578,7 +572,7 @@ describe('扩图真实HTTP链：有效反馈沿用sonner，旧失败不打扰新
     expect(outpaintCard().data.errorText).toBe('扩图业务失败');
     expect(toast.error).toHaveBeenCalledTimes(1);
     expect(toast.error).toHaveBeenCalledWith('扩图业务失败');
-    expect(document.body.querySelector('[data-testid="canvas-toast"]')).toBeNull();
+    expect(document.querySelector('[data-sonner-toast]')).toBeNull();
   });
 
   it.each(['business', 'network'] as const)('同卡重开后旧 %s 失败全链路静默，新扩展参数保留', async (failure) => {
@@ -596,7 +590,7 @@ describe('扩图真实HTTP链：有效反馈沿用sonner，旧失败不打扰新
     expect(flowProps.current.outpaintFrame.expands.right).toBe(100);
     expect(outpaintSend()!.disabled).toBe(false);
     expect(toast.error).not.toHaveBeenCalled();
-    expect(document.body.querySelector('[data-testid="canvas-toast"]')).toBeNull();
+    expect(document.querySelector('[data-sonner-toast]')).toBeNull();
     expect(outpaintCard().data.genStatus).toBe('failed');
   });
 

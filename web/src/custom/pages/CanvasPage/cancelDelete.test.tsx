@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Node } from '@xyflow/react';
 import { ApiError } from '@/shared/api/http';
 import CanvasPage from './index';
+import { Toaster, toast } from 'sonner';
 
 
 vi.mock('@/custom/api/generationQuote', async (importActual) => ({
@@ -241,12 +242,14 @@ async function renderPage() {
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
+  toast.dismiss();
+
   await act(async () => {
     root.render(
       createElement(
         QueryClientProvider,
         { client: new QueryClient() },
-        createElement(MemoryRouter, null, createElement(CanvasPage)),
+        createElement(MemoryRouter, null, createElement(CanvasPage), createElement(Toaster, { duration: Infinity })),
       ),
     );
   });
@@ -322,7 +325,7 @@ describe('IKDMQW 普通取消：接口确认后按任务权威状态收敛', () 
     expect(nodeOf('d1')).toBeDefined();
     apiMocks.fetchJobStatus.mockResolvedValue({ ...SUCCEEDED });
     await vi.waitFor(() => expect(dataOf('d1').src).toBe('http://img/out.png'), { timeout: 4000 });
-    expect(container.textContent).toContain('任务已完成');
+    await vi.waitFor(() => expect(container.textContent).toContain('任务已完成'), { timeout: 3000 });
   });
 
   it('取消后的状态查询失败不能恢复待生成，轮询确认 cancelled 后才恢复', async () => {

@@ -8,6 +8,7 @@ import type { Node } from '@xyflow/react';
 import CanvasPage from './index';
 import { ATTACHMENT_ACTION_PICK_CANVAS_TITLE } from './components/AttachmentActionBar';
 import { readPromptRefText, typePromptRefRaw, typePromptRefText } from './testing/promptRefEditor';
+import { Toaster, toast } from 'sonner';
 
 
 vi.mock('@/custom/api/generationQuote', async (importActual) => ({
@@ -211,12 +212,14 @@ async function renderPage() {
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
+  toast.dismiss();
+
   await act(async () => {
     root.render(
       createElement(
         QueryClientProvider,
         { client: new QueryClient() },
-        createElement(MemoryRouter, null, createElement(CanvasPage)),
+        createElement(MemoryRouter, null, createElement(CanvasPage), createElement(Toaster, { duration: Infinity })),
       ),
     );
   });
@@ -375,7 +378,7 @@ describe('IKDMQR Dock 选择 → 连线', () => {
     await vi.waitFor(() => expect(container.textContent).toContain('测试生图模型'));
 
     await enterPickMode();
-    expect(container.textContent).toContain('点击画布中的图片节点');
+    await vi.waitFor(() => expect(container.textContent).toContain('点击画布中的图片节点'), { timeout: 3000 });
 
     const m1 = flowProps.current.mediaNodes.find((n: Node) => n.id === 'm1')!;
     await act(async () => {
@@ -389,7 +392,7 @@ describe('IKDMQR Dock 选择 → 连线', () => {
     expect(saved.edges.map((e: { source: string; target: string }) => `${e.source}->${e.target}`)).toEqual([`m1->${draftId}`]);
     expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();
 
-    expect(container.textContent).toContain('完成选取');
+    await vi.waitFor(() => expect(container.textContent).toContain('完成选取'), { timeout: 3000 });
     await finishPick();
     expect(container.textContent).not.toContain('点击画布中的图片节点');
 
@@ -418,7 +421,7 @@ describe('IKDMQR Dock 选择 → 连线', () => {
       flowProps.current.onNodeClick(otherDraft);
     });
     expect(edgePairs()).toEqual([]);
-    expect(container.textContent).toContain('待生成的草稿不能作为参考');
+    await vi.waitFor(() => expect(container.textContent).toContain('待生成的草稿不能作为参考'), { timeout: 3000 });
 
     await enterPickMode();
     const v1 = flowProps.current.mediaNodes.find((n: Node) => n.id === 'v1')!;
@@ -426,7 +429,7 @@ describe('IKDMQR Dock 选择 → 连线', () => {
       flowProps.current.onNodeClick(v1);
     });
     expect(edgePairs()).toEqual([]);
-    expect(container.textContent).toContain('图片参考仅支持图片素材');
+    await vi.waitFor(() => expect(container.textContent).toContain('图片参考仅支持图片素材'), { timeout: 3000 });
   });
 });
 
@@ -524,7 +527,7 @@ describe('IKDMQR 画布连线来源校验', () => {
     await connect('m1', draftId);
     await connect('m1-copy', draftId);
     expect(edgePairs()).toEqual([`m1->${draftId}`]);
-    expect(container.textContent).toContain('该素材已连入当前草稿');
+    await vi.waitFor(() => expect(container.textContent).toContain('该素材已连入当前草稿'), { timeout: 3000 });
 
     for (let i = 0; i < 9; i += 1) {
       await connect(`mx${i}`, draftId);
@@ -532,7 +535,7 @@ describe('IKDMQR 画布连线来源校验', () => {
     expect(edgePairs()).toHaveLength(10);
     await connect('mx9', draftId);
     expect(edgePairs()).toHaveLength(10);
-    expect(container.textContent).toContain('图片最多 10 张');
+    await vi.waitFor(() => expect(container.textContent).toContain('图片最多 10 张'), { timeout: 3000 });
   });
 
   it('重复校验兼容 assetId/asset_id/assetID 三形态（asset_id 形态来源去重不误判）', async () => {
@@ -563,7 +566,7 @@ describe('IKDMQR 画布连线来源校验', () => {
     expect(edgePairs()).toEqual([`m-u->${draftId}`]);
     await connect('m-c', draftId);
     expect(edgePairs()).toEqual([`m-u->${draftId}`]);
-    expect(container.textContent).toContain('该素材已连入当前草稿');
+    await vi.waitFor(() => expect(container.textContent).toContain('该素材已连入当前草稿'), { timeout: 3000 });
     await connect('m-x', draftId);
     expect(edgePairs()).toEqual([`m-u->${draftId}`, `m-x->${draftId}`]);
   });
@@ -597,7 +600,7 @@ describe('IKDMQR 生成中输入只读', () => {
     await createDraft();
     await vi.waitFor(() => expect(dockRefImages()).toEqual(['素材图一']));
     expect(container.querySelector('[data-testid="dock-media-ref"] button[title="移除"]')).toBeNull();
-    expect(container.textContent).toContain('生成中，参数与连线只读');
+    await vi.waitFor(() => expect(container.textContent).toContain('生成中，参数与连线只读'), { timeout: 3000 });
 
     const edgeId = flowProps.current.edges.find(
       (e: { source: string; target: string }) => e.source === 'm1' && e.target === draftId,

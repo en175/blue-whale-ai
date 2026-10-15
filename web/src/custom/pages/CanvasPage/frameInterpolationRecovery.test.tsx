@@ -151,7 +151,7 @@ describe('IKHSFF 发送前保存失败拦截', () => {
     expect(panelOpen()).toBe(false);
     expect(dataOf(draftId).genStatus).toBe('draft');
     expect(dataOf(draftId).jobId).toBeUndefined();
-    expect(document.body.textContent).toContain('画布保存失败');
+    await vi.waitFor(() => expect(document.body.textContent).toContain('画布保存失败'), { timeout: 3000 });
     await clickCard(draftId);
     expect(panelOpen()).toBe(true);
     expect(panelSend()!.disabled).toBe(false);
@@ -401,7 +401,7 @@ describe('IKHSFF 关页后重进：服务端权威关联恢复', () => {
     await act(async () => { (dataOf(draftId).onRetryJob as (id: string) => void)(draftId); });
     await flush();
     expect(apiMocks.createFrameInterpolation).not.toHaveBeenCalled();
-    expect(document.body.textContent).toContain('原任务输入已不可信');
+    await vi.waitFor(() => expect(document.body.textContent).toContain('原任务输入已不可信'), { timeout: 3000 });
     expect(identityOf(draftId)?.frozenParams).toBeUndefined();
   });
 

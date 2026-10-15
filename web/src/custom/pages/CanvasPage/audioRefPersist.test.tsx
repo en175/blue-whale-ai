@@ -13,6 +13,7 @@ import {
 } from './components/AttachmentActionBar';
 import barStyles from './components/AttachmentActionBar/index.module.css';
 import dialogStyles from './components/AudioDialog/index.module.css';
+import { Toaster, toast } from 'sonner';
 
 
 vi.mock('@/custom/api/generationQuote', async (importActual) => ({
@@ -253,12 +254,14 @@ async function renderPage() {
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
+  toast.dismiss();
+
   await act(async () => {
     root.render(
       createElement(
         QueryClientProvider,
         { client: new QueryClient() },
-        createElement(MemoryRouter, null, createElement(CanvasPage)),
+        createElement(MemoryRouter, null, createElement(CanvasPage), createElement(Toaster, { duration: Infinity })),
       ),
     );
   });

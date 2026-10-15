@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Node } from '@xyflow/react';
 import CanvasPage from './index';
 import { typePromptRefText } from './testing/promptRefEditor';
+import { Toaster, toast } from 'sonner';
 
 
 
@@ -234,12 +235,14 @@ async function renderPage() {
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
+  toast.dismiss();
+
   await act(async () => {
     root.render(
       createElement(
         QueryClientProvider,
         { client: new QueryClient() },
-        createElement(MemoryRouter, null, createElement(CanvasPage)),
+        createElement(MemoryRouter, null, createElement(CanvasPage), createElement(Toaster, { duration: Infinity })),
       ),
     );
   });
@@ -578,7 +581,7 @@ describe('IKDL9U review text input consistency', () => {
       flowProps.current.textNodes[0].data.onAddToChat('t1');
     });
     expect(apiMocks.createConversationQuote).not.toHaveBeenCalled();
-    expect(container.textContent).toContain('正文超限');
+    await vi.waitFor(() => expect(container.textContent).toContain('正文超限'), { timeout: 3000 });
   });
   it('blocks generation while a connected text has an invalid draft', async () => {
 

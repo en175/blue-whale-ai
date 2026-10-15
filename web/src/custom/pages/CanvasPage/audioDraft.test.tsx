@@ -8,6 +8,7 @@ import type { Node } from '@xyflow/react';
 import CanvasPage from './index';
 import type { AudioDialogProps } from './components/AudioDialog';
 import { typePromptRefText, readPromptRefText, promptRefReadOnly } from './testing/promptRefEditor';
+import { Toaster, toast } from 'sonner';
 
 
 const audioDialogProps = vi.hoisted(() => ({ current: null as AudioDialogProps | null }));
@@ -308,12 +309,14 @@ async function renderPage() {
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
+  toast.dismiss();
+
   await act(async () => {
     root.render(
       createElement(
         QueryClientProvider,
         { client: new QueryClient() },
-        createElement(MemoryRouter, null, createElement(CanvasPage)),
+        createElement(MemoryRouter, null, createElement(CanvasPage), createElement(Toaster, { duration: Infinity })),
       ),
     );
   });
@@ -542,7 +545,7 @@ describe('IKDMQT 原位提交与首次生成', () => {
     await openDraftPanel();
     expect(promptRefReadOnly(container)).toBe(true);
     expect(sendButton().disabled).toBe(true);
-    expect(container.textContent).toContain('生成中，参数只读');
+    await vi.waitFor(() => expect(container.textContent).toContain('生成中，参数只读'), { timeout: 3000 });
 
     await act(async () => {
       flowProps.current.onConnect({ source: 'm1', target: draftId, sourceHandle: null, targetHandle: null });
@@ -553,7 +556,7 @@ describe('IKDMQT 原位提交与首次生成', () => {
       flowProps.current.onEdgesChange([{ type: 'remove', id: draftEdgeId }]);
     });
     expect(flowProps.current.edges.some((e: { id: string }) => e.id === draftEdgeId)).toBe(true);
-    expect(container.textContent).toContain('生成中，输入连线只读');
+    await vi.waitFor(() => expect(container.textContent).toContain('生成中，输入连线只读'), { timeout: 3000 });
   });
 
   it('建任务 401：草稿回退待生成（标题恢复「音频草稿」），卡片与参数保留', async () => {

@@ -304,7 +304,7 @@ describe('IKILTB 422 阻断后项目切换提示刷新复核', () => {
     await act(async () => {});
 
     expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(1);
-    expect(document.querySelector('[data-testid="canvas-toast"]')?.textContent).toContain(REJECTED_422_TOAST);
+    await vi.waitFor(() => expect(document.body.textContent).toContain(REJECTED_422_TOAST), { timeout: 3000 });
     expect(locationRef!.search).toContain('project=p1');
   });
 });
@@ -423,7 +423,7 @@ describe('IKIN23 冲突后整文档待复核阻断陈旧保存', () => {
     await act(async () => {});
 
     expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(1);
-    expect(document.querySelector('[data-testid="canvas-toast"]')?.textContent).toContain(CONFLICT_TOAST);
+    await vi.waitFor(() => expect(document.body.textContent).toContain(CONFLICT_TOAST), { timeout: 3000 });
   });
 
   it('b. 412 清空冲突后新增保持非空：返回首页中止并提示刷新复核', async () => {
@@ -443,7 +443,7 @@ describe('IKIN23 冲突后整文档待复核阻断陈旧保存', () => {
     await act(async () => {});
 
     expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(1);
-    expect(document.querySelector('[data-testid="canvas-toast"]')?.textContent).toContain(CONFLICT_TOAST);
+    await vi.waitFor(() => expect(document.body.textContent).toContain(CONFLICT_TOAST), { timeout: 3000 });
     expect(locationRef!.search).toContain('project=p1');
   });
 
@@ -498,7 +498,7 @@ describe('IKIN23 冲突后整文档待复核阻断陈旧保存', () => {
     await act(async () => { retryBtn!.click(); });
     await act(async () => {});
     expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(1);
-    expect(document.querySelector('[data-testid="canvas-toast"]')?.textContent).toContain(REJECTED_422_TOAST);
+    await vi.waitFor(() => expect(document.body.textContent).toContain(REJECTED_422_TOAST), { timeout: 3000 });
   });
 
   it('e. 422 拒后新增保持非空：返回首页中止并提示刷新复核', async () => {
@@ -525,7 +525,7 @@ describe('IKIN23 冲突后整文档待复核阻断陈旧保存', () => {
     await act(async () => {});
 
     expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(1);
-    expect(document.querySelector('[data-testid="canvas-toast"]')?.textContent).toContain(REJECTED_422_TOAST);
+    await vi.waitFor(() => expect(document.body.textContent).toContain(REJECTED_422_TOAST), { timeout: 3000 });
     expect(locationRef!.search).toContain('project=p1');
   });
 
@@ -550,7 +550,7 @@ describe('IKIN23 冲突后整文档待复核阻断陈旧保存', () => {
     expect(retryBtn).toBeTruthy();
     await act(async () => { retryBtn!.click(); });
     expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(1);
-    expect(document.querySelector('[data-testid="canvas-toast"]')?.textContent).toContain(CONFLICT_TOAST);
+    await vi.waitFor(() => expect(document.body.textContent).toContain(CONFLICT_TOAST), { timeout: 3000 });
 
     canvasDocMock.current = {
       ...canvasDocMock.current,
@@ -607,7 +607,7 @@ describe('IKIN23 冲突后整文档待复核阻断陈旧保存', () => {
     expect(retryBtn).toBeTruthy();
     await act(async () => { retryBtn!.click(); });
     expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(1);
-    expect(document.querySelector('[data-testid="canvas-toast"]')?.textContent).toContain(CONFLICT_TOAST);
+    await vi.waitFor(() => expect(document.body.textContent).toContain(CONFLICT_TOAST), { timeout: 3000 });
   });
 });
 
@@ -634,7 +634,7 @@ describe('IKIN8A 待复核期间同页 Project 导航门禁', () => {
     expect(locationRef!.search).not.toContain('project=p2');
     expect(flowProps.current.textNodes.length).toBeGreaterThan(0);
     expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(1);
-    expect(document.querySelector('[data-testid="canvas-toast"]')?.textContent).toContain(CONFLICT_TOAST);
+    await vi.waitFor(() => expect(document.body.textContent).toContain(CONFLICT_TOAST), { timeout: 3000 });
   }, 10000);
 
   it('b. 被拒的同页导航不清除待复核：此后手动重试保存仍被拦，仍提示刷新复核', async () => {
@@ -650,7 +650,7 @@ describe('IKIN8A 待复核期间同页 Project 导航门禁', () => {
     await act(async () => { retryBtn!.click(); });
     await act(async () => {});
     expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(1);
-    expect(document.querySelector('[data-testid="canvas-toast"]')?.textContent).toContain(CONFLICT_TOAST);
+    await vi.waitFor(() => expect(document.body.textContent).toContain(CONFLICT_TOAST), { timeout: 3000 });
   }, 10000);
 
   it('c. 422 空覆盖待复核期间：同页路由切换同样被中止，新增节点保留并提示刷新复核', async () => {
@@ -671,7 +671,7 @@ describe('IKIN8A 待复核期间同页 Project 导航门禁', () => {
     expect(locationRef!.search).toContain('project=p1');
     expect(flowProps.current.textNodes).toHaveLength(1);
     expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(1);
-    expect(document.querySelector('[data-testid="canvas-toast"]')?.textContent).toContain(REJECTED_422_TOAST);
+    await vi.waitFor(() => expect(document.body.textContent).toContain(REJECTED_422_TOAST), { timeout: 3000 });
   }, 10000);
 
   it('d. 无待复核时同页切换到另一 Project：正常水合新项目、地址指向新项目、可正常保存', async () => {

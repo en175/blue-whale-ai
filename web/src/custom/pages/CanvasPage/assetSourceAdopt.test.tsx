@@ -9,6 +9,7 @@ import CanvasPage from './index';
 import { ATTACHMENT_ACTION_PICK_ASSETS_TITLE } from './components/AttachmentActionBar';
 import type { GenerationModel, ModelFeatures } from '@/custom/api/generation';
 import type { AssetRecord } from '@/custom/api/assets';
+import { Toaster, toast } from 'sonner';
 
 
 vi.mock('@/custom/api/generationQuote', async (importActual) => ({
@@ -309,12 +310,14 @@ async function renderPage() {
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
+  toast.dismiss();
+
   await act(async () => {
     root.render(
       createElement(
         QueryClientProvider,
         { client: new QueryClient() },
-        createElement(MemoryRouter, null, createElement(CanvasPage)),
+        createElement(MemoryRouter, null, createElement(CanvasPage), createElement(Toaster, { duration: Infinity })),
       ),
     );
   });

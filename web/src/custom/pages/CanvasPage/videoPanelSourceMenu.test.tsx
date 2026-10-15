@@ -24,6 +24,7 @@ import {
 } from './components/AttachmentActionBar';
 import barStyles from './components/AttachmentActionBar/index.module.css';
 import dialogStyles from './components/BottomDialog/index.module.css';
+import { Toaster, toast } from 'sonner';
 
 vi.mock('@/custom/api/generationQuote', async (importActual) => ({
   ...(await importActual<typeof import('@/custom/api/generationQuote')>()),
@@ -268,6 +269,8 @@ async function renderPage(withHomeHandoff = false) {
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
+  toast.dismiss();
+
   await act(async () => {
     root.render(
       createElement(
@@ -278,7 +281,7 @@ async function renderPage(withHomeHandoff = false) {
           withHomeHandoff
             ? { initialEntries: [{ pathname: '/c', state: { genKind: 'video' } }] }
             : undefined,
-          createElement(CanvasPage),
+          createElement(CanvasPage), createElement(Toaster, { duration: Infinity }),
         ),
       ),
     );
@@ -400,7 +403,7 @@ async function switchMode(label: '全能参考' | '图片参考' | '首尾帧') 
 }
 
 function toastText(): string {
-  return container.textContent ?? '';
+  return document.body.textContent ?? '';
 }
 
 
@@ -475,7 +478,7 @@ describe('IKGB7W 视频面板附件操作条（普通参考模式）', () => {
 
     await clickPickReference();
 
-    expect(container.textContent).toContain('连续点击画布中的图片、视频或音频节点带入参考');
+    await vi.waitFor(() => expect(container.textContent).toContain('连续点击画布中的图片、视频或音频节点带入参考'), { timeout: 3000 });
     expect(pickReferenceButton()!.classList.contains(barStyles.picking)).toBe(true);
     expect(assetsLibraryButton()!.classList.contains(barStyles.picking)).toBe(false);
   });
@@ -529,7 +532,7 @@ describe('IKGB7W 视频面板附件操作条（普通参考模式）', () => {
     await clickPickReference();
     await clickNode('v1');
 
-    expect(toastText()).toContain('图片参考仅支持图片素材');
+    await vi.waitFor(() => expect(toastText()).toContain('图片参考仅支持图片素材'), { timeout: 3000 });
     expect(edgePairs()).toEqual(['m1->' + currentVideoDraftId()]);
 
     await clickNode('m2');
@@ -585,7 +588,7 @@ describe('IKGB7W 视频面板附件操作条（普通参考模式）', () => {
     await act(async () => {
       assetsPickerProps.current.onSelect([audioAsset(2), audioAsset(3)]);
     });
-    expect(toastText()).toContain('参考音频最多 3 段');
+    await vi.waitFor(() => expect(toastText()).toContain('参考音频最多 3 段'), { timeout: 3000 });
     await vi.waitFor(() => expect(edgePairs().length).toBe(3));
   });
 
@@ -596,11 +599,11 @@ describe('IKGB7W 视频面板附件操作条（普通参考模式）', () => {
 
     await clickPickReference();
 
-    expect(container.textContent).toContain('连续点击画布中的图片、视频或音频节点带入参考');
+    await vi.waitFor(() => expect(container.textContent).toContain('连续点击画布中的图片、视频或音频节点带入参考'), { timeout: 3000 });
     expect([...container.querySelectorAll('button')].some((b) => b.textContent === '完成选取')).toBe(true);
 
     await clickNode('m1');
-    expect(container.textContent).toContain('完成选取');
+    await vi.waitFor(() => expect(container.textContent).toContain('完成选取'), { timeout: 3000 });
     expect(container.textContent).not.toContain('点击空白处取消');
   });
 });
@@ -679,7 +682,7 @@ describe('IKGB7Y 首尾帧操作条顺序填充与溢出处理', () => {
 
     expect(pickActive()).toBe(false);
     expect(finishPickButton()).toBeUndefined();
-    expect(toastText()).toContain('首尾帧已就绪');
+    await vi.waitFor(() => expect(toastText()).toContain('首尾帧已就绪'), { timeout: 3000 });
     await vi.waitFor(() => expect(frameBadges()).toEqual(['首帧', '尾帧']));
   });
 
@@ -705,7 +708,7 @@ describe('IKGB7Y 首尾帧操作条顺序填充与溢出处理', () => {
     await clickNode('m4');
     expect(frameEdges().some((e) => e.source === 'm4' && e.data?.refRole === 'last')).toBe(true);
     expect(pickActive()).toBe(false);
-    expect(toastText()).toContain('首尾帧已就绪');
+    await vi.waitFor(() => expect(toastText()).toContain('首尾帧已就绪'), { timeout: 3000 });
   });
 
   it('资产库多选超剩余空槽（两槽均空选 3 张）：按选择顺序只取前两张填满首/尾帧并 toast 提示', async () => {
@@ -725,7 +728,7 @@ describe('IKGB7Y 首尾帧操作条顺序填充与溢出处理', () => {
     expect(nodeAssetId(first.source)).toBe('901');
     expect(nodeAssetId(last.source)).toBe('902');
     expect(canvasHasAsset('903')).toBe(false);
-    expect(toastText()).toContain('首尾帧最多两张图片，已按选择顺序取前两张');
+    await vi.waitFor(() => expect(toastText()).toContain('首尾帧最多两张图片，已按选择顺序取前两张'), { timeout: 3000 });
     await vi.waitFor(() => expect(frameBadges()).toEqual(['首帧', '尾帧']));
   });
 
@@ -742,7 +745,7 @@ describe('IKGB7Y 首尾帧操作条顺序填充与溢出处理', () => {
     const last = frameEdges().find((e) => e.data?.refRole === 'last')!;
     expect(nodeAssetId(last.source)).toBe('901');
     expect(canvasHasAsset('902')).toBe(false);
-    expect(toastText()).toContain('首尾帧仅支持一张图片，已取首张');
+    await vi.waitFor(() => expect(toastText()).toContain('首尾帧仅支持一张图片，已取首张'), { timeout: 3000 });
     await vi.waitFor(() => expect(frameBadges()).toEqual(['首帧', '尾帧']));
   });
 });
@@ -778,7 +781,7 @@ describe('IKFEWF 文本选取边界', () => {
     const slot = [...container.querySelectorAll<HTMLButtonElement>('button')].find(b => b.title.includes('尾帧') && b.title.includes('从资产'))!;
     await clickMenuItem(slot, '从节点添加素材');
     await clickNode('t1');
-    expect(toastText()).toContain('首尾帧仅支持图片素材');
+    await vi.waitFor(() => expect(toastText()).toContain('首尾帧仅支持图片素材'), { timeout: 3000 });
     expect(flowProps.current.edges.some((e: { source: string }) => e.source === 't1')).toBe(false);
     await clickNode('m2');
     expect(flowProps.current.edges.some((e: { source: string; data?: { refRole?: string } }) => e.source === 'm2' && e.data?.refRole === 'last')).toBe(true);

@@ -8,6 +8,7 @@ import type { Node } from '@xyflow/react';
 import CanvasPage from './index';
 import type { GenerationModel } from '@/custom/api/generation';
 import { imageMediaRefsOf } from './mediaRefs';
+import { Toaster, toast } from 'sonner';
 
 vi.mock('@/custom/api/generationQuote', async (importActual) => ({
   ...(await importActual<typeof import('@/custom/api/generationQuote')>()),
@@ -205,12 +206,14 @@ async function renderPage() {
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
+  toast.dismiss();
+
   await act(async () => {
     root.render(
       createElement(
         QueryClientProvider,
         { client: new QueryClient() },
-        createElement(MemoryRouter, null, createElement(CanvasPage)),
+        createElement(MemoryRouter, null, createElement(CanvasPage), createElement(Toaster, { duration: Infinity })),
       ),
     );
   });
@@ -486,7 +489,7 @@ describe('IKGW1S 失败路径：留在裁切模式，不产生半成品', () => 
     expect(mediaNodes().length).toBe(2);
     expect(flowProps.current.edges).toEqual([]);
     expect(apiMocks.uploadAssetFile).not.toHaveBeenCalled();
-    expect(container.textContent).toContain('分辨率');
+    await vi.waitFor(() => expect(container.textContent).toContain('分辨率'), { timeout: 3000 });
   });
 
   it('上传失败：留在裁切模式、无卡无边，toast 报错', async () => {
@@ -499,7 +502,7 @@ describe('IKGW1S 失败路径：留在裁切模式，不产生半成品', () => 
     expect(mediaNodes().length).toBe(2);
     expect(flowProps.current.edges).toEqual([]);
     expect(cropFrameProp()).not.toBeNull();
-    expect(container.textContent).toContain('裁切上传失败');
+    await vi.waitFor(() => expect(container.textContent).toContain('裁切上传失败'), { timeout: 3000 });
   });
 
   it('提交期间重复点确认只发起一次（防双卡）', async () => {
@@ -604,7 +607,7 @@ describe('IKJIQ3 裁切运行时接线：编码窗口与迟到上传', () => {
     await renderPage(); await cropImage('i1'); await clickBody('crop-preset-4-3');
     await clickBody('crop-confirm');
     expect(cropFrameProp()?.preset).toBe('4:3');
-    expect(container.textContent).toContain('裁切生成失败');
+    await vi.waitFor(() => expect(container.textContent).toContain('裁切生成失败'), { timeout: 3000 });
     expect(apiMocks.uploadAssetFile).not.toHaveBeenCalled();
     await clickBody('crop-confirm');
     expect(apiMocks.uploadAssetFile).toHaveBeenCalledTimes(1);
@@ -626,7 +629,7 @@ describe('IKJIQ3 裁切运行时接线：编码窗口与迟到上传', () => {
     });
     expect(cropEditing('i1')).toBe(true);
     expect(cropFrameProp()?.preset).toBe('1:1');
-    expect(document.body.querySelector('[data-testid="canvas-toast"]')).toBeNull();
+    expect(document.querySelector('[data-sonner-toast]')).toBeNull();
     await clickBody('crop-confirm');
     expect(apiMocks.uploadAssetFile).toHaveBeenCalledTimes(2);
     expect(mediaNodes()).toHaveLength(outcome === 'success' ? 3 : 2);

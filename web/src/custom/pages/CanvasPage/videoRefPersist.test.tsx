@@ -8,6 +8,7 @@ import type { Node } from '@xyflow/react';
 import CanvasPage from './index';
 import { readPromptRefText, typePromptRefRaw, typePromptRefText } from './testing/promptRefEditor';
 import type { GenerationModel, ModelFeatures } from '@/custom/api/generation';
+import { Toaster, toast } from 'sonner';
 
 vi.mock('@/custom/api/generationQuote', async (importActual) => ({
   ...(await importActual<typeof import('@/custom/api/generationQuote')>()),
@@ -257,12 +258,14 @@ async function renderPage() {
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
+  toast.dismiss();
+
   await act(async () => {
     root.render(
       createElement(
         QueryClientProvider,
         { client: new QueryClient() },
-        createElement(MemoryRouter, null, createElement(CanvasPage)),
+        createElement(MemoryRouter, null, createElement(CanvasPage), createElement(Toaster, { duration: Infinity })),
       ),
     );
   });
@@ -558,7 +561,7 @@ describe('IKFDFW 视频参考即时保存与角色恢复', () => {
     await vi.waitFor(() => expect(frameBadges()).toEqual(['首帧', '尾帧']));
     expect(readPromptRefText(container)).toBe('保留我的编辑');
     await vi.waitFor(() => expect(container.textContent).toContain('测试视频模型'));
-    expect(container.textContent).toContain('720p');
+    await vi.waitFor(() => expect(container.textContent).toContain('720p'), { timeout: 3000 });
   });
 
   it('点击画布空白：视频面板统一关闭（IKFYH6 推翻旧「不关」设计），参考与提示词保留，重开恢复', async () => {
@@ -855,7 +858,7 @@ describe('IKFR4Y 视频参考持续选取与首尾帧连续替换', () => {
     expect(pickLock()).toBe(true);
 
     await clickNode('v4');
-    expect(container.textContent).toContain('参考视频最多 3 个');
+    await vi.waitFor(() => expect(container.textContent).toContain('参考视频最多 3 个'), { timeout: 3000 });
     expect(edgePairs()).toHaveLength(4);
     expect(pickLock()).toBe(true);
     await clickNode('m2');
@@ -944,11 +947,11 @@ describe('IKFR4Y 视频参考持续选取与首尾帧连续替换', () => {
 
     await enterPick('添加首帧（从资产中选择 / 从节点添加素材）');
     await clickNode('v1');
-    expect(container.textContent).toContain('首尾帧仅支持图片素材');
+    await vi.waitFor(() => expect(container.textContent).toContain('首尾帧仅支持图片素材'), { timeout: 3000 });
     expect(edgePairs().sort()).toEqual(['m1->d1', 'm2->d1']);
     expect(pickLock()).toBe(true);
     await clickNode('t1');
-    expect(container.textContent).toContain('首尾帧仅支持图片素材');
+    await vi.waitFor(() => expect(container.textContent).toContain('首尾帧仅支持图片素材'), { timeout: 3000 });
     expect(flowProps.current.edges.some((e: { source: string }) => e.source === 't1')).toBe(false);
     expect(pickLock()).toBe(true);
     await clickNode('m3');

@@ -36,6 +36,7 @@ import { videoReferenceMaxOf, audioReferenceMaxOf, imageReferenceMaxOf, supports
 import { promptCharCountLabel, promptMaxLengthOf } from '@/custom/utils/prompt-max-length';
 import { VIDEO_REFERENCE_NOT_APPROVED_MESSAGE, isUnapprovedVideoMaterialStatus } from '@/custom/utils/video-reference-compliance';
 import { OMNI_REFERENCE_FOLLOW_HINT } from '@/custom/utils/video-reference-hints';
+import { showToast as pushToast } from '@/custom/utils/toast';
 import DurationSlider from './DurationSlider';
 import { resolveHomeLoginResume, type HomePendingAction } from './homeLoginResume';
 import { limitPromptInput } from './promptInput';
@@ -64,6 +65,7 @@ async function navigateToNewProject(navigate: ReturnType<typeof useNavigate>, st
 }
 
 export default function ChatBox({ draft }: { draft?: { text: string; ts: number; mediaType: 'video' | 'image' } | null }) {
+  const showToast = (msg: string) => pushToast('warn', msg);
   const [activeTab, setActiveTab] = useState('agent');
   const [inputValue, setInputValue] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -132,20 +134,6 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
 
   const [slotTarget, setSlotTarget] = useState<'first' | 'last' | null>(null);
 
-  const [toast, setToast] = useState('');
-  const toastTimer = useRef<number | null>(null);
-  const showToast = useCallback((msg: string) => {
-    setToast(msg);
-    if (toastTimer.current) window.clearTimeout(toastTimer.current);
-    toastTimer.current = window.setTimeout(() => setToast(''), 2600);
-  }, []);
-  useEffect(
-    () => () => {
-      if (toastTimer.current) window.clearTimeout(toastTimer.current);
-    },
-    [],
-  );
-
   const [imageModel, setImageModel] = useState('');
   const [imageAspectRatio, setImageAspectRatio] = useState('');
   const [imageResolution, setImageResolution] = useState('');
@@ -187,7 +175,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
     if (!isKeyframe) return;
     const ok = keyframeRefs.first || keyframeRefs.last;
     if (!ok) showToast('首尾帧模式需至少上传一张图片（首帧或尾帧）');
-  }, [isKeyframe, keyframeRefs, showToast]);
+  }, [isKeyframe, keyframeRefs]);
 
   useEffect(() => {
     const m = videoModelList.find((x) => x.model_id === videoModel);
@@ -1556,14 +1544,6 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
       { }
       {showLogin && <LoginModal onClose={handleLoginClose} />}
 
-      { }
-      {toast && (
-        <div className={styles.toast} role="alert">
-          {toast}
-        </div>
-      )}
-
-      { }
       {refMenu && refMenuPos && createPortal(
         <div ref={refMenuRef} className={styles.refMenu} style={refMenuPos}>
           <button

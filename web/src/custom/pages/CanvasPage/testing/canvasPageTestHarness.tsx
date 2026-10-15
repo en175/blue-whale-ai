@@ -2,6 +2,7 @@ import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
+import { Toaster, toast } from 'sonner';
 import CanvasPageNavProbe from './CanvasPageNavProbe';
 import { beforeAll, vi } from 'vitest';
 import type { Node } from '@xyflow/react';
@@ -184,6 +185,7 @@ export async function renderPage() {
         QueryClientProvider,
         { client: new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } }) },
         createElement(MemoryRouter, { initialEntries: ['/canvas?project=p1'] }, createElement(CanvasPageNavProbe, { onChange: (navigate, search) => { navigateRef = navigate; locationRef = { search }; } }), createElement(CanvasPage)),
+        createElement(Toaster, { duration: Infinity }),
       ),
     );
   });
@@ -192,6 +194,7 @@ export async function renderPage() {
 export async function unmountPage() {
   const current = root;
   if (current) await act(async () => { current.unmount(); });
+  toast.dismiss();
   container?.remove();
   root = null;
   container = null;

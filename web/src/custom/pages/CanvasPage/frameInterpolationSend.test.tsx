@@ -931,7 +931,7 @@ describe('IKHSFH 提交会话隔离（切卡旧响应与并行）', () => {
     });
     await clickCard(draftId);
     expect(panelOpen()).toBe(true);
-    expect(document.body.textContent).toContain('参数只读');
+    await vi.waitFor(() => expect(document.body.textContent).toContain('参数只读'), { timeout: 3000 });
     expect(panelFps(120)!.disabled).toBe(true);
     expect(panelSend()!.disabled).toBe(true);
 

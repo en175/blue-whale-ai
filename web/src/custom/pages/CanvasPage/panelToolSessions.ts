@@ -1,5 +1,4 @@
 import type { Node } from '@xyflow/react';
-import { isApiError } from '@/shared/api/http';
 import { buildImageEnhanceInput, restoreImageEnhanceParams, type ImageEnhanceIdentity, type ImageEnhancePanelParams } from './imageEnhance';
 import { buildVideoEnhanceInput, restoreVideoEnhanceResolution, type VideoEnhanceIdentity } from './videoEnhance';
 import type { VideoEnhanceResolution } from '@lib/contracts/video-enhance';
@@ -78,7 +77,6 @@ export function createVideoEnhanceSession(getHost: () => PanelToolHost): ToolSes
     inFlight: (state) => getHost().isVideoEnhanceInFlight(state.nodeId),
     onError(error) {
       if (isSilentAuthError(error)) return;
-      if (isApiError(error)) getHost().httpError(error.message);
       getHost().error(apiErrorMessage(error, 'HD 高清任务创建失败，请重试'));
     },
     reconcile: (state) => getHost().isValidTarget(state.nodeId, 'videoEnhance') ? state : null,

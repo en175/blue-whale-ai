@@ -55,13 +55,13 @@ describe('HD 面板通过运行时的提交契约', () => {
     video.send('4k'); pending[1]!.resolve(); await flush();
     expect(video.getSnapshot().visible).toBe(false);
   });
-  it('当前有效 HD HTTP 失败保留原 HTTP 与画布两路提示，后来会话不接收这两路旧错误', async () => {
+  it('当前有效 HD HTTP 失败保留单路提示，后来会话不接收旧错误', async () => {
     for (const reopen of [false, true]) {
       const { video, pending, errors } = setup();
       video.open('a', deps); video.send('2k');
       if (reopen) { video.close(); video.open('a', deps); }
       pending[0]!.reject(new ApiError(400, '输入超出限制')); await flush();
-      expect(errors).toEqual(reopen ? [] : ['输入超出限制', '输入超出限制']);
+      expect(errors).toEqual(reopen ? [] : ['输入超出限制']);
     }
   });
   it.each(['close', 'reopen', 'switch', 'project'] as const)('%s 后旧成功/失败不关闭新界面、不解新锁、不弹旧错误', async (change) => {

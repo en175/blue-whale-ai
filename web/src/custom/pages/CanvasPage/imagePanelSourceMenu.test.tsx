@@ -13,6 +13,7 @@ import {
 } from './components/AttachmentActionBar';
 import barStyles from './components/AttachmentActionBar/index.module.css';
 import dialogStyles from './components/ImageDialog/index.module.css';
+import { Toaster, toast } from 'sonner';
 
 vi.mock('@/custom/api/generationQuote', async (importActual) => ({
   ...(await importActual<typeof import('@/custom/api/generationQuote')>()),
@@ -229,6 +230,8 @@ async function renderPage(withHomeHandoff = false) {
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
+  toast.dismiss();
+
   await act(async () => {
     root.render(
       createElement(
@@ -239,7 +242,7 @@ async function renderPage(withHomeHandoff = false) {
           withHomeHandoff
             ? { initialEntries: [{ pathname: '/c', state: { genKind: 'image' } }] }
             : undefined,
-          createElement(CanvasPage),
+          createElement(CanvasPage), createElement(Toaster, { duration: Infinity }),
         ),
       ),
     );
@@ -302,7 +305,7 @@ function refImages(): string[] {
 }
 
 function toastText(): string {
-  return container.textContent ?? '';
+  return document.body.textContent ?? '';
 }
 
 beforeEach(() => {
@@ -371,7 +374,7 @@ describe('IKGB7U 图片面板附件操作条', () => {
 
     await clickPickReference();
 
-    expect(toastText()).toContain('从节点添加素材');
+    await vi.waitFor(() => expect(toastText()).toContain('从节点添加素材'), { timeout: 3000 });
     expect(pickReferenceButton()!.classList.contains(barStyles.picking)).toBe(true);
   });
 
@@ -389,7 +392,7 @@ describe('IKGB7U 图片面板附件操作条', () => {
     await clickPickReference();
     await clickNode('v1');
 
-    expect(toastText()).toContain('图片参考仅支持图片素材');
+    await vi.waitFor(() => expect(toastText()).toContain('图片参考仅支持图片素材'), { timeout: 3000 });
     expect(refImages()).toEqual([]);
     await clickNode('m1');
     await vi.waitFor(() => expect(refImages()).toEqual(['素材图一']));
@@ -401,7 +404,7 @@ describe('IKGB7U 图片面板附件操作条', () => {
     await clickPickReference();
     await clickNode('s1');
 
-    expect(toastText()).toContain('图片参考仅支持图片素材');
+    await vi.waitFor(() => expect(toastText()).toContain('图片参考仅支持图片素材'), { timeout: 3000 });
     expect(refImages()).toEqual([]);
   });
 
@@ -421,7 +424,7 @@ describe('IKGB7U 图片面板附件操作条', () => {
     await clickPickReference();
     await clickNode('v1');
 
-    expect(toastText()).toContain('图片参考仅支持图片素材');
+    await vi.waitFor(() => expect(toastText()).toContain('图片参考仅支持图片素材'), { timeout: 3000 });
     expect(refImages()).toEqual([]);
     await clickPickReference();
     await clickNode('m1');

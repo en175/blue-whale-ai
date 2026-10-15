@@ -315,7 +315,7 @@ describe('卡片右键菜单入口保持原行为（父单故事 32）', () => {
       t1Callbacks().onPaste('t1');
     });
     await act(async () => {});
-    expect(document.body.textContent).toContain('剪贴板无可粘贴内容');
+    await vi.waitFor(() => expect(document.body.textContent).toContain('剪贴板无可粘贴内容'), { timeout: 3000 });
     expect(textCopies()).toHaveLength(1);
   });
 });
