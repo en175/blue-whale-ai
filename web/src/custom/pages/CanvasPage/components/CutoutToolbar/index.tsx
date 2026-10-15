@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { X, ArrowUp, ChevronDown, Scan, User, Package, CircleDot, Crop } from 'lucide-react';
+import DropdownMenu from '@/custom/components/DropdownMenu';
 import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../followDialog';
 import {
   IMAGE_CUTOUT_CONTOUR_SIZE_MIN,
@@ -54,23 +55,6 @@ export default function CutoutToolbar({
 }: CutoutToolbarProps) {
   const [sceneMenuOpen, setSceneMenuOpen] = useState(false);
   const [contourMenuOpen, setContourMenuOpen] = useState(false);
-  const sceneAnchorRef = useRef<HTMLDivElement | null>(null);
-  const contourAnchorRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    if (!sceneMenuOpen && !contourMenuOpen) return;
-    const onPointerDown = (e: PointerEvent) => {
-      const target = e.target as Node;
-      if (sceneMenuOpen && sceneAnchorRef.current && !sceneAnchorRef.current.contains(target)) {
-        setSceneMenuOpen(false);
-      }
-      if (contourMenuOpen && contourAnchorRef.current && !contourAnchorRef.current.contains(target)) {
-        setContourMenuOpen(false);
-      }
-    };
-    document.addEventListener('pointerdown', onPointerDown);
-    return () => document.removeEventListener('pointerdown', onPointerDown);
-  }, [sceneMenuOpen, contourMenuOpen]);
 
   const subjectScene = scene !== 'general';
   const sceneLabel = SCENE_OPTIONS.find((option) => option.key === scene)?.label ?? '通用';
@@ -99,66 +83,69 @@ export default function CutoutToolbar({
         </button>
         <span className={styles.divider} aria-hidden />
 
-        <div className={styles.menuAnchor} ref={sceneAnchorRef}>
-          <button
-            type="button"
-            className={styles.triggerBtn}
-            aria-haspopup="menu"
-            aria-expanded={sceneMenuOpen || undefined}
-            title="选择抠图场景"
-            data-testid="cutout-scene-trigger"
-            onClick={() => {
-              setContourMenuOpen(false);
-              setSceneMenuOpen((open) => !open);
-            }}
-          >
-            <span>{sceneLabel}</span>
-            <ChevronDown size={12} strokeWidth={2} />
-          </button>
-          {sceneMenuOpen && (
-            <div className={styles.menuPopup} role="menu" data-testid="cutout-scene-menu">
-              {SCENE_OPTIONS.map(({ key, label, hint, Icon }) => (
-                <button
-                  key={key}
-                  type="button"
-                  role="menuitem"
-                  title={hint}
-                  className={`${styles.menuItem} ${scene === key ? styles.menuItemActive : ''}`}
-                  data-testid={`cutout-scene-${key}`}
-                  onClick={guarded(false, () => {
-                    onSceneChange(key);
-                    setSceneMenuOpen(false);
-                  })}
-                >
-                  <Icon size={14} strokeWidth={2} />
-                  <span>{label}</span>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
+        <DropdownMenu
+          modal={false}
+          open={sceneMenuOpen}
+          onOpenChange={(open) => {
+            setSceneMenuOpen(open);
+            if (open) setContourMenuOpen(false);
+          }}
+          wrapClassName={styles.menuAnchor}
+          contentClassName={styles.menuPopup}
+          contentTestId="cutout-scene-menu"
+          trigger={
+            <button
+              type="button"
+              className={styles.triggerBtn}
+              aria-haspopup="menu"
+              title="选择抠图场景"
+              data-testid="cutout-scene-trigger"
+            >
+              <span>{sceneLabel}</span>
+              <ChevronDown size={12} strokeWidth={2} />
+            </button>
+          }
+          items={SCENE_OPTIONS.map(({ key, label, hint, Icon }) => ({
+            key,
+            label: (
+              <>
+                <Icon size={14} strokeWidth={2} />
+                <span>{label}</span>
+              </>
+            ),
+            title: hint,
+            testId: `cutout-scene-${key}`,
+            onSelect: () => onSceneChange(key),
+          }))}
+        />
 
         {subjectScene && (
           <>
-            <div className={styles.menuAnchor} ref={contourAnchorRef}>
-              <button
-                type="button"
-                className={`${styles.triggerBtn} ${needContour ? styles.triggerBtnActive : ''}`}
-                aria-haspopup="menu"
-                aria-expanded={contourMenuOpen || undefined}
-                title="主体描边（白色，仅人像/商品）"
-                data-testid="cutout-contour-trigger"
-                onClick={() => {
-                  setSceneMenuOpen(false);
-                  setContourMenuOpen((open) => !open);
-                }}
-              >
-                <CircleDot size={14} strokeWidth={2} />
-                <span>描边</span>
-                <ChevronDown size={12} strokeWidth={2} />
-              </button>
-              {contourMenuOpen && (
-                <div className={styles.contourPopup} data-testid="cutout-contour-menu">
+            <DropdownMenu
+              modal={false}
+              open={contourMenuOpen}
+              onOpenChange={(open) => {
+                setContourMenuOpen(open);
+                if (open) setSceneMenuOpen(false);
+              }}
+              wrapClassName={styles.menuAnchor}
+              contentClassName={styles.contourPopup}
+              contentTestId="cutout-contour-menu"
+              trigger={
+                <button
+                  type="button"
+                  className={`${styles.triggerBtn} ${needContour ? styles.triggerBtnActive : ''}`}
+                  aria-haspopup="menu"
+                  title="主体描边（白色，仅人像/商品）"
+                  data-testid="cutout-contour-trigger"
+                >
+                  <CircleDot size={14} strokeWidth={2} />
+                  <span>描边</span>
+                  <ChevronDown size={12} strokeWidth={2} />
+                </button>
+              }
+              panel={
+                <>
                   <button
                     type="button"
                     role="switch"
@@ -189,9 +176,9 @@ export default function CutoutToolbar({
                     />
                     <span className={styles.contourValue}>{contourSize}px</span>
                   </div>
-                </div>
-              )}
-            </div>
+                </>
+              }
+            />
 
             <button
               type="button"

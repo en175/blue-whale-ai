@@ -6,9 +6,9 @@ import { assetPageQueryOptions } from '@/custom/api/assets';
 import { isApiError } from '@/shared/api/http';
 import { uploadAssetFile } from '@/custom/utils/upload';
 import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../followDialog';
-import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
 import { AUDIO_MIX_FORMATS, audioMixSourceError, type AudioMixFormat, type AudioMixInputSelection } from '../../audioMix';
 import { cardNameOfNode, readAssetId } from '../../mediaRefs';
+import DropdownMenu from '@/custom/components/DropdownMenu';
 import Tabs from '@/custom/components/Tabs';
 import bar from '../AudioTrimBar/index.module.css';
 import styles from './index.module.css';
@@ -63,21 +63,13 @@ export default function AudioMixBar({
   source, candidates, selected, onAdd, onRemove, projectId, format, onFormatChange,
   onSend, onClose, submitting, anchor, dragHidden,
 }: AudioMixBarProps) {
-  const [sourceMenuOpen, setSourceMenuOpen] = useState(false);
-  const [formatMenuOpen, setFormatMenuOpen] = useState(false);
   const [tab, setTab] = useState<SourceTab>('canvas');
   const [uploadError, setUploadError] = useState<string | null>(null);
-  const sourceWrapRef = useRef<HTMLDivElement>(null);
-  const formatWrapRef = useRef<HTMLDivElement>(null);
   const mountedRef = useRef(true);
   useEffect(() => {
     mountedRef.current = true;
     return () => { mountedRef.current = false; };
   }, []);
-  useDismissOnOutside([
-    { open: sourceMenuOpen, ref: sourceWrapRef, dismiss: () => setSourceMenuOpen(false) },
-    { open: formatMenuOpen, ref: formatWrapRef, dismiss: () => setFormatMenuOpen(false) },
-  ]);
 
   const sourceAssetId = readAssetId(source.data);
   const selectedIds = new Set<string>([...(sourceAssetId ? [sourceAssetId] : []), ...selected.map((item) => item.assetId)]);
@@ -127,14 +119,20 @@ export default function AudioMixBar({
         <X size={14} strokeWidth={2} />
       </button>
       <span className={bar.title}>混合</span>
-      <div className={bar.formatWrap} ref={sourceWrapRef}>
-        <button type="button" className={bar.formatTrigger} data-testid="audio-mix-add"
-          aria-haspopup="menu" aria-expanded={sourceMenuOpen || undefined}
-          disabled={submitting} onClick={() => setSourceMenuOpen((open) => !open)}>
-          <Plus size={13} strokeWidth={2} /> 音频 {selected.length + 1}/100
-        </button>
-        {sourceMenuOpen && (
-          <div className={`${bar.formatMenu} ${styles.sourceMenu}`} role="menu" data-testid="audio-mix-source-menu">
+      <DropdownMenu
+        modal={false}
+        side="top"
+        wrapClassName={bar.formatWrap}
+        contentClassName={`${bar.formatMenu} ${styles.sourceMenu}`}
+        contentTestId="audio-mix-source-menu"
+        trigger={
+          <button type="button" className={bar.formatTrigger} data-testid="audio-mix-add"
+            aria-haspopup="menu" disabled={submitting}>
+            <Plus size={13} strokeWidth={2} /> 音频 {selected.length + 1}/100
+          </button>
+        }
+        panel={
+          <>
             <div className={styles.selectedList} data-testid="audio-mix-selected-list">
               <div className={styles.sourceRow}>{cardNameOfNode(source)} <span>固定</span></div>
               {selected.map((item) => (
@@ -193,29 +191,30 @@ export default function AudioMixBar({
                 {uploadError && <div className={styles.hint} role="alert">{uploadError}</div>}
               </>}
             </div>
-          </div>
-        )}
-      </div>
+          </>
+        }
+      />
       <span className={bar.range} data-testid="audio-mix-duration">预计 {duration}</span>
-      <div className={bar.formatWrap} ref={formatWrapRef}>
-        <button type="button" className={bar.formatTrigger} data-testid="audio-mix-format-trigger"
-          aria-haspopup="menu" aria-expanded={formatMenuOpen || undefined}
-          disabled={submitting} onClick={() => setFormatMenuOpen((open) => !open)}>
-          {format} <ChevronDown size={12} strokeWidth={2} />
-        </button>
-        {formatMenuOpen && (
-          <div className={bar.formatMenu} role="menu" data-testid="audio-mix-format-menu">
-            {AUDIO_MIX_FORMATS.map((item) => (
-              <button key={item} type="button" role="menuitemradio" aria-checked={item === format}
-                className={`${bar.formatMenuItem} ${item === format ? bar.formatMenuItemActive : ''}`}
-                data-testid={`audio-mix-format-${item}`}
-                onClick={() => { onFormatChange(item); setFormatMenuOpen(false); }}>
-                {item}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
+      <DropdownMenu
+        modal={false}
+        side="top"
+        wrapClassName={bar.formatWrap}
+        contentClassName={bar.formatMenu}
+        contentTestId="audio-mix-format-menu"
+        trigger={
+          <button type="button" className={bar.formatTrigger} data-testid="audio-mix-format-trigger"
+            aria-haspopup="menu" disabled={submitting}>
+            {format} <ChevronDown size={12} strokeWidth={2} />
+          </button>
+        }
+        items={AUDIO_MIX_FORMATS.map((item) => ({
+          key: item,
+          label: item,
+          checked: item === format,
+          testId: `audio-mix-format-${item}`,
+          onSelect: () => onFormatChange(item),
+        }))}
+      />
       <span className={bar.free} title="本期免费" data-testid="audio-mix-free">
         <Zap size={11} fill="currentColor" strokeWidth={0} />0 本期免费
       </span>

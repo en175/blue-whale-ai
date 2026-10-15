@@ -42,9 +42,11 @@ function pointerClick(target: EventTarget) {
 function Harness({
   items,
   canvasSafe,
+  openOnHover,
 }: {
   items: DropdownMenuItem[];
   canvasSafe?: boolean;
+  openOnHover?: boolean;
 }) {
   const [last, setLast] = useState('');
   return createElement(
@@ -52,6 +54,8 @@ function Harness({
     null,
     createElement(DropdownMenu, {
       canvasSafe,
+      openOnHover,
+      contentTestId: 'dropdown-menu',
       trigger: createElement('button', { type: 'button', title: '打开菜单' }, '打开'),
       items: items.map((item) => ({
         ...item,
@@ -66,12 +70,21 @@ function Harness({
   );
 }
 
-async function render(items: DropdownMenuItem[], canvasSafe?: boolean) {
+async function render(
+  items: DropdownMenuItem[],
+  options?: { canvasSafe?: boolean; openOnHover?: boolean },
+) {
   mountNode = document.createElement('div');
   document.body.appendChild(mountNode);
   root = createRoot(mountNode);
   await act(async () => {
-    root.render(createElement(Harness, { items, canvasSafe }));
+    root.render(
+      createElement(Harness, {
+        items,
+        canvasSafe: options?.canvasSafe,
+        openOnHover: options?.openOnHover,
+      }),
+    );
   });
 }
 
@@ -162,8 +175,48 @@ describe('DropdownMenu', () => {
   });
 
   it('画布触发器带 nodrag nopan', async () => {
-    await render([{ key: 'view', label: '查看' }], true);
+    await render([{ key: 'view', label: '查看' }], { canvasSafe: true });
     expect(trigger().className).toContain('nodrag');
     expect(trigger().className).toContain('nopan');
+  });
+
+  it('悬停打开，移出延迟关闭，重新进入取消关闭', async () => {
+    vi.useFakeTimers();
+    await render([{ key: 'view', label: '查看' }], { openOnHover: true });
+    await act(async () => {
+      trigger().dispatchEvent(new MouseEvent('mouseover', { bubbles: true, relatedTarget: document.body }));
+    });
+    expect(menuItems().map((item) => item.textContent)).toEqual(['查看']);
+
+    await act(async () => {
+      trigger().dispatchEvent(new MouseEvent('mouseout', { bubbles: true, relatedTarget: document.body }));
+    });
+    expect(menuItems()).toHaveLength(1);
+    await act(async () => {
+      trigger().dispatchEvent(new MouseEvent('mouseover', { bubbles: true, relatedTarget: document.body }));
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(200);
+    });
+    expect(menuItems()).toHaveLength(1);
+
+    await act(async () => {
+      trigger().dispatchEvent(new MouseEvent('mouseout', { bubbles: true, relatedTarget: document.body }));
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(200);
+    });
+    expect(menuItems()).toHaveLength(0);
+    vi.useRealTimers();
+  });
+
+  it('画布内容带 nodrag nopan', async () => {
+    await render([{ key: 'view', label: '查看' }], { canvasSafe: true, openOnHover: true });
+    await act(async () => {
+      trigger().dispatchEvent(new MouseEvent('mouseover', { bubbles: true, relatedTarget: document.body }));
+    });
+    const content = document.body.querySelector('[data-testid="dropdown-menu"]');
+    expect(content?.className).toContain('nodrag');
+    expect(content?.className).toContain('nopan');
   });
 });
