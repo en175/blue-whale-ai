@@ -13,10 +13,8 @@ import {
 import { isApiError } from '@/shared/api/http';
 import ConfirmModal from '../../components/ConfirmModal';
 import DiscountPolicyNotice from '../../components/DiscountPolicyNotice';
+import { PROMOTION_STATUS_OPTIONS, TIER_OPTIONS, WEEKDAY_OPTIONS } from '@/admin/enums';
 import {
-  PROMOTION_STATUS_OPTIONS,
-  TIER_OPTIONS,
-  WEEKDAY_OPTIONS,
   describePatterns,
   describeSchedule,
   describeTiers,

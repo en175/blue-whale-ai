@@ -1,45 +1,13 @@
 import type { Tier } from '@lib/core/identity/tier';
-
-export const TIER_LABELS: Record<Tier, string> = {
-  free: '免费',
-  basic: '基础',
-  pro: '专业',
-  max: '旗舰',
-};
-
-export const TIER_OPTIONS = (Object.keys(TIER_LABELS) as Tier[]).map((tier) => ({
-  value: tier,
-  label: `${TIER_LABELS[tier]}（${tier}）`,
-}));
+import { TIER_LABELS, WEEKDAY_OPTIONS } from '@/admin/enums';
 
 export function tierLabel(tier: string): string {
   return TIER_LABELS[tier as Tier] ?? tier;
 }
 
-export const WEEKDAY_OPTIONS: { value: number; label: string }[] = [
-  { value: 1, label: '周一' },
-  { value: 2, label: '周二' },
-  { value: 3, label: '周三' },
-  { value: 4, label: '周四' },
-  { value: 5, label: '周五' },
-  { value: 6, label: '周六' },
-  { value: 7, label: '周日' },
-];
-
 export function weekdayLabel(day: number): string {
   return WEEKDAY_OPTIONS.find((o) => o.value === day)?.label ?? String(day);
 }
-
-export const MEMBER_STATUS_OPTIONS = [
-  { value: 'enabled', label: '启用' },
-  { value: 'disabled', label: '停用' },
-];
-
-export const PROMOTION_STATUS_OPTIONS = [
-  { value: 'draft', label: '草稿（不生效）' },
-  { value: 'enabled', label: '启用（到点自动生效）' },
-  { value: 'disabled', label: '停用' },
-];
 
 const STATUS_LABELS: Record<string, string> = {
   draft: '草稿',

@@ -5,8 +5,8 @@ import {
   adminUsersOptions,
   manageAdminUser,
   type AdminUserRow,
-  type UserManageAction,
 } from '@/admin/api/adminUsers';
+import { type UserManageAction } from '@/admin/enums';
 import { operationLogsOptions, type OperationLog } from '@/admin/api/adminOperationLogs';
 import { isApiError } from '@/shared/api/http';
 import { newIdempotencyKey } from '@/shared/api/idempotencyKey';

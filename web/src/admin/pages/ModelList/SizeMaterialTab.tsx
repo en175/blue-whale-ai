@@ -6,7 +6,6 @@ import {
   channelOf,
   type ChannelId,
   type GptMatrix,
-  type ModelType,
   type RatioForm,
   type SizeForm,
 } from './model-form';
@@ -14,6 +13,9 @@ import {
   FEATURE_BOOL_LABELS,
   FEATURE_NUMBER_LABELS,
   FEATURE_STRING_LABELS,
+  type ModelType,
+} from '@/admin/enums';
+import {
   featureApplies,
 } from './feature-fields';
 import { Badge, Button, Checkbox, Chip, Field, Input, Select, Table } from '../../ui';

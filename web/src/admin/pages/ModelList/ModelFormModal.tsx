@@ -72,7 +72,6 @@ import {
   type ChannelId,
   type FormSnapshot,
   type GptMatrix,
-  type ModelType,
   type RatioForm,
   type SizeForm,
 } from './model-form';
@@ -80,6 +79,9 @@ import {
   FEATURE_BOOL_LABELS,
   FEATURE_NUMBER_LABELS,
   FEATURE_STRING_LABELS,
+  type ModelType,
+} from '@/admin/enums';
+import {
   buildVideoDimensions,
   dropKnownFeatures,
   featureApplies,

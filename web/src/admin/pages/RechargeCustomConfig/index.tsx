@@ -8,7 +8,7 @@ import {
 } from '@/admin/api/adminRechargeCustomConfig';
 import { isApiError } from '@/shared/api/http';
 import { customPriceFen, formatCredits, formatPriceYuan } from '@/shared/utils/customRecharge';
-import { TIER_PERMISSION_LABEL } from '../RechargePlans/plan';
+import { TIER_PERMISSION_LABEL } from '@/admin/enums';
 import {
   Alert,
   Badge,

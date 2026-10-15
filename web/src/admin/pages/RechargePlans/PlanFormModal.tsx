@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { toast } from 'sonner';
-import type { TopupTierPermission, TopupTierStatus } from '@/admin/api/adminTopupTiers';
+import { type TopupTierPermission, type TopupTierStatus } from '@/admin/enums';
 import { isApiError } from '@/shared/api/http';
 import {
   Button,
