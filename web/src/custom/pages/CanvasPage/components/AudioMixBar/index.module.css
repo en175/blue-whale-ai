@@ -70,8 +70,8 @@
 }
 
 .activeTab {
-  color: var(--color-accent-text);
-  background: var(--color-accent-primary);
+  color: var(--color-text-primary);
+  background: #2e2e2e;
 }
 
 .hint {

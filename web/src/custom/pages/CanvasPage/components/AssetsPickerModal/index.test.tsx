@@ -113,7 +113,9 @@ async function clickTab(label: string) {
   const btn = [...document.body.querySelectorAll(`.${pickerStyles.tabs} button`)]
     .find((b) => b.textContent === label);
   if (!(btn instanceof HTMLButtonElement)) throw new Error(`tab not found: ${label}`);
-  await act(async () => { btn.click(); });
+  await act(async () => {
+    btn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
+  });
 }
 
 function assetCardOf(selector: string): HTMLElement {

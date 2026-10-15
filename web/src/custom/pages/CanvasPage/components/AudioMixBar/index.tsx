@@ -9,6 +9,7 @@ import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../followDialo
 import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
 import { AUDIO_MIX_FORMATS, audioMixSourceError, type AudioMixFormat, type AudioMixInputSelection } from '../../audioMix';
 import { cardNameOfNode, readAssetId } from '../../mediaRefs';
+import Tabs from '@/custom/components/Tabs';
 import bar from '../AudioTrimBar/index.module.css';
 import styles from './index.module.css';
 
@@ -144,13 +145,19 @@ export default function AudioMixBar({
                 </div>
               ))}
             </div>
-            <div className={styles.tabs} role="tablist" aria-label="音频来源">
-              {([['canvas', '画布'], ['library', '素材库'], ['upload', '上传']] as const).map(([key, label]) => (
-                <button key={key} type="button" role="tab" data-testid={`audio-mix-tab-${key}`}
-                  aria-selected={tab === key} className={tab === key ? styles.activeTab : styles.tab}
-                  onClick={() => setTab(key)}>{label}</button>
-              ))}
-            </div>
+            <Tabs
+              className={styles.tabs}
+              triggerClassName={styles.tab}
+              activeTriggerClassName={styles.activeTab}
+              ariaLabel="音频来源"
+              value={tab}
+              onChange={setTab}
+              items={[
+                { key: 'canvas', label: '画布', testId: 'audio-mix-tab-canvas' },
+                { key: 'library', label: '素材库', testId: 'audio-mix-tab-library' },
+                { key: 'upload', label: '上传', testId: 'audio-mix-tab-upload' },
+              ]}
+            />
             <div className={styles.candidateList} role="tabpanel">
               {tab === 'canvas' && !full && !hasCanvasCandidate &&
                 <div className={styles.hint}>画布暂无其它音频，可从素材库或上传添加</div>}

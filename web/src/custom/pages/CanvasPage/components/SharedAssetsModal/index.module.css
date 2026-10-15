@@ -80,6 +80,12 @@
   gap: var(--spacing-xs);
 }
 
+.tabTriggers {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+}
+
 .tab {
   display: flex;
   align-items: center;

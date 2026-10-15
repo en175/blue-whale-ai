@@ -19,6 +19,7 @@ import { usePreviewAsset } from '@/custom/pages/Assets/previewAsset';
 import assetStyles from '@/custom/pages/Assets/index.module.css';
 import Skeleton from '@/custom/components/Skeleton';
 import ConfirmModal from '@/custom/components/ConfirmModal';
+import Tabs from '@/custom/components/Tabs';
 import styles from './index.module.css';
 import { type PickerMediaType, type AssetType } from '@/custom/enums';
 
@@ -329,17 +330,14 @@ export default function AssetsPickerModal({
         <div className={styles.header}>
           <h2 className={styles.title}>资产库</h2>
           {visibleTabs.length > 1 && (
-            <div className={styles.tabs}>
-              {visibleTabs.map((tab) => (
-                <button
-                  key={tab.key}
-                  className={`${assetStyles.filterBtn} ${activeTab === tab.key ? assetStyles.filterBtnActive : ''}`}
-                  onClick={() => setActiveTab(tab.key)}
-                >
-                  {tab.label}
-                </button>
-              ))}
-            </div>
+            <Tabs
+              className={styles.tabs}
+              triggerClassName={assetStyles.filterBtn}
+              activeTriggerClassName={assetStyles.filterBtnActive}
+              value={activeTab}
+              onChange={setActiveTab}
+              items={visibleTabs}
+            />
           )}
           <button className={styles.closeBtn} onClick={onClose} aria-label="关闭">
             <X size={18} strokeWidth={2} />

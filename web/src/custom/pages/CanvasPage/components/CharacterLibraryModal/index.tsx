@@ -19,6 +19,7 @@ import {
 } from '@/custom/api/material';
 import { isApiError } from '@/shared/api/http';
 import { toast } from '@/custom/components/Toast';
+import Tabs from '@/custom/components/Tabs';
 import { uploadMaterialLibraryFiles } from '../../characterLibraryUpload';
 import { VIDEO_REFERENCE_NOT_APPROVED_MESSAGE } from '@/custom/utils/video-reference-compliance';
 import { resolveMediaSrc } from '@/shared/utils/remoteImageCors';
@@ -437,18 +438,22 @@ export default function CharacterLibraryModal({ onClose, onSelectAssets, enableR
         </div>
 
         {}
-        <div className={styles.tabs}>
-          {TABS.filter((tab) => tab.key !== 'real' || enableRealPersonTab).map((tab) => (
-            <button
-              key={tab.key}
-              className={`${styles.tab} ${activeTab === tab.key ? styles.tabActive : ''}`}
-              onClick={() => setActiveTab(tab.key)}
-            >
-              <tab.icon size={14} strokeWidth={2} />
-              {tab.label}
-            </button>
-          ))}
-        </div>
+        <Tabs
+          className={styles.tabs}
+          triggerClassName={styles.tab}
+          activeTriggerClassName={styles.tabActive}
+          value={activeTab}
+          onChange={setActiveTab}
+          items={TABS.filter((tab) => tab.key !== 'real' || enableRealPersonTab).map((tab) => ({
+            key: tab.key,
+            label: (
+              <>
+                <tab.icon size={14} strokeWidth={2} />
+                {tab.label}
+              </>
+            ),
+          }))}
+        />
 
         {}
         <div className={styles.content}>
