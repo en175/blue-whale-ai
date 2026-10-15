@@ -895,4 +895,16 @@ describe('IKJUH5 注册扩展的真实页面契约', () => {
     });
     expect(addedDock.active()).toBeNull();
   });
+
+  it('面板领土内按下、click 被重定向到 body：不收起面板（IKM0TP Radix 下拉开合）', async () => {
+    await renderPage();
+    await act(async () => { addedDock.open(); });
+    const territory = document.body.querySelector<HTMLElement>('[data-gen-panel-territory]')!;
+    expect(territory).toBeTruthy();
+    await act(async () => {
+      territory.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: 10, clientY: 10 }));
+      document.body.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: 10, clientY: 10 }));
+    });
+    expect(addedDock.active()).toBe('added');
+  });
 });
