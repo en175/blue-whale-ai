@@ -5,6 +5,7 @@ import { fetchGenerationModels, type GenerationModel } from '@/custom/api/genera
 import { checkAddAudioRef, audioRefItemMediaTypeOf } from '../../audioMediaRefs';
 import { checkReferenceLimits, audioReferenceMaxOf, imageReferenceMaxOfForAudio } from '@/custom/utils/model-reference-limits';
 import { remoteImageCrossOrigin, resolveMediaSrc } from '@/shared/utils/remoteImageCors';
+import Empty from '@/custom/components/Empty';
 import Select from '@/custom/components/Select';
 import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
 import { useAudioDurations } from '../../hooks/useAudioDurations';
@@ -398,7 +399,7 @@ export default function AudioDialog({
               </button>
             </div>
             {canvasPickItems.length === 0 ? (
-              <div className={styles.pickerEmpty}>画布暂无可选图片或音频</div>
+              <Empty className={styles.pickerEmpty} title="画布暂无可选图片或音频" />
             ) : (
               <div className={styles.pickerList}>
                 {canvasPickItems.map((it) => (

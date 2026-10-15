@@ -6,7 +6,6 @@ import { markdownToSanitizedHtml, unifiedTextNodeText } from '@lib/contracts/tex
 import { type CardFilter, type SharedAssetType } from '@/custom/enums';
 import {
   X,
-  Search,
   Image as ImageIcon,
   Video,
   AudioLines,
@@ -24,6 +23,8 @@ import {
 import { fetchSharedAssetList, removeSharedAsset, addSceneToProject, type SharedAssetView, type SharedAssetKind, type SharedAssetListQuery, type SharedAssetMediaSnapshot, type SharedAssetCardSnapshot, type SharedAssetGoodsSnapshot, type SharedAssetTextSnapshot, type SharedAssetSceneSnapshot } from '@/custom/api/sharedAssets';
 import { isApiError } from '@/shared/api/http';
 import { remoteImageCrossOrigin, resolveMediaSrc } from '@/shared/utils/remoteImageCors';
+import Empty from '@/custom/components/Empty';
+import SearchInput from '@/custom/components/SearchInput';
 import Select from '@/custom/components/Select';
 import Tabs from '@/custom/components/Tabs';
 import styles from './index.module.css';
@@ -375,15 +376,13 @@ export default function SharedAssetsModal({
           </div>
 
           <div className={styles.tabRight}>
-            <div className={styles.searchBox}>
-              <Search size={14} strokeWidth={2} />
-              <input
-                className={styles.searchInput}
-                placeholder="搜索资产"
-                value={keyword}
-                onChange={(e) => setKeyword(e.target.value)}
-              />
-            </div>
+            <SearchInput
+              className={styles.searchBox}
+              variant="plain"
+              placeholder="搜索资产"
+              value={keyword}
+              onChange={setKeyword}
+            />
           </div>
         </div>
 
@@ -395,31 +394,37 @@ export default function SharedAssetsModal({
               <span>加载中...</span>
             </div>
           ) : loadError ? (
-            <div className={`${styles.empty} ${styles.loadError}`}>
-              <div className={styles.emptyIconBox}>
-                <AlertCircle size={32} strokeWidth={1.5} />
-              </div>
-              <p className={styles.emptyTitle}>加载失败</p>
-              <p className={styles.emptyHint}>网络异常或服务暂时不可用</p>
-              <button className={styles.retryBtn} onClick={() => loadList(true)}>
-                <RefreshCw size={14} strokeWidth={2} />
-                <span>重新加载</span>
-              </button>
-            </div>
+            <Empty
+              className={`${styles.empty} ${styles.loadError}`}
+              icon={(
+                <div className={styles.emptyIconBox}>
+                  <AlertCircle size={32} strokeWidth={1.5} />
+                </div>
+              )}
+              title="加载失败"
+              description="网络异常或服务暂时不可用"
+              action={(
+                <button className={styles.retryBtn} onClick={() => loadList(true)}>
+                  <RefreshCw size={14} strokeWidth={2} />
+                  <span>重新加载</span>
+                </button>
+              )}
+            />
           ) : filteredItems.length === 0 ? (
-            <div className={styles.empty}>
-              <div className={styles.emptyIconBox}>
-                <Inbox size={28} strokeWidth={1.5} />
-              </div>
-              <p className={styles.emptyTitle}>
-                {keyword.trim() ? '未找到匹配的资产' : '暂无共享资产'}
-              </p>
-              <p className={styles.emptyHint}>
-                {keyword.trim()
+            <Empty
+              className={styles.empty}
+              icon={(
+                <div className={styles.emptyIconBox}>
+                  <Inbox size={28} strokeWidth={1.5} />
+                </div>
+              )}
+              title={keyword.trim() ? '未找到匹配的资产' : '暂无共享资产'}
+              description={
+                keyword.trim()
                   ? '换个关键词试试'
-                  : '在画布中右键节点，选择「保存到共享资产」即可添加'}
-              </p>
-            </div>
+                  : '在画布中右键节点，选择「保存到共享资产」即可添加'
+              }
+            />
           ) : (
             <>
               <div className={styles.grid}>

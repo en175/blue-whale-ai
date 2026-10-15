@@ -19,6 +19,7 @@ import {
 } from '@/custom/api/material';
 import { isApiError } from '@/shared/api/http';
 import { toast } from '@/custom/components/Toast';
+import Empty from '@/custom/components/Empty';
 import Tabs from '@/custom/components/Tabs';
 import { uploadMaterialLibraryFiles } from '../../characterLibraryUpload';
 import { VIDEO_REFERENCE_NOT_APPROVED_MESSAGE } from '@/custom/utils/video-reference-compliance';
@@ -168,7 +169,7 @@ function GroupDetail({
       </div>
 
       {assets.length === 0 ? (
-        <div className={styles.empty}>该分组暂无素材，请前往资产页添加</div>
+        <Empty className={styles.empty} title="该分组暂无素材，请前往资产页添加" />
       ) : (
         <SelectableAssetGrid
           assets={assets}
@@ -495,16 +496,19 @@ export default function CharacterLibraryModal({ onClose, onSelectAssets, enableR
                   ))}
                 </div>
                 {groups.length === 0 && (
-                  <div className={styles.emptyHint}>
-                    <p>暂无真人素材</p>
-                    <p>完成真人认证建档后，即可在视频生成时使用真人形象</p>
-                    <button
-                      className={styles.emptyActionBtn}
-                      onClick={() => window.open('/library?type=liveness', '_blank')}
-                    >
-                      去资产页·真人人像库建档
-                    </button>
-                  </div>
+                  <Empty
+                    className={styles.emptyHint}
+                    title="暂无真人素材"
+                    description="完成真人认证建档后，即可在视频生成时使用真人形象"
+                    action={(
+                      <button
+                        className={styles.emptyActionBtn}
+                        onClick={() => window.open('/library?type=liveness', '_blank')}
+                      >
+                        去资产页·真人人像库建档
+                      </button>
+                    )}
+                  />
                 )}
               </div>
             )

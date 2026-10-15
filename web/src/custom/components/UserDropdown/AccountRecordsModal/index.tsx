@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Wallet, Wand2, ArrowDown, ArrowUp } from 'lucide-react';
 import { fetchConsumptions, type ConsumptionRecord } from '@/custom/api/account';
+import Empty from '@/custom/components/Empty';
 import Tabs from '@/custom/components/Tabs';
 import styles from './index.module.css';
 
@@ -98,9 +99,10 @@ export default function AccountRecordsModal({ onClose }: AccountRecordsModalProp
           ) : error ? (
             <div className={styles.empty}>{error}</div>
           ) : records.length === 0 ? (
-            <div className={styles.empty}>
-              {tab === 'recharge' ? '暂无充值记录' : '暂无消费记录'}
-            </div>
+            <Empty
+              className={styles.empty}
+              title={tab === 'recharge' ? '暂无充值记录' : '暂无消费记录'}
+            />
           ) : (
             records.map((r) => {
               const isIn = r.direction === 'in';

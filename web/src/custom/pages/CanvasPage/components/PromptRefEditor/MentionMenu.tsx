@@ -1,4 +1,5 @@
 import { FileText, FolderOpen, Image as ImageIcon, MousePointerClick, AudioLines } from 'lucide-react';
+import Empty from '@/custom/components/Empty';
 import { remoteImageCrossOrigin, resolveMediaSrc } from '@/shared/utils/remoteImageCors';
 import styles from './index.module.css';
 
@@ -64,7 +65,7 @@ export default function MentionMenu({ items, activeIndex, newRefEntries, onPick,
   return (
     <div className={styles.mentionMenu} data-testid="mention-menu">
       <div className={styles.mentionSection}>已引用</div>
-      {items.length === 0 && <div className={styles.mentionEmpty}>暂无已引用素材，可从下方添加新参考</div>}
+      {items.length === 0 && <Empty className={styles.mentionEmpty} title="暂无已引用素材，可从下方添加新参考" />}
       {items.map((item, index) => (
         <MentionRefRow
           key={item.assetId}

@@ -9,6 +9,7 @@ import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../followDialo
 import { AUDIO_MIX_FORMATS, audioMixSourceError, type AudioMixFormat, type AudioMixInputSelection } from '../../audioMix';
 import { cardNameOfNode, readAssetId } from '../../mediaRefs';
 import DropdownMenu from '@/custom/components/DropdownMenu';
+import Empty from '@/custom/components/Empty';
 import Tabs from '@/custom/components/Tabs';
 import bar from '../AudioTrimBar/index.module.css';
 import styles from './index.module.css';
@@ -158,7 +159,7 @@ export default function AudioMixBar({
             />
             <div className={styles.candidateList} role="tabpanel">
               {tab === 'canvas' && !full && !hasCanvasCandidate &&
-                <div className={styles.hint}>画布暂无其它音频，可从素材库或上传添加</div>}
+                <Empty className={styles.hint} title="画布暂无其它音频，可从素材库或上传添加" />}
               {tab === 'canvas' && candidates.map((node) => {
                 const assetId = readAssetId(node.data);
                 return (

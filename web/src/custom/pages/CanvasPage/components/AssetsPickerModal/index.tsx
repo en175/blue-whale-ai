@@ -19,6 +19,7 @@ import { usePreviewAsset } from '@/custom/pages/Assets/previewAsset';
 import assetStyles from '@/custom/pages/Assets/index.module.css';
 import Skeleton from '@/custom/components/Skeleton';
 import ConfirmModal from '@/custom/components/ConfirmModal';
+import Empty from '@/custom/components/Empty';
 import Tabs from '@/custom/components/Tabs';
 import styles from './index.module.css';
 import { type PickerMediaType, type AssetType } from '@/custom/enums';
@@ -380,10 +381,10 @@ export default function AssetsPickerModal({
             </div>
           )}
           {!isMaterialTab && !loading && listError && gridItems.length === 0 && (
-            <div className={assetStyles.empty}>资产加载失败，请稍后重试</div>
+            <Empty className={assetStyles.empty} title="资产加载失败，请稍后重试" />
           )}
           {!isMaterialTab && !loading && !listError && gridItems.length === 0 && (
-            <div className={assetStyles.empty}>暂无素材</div>
+            <Empty className={assetStyles.empty} title="暂无素材" />
           )}
           {!isMaterialTab && !loading && gridItems.length > 0 && (
             <>
