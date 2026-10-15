@@ -1,6 +1,4 @@
-import { PANEL_REF_MEDIA_TYPES } from './refSourceTypes';
-import type { VideoRefRole } from './videoMediaRefs';
-import type { PickerMediaType } from './components/AssetsPickerModal';
+import { type VideoRefRole, type PickerMediaType, PANEL_REF_MEDIA_TYPES } from '@/custom/enums';
 
 export type AssetsPickerTarget = 'toolbar' | 'videoDraft' | 'imageDialog' | 'audioDialog' | 'agentPanel';
 

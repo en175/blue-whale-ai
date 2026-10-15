@@ -1,3 +1,4 @@
+import { type MediaGenStatus, type VideoRefRole } from '@/custom/enums';
 import type { ReactNode } from 'react';
 import type { Edge, Node } from '@xyflow/react';
 import { restorePromptDoc } from '@/custom/utils/prompt-doc';
@@ -11,8 +12,8 @@ import { composeImageSendPrompt } from './components/ImageDialog/composeImageSen
 import { orderRefStripItems, videoRefStripKey } from './components/RefThumbnail/strip-dnd';
 import { buildVideoJobReferences } from './videoJobReferences';
 import type { VideoGenSeedParams, VideoDraftParamsPatch, VideoGenOptions } from './components/BottomDialog';
-import type { MediaGenStatus } from './components/MediaNode';
-import { checkAddVideoRef, freshVideoCanvasRefs, videoRefConflict, type VideoMediaRef, type VideoMediaRefs, type VideoRefRole } from './videoMediaRefs';
+
+import { checkAddVideoRef, freshVideoCanvasRefs, videoRefConflict, type VideoMediaRef, type VideoMediaRefs } from './videoMediaRefs';
 import { mergedVideoRefsWithTextIndex, videoTextIndexSendError } from './textIndexSync';
 import { draftVideoModeOf, videoModeAfterRefAdd } from './videoModes';
 

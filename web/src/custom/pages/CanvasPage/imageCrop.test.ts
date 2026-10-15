@@ -1,23 +1,6 @@
+import { CROP_PRESET_LABELS } from '@/custom/enums';
 import { describe, expect, it } from 'vitest';
-import {
-  CROP_PRESET_LABELS,
-  CROP_PRESET_ORDER,
-  IMAGE_CROP_EDGE_ORIGIN,
-  IMAGE_CROP_JPEG_QUALITY,
-  IMAGE_CROP_MIN_NATURAL_SIDE,
-  clampCropRect,
-  cropOutputFormat,
-  cropPresetRatio,
-  cropRectToNatural,
-  dragCropCorner,
-  dragCropEdge,
-  fullCropRect,
-  inscribeCropRect,
-  minCropSideDisplay,
-  moveCropRect,
-  type CropCoordinateSpace,
-  type CropRect,
-} from './imageCrop';
+import { CROP_PRESET_ORDER, IMAGE_CROP_EDGE_ORIGIN, IMAGE_CROP_JPEG_QUALITY, IMAGE_CROP_MIN_NATURAL_SIDE, clampCropRect, cropOutputFormat, cropPresetRatio, cropRectToNatural, dragCropCorner, dragCropEdge, fullCropRect, inscribeCropRect, minCropSideDisplay, moveCropRect, type CropCoordinateSpace, type CropRect } from './imageCrop';
 
 const bounds: CropRect = { x: 1000, y: 500, width: 400, height: 300 };
 const space: CropCoordinateSpace = { displayWidth: 400, displayHeight: 300, naturalWidth: 800, naturalHeight: 600 };

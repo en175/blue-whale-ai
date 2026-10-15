@@ -1,3 +1,4 @@
+import { type AudioVideoMuxSync } from '@/custom/enums';
 import type { Node } from '@xyflow/react';
 import { isApiError } from '@/shared/api/http';
 import type { AudioMixCreate } from '@lib/contracts/audio-mix';
@@ -5,7 +6,7 @@ import { audioMixCandidate, audioMixSourceError, type AudioMixFormat, type Audio
 import { readAssetId, cardNameOfNode } from './mediaRefs';
 import { apiErrorMessage, cloneSourceNode } from './toolSessionCapture';
 import type { CreateAudioVideoMuxPayload } from '@/custom/api/jobs';
-import { audioVideoMuxIdentityOf, audioVideoMuxSourceError, audioVideoMuxVideoError, isAudioVideoMuxDraftNode, type AudioVideoMuxIdentity, type AudioVideoMuxBoundVideo, type AudioVideoMuxSync } from './audioVideoMux';
+import { audioVideoMuxIdentityOf, audioVideoMuxSourceError, audioVideoMuxVideoError, isAudioVideoMuxDraftNode, type AudioVideoMuxIdentity, type AudioVideoMuxBoundVideo } from './audioVideoMux';
 import type { ToolSessionDefinition, ToolSubmissionContext } from './toolSessionRuntime';
 
 export interface AudioMixState {

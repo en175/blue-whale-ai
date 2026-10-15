@@ -1,6 +1,7 @@
+import { type AssetType } from '@/custom/enums';
 import type { RefObject } from 'react';
 import type { Edge, Node } from '@xyflow/react';
-import { fetchUploadPresign, putToPresignedUrl, completeUpload, type AssetType, type UploadCompleteData } from '@/custom/api/assets';
+import { fetchUploadPresign, putToPresignedUrl, completeUpload, type UploadCompleteData } from '@/custom/api/assets';
 import { probeMediaMeta } from '@/custom/utils/upload';
 import { checkFileBeforeUpload } from '@/custom/utils/fileSignature';
 import { fetchUrlAsFile } from '../canvasPureNodeHelpers';

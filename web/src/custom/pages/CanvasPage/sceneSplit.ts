@@ -39,11 +39,7 @@ export type SceneSplitGranularity = VideoSceneSplitGranularity;
 
 export const SCENE_SPLIT_DEFAULT_GRANULARITY: SceneSplitGranularity = VIDEO_SCENE_SPLIT_DEFAULT_GRANULARITY;
 
-export const SCENE_SPLIT_GRANULARITY_LABELS: Record<SceneSplitGranularity, string> = {
-  fine: '细',
-  standard: '标准',
-  coarse: '粗',
-};
+import { SCENE_SPLIT_GRANULARITY_LABELS } from '@/custom/enums';
 
 export const SCENE_SPLIT_EDGE_ORIGIN = 'scene-split';
 

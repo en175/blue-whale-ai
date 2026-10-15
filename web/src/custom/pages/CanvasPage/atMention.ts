@@ -1,7 +1,6 @@
 import type { ComposedValue } from './components/ChipTextEditor/composed';
 import type { AudioRefItem } from './components/AudioDialog';
-
-export type AtMentionKind = 'image' | 'video' | 'audio' | 'text';
+import { type AtMentionKind } from '@/custom/enums';
 
 export interface AtMentionItem {
   id: string;

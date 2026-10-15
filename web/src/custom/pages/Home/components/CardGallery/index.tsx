@@ -1,3 +1,4 @@
+import { type GalleryMediaKind } from '@/custom/enums';
 import { useEffect, useState } from 'react';
 import {
   Megaphone,
@@ -16,12 +17,7 @@ import {
   type TemplateRecord,
 } from '@/custom/api/agent';
 import { remoteImageCrossOrigin, resolveMediaSrc } from '@/shared/utils/remoteImageCors';
-import {
-  galleryCoverSrc,
-  mediaKindFromTagCode,
-  shouldShowVideoChrome,
-  type GalleryMediaKind,
-} from './galleryCardModel';
+import { galleryCoverSrc, mediaKindFromTagCode, shouldShowVideoChrome } from './galleryCardModel';
 
 const TAG_ICON_BY_CODE: Record<string, LucideIcon> = {
   marketing: Megaphone,

@@ -1,3 +1,4 @@
+import { type VideoRefRole } from '@/custom/enums';
 import { useCallback, useMemo, type Dispatch, type SetStateAction } from 'react';
 import { promptBindingList } from '@lib/contracts/prompt-target';
 import { promptMentionSchema } from '@lib/contracts/prompt-preview';
@@ -6,7 +7,7 @@ import { planReferenceErrorFor, pickMarkedIdsFor, complianceBlockedIds, pendingP
 import type { CanvasPickItem } from '../components/AudioDialog';
 import type { AtMentionItem } from '../atMention';
 import { mergedImageRefsOf, mergedVideoRefsWithTextIndex } from '../textIndexSync';
-import { videoRefIdentityIds, type VideoRefRole } from '../videoMediaRefs';
+import { videoRefIdentityIds } from '../videoMediaRefs';
 
 export function useCanvasPlanMentions(input: {
   imageSeed: { targetNodeId?: string } | null | undefined;

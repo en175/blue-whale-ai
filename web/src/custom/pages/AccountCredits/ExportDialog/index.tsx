@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import Modal from '@/custom/components/Modal';
-import { EXPORT_FIELDS, fetchAccountExport, type ExportScope } from '@/custom/api/accountCredits';
+import { fetchAccountExport } from '@/custom/api/accountCredits';
+import { EXPORT_FIELDS, type ExportScope } from '@/custom/enums';
 import styles from '../index.module.css';
 
 const SCOPE_LABEL: Record<ExportScope, string> = {

@@ -1,4 +1,5 @@
 
+import { type FilterKey } from '@/custom/enums';
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
@@ -15,7 +16,7 @@ import AssetDetailModal from './components/AssetDetailModal';
 import CharacterLibrary from './components/CharacterLibrary';
 import AssetMasonry, { type AssetGridItem } from './components/AssetMasonry';
 import { appendUniqueAssets, typeLabel } from './assetGrid';
-import { getAssetFilter, setAssetFilter, type FilterKey } from './filterQuery';
+import { getAssetFilter, setAssetFilter } from './filterQuery';
 import { usePreviewAsset } from './previewAsset';
 import styles from './index.module.css';
 
@@ -29,7 +30,6 @@ const filterTabs: { key: FilterKey; label: string }[] = [
 ];
 
 const LIBRARY_PAGE_SIZE = 30;
-
 
 export default function Assets() {
   const [searchParams, setSearchParams] = useSearchParams();

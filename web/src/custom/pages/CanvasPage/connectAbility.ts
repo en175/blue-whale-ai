@@ -1,6 +1,5 @@
 import type { Edge, Node } from '@xyflow/react';
-
-export type ConnectGenKind = 'image' | 'video' | 'text' | 'audio';
+import { type ConnectGenKind } from '@/custom/enums';
 
 export type ConnectSourceKind = 'image' | 'video' | 'audio' | 'text';
 

@@ -1,8 +1,9 @@
+import { type JobStatus } from '@/custom/enums';
 import { useQuery } from '@tanstack/react-query';
 import Modal from '@/custom/components/Modal';
 import Skeleton from '@/custom/components/Skeleton';
 import { apiRequest, isApiError } from '@/shared/api/http';
-import { readJobFailText, type JobDetail, type JobStatus } from '@/custom/api/jobs';
+import { readJobFailText, type JobDetail } from '@/custom/api/jobs';
 import { chargeLabel, jobStatusLabel, stageBadgeLabel } from './labels';
 import styles from './index.module.css';
 

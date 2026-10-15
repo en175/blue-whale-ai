@@ -1,15 +1,8 @@
+import { type VideoRefRole } from '@/custom/enums';
 import type { Edge, Node } from '@xyflow/react';
 import type { GenerationModel } from '@/custom/api/generation';
 import { imageMediaRefsOf, imageRefSourceError, isImageDraftNode, readAssetId } from './mediaRefs';
-import {
-  mergedVideoMediaRefsOf,
-  videoRefSourceError,
-  checkAddVideoRef,
-  isVideoDraftNode,
-  type VideoMediaRefs,
-  type VideoRefCapabilities,
-  type VideoRefRole,
-} from './videoMediaRefs';
+import { mergedVideoMediaRefsOf, videoRefSourceError, checkAddVideoRef, isVideoDraftNode, type VideoMediaRefs, type VideoRefCapabilities } from './videoMediaRefs';
 import { videoRefCapsOfModel } from './modelCaps';
 import { draftVideoModeOf, videoModeAfterRefAdd } from './videoModes';
 import { imageReferenceMaxOf, supportsAudioReferenceOf, supportsVideoReferenceOf } from '@/custom/utils/model-reference-limits';

@@ -6,16 +6,12 @@ import {
   type VideoSubtitleEraseInput,
 } from '@lib/contracts/video-subtitle-erase';
 import { subtitleBoxesToPayload, type SubtitleBoxOp } from './subtitleEraseBoxes';
-
-
 export {
   VIDEO_SUBTITLE_ERASE_MAX_DURATION_MS,
   VIDEO_SUBTITLE_ERASE_MAX_LONG_SIDE_PX,
   VIDEO_SUBTITLE_ERASE_MAX_SHORT_SIDE_PX,
 };
 export type { VideoSubtitleEraseInput };
-
-export type VideoSubtitleEraseMode = 'smart' | 'box';
 
 
 export interface VideoSubtitleEraseGateSource {

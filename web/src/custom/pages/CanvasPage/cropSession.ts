@@ -1,9 +1,10 @@
+import { type CropPresetKey } from '@/custom/enums';
 import type { Node } from '@xyflow/react';
 import { resolveMediaSrc } from '@/shared/utils/remoteImageCors';
 import type { UploadCompleteData } from '@/custom/api/assets';
 import { apiErrorMessage, cloneSourceNode } from './toolSessionCapture';
 import { mediaContentBox, MEDIA_CONTENT_TOP_OFFSET } from './components/MediaNode/mediaContentSize';
-import { fullCropRect, cropPresetRatio, inscribeCropRect, clampCropRect, minCropSideDisplay, cropOutputFormat, cropRectToNatural, type CropNaturalRect, type CropOutputFormat, type CropCoordinateSpace, type CropRect, type CropPresetKey } from './imageCrop';
+import { fullCropRect, cropPresetRatio, inscribeCropRect, clampCropRect, minCropSideDisplay, cropOutputFormat, cropRectToNatural, type CropNaturalRect, type CropOutputFormat, type CropCoordinateSpace, type CropRect } from './imageCrop';
 import type { ToolSessionDefinition } from './toolSessionRuntime';
 
 export interface CropState { nodeId: string; preset: CropPresetKey; rect: CropRect }

@@ -1,3 +1,4 @@
+import { type MediaGenStatus } from '@/custom/enums';
 import type { ReactNode } from 'react';
 import type { Edge, Node } from '@xyflow/react';
 import type { PromptDoc } from '@/custom/utils/prompt-doc';
@@ -6,7 +7,7 @@ import type { MusicGenOptions } from './components/MusicDialog';
 import { draftSeedEquals, type AudioDraftSeed } from './draftSeed';
 import { restorePromptDoc } from '@/custom/utils/prompt-doc';
 import { hasGenerationRecord } from './mediaReEdit';
-import type { MediaGenStatus } from './components/MediaNode';
+
 import { mergedAudioRefsWithTextIndex, audioTextIndexSendError } from './textIndexSync';
 import type { DockSelection } from './generationDockCoordinator';
 import { mediaDockSelectionVisibility, captureGenerationDockSubmission, holdGenerationDockSubmission, reportGenerationDockSubmissionError, type GenerationDockSubmissionHost } from './generationDockCoordinator';

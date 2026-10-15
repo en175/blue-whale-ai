@@ -1,3 +1,4 @@
+import { type AudioVideoMuxSync, AUDIO_VIDEO_MUX_RESERVE_OPTIONS, AUDIO_VIDEO_MUX_SYNC_OPTIONS } from '@/custom/enums';
 import { useEffect, useRef, useState } from 'react';
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { ArrowUp, Film, Video, X, Zap } from 'lucide-react';
@@ -5,14 +6,7 @@ import { assetPageQueryOptions } from '@/custom/api/assets';
 import { resolveMediaSrc } from '@/shared/utils/remoteImageCors';
 import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../followDialog';
 import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
-import {
-  AUDIO_VIDEO_MUX_RESERVE_OPTIONS,
-  AUDIO_VIDEO_MUX_SYNC_OPTIONS,
-  AUDIO_VIDEO_MUX_TITLE,
-  type AudioVideoMuxBoundVideo,
-  type AudioVideoMuxIdentity,
-  type AudioVideoMuxSync,
-} from '../../audioVideoMux';
+import { AUDIO_VIDEO_MUX_TITLE, type AudioVideoMuxBoundVideo, type AudioVideoMuxIdentity } from '../../audioVideoMux';
 import styles from './index.module.css';
 
 interface AudioVideoMuxPanelProps {

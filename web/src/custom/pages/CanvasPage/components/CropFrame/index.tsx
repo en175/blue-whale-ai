@@ -1,16 +1,8 @@
+import { type CropPresetKey } from '@/custom/enums';
 import { useCallback, useEffect, useRef } from 'react';
 import { useReactFlow } from '@xyflow/react';
 import { findFlowRenderer, forwardWheelToRenderer } from '../Canvas/canvasWheelPassthrough';
-import {
-  cropPresetRatio,
-  dragCropCorner,
-  dragCropEdge,
-  moveCropRect,
-  type CropCorner,
-  type CropEdge,
-  type CropPresetKey,
-  type CropRect,
-} from '../../imageCrop';
+import { cropPresetRatio, dragCropCorner, dragCropEdge, moveCropRect, type CropCorner, type CropEdge, type CropRect } from '../../imageCrop';
 import styles from './index.module.css';
 
 export interface CropFrameProps {

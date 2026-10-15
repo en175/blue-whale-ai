@@ -1,11 +1,9 @@
 
 
-
-
-
 import { useMemo, useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { markdownToSanitizedHtml, unifiedTextNodeText } from '@lib/contracts/text-node-markdown';
+import { type CardFilter, type SharedAssetType } from '@/custom/enums';
 import {
   X,
   Search,
@@ -24,24 +22,10 @@ import {
   AlertCircle,
   RefreshCw,
 } from 'lucide-react';
-import {
-  fetchSharedAssetList,
-  removeSharedAsset,
-  addSceneToProject,
-  type SharedAssetView,
-  type SharedAssetType,
-  type SharedAssetKind,
-  type SharedAssetListQuery,
-  type SharedAssetMediaSnapshot,
-  type SharedAssetCardSnapshot,
-  type SharedAssetGoodsSnapshot,
-  type SharedAssetTextSnapshot,
-  type SharedAssetSceneSnapshot,
-} from '@/custom/api/sharedAssets';
+import { fetchSharedAssetList, removeSharedAsset, addSceneToProject, type SharedAssetView, type SharedAssetKind, type SharedAssetListQuery, type SharedAssetMediaSnapshot, type SharedAssetCardSnapshot, type SharedAssetGoodsSnapshot, type SharedAssetTextSnapshot, type SharedAssetSceneSnapshot } from '@/custom/api/sharedAssets';
 import { isApiError } from '@/shared/api/http';
 import { remoteImageCrossOrigin, resolveMediaSrc } from '@/shared/utils/remoteImageCors';
 import styles from './index.module.css';
-
 
 const TABS: { key: string; label: string; assetType?: SharedAssetType; kind?: SharedAssetKind; icon: typeof ImageIcon }[] = [
   { key: 'image', label: '图片', assetType: 'media', kind: 'image', icon: ImageIcon },
@@ -51,9 +35,7 @@ const TABS: { key: string; label: string; assetType?: SharedAssetType; kind?: Sh
   { key: 'goods', label: '商品', assetType: 'goods', icon: Box },
 ];
 
-
 type CardKind = 'style' | 'character' | 'object' | 'environment';
-export type CardFilter = 'all' | 'all-assets' | CardKind;
 const CARD_KINDS: CardKind[] = ['style', 'character', 'object', 'environment'];
 const CARD_KIND_LABEL: Record<CardKind, string> = {
   style: '风格',
@@ -61,7 +43,6 @@ const CARD_KIND_LABEL: Record<CardKind, string> = {
   object: '物体',
   environment: '环境',
 };
-
 
 const TYPE_ICON: Record<string, typeof ImageIcon> = {
   card: ImageIcon,
@@ -74,7 +55,6 @@ const TYPE_ICON: Record<string, typeof ImageIcon> = {
   audio: AudioLines,
 };
 
-
 const TYPE_GRADIENT: Record<string, { from: string; to: string }> = {
   card: { from: '#5b2a86', to: '#8e2f66' },
   media: { from: '#31307a', to: '#6b2f8e' },
@@ -86,12 +66,10 @@ const TYPE_GRADIENT: Record<string, { from: string; to: string }> = {
   audio: { from: '#1f3a5a', to: '#2f5a6b' },
 };
 
-
 interface AssetListItem extends SharedAssetView {
 
   deleting?: boolean;
 }
-
 
 type ToastFn = (type: 'success' | 'error' | 'warn', msg: string) => void;
 
@@ -108,7 +86,6 @@ interface SharedAssetsModalProps {
 
   defaultCardFilter?: CardFilter;
 }
-
 
 function titleFromAsset(item: SharedAssetView): string {
   if (item.name) return item.name;
@@ -141,7 +118,6 @@ function titleFromAsset(item: SharedAssetView): string {
   }
 }
 
-
 function coverUrl(item: SharedAssetView): string | undefined {
   if (item.assetType === 'media') {
 
@@ -160,7 +136,6 @@ function coverUrl(item: SharedAssetView): string | undefined {
   }
   return undefined;
 }
-
 
 function badgeText(item: SharedAssetView): string {
   if (item.kind) {
@@ -204,7 +179,6 @@ export default function SharedAssetsModal({
 
   const [previewItem, setPreviewItem] = useState<AssetListItem | null>(null);
 
-
   const buildQuery = useCallback((): SharedAssetListQuery => {
     const q: SharedAssetListQuery = { page: 1, size: 50 };
     if (cardFilter === 'all-assets') {
@@ -221,7 +195,6 @@ export default function SharedAssetsModal({
     }
     return q;
   }, [tab, cardFilter]);
-
 
   const loadList = useCallback(async (reset = false) => {
     if (reset) {
@@ -254,12 +227,10 @@ export default function SharedAssetsModal({
     }
   }, [buildQuery, page, onToast]);
 
-
   useEffect(() => {
     setPage(1);
     loadList(true);
   }, [tab, cardFilter, loadList]);
-
 
   const filteredItems = useMemo(() => {
     const kw = keyword.trim().toLowerCase();
@@ -269,7 +240,6 @@ export default function SharedAssetsModal({
       return title.includes(kw) || (it.name && it.name.toLowerCase().includes(kw));
     });
   }, [items, keyword]);
-
 
   const handleLoadMore = () => {
     if (loadingMore || !hasMore) return;
@@ -282,7 +252,6 @@ export default function SharedAssetsModal({
     });
   };
 
-
   const handleDelete = async (id: string) => {
     setItems((prev) => prev.map((it) => (it.id === id ? { ...it, deleting: true } : it)));
     try {
@@ -294,7 +263,6 @@ export default function SharedAssetsModal({
       if (!isApiError(e)) onToast('error', '删除失败');
     }
   };
-
 
   const handleAddToCanvas = async (item: AssetListItem) => {
     if (addItemId) return;
@@ -327,7 +295,6 @@ export default function SharedAssetsModal({
       setAddItemId(null);
     }
   };
-
 
   const handleCardClick = (item: AssetListItem) => {
     if (item.deleting || addItemId) return;
@@ -612,7 +579,6 @@ export default function SharedAssetsModal({
     document.body,
   );
 }
-
 
 function PreviewContent({ item }: { item: SharedAssetView }) {
   switch (item.assetType) {

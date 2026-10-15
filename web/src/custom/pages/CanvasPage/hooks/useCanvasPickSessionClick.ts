@@ -1,24 +1,14 @@
+import { type VideoRefRole, type PickChannel, PANEL_REF_MEDIA_TYPES } from '@/custom/enums';
 import type { Dispatch, RefObject, SetStateAction } from 'react';
 import type { Node } from '@xyflow/react';
 import type { UploadedFile } from '../components/ImageDialog';
 import type { AudioRefItem } from '../components/AudioDialog';
 import { readNodeAssetId } from '../canvasNodeUtils';
-import { PANEL_REF_MEDIA_TYPES, panelCanvasRefError } from '../refSourceTypes';
+import { panelCanvasRefError } from '../refSourceTypes';
 import { readAssetId } from '../mediaRefs';
 import { audioRefMediaTypeOf, audioRefSourceError } from '../audioMediaRefs';
 import { videoFreeRefItemOf } from '../canvasPureNodeHelpers';
-import {
-  checkAddVideoRef,
-  incomingVideoRefOccupied,
-  isLibraryOnlyVideoRef,
-  mergedVideoMediaRefsOf,
-  videoRefSourceError,
-  type VideoMediaRef,
-  type VideoMediaRefs,
-  type VideoRefCapabilities,
-  type VideoRefRole,
-} from '../videoMediaRefs';
-import type { PickChannel } from './useCanvasPickers';
+import { checkAddVideoRef, incomingVideoRefOccupied, isLibraryOnlyVideoRef, mergedVideoMediaRefsOf, videoRefSourceError, type VideoMediaRef, type VideoMediaRefs, type VideoRefCapabilities } from '../videoMediaRefs';
 
 export interface CanvasPickSessionClickHost {
   mediaNodesRef: RefObject<Node[]>;

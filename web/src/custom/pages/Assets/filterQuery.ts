@@ -1,4 +1,4 @@
-import type { AssetType } from '@/custom/api/assets';
+import { type AssetType } from '@/custom/enums';
 
 export type FilterKey = 'all' | AssetType | 'liveness';
 

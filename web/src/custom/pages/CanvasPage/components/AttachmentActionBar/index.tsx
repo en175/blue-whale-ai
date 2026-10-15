@@ -1,6 +1,7 @@
+import { type VideoRefRole } from '@/custom/enums';
 import type { ReactNode } from 'react';
 import { FolderOpen, Plus } from 'lucide-react';
-import type { VideoRefRole } from '../../videoMediaRefs';
+
 import styles from './index.module.css';
 
 export const ATTACHMENT_ACTION_PICK_CANVAS_TITLE = '从节点添加素材';

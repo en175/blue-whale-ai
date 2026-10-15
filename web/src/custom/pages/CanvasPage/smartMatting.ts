@@ -60,21 +60,7 @@ export type SmartMattingBackgroundColor = VideoMattingBackgroundColor;
 export const SMART_MATTING_DEFAULT_BACKGROUND_COLOR: SmartMattingBackgroundColor =
   VIDEO_MATTING_DEFAULT_BACKGROUND_COLOR;
 
-export const SMART_MATTING_FORMAT_LABELS: Record<SmartMattingFormat, string> = {
-  WEBM: 'WEBM 透明',
-  MP4: 'MP4 纯色',
-};
-
-export const SMART_MATTING_BACKGROUND_COLOR_LABELS: Record<SmartMattingBackgroundColor, string> = {
-  white: '白色',
-  black: '黑色',
-  green: '绿色',
-};
-
-export const SMART_MATTING_MODE_LABELS: Record<SmartMattingMode, string> = {
-  portrait: '人像抠像',
-  greenscreen: '绿幕抠像',
-};
+import { SMART_MATTING_MODE_LABELS } from '@/custom/enums';
 
 export const SMART_MATTING_EDGE_ORIGIN = 'smart-matting';
 

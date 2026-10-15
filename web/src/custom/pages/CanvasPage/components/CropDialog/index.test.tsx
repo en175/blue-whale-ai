@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
+import { type CropPresetKey } from '@/custom/enums';
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import CropDialog from './index';
-import { CROP_PRESET_ORDER, type CropPresetKey } from '../../imageCrop';
+import { CROP_PRESET_ORDER } from '../../imageCrop';
 
 let root: Root;
 let mountNode: HTMLDivElement;

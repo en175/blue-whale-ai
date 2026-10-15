@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { type VideoSubtitleEraseMode } from '@/custom/enums';
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -8,7 +9,7 @@ import type { Node } from '@xyflow/react';
 import CanvasPage from './index';
 import MediaNodeToolbar from './components/MediaNode/Toolbar';
 import type { GenerationModel } from '@/custom/api/generation';
-import type { VideoSubtitleEraseMode } from './videoSubtitleErase';
+
 import { imageMediaRefsOf } from './mediaRefs';
 
 vi.mock('@/custom/api/generationQuote', async (importActual) => ({
@@ -639,7 +640,6 @@ describe('IKH3OU 经入口下拉进会话（画布级全链路）', () => {
     host.remove();
   });
 });
-
 
 function stubWrapperSize(width: number, height: number) {
   vi.spyOn(Element.prototype, 'clientWidth', 'get').mockReturnValue(width);

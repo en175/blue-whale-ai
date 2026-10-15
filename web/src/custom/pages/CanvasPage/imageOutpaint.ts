@@ -7,6 +7,7 @@ import {
   imageOutpaintSourceGate,
   type ImageOutpaintInput,
 } from '@lib/contracts/image-outpaint';
+import { type OutpaintPresetKey, OUTPAINT_PRESET_LABELS } from '@/custom/enums';
 
 export const IMAGE_OUTPAINT_MAX_EXPAND_RATIO = IMAGE_OUTPAINT_EXPAND_RATIO_LIMITS.max;
 export const IMAGE_OUTPAINT_LONG_SIDE_LIMIT = IMAGE_OUTPAINT_SOURCE_LIMITS.maxLongSide;
@@ -132,17 +133,6 @@ export function dragExpandCorner(
   );
 }
 
-
-export type OutpaintPresetKey = 'original' | '1:1' | '4:3' | '3:4' | '16:9' | '9:16';
-
-export const OUTPAINT_PRESET_LABELS: Record<OutpaintPresetKey, string> = {
-  original: '原图比例',
-  '1:1': '1:1',
-  '4:3': '4:3',
-  '3:4': '3:4',
-  '16:9': '16:9',
-  '9:16': '9:16',
-};
 
 export const OUTPAINT_PRESET_ORDER: OutpaintPresetKey[] = ['original', '1:1', '4:3', '3:4', '16:9', '9:16'];
 

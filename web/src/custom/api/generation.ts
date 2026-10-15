@@ -1,6 +1,5 @@
 import { apiRequest } from '@/shared/api/http';
-
-export type ModelCapability = 'text' | 'video' | 'image' | 'audio';
+import { type ModelCapability } from '@/custom/enums';
 
 export interface AspectRatioOption {
   id: string;

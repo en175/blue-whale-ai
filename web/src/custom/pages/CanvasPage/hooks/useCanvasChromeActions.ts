@@ -1,9 +1,9 @@
+import { type AssetCardKind, type CardFilter } from '@/custom/enums';
 import type { Dispatch, SetStateAction } from 'react';
 import type { MaterialAsset } from '@/custom/api/material';
-import type { AssetCardKind } from '../components/AssetCardNode';
+
 import type { UploadedFile } from '../components/ImageDialog';
 import type { CanvasGalleryRef } from '../collectMediaBlocks';
-import type { CardFilter } from '../components/SharedAssetsModal';
 
 export function useCanvasChromeActions(input: {
   setAssetsModalDefaultTab: Dispatch<SetStateAction<string | undefined>>;

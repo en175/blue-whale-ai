@@ -36,17 +36,6 @@ export interface AudioVideoMuxIdentity {
   video?: AudioVideoMuxBoundVideo;
 }
 
-export const AUDIO_VIDEO_MUX_RESERVE_OPTIONS: ReadonlyArray<{ value: boolean; label: string }> = [
-  { value: true, label: '保留原声' },
-  { value: false, label: '替换原声' },
-];
-
-export const AUDIO_VIDEO_MUX_SYNC_OPTIONS: ReadonlyArray<{ value: AudioVideoMuxSync; label: string }> = [
-  { value: 'none', label: '保持原长' },
-  { value: 'video', label: '裁到视频长' },
-  { value: 'audio', label: '裁到音频长' },
-];
-
 export function buildAudioVideoMuxIdentity(sourceNodeId: string, sourceAssetId?: string): AudioVideoMuxIdentity {
   return { sourceNodeId, sourceAssetId, reserveAudio: true, sync: 'none' };
 }

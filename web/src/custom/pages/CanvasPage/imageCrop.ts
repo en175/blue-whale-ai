@@ -1,4 +1,6 @@
 
+import { type CropPresetKey } from '@/custom/enums';
+
 export interface CropRect {
   x: number;
   y: number;
@@ -9,17 +11,6 @@ export interface CropRect {
 export type CropEdge = 'top' | 'right' | 'bottom' | 'left';
 export type CropCorner = 'nw' | 'ne' | 'sw' | 'se';
 
-
-export type CropPresetKey = 'free' | '1:1' | '4:3' | '3:4' | '16:9' | '9:16';
-
-export const CROP_PRESET_LABELS: Record<CropPresetKey, string> = {
-  free: '自由',
-  '1:1': '1:1',
-  '4:3': '4:3',
-  '3:4': '3:4',
-  '16:9': '16:9',
-  '9:16': '9:16',
-};
 
 export const CROP_PRESET_ORDER: CropPresetKey[] = ['free', '1:1', '4:3', '3:4', '16:9', '9:16'];
 

@@ -1,13 +1,6 @@
+import { type AssetType } from '@/custom/enums';
 import SparkMD5 from 'spark-md5';
-import {
-  UPLOAD_SIZE_LIMIT,
-  fetchUploadPresign,
-  putToPresignedUrl,
-  completeUpload,
-  dedupUpload,
-  type AssetType,
-  type UploadCompleteData,
-} from '@/custom/api/assets';
+import { UPLOAD_SIZE_LIMIT, fetchUploadPresign, putToPresignedUrl, completeUpload, dedupUpload, type UploadCompleteData } from '@/custom/api/assets';
 import { silentInit } from '@/shared/api/http';
 import { FileRejectedError, checkFileBeforeUpload } from './fileSignature';
 

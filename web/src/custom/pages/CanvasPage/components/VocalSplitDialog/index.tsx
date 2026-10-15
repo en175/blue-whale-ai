@@ -1,15 +1,9 @@
+import { VOCAL_SPLIT_SCENE_OPTIONS } from '@/custom/enums';
 import { useRef, useState } from 'react';
 import { ArrowUp, ChevronDown, X } from 'lucide-react';
 import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../followDialog';
 import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
-import {
-  VOCAL_SPLIT_FORMATS,
-  VOCAL_SPLIT_SCENE_OPTIONS,
-  vocalSplitSceneHint,
-  vocalSplitSceneLabel,
-  type VocalSplitFormat,
-  type VocalSplitScene,
-} from '../../vocalSplit';
+import { VOCAL_SPLIT_FORMATS, vocalSplitSceneHint, vocalSplitSceneLabel, type VocalSplitFormat, type VocalSplitScene } from '../../vocalSplit';
 import styles from './index.module.css';
 
 interface VocalSplitDialogProps {

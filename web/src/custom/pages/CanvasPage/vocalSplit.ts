@@ -4,7 +4,6 @@ import {
   VOCAL_SPLIT_DEFAULT_SCENE,
   VOCAL_SPLIT_OUTPUT_FORMATS,
   VOCAL_SPLIT_SCENE_TRACKS,
-  VOCAL_SPLIT_SCENES,
   type VocalSplitOutputFormat,
   type VocalSplitScene,
   type VocalSplitTrackType,
@@ -18,7 +17,7 @@ export type VocalSplitFormat = VocalSplitOutputFormat;
 export type { VocalSplitScene };
 export const VOCAL_SPLIT_DEFAULT_FORMAT: VocalSplitFormat = VOCAL_SPLIT_DEFAULT_OUTPUT_FORMAT;
 
-export const VOCAL_SPLIT_SCENE_OPTIONS: readonly VocalSplitScene[] = VOCAL_SPLIT_SCENES;
+import { VOCAL_SPLIT_TRACK_LABELS } from '@/custom/enums';
 export const VOCAL_SPLIT_DEFAULT_SESSION_SCENE: VocalSplitScene = VOCAL_SPLIT_DEFAULT_SCENE;
 
 export function vocalSplitSceneLabel(scene: VocalSplitScene): string {
@@ -144,13 +143,6 @@ export function vocalSplitTerminalPatch(detail: {
   return null;
 }
 
-
-export const VOCAL_SPLIT_TRACK_LABELS: Record<VocalSplitTrackType, string> = {
-  voice: '人声',
-  background: '背景音',
-  music: '音乐',
-  sfx: '音效',
-};
 
 export const VOCAL_SPLIT_TRACK_NODE_PREFIX = 'vocal-track-';
 

@@ -1,6 +1,7 @@
+import { type ConnectGenKind } from '@/custom/enums';
 import { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import type { ConnectGenKind } from '../../connectAbility';
+
 import styles from './index.module.css';
 
 const ITEMS: Array<{ kind: ConnectGenKind; label: string }> = [

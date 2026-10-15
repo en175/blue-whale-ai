@@ -1,8 +1,7 @@
 import { useCallback, useRef, useState } from 'react';
 import { persistSnapAlignmentEnabled, readSnapAlignmentEnabled } from '../snapPreference';
-import type { CardFilter } from '../components/SharedAssetsModal';
 
-export type ToolMode = 'drag' | 'select';
+import { type ToolMode, type CardFilter } from '@/custom/enums';
 
 export function useCanvasWorkbenchChrome() {
   const [showMiniMap, setShowMiniMap] = useState(false);

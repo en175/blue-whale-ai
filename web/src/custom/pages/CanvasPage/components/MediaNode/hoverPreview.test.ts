@@ -1,7 +1,8 @@
+import { type MediaGenStatus } from '@/custom/enums';
 import { describe, expect, it } from 'vitest';
 import { HOVER_PREVIEW_DELAY_MS, videoHoverPreviewBlocked, videoHoverPreviewEligible } from './hoverPreview';
 import type { VideoHoverPreviewInput } from './hoverPreview';
-import type { MediaGenStatus } from './index';
+
 import { isMultiNodeSelection } from '../../useSoloNodeSelected';
 
 const _genStatusCoversMediaGenStatus: VideoHoverPreviewInput['genStatus'] = undefined as MediaGenStatus | undefined;

@@ -3,8 +3,7 @@ import { Brush, Eraser, Square, TypeOutline, Undo2, Redo2, X, ArrowUp } from 'lu
 import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../followDialog';
 import type { MaskCoordinateSpace } from '../../eraseMask';
 import styles from './index.module.css';
-
-export type EraseTool = 'brush' | 'rect' | 'eraser';
+import { type EraseTool } from '@/custom/enums';
 
 export const ERASE_BRUSH_RADIUS_MIN = 6;
 export const ERASE_BRUSH_RADIUS_MAX = 64;

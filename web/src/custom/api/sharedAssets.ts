@@ -1,6 +1,5 @@
 import { apiRequest } from '@/shared/api/http';
-
-export type SharedAssetType = 'card' | 'media' | 'goods' | 'scene' | 'text';
+import { type SharedAssetType } from '@/custom/enums';
 
 export type SharedAssetKind =
   | 'style'
