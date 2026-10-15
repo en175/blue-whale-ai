@@ -440,6 +440,96 @@ describe('多结果家族：运行时集成', () => {
     expect(fake.removes).not.toContain(segmentId);
   });
 
+  it.each([false, true])('任务 3416 四段恢复后删除一段，首次保存已完成=%s，重新打开三次不复活或覆盖位置', async (savedBeforeDelete) => {
+    const fake = createFakeHost();
+    const source: RuntimeNodeView = { id: 'v1', type: 'mediaNode', position: { x: 100, y: 200 }, data: { assetId: '8166', mediaType: 'video', fileName: '源视频' } };
+    fake.nodes.set(source.id, source);
+    fake.nodes.set('ph-1', { id: 'ph-1', type: 'mediaNode', position: { x: 958, y: 0 }, data: { sceneSplit: { sourceAssetId: '8166', lastInput: {} } } });
+    fake.edges.push({ source: 'v1', target: 'ph-1' });
+    const segments = [
+      { segment_index: 1, start_time: 0, end_time: 2.0416667, segment_asset_id: '8215' },
+      { segment_index: 2, start_time: 2.0416667, end_time: 3.5, segment_asset_id: '8216' },
+      { segment_index: 3, start_time: 3.5, end_time: 4.75, segment_asset_id: '8217' },
+      { segment_index: 4, start_time: 4.75, end_time: 30.041666, segment_asset_id: '8218' },
+    ];
+    const detail = {
+      job_id: '3416', status: 'succeeded', progress: 100, asset: null,
+      result: { duration: 30.08, segments },
+      output_assets: segments.map(segment => ({ id: segment.segment_asset_id, url: `http://t/${segment.segment_asset_id}.mp4`, type: 'video', width: 480, height: 854 })),
+    };
+    const page = oneSegmentPage();
+    const record = page.records[0]!;
+    record.job_id = '3416';
+    record.job = { ...record.job!, job_id: '3416', output_asset_ids: ['8215', '8216', '8217', '8218'] };
+    record.recovery_seed!.sources = [{ node_id: 'v1', x: 100, y: 200, width: 480, height: 854, name: '源视频' }];
+    record.items = [record.items[0]!, ...segments.map(segment => ({
+      recovery_item_id: `gcr:${SUBMISSION}:segment:${segment.segment_index}`,
+      output_key: `segment:${segment.segment_index}`,
+      node_id: `generation-result:${SUBMISSION}:segment:${segment.segment_index}`,
+      state: 'pending' as const, revision: 0, node_binding_revision: 0,
+      asset_id: segment.segment_asset_id, slot_id: null,
+    }))];
+    const runtime = setupRuntime(fake, [detail], page);
+    await runtime.recover('p1');
+    await flushMicrotasks(20);
+    const ids = [1, 2, 3, 4].map(index => `generation-result:${SUBMISSION}:segment:${index}`);
+    expect(fake.nodes.has('ph-1')).toBe(false);
+    expect(ids.map(id => fake.nodes.get(id)?.data)).toEqual([
+      expect.objectContaining({ assetId: '8215', src: 'http://t/8215.mp4', fileName: '第 1 段 00:00-00:02' }),
+      expect.objectContaining({ assetId: '8216', src: 'http://t/8216.mp4', fileName: '第 2 段 00:02-00:03' }),
+      expect.objectContaining({ assetId: '8217', src: 'http://t/8217.mp4', fileName: '第 3 段 00:03-00:04' }),
+      expect.objectContaining({ assetId: '8218', src: 'http://t/8218.mp4', fileName: '第 4 段 00:04-00:30' }),
+    ]);
+    expect(fake.edges).toEqual(expect.arrayContaining(ids.map(target => ({ source: 'v1', target }))));
+    expect(runtime.composeSaveFields()!.recoveryChanges).toEqual([
+      { recoveryItemId: `gcr:${SUBMISSION}:$target`, expectedRevision: 1, action: 'replaceTarget' },
+      ...[1, 2, 3, 4].map(index => ({ recoveryItemId: `gcr:${SUBMISSION}:segment:${index}`, expectedRevision: 0, action: 'apply' })),
+    ]);
+    const receipt = () => ({
+      commandId: 'cmd-3416', replayed: false,
+      changes: record.items.map(item => ({ recoveryItemId: item.recovery_item_id, revision: item.revision, nodeBindingRevision: item.node_binding_revision, state: item.state })),
+    });
+    if (savedBeforeDelete) {
+      record.items.forEach(item => {
+        item.state = item.output_key === '$target' ? 'replaced' : 'present';
+        item.revision = item.output_key === '$target' ? 2 : 1;
+        item.node_binding_revision = 1;
+      });
+      runtime.onSaveReceipt(receipt());
+      expect(runtime.composeSaveFields()).toBeNull();
+    }
+    fake.nodes.get(ids[2]!)!.position = { x: 1500, y: 700 };
+    expect(runtime.remove(ids[1]!)).toBe(true);
+    expect(runtime.composeSaveFields()!.recoveryChanges).toContainEqual({
+      recoveryItemId: `gcr:${SUBMISSION}:segment:2`, expectedRevision: savedBeforeDelete ? 1 : 0, action: 'remove',
+    });
+    record.items.forEach(item => {
+      item.state = item.output_key === '$target' ? 'replaced' : item.output_key === 'segment:2' ? 'removed' : 'present';
+      item.revision = item.output_key === '$target' || (savedBeforeDelete && item.output_key === 'segment:2') ? 2 : 1;
+      item.node_binding_revision = 1;
+    });
+    runtime.onSaveReceipt(receipt());
+    expect(runtime.composeSaveFields()).toBeNull();
+    const savedNodes = structuredClone([...fake.nodes.values()]);
+    expect(savedNodes.map(node => node.id)).toEqual(['v1', ids[0], ids[2], ids[3]]);
+    runtime.reset();
+    for (let refresh = 0; refresh < 3; refresh += 1) {
+      const reopened = createFakeHost();
+      for (const node of structuredClone(savedNodes)) reopened.nodes.set(node.id, node);
+      const reopenedRuntime = setupRuntime(reopened, [detail], page);
+      await reopenedRuntime.recover('p1');
+      await flushMicrotasks(20);
+      expect([...reopened.nodes.values()]).toEqual(savedNodes);
+      expect(reopened.nodes.get('v1')).toEqual(source);
+      expect(reopened.nodes.get(ids[2]!)?.position).toEqual({ x: 1500, y: 700 });
+      expect(reopened.inserts).toHaveLength(0);
+      expect(reopenedRuntime.composeSaveFields()).toBeNull();
+      reopenedRuntime.reset();
+    }
+    expect(apiMocks.createVideoSceneSplit).not.toHaveBeenCalled();
+    expect(apiMocks.cancelGenerationJob).not.toHaveBeenCalled();
+  });
+
 
   const sceneSplitFailedCard = () => ({
     id: 'ph-1', type: 'mediaNode' as const, position: { x: 958, y: 0 },

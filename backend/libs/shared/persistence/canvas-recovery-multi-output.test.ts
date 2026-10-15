@@ -130,6 +130,30 @@ describe("场景切分投影（segment:<index>，序号来自可信终态 result
     expect(projection).toEqual({ kind: "ok", items: [] });
   });
 
+  it("任务 3416 成功日志携带 asset_ids 时仍恢复四个场景段", async () => {
+    const projection = await projectVirtualOutputs(fakeTx({ logs: [sceneSplitLog({
+      duration: 30.08,
+      segments: [
+        { segment_index: 1, start_time: 0, end_time: 2.0416667, segment_asset_id: "8215" },
+        { segment_index: 2, start_time: 2.0416667, end_time: 3.5, segment_asset_id: "8216" },
+        { segment_index: 3, start_time: 3.5, end_time: 4.75, segment_asset_id: "8217" },
+        { segment_index: 4, start_time: 4.75, end_time: 30.041666, segment_asset_id: "8218" },
+      ],
+      asset_ids: ["8215", "8216", "8217", "8218"],
+    })] }), {
+      submissionId: SUBMISSION, targetNodeId: TARGET, job: sceneSplitJob(),
+    });
+    expect(projection).toEqual({
+      kind: "ok",
+      items: [
+        { outputKey: "segment:1", nodeId: `generation-result:${SUBMISSION}:segment:1`, assetId: "8215", slotId: null },
+        { outputKey: "segment:2", nodeId: `generation-result:${SUBMISSION}:segment:2`, assetId: "8216", slotId: null },
+        { outputKey: "segment:3", nodeId: `generation-result:${SUBMISSION}:segment:3`, assetId: "8217", slotId: null },
+        { outputKey: "segment:4", nodeId: `generation-result:${SUBMISSION}:segment:4`, assetId: "8218", slotId: null },
+      ],
+    });
+  });
+
   it("成功但缺终态日志 → invalid（缺产物）", async () => {
     const projection = await projectVirtualOutputs(fakeTx({}), {
       submissionId: SUBMISSION, targetNodeId: TARGET, job: sceneSplitJob(),
@@ -145,11 +169,38 @@ describe("场景切分投影（segment:<index>，序号来自可信终态 result
     expect(projection).toEqual({ kind: "invalid" });
   });
 
+  it.each([
+    null,
+    [],
+    "invalid",
+    { asset_ids: ["701"] },
+    { ...payload, duration: "12.5", asset_ids: ["701", "702"] },
+    { ...payload, segments: [], asset_ids: ["701", "702"] },
+    { ...payload, segments: [{ ...payload.segments[0], segment_asset_id: "invalid" }], asset_ids: ["701"] },
+    { ...payload, segments: [{ ...payload.segments[0], extra: true }], asset_ids: ["701"] },
+  ])("日志附加字段不放宽结果契约校验：%j", async (invalidPayload) => {
+    expect(await projectVirtualOutputs(fakeTx({ logs: [sceneSplitLog(invalidPayload)] }), {
+      submissionId: SUBMISSION, targetNodeId: TARGET, job: sceneSplitJob(),
+    })).toEqual({ kind: "invalid" });
+  });
+
+  it("历史日志无 asset_ids 且仅一段时照常恢复", async () => {
+    const projection = await projectVirtualOutputs(fakeTx({ logs: [sceneSplitLog({
+      duration: 5, segments: [payload.segments[0]],
+    })] }), {
+      submissionId: SUBMISSION, targetNodeId: TARGET, job: sceneSplitJob(),
+    });
+    expect(projection).toEqual({ kind: "ok", items: [
+      { outputKey: "segment:1", nodeId: `generation-result:${SUBMISSION}:segment:1`, assetId: "701", slotId: null },
+    ] });
+  });
+
   it("重复 segment_index → invalid（重复键）", async () => {
     const projection = await projectVirtualOutputs(
       fakeTx({
         logs: [sceneSplitLog({
           duration: 10,
+          asset_ids: ["701", "702"],
           segments: [
             { segment_index: 1, start_time: 0, end_time: 5, segment_asset_id: "701" },
             { segment_index: 1, start_time: 5, end_time: 10, segment_asset_id: "702" },

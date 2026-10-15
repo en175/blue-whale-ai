@@ -88,8 +88,14 @@ async function projectSceneSplit(
     orderBy: { occurred_at: "desc" },
     select: { payload: true },
   });
-  if (!logRow?.payload) return { kind: "invalid" };
-  const parsed = videoSceneSplitResultSchema.safeParse(logRow.payload);
+  if (!logRow?.payload || typeof logRow.payload !== "object" || Array.isArray(logRow.payload)) {
+    return { kind: "invalid" };
+  }
+  const payload = logRow.payload as Record<string, unknown>;
+  const parsed = videoSceneSplitResultSchema.safeParse({
+    duration: payload.duration,
+    segments: payload.segments,
+  });
   if (!parsed.success) return { kind: "invalid" };
   const seen = new Set<number>();
   const items: VirtualOutputItem[] = [];
