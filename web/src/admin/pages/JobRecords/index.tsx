@@ -5,7 +5,7 @@ import {
   type AdminJobRecord,
   type AdminJobRecordQuery,
 } from '@/admin/api/adminJobRecords';
-import { TASK_TYPE_OPTIONS } from '../../taskTypeLabels';
+import { TASK_TYPE_OPTIONS } from '@/shared/enums/taskTypeLabels';
 import AdminQueryTable, {
   type Column,
   type OffsetPaginationState,

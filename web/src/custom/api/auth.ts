@@ -1,6 +1,9 @@
 import { apiRequest } from '@/shared/api/http';
 import { clearSessionToken, getSessionToken, setSessionToken } from '@/shared/api/sessionToken';
 import type { SessionUser } from '@/shared/utils/auth';
+import type { UsageTokenData } from '@/shared/stores/auth';
+
+export type { UsageTokenData } from '@/shared/stores/auth';
 
 export interface LoginData {
   token: string;
@@ -21,11 +24,6 @@ export interface MeData {
   created_at: string;
   has_password?: boolean;
   is_admin?: boolean;
-}
-
-export interface UsageTokenData {
-  credits: number;
-  by_source?: { source: string; credits: number }[];
 }
 
 export const toSessionUser = (m: MeData): SessionUser => ({

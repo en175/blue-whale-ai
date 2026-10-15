@@ -11,7 +11,7 @@ import AdminQueryTable, {
 } from '../../components/AdminQueryTable';
 import { useAppliedFilters, usePagedQuery } from '../../components/AdminQueryTable/useQueryFilters';
 import { Badge, Button, Hint, Input, MetaRow, Select, Tooltip, type BadgeTone } from '../../ui';
-import { taskTypeLabel } from '../../taskTypeLabels';
+import { taskTypeLabel } from '@/shared/enums/taskTypeLabels';
 
 const PAGE_SIZE = 20;
 
