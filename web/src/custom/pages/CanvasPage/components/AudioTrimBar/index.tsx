@@ -1,7 +1,6 @@
-import { useRef, useState } from 'react';
 import { ArrowUp, ChevronDown, X, Zap } from 'lucide-react';
+import DropdownMenu from '@/custom/components/DropdownMenu';
 import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../followDialog';
-import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
 import { AUDIO_TRIM_FORMATS, type AudioTrimFormat } from '../../audioTrim';
 import { audioTrimRangeLabel } from '../../audioTrimGeometry';
 import styles from './index.module.css';
@@ -30,12 +29,6 @@ export default function AudioTrimBar({
 }: AudioTrimBarProps) {
   const readOnly = submitting === true;
 
-  const [formatMenuOpen, setFormatMenuOpen] = useState(false);
-  const formatWrapRef = useRef<HTMLDivElement>(null);
-  useDismissOnOutside([
-    { open: formatMenuOpen, ref: formatWrapRef, dismiss: () => setFormatMenuOpen(false) },
-  ]);
-
   const guarded = (disabled: boolean, dispatch: () => void) => () => {
     if (disabled) return;
     dispatch();
@@ -62,41 +55,33 @@ export default function AudioTrimBar({
         {audioTrimRangeLabel({ start, end })}
       </span>
       {}
-      <div className={styles.formatWrap} ref={formatWrapRef}>
-        <button
-          type="button"
-          className={styles.formatTrigger}
-          data-testid="audio-trim-format-trigger"
-          aria-haspopup="menu"
-          aria-expanded={formatMenuOpen || undefined}
-          disabled={readOnly}
-          title="选择输出格式（默认跟随源音频格式）"
-          onClick={guarded(readOnly, () => setFormatMenuOpen((open) => !open))}
-        >
-          <span>{format}</span>
-          <ChevronDown size={12} strokeWidth={2} />
-        </button>
-        {formatMenuOpen && (
-          <div className={styles.formatMenu} role="menu" data-testid="audio-trim-format-menu">
-            {AUDIO_TRIM_FORMATS.map((item) => (
-              <button
-                key={item}
-                type="button"
-                role="menuitemradio"
-                aria-checked={item === format}
-                className={`${styles.formatMenuItem} ${item === format ? styles.formatMenuItemActive : ''}`}
-                data-testid={`audio-trim-format-item-${item}`}
-                onClick={() => {
-                  onFormatChange(item);
-                  setFormatMenuOpen(false);
-                }}
-              >
-                {item}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
+      <DropdownMenu
+        modal={false}
+        side="top"
+        wrapClassName={styles.formatWrap}
+        contentClassName={styles.formatMenu}
+        contentTestId="audio-trim-format-menu"
+        trigger={
+          <button
+            type="button"
+            className={styles.formatTrigger}
+            data-testid="audio-trim-format-trigger"
+            aria-haspopup="menu"
+            disabled={readOnly}
+            title="选择输出格式（默认跟随源音频格式）"
+          >
+            <span>{format}</span>
+            <ChevronDown size={12} strokeWidth={2} />
+          </button>
+        }
+        items={AUDIO_TRIM_FORMATS.map((item) => ({
+          key: item,
+          label: item,
+          checked: item === format,
+          testId: `audio-trim-format-item-${item}`,
+          onSelect: () => onFormatChange(item),
+        }))}
+      />
       {}
       <span className={styles.free} title="本期免费" data-testid="audio-trim-free">
         <Zap size={11} fill="currentColor" strokeWidth={0} />

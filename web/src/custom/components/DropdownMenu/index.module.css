@@ -1,3 +1,9 @@
+.wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
 .content {
   z-index: 9999;
   min-width: 140px;
@@ -49,6 +55,11 @@
 .danger[data-highlighted] {
   color: #ff6b6b;
   background-color: rgba(229, 72, 77, 0.12);
+}
+
+.checked {
+  color: #fff;
+  background-color: rgba(255, 255, 255, 0.12);
 }
 
 .chevron {
