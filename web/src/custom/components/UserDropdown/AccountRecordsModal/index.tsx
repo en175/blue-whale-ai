@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Wallet, Wand2, ArrowDown, ArrowUp } from 'lucide-react';
 import { fetchConsumptions, type ConsumptionRecord } from '@/custom/api/account';
+import Tabs from '@/custom/components/Tabs';
 import styles from './index.module.css';
 
 interface AccountRecordsModalProps {
@@ -62,22 +63,33 @@ export default function AccountRecordsModal({ onClose }: AccountRecordsModalProp
         <h2 className={styles.title}>账户记录</h2>
 
         {}
-        <div className={styles.tabs}>
-          <button
-            className={`${styles.tab} ${tab === 'recharge' ? styles.tabActive : ''}`}
-            onClick={() => setTab('recharge')}
-          >
-            <Wallet size={16} strokeWidth={2} />
-            <span>充值记录</span>
-          </button>
-          <button
-            className={`${styles.tab} ${tab === 'consume' ? styles.tabActive : ''}`}
-            onClick={() => setTab('consume')}
-          >
-            <Wand2 size={16} strokeWidth={2} />
-            <span>消费记录</span>
-          </button>
-        </div>
+        <Tabs
+          className={styles.tabs}
+          triggerClassName={styles.tab}
+          activeTriggerClassName={styles.tabActive}
+          value={tab}
+          onChange={setTab}
+          items={[
+            {
+              key: 'recharge',
+              label: (
+                <>
+                  <Wallet size={16} strokeWidth={2} />
+                  <span>充值记录</span>
+                </>
+              ),
+            },
+            {
+              key: 'consume',
+              label: (
+                <>
+                  <Wand2 size={16} strokeWidth={2} />
+                  <span>消费记录</span>
+                </>
+              ),
+            },
+          ]}
+        />
 
         {}
         <div className={styles.list}>

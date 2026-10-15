@@ -65,7 +65,10 @@ async function render(initial: AudioMixInputSelection[] = [], candidates: Node[]
 async function click(id: string) {
   const button = container.querySelector<HTMLButtonElement>(`[data-testid="${id}"]`);
   expect(button).not.toBeNull();
-  await act(async () => button!.click());
+  await act(async () => {
+    button!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
+    button!.click();
+  });
 }
 
 beforeEach(() => {

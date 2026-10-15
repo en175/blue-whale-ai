@@ -31,6 +31,7 @@ import {
 } from '@/custom/api/skills';
 import { isApiError } from '@/shared/api/http';
 import Select from '@/custom/components/Select';
+import Tabs from '@/custom/components/Tabs';
 import ConfirmModal from '@/custom/components/ConfirmModal';
 
 interface SkillModalProps {
@@ -326,23 +327,33 @@ export default function SkillModal({ open, onClose, onUseSkill }: SkillModalProp
       <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
         {}
         <div className={styles.header}>
-          <div className={styles.tabs}>
-            <button
-              className={`${styles.tab} ${tab === 'mine' ? styles.tabActive : ''}`}
-              onClick={() => setTab('mine')}
-            >
-              <BookMarked size={15} strokeWidth={2} />
-              <span>我的技能</span>
-            </button>
-            <button
-              className={`${styles.tab} ${tab === 'library' ? styles.tabActive : ''}`}
-              onClick={() => setTab('library')}
-            >
-              <Store size={15} strokeWidth={2} />
-              <span>技能库</span>
-            </button>
-            {}
-          </div>
+          <Tabs
+            className={styles.tabs}
+            triggerClassName={styles.tab}
+            activeTriggerClassName={styles.tabActive}
+            value={tab === 'create' ? '' : tab}
+            onChange={setTab}
+            items={[
+              {
+                key: 'mine',
+                label: (
+                  <>
+                    <BookMarked size={15} strokeWidth={2} />
+                    <span>我的技能</span>
+                  </>
+                ),
+              },
+              {
+                key: 'library',
+                label: (
+                  <>
+                    <Store size={15} strokeWidth={2} />
+                    <span>技能库</span>
+                  </>
+                ),
+              },
+            ]}
+          />
           <button className={styles.closeBtn} onClick={onClose} title="关闭">
             <X size={16} strokeWidth={2} />
           </button>

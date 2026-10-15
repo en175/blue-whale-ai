@@ -25,6 +25,7 @@ import { fetchSharedAssetList, removeSharedAsset, addSceneToProject, type Shared
 import { isApiError } from '@/shared/api/http';
 import { remoteImageCrossOrigin, resolveMediaSrc } from '@/shared/utils/remoteImageCors';
 import Select from '@/custom/components/Select';
+import Tabs from '@/custom/components/Tabs';
 import styles from './index.module.css';
 
 const TABS: { key: string; label: string; assetType?: SharedAssetType; kind?: SharedAssetKind; icon: typeof ImageIcon }[] = [
@@ -349,22 +350,28 @@ export default function SharedAssetsModal({
                 ...CARD_KINDS.map((s) => ({ value: s, label: CARD_KIND_LABEL[s] })),
               ]}
             />
-            {TABS.map((t) => {
-              const Icon = t.icon;
-              return (
-                <button
-                  key={t.key}
-                  className={`${styles.tab} ${tab === t.key && cardFilter === 'all' ? styles.tabActive : ''}`}
-                  onClick={() => {
-                    setTab(t.key);
-                    setCardFilter('all');
-                  }}
-                >
-                  <Icon size={14} strokeWidth={2} />
-                  <span>{t.label}</span>
-                </button>
-              );
-            })}
+            <Tabs
+              className={styles.tabTriggers}
+              triggerClassName={styles.tab}
+              activeTriggerClassName={styles.tabActive}
+              value={cardFilter === 'all' ? tab : ''}
+              onChange={(next) => {
+                setTab(next);
+                setCardFilter('all');
+              }}
+              items={TABS.map((t) => {
+                const Icon = t.icon;
+                return {
+                  key: t.key,
+                  label: (
+                    <>
+                      <Icon size={14} strokeWidth={2} />
+                      <span>{t.label}</span>
+                    </>
+                  ),
+                };
+              })}
+            />
           </div>
 
           <div className={styles.tabRight}>
