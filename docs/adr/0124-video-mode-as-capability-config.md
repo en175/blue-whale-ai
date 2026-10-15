@@ -38,6 +38,20 @@
    键下的 `allowed_ratios` 保留现状语义（该模式的比例白名单）。**空对象 = 开放且无额外约束。**
 2. **不新增字段，白名单与 `task_types` 合并。** 「这座模型有哪些模式」与「每个模式什么约束」是同一张表。
 3. **`allowed_durations` 只放行 `[-1]`。** 它是「该模式下时长由上游决定、用户不可选」的表达。写侧闸门**强制只允许 `[-1]`**，正数枚举一律拒绝（堵住重演 IKG4UR）。它同时是「编辑单的时长只能跟随」这一唯一事实源。
+   IKLUVP 修订，2026-10-15：`edit`、`extend` 模式可以额外声明 `allow_auto_duration: true`，表示在基础 `supported_durations` 范围与步长之外接受自动时长 `-1`。缺失、null 或 false 不开放自动时长。基础范围的步长由接纳侧与前端共同校验，指定值须满足 `(duration - min) % step === 0`，未配置步长时只校验范围。`allowed_durations: [-1]` 仍表示只能自动，优先于范围与自动可选标记；管理端写入只能自动时移除可选标记。禁止用正数枚举表达范围。
+
+   | 模式配置 | 接受的时长 | 界面 |
+   | --- | --- | --- |
+   | 两个字段均缺失 | 基础范围及步长 | 指定秒数 |
+   | `allow_auto_duration: true`，无 `allowed_durations` | `-1` 或基础范围及步长 | 自动与指定秒数可选 |
+   | `allowed_durations: [-1]` | 仅 `-1` | 自动锁定 |
+
+   当前 worker 的自动时长只支持 edit / extend。写侧拒绝其他模式的 `allow_auto_duration: true`，管理端只在这两个模式提供该选项；本单不扩展执行侧模式能力。
+
+   模式内字段使用 snake_case。外层 `taskTypes` 历史别名归一为 `task_types` 时，保留模式内字段。Seedance 2.5 的 `extend` 补入 `allow_auto_duration: true`，保留 adaptive 比例与 4–30 秒基础范围；`edit` 继续使用 `allowed_durations: [-1]`。旧配置不会由模型名前缀或模式名自动扩权，须执行本单提供的定向配置 SQL。先部署支持新字段的 backend 与 web，再经人工审批更新存量配置并刷新目录缓存。
+
+   自动可选表示由模型选择时长；编辑自动表示跟随原视频。快照中的 `duration` 保留用户的 `-1` 或正数，`video_mode` 保留显式模式，worker 按既有字段消费，不增加执行期能力字段。
+
 4. **模式显式传递，执行侧只读快照。** 前端传模式 → 接纳侧按能力行校验并**冻结进 job 快照**（复用 IKJ795 的 `video_task_type` 机制，把「推出来的值」换成「传进来的值」）→ worker 按快照下发 `omni_reference_task_type` 与 `ratio` / `duration`。**worker 不得改写任何用户入参**，也不得含模型名前缀判定。
 5. **`omni_reference_task_type` 只在 Seedance 2.5 下发**（官方该参数的模型支持仅 2.5）。2.0 靠 `content[].role` 表达，payload 逐位不变。new-api 侧**零改动**——2.5 专用渠道 `volcengine-25`（type 66）已支持该字段。
 6. **推断退役，但误判兜底保留。** 官方明文「显式指定不保证按该类型生成，上游仍会结合提示词语义复判」——所以模式只解决「用户想做什么」，不保证上游照办。IKJ795 的**结构化拒单 + 前端一键修复**路径（`task_type_param_constraint` 码）必须保留，它是误判时的唯一出口。

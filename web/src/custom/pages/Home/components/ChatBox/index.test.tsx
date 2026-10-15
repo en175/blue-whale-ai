@@ -189,3 +189,32 @@ describe('IKJ794 adaptive 档文案（ChatBox，沿用上游 IKJ4W6 auto 显示�
     expect(ratioBtn.textContent).toBe('auto');
   });
 });
+
+
+describe('IKLUVP 首页延长时长', () => {
+  it('自动与指定秒数可切换，离开支持模式恢复正数', async () => {
+    fetchGenerationModels.mockResolvedValue([{
+      ...seedance25,
+      features: { ...baseFeatures, task_types: { ...baseFeatures.task_types,
+        edit: { allowed_ratios: ['adaptive'], allowed_durations: [-1] },
+        extend: { allowed_ratios: ['adaptive'], allow_auto_duration: true },
+      } },
+    }]);
+    await renderChatBox();
+    await switchToVideoTabAndInject([videoAsset]);
+    await act(async () => { buttonByLabel('视频编辑').click(); });
+    await act(async () => { buttonByLabel('视频延长').click(); });
+    expect(mountNode.textContent).not.toContain('跟随原视频');
+    await act(async () => { buttonByLabel('⏱ 自动').click(); });
+    const automatic = mountNode.querySelector<HTMLInputElement>('[aria-label="自动时长，由模型选择"]')!;
+    expect(automatic.checked).toBe(true);
+    await act(async () => { automatic.click(); });
+    expect(mountNode.querySelector('[aria-label="时长秒数"]')).not.toBeNull();
+    await act(async () => { automatic.click(); });
+    expect(buttonByLabel('⏱ 自动')).toBeTruthy();
+    await act(async () => { buttonByLabel('视频延长').click(); });
+    await act(async () => { buttonByLabel('全能参考').click(); });
+    expect(mountNode.textContent).not.toContain('⏱ 自动');
+    expect(mountNode.textContent).not.toContain('-1s');
+  });
+});

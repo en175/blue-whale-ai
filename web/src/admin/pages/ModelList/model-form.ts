@@ -750,6 +750,16 @@ export function pickTaskTypeFollowDuration(features: Record<string, unknown> | u
   return out;
 }
 
+export function pickTaskTypeAutoDuration(features: Record<string, unknown> | undefined): Record<string, boolean> {
+  const raw = readFeature(features, 'task_types');
+  const map = raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
+  return Object.fromEntries(TASK_TYPE_KEYS.map((key) => {
+    const entry = map[key];
+    return [key, !!entry && typeof entry === 'object' && !Array.isArray(entry)
+      && (entry as Record<string, unknown>).allow_auto_duration === true];
+  }));
+}
+
 export function pickTaskTypeEnabled(features: Record<string, unknown> | undefined): Record<string, boolean> {
   const raw = readFeature(features, 'task_types');
   const map = raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
@@ -765,6 +775,7 @@ export function buildTaskTypes(
   ratios: Record<string, string[]>,
   enabled: Record<string, boolean>,
   followDuration: Record<string, boolean>,
+  autoDuration: Record<string, boolean> = {},
 ): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const taskType of TASK_TYPE_KEYS) {
@@ -777,9 +788,11 @@ export function buildTaskTypes(
         : {};
     delete rest.allowed_ratios;
     delete rest.allowed_durations;
+    delete rest.allow_auto_duration;
     const next: Record<string, unknown> = { ...rest };
     if (list.length) next.allowed_ratios = list;
     if (followDuration[taskType]) next.allowed_durations = [-1];
+    else if (autoDuration[taskType]) next.allow_auto_duration = true;
     out[taskType] = next;
   }
   return out;

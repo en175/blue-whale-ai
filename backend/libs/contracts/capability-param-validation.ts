@@ -327,12 +327,13 @@ function durationInRange(
   if (Array.isArray(supported)) {
     return supported.includes(duration);
   }
-  const range = supported as { min?: number; max?: number } | null;
+  const range = supported as { min?: number; max?: number; step?: number } | null;
   if (!range || typeof range.min !== "number" || typeof range.max !== "number") {
 
     return true;
   }
-  return duration >= range.min && duration <= range.max;
+  return duration >= range.min && duration <= range.max
+    && (range.step === undefined || (duration - range.min) % range.step === 0);
 }
 
 export function aspectRatioIds(value: unknown): string[] {
@@ -417,7 +418,7 @@ export function checkGenerationParamLimit(
           reason: `${taskLabel}不支持 时长 ${d} 秒，可用：${taskDurations.join(" / ")}`,
         };
       }
-    } else {
+    } else if (!(d === -1 && constraint?.allow_auto_duration === true)) {
 
       if (!Number.isFinite(d) || d <= 0) {
         return { field: "duration", code: ERROR_CAPABILITY_UNSUPPORTED_DURATION, reason: "时长必须为正数" };

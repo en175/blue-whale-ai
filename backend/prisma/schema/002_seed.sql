@@ -136,7 +136,7 @@ INSERT INTO generation_model_capability (
         'first_frame', JSON_OBJECT('allowed_ratios', JSON_ARRAY('adaptive')),
         'first_last_frame', JSON_OBJECT('allowed_ratios', JSON_ARRAY('adaptive')),
         'edit', JSON_OBJECT('allowed_ratios', JSON_ARRAY('adaptive'), 'allowed_durations', JSON_ARRAY(-1)),
-        'extend', JSON_OBJECT('allowed_ratios', JSON_ARRAY('adaptive'))
+        'extend', JSON_OBJECT('allowed_ratios', JSON_ARRAY('adaptive'), 'allow_auto_duration', CAST('true' AS JSON))
       )
     ),
     TRUE,

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  allowsAutoDurationOf,
   configuredVideoModes,
   effectiveVideoParams,
   lockedDurationOf,
@@ -456,4 +457,20 @@ describe('IKL406 编辑模式视频上限收紧（与后端 videoReferenceMax �
     expect(videoModeAfterRefAdd('edit', refsOf([ref('m1')]), 'image')).toBe('edit');
     expect(videoModeAfterRefAdd(null, refsOf([ref('v1', 'video')]), 'video')).toBe('omni');
   });
+});
+
+
+it('IKLUVP 自动可选与自动锁定分别读取，用户秒数保持原值', () => {
+  const features = { task_types: {
+    extend: { allowed_ratios: ['adaptive'], allow_auto_duration: true },
+    edit: { allowed_durations: [-1] }, omni: {},
+  } };
+  expect(allowsAutoDurationOf(features, 'extend')).toBe(true);
+  expect(allowsAutoDurationOf(features, 'edit')).toBe(true);
+  expect(allowsAutoDurationOf(features, 'omni')).toBe(false);
+  expect(lockedDurationOf(features, 'extend')).toBeNull();
+  for (const duration of [-1, 4, 10, 30]) {
+    expect(effectiveVideoParams(features, 'extend', { aspectRatio: '16:9', duration }))
+      .toEqual({ aspect_ratio: 'adaptive', duration });
+  }
 });

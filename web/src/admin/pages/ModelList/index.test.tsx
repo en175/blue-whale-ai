@@ -644,7 +644,7 @@ describe('ModelList 定价 tab', () => {
 
 
 
-describe('ModelList 视频模式「时长跟随原视频」（IKK7QC）', () => {
+describe('ModelList 视频模式「仅自动时长」（IKK7QC）', () => {
   const withEdit = {
     ...videoPriced,
     features: { task_types: { edit: { allowed_ratios: ['adaptive'] } } },
@@ -652,11 +652,29 @@ describe('ModelList 视频模式「时长跟随原视频」（IKK7QC）', () => 
 
   function followBoxes(): HTMLElement[] {
     return [...document.body.querySelectorAll<HTMLElement>('[role="checkbox"]')].filter((el) =>
-      el.closest('label')?.textContent?.includes('时长跟随原视频'),
+      el.closest('label')?.textContent?.includes('仅自动时长'),
     );
   }
 
-  it('★ 勾上「时长跟随原视频」保存 → task_types 带 allowed_durations: [-1]', async () => {
+  it('IKLUVP 延长可选自动，其他模式不提供执行侧不支持的开关', async () => {
+    api.fetchAdminModels.mockResolvedValue([{
+      ...videoPriced,
+      features: { task_types: { extend: { allowed_ratios: ['adaptive'] } } },
+    }]);
+    await renderPage();
+    await openRowEdit('视频');
+    await openTab('尺寸与素材');
+    const boxes = [...document.body.querySelectorAll<HTMLElement>('[role="checkbox"]')]
+      .filter((el) => el.closest('label')?.textContent?.includes('允许自动或指定秒数'));
+    expect(boxes).toHaveLength(2);
+    await click(boxes[1]);
+    await click(button('保存'));
+    expect(api.updateAdminModel.mock.calls[0]?.[1]).toMatchObject({ features: { task_types: {
+      extend: { allowed_ratios: ['adaptive'], allow_auto_duration: true },
+    } } });
+  });
+
+  it('★ 勾上「仅自动时长」保存 → task_types 带 allowed_durations: [-1]', async () => {
     api.fetchAdminModels.mockResolvedValue([withEdit]);
     await renderPage();
     await openRowEdit('视频');

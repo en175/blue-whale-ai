@@ -64,6 +64,7 @@ export function configuredVideoModes(
 export interface VideoModeConstraint {
   allowed_ratios?: unknown;
   allowed_durations?: unknown;
+  allow_auto_duration?: unknown;
 }
 
 export function videoModeConstraintOf(
@@ -97,6 +98,14 @@ export function lockedDurationOf(
 ): number | null {
   const values = singleValueOf(videoModeConstraintOf(features, mode)?.allowed_durations);
   return values && typeof values[0] === 'number' ? values[0] : null;
+}
+
+export function allowsAutoDurationOf(
+  features: VideoModeFeatures | null | undefined,
+  mode: VideoMode | string | null | undefined,
+): boolean {
+  return lockedDurationOf(features, mode) === -1
+    || videoModeConstraintOf(features, mode)?.allow_auto_duration === true;
 }
 
 export interface VideoWireParams {

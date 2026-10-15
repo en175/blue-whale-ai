@@ -1035,13 +1035,67 @@ describe('IKK1T9 视频编辑/延长（ADR-0124 模式配置化）', () => {
           first_frame: { allowed_ratios: ['adaptive'] },
           first_last_frame: { allowed_ratios: ['adaptive'] },
           edit: { allowed_ratios: ['adaptive'], allowed_durations: [-1] },
-          extend: { allowed_ratios: ['adaptive'] },
+          extend: { allowed_ratios: ['adaptive'], allow_auto_duration: true },
         },
       },
       version: 1,
       digest: '',
     };
   }
+
+  it.each([-1, 10])('IKLUVP 延长时长 %s 可选、持久化并原样提交', async (duration) => {
+    apiMocks.fetchGenerationModels.mockResolvedValue([editCapableModel()]);
+    await renderPage();
+    await clickNode({ id: 'd1', type: 'mediaNode', data: { draft: true, mediaType: 'video' } });
+    await waitModelReady();
+    await connect('v1', 'd1');
+    await expectMode('视频编辑');
+    await openModeMenu();
+    await act(async () => { modeOption('视频延长')!.click(); });
+    await expectMode('视频延长');
+    await act(async () => {
+      [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('测试视频模型'))!.click();
+    });
+    const automatic = container.querySelector<HTMLInputElement>('[aria-label="自动时长，由模型选择"]');
+    expect(automatic).not.toBeNull();
+    if (duration === -1) {
+      if (!automatic!.checked) await act(async () => { automatic!.click(); });
+    } else {
+      if (automatic!.checked) await act(async () => { automatic!.click(); });
+      const slider = container.querySelector<HTMLInputElement>('input[type="range"]')!;
+      await act(async () => {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(slider, '10');
+        slider.dispatchEvent(new Event('input', { bubbles: true }));
+        slider.dispatchEvent(new Event('change', { bubbles: true }));
+      });
+    }
+    expect(draftDataOf('d1').draftDuration).toBe(duration);
+    expect(container.textContent).not.toContain('跟随原视频');
+    await typePrompt('延长这段视频');
+    await act(async () => { sendButton().click(); });
+    await waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
+    expect(apiMocks.createGenerationJob.mock.calls[0]![1].parameters)
+      .toMatchObject({ mode: 'extend', duration, aspect_ratio: 'adaptive' });
+  });
+
+  it.each([-1, 10])('IKLUVP 已保存延长时长 %s 重开与更新生成保持选择', async (duration) => {
+    apiMocks.fetchGenerationModels.mockResolvedValue([editCapableModel()]);
+    const doc = canvasDocMock.current.doc as { nodes: Node[]; edges: unknown[] };
+    Object.assign(doc.nodes.find(n => n.id === 'd1')!.data, {
+      draftMode: 'extend', draftDuration: duration, draftRatio: 'adaptive',
+    });
+    doc.edges = [{ id: 'e-v1-d1', source: 'v1', target: 'd1', data: { refRole: 'reference' } }];
+    await renderPage();
+    await clickNode({ id: 'd1', type: 'mediaNode', data: { draft: true, mediaType: 'video' } });
+    await waitModelReady();
+    await expectMode('视频延长');
+    expect(draftDataOf('d1').draftDuration).toBe(duration);
+    expect(container.textContent).toContain(duration === -1 ? '自动' : '10s');
+    await act(async () => { flowProps.current.onUpdateGenerate('d1'); });
+    await waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
+    expect(apiMocks.createGenerationJob.mock.calls[0]![1].parameters)
+      .toMatchObject({ mode: 'extend', duration, aspect_ratio: 'adaptive' });
+  });
 
   it('只有一段参考视频 → 默认表落视频编辑；比例/时长按能力行锁定；提交带 mode 与锁定值', async () => {
     apiMocks.fetchGenerationModels.mockResolvedValue([editCapableModel()]);

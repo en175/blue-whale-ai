@@ -142,11 +142,12 @@ class NewApiVideoClientEndpointTest {
         assertThat(body.get("metadata").get("resolution").asText()).isEqualTo("720p");
     }
 
-    @Test
-    @DisplayName("IKK1T4 延长单：extend → omni=extend，ratio/duration 均原样透传")
-    void seedance25ProlongTaskKeepsUserRatioAndDuration() throws Exception {
+    @ParameterizedTest
+    @ValueSource(doubles = {-1, 4, 10, 30})
+    @DisplayName("IKLUVP 延长单：extend → omni=extend，ratio/duration 均原样透传")
+    void seedance25ProlongTaskKeepsUserRatioAndDuration(double duration) throws Exception {
         VideoSubmitInput input = new VideoSubmitInput(
-                "doubao-seedance-2-5-260628", "把视频向后延长", 12.0, "720p", "16:9", null, null,
+                "doubao-seedance-2-5-260628", "把视频向后延长", duration, "720p", "adaptive", null, null,
                 List.of(new VideoReference("video", "https://tos.test/ref.mp4", null)),
                 null, false, "extend");
 
@@ -154,9 +155,9 @@ class NewApiVideoClientEndpointTest {
 
         JsonNode body = JSON.readTree(lastBody.get());
         assertThat(body.get("metadata").get("omni_reference_task_type").asText()).isEqualTo("extend");
-        assertThat(body.get("metadata").get("ratio").asText()).isEqualTo("16:9");
-        assertThat(body.get("duration").asDouble()).isEqualTo(12.0);
-        assertThat(body.get("metadata").get("duration").asDouble()).isEqualTo(12.0);
+        assertThat(body.get("metadata").get("ratio").asText()).isEqualTo("adaptive");
+        assertThat(body.get("duration").asDouble()).isEqualTo(duration);
+        assertThat(body.get("metadata").get("duration").asDouble()).isEqualTo(duration);
     }
 
     @Test

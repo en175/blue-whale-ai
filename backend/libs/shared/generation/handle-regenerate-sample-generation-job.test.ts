@@ -68,7 +68,7 @@ const S25_CAPABILITY = {
   },
   supported_sizes: [{ id: "480p", api_value: "480p" }, { id: "1080p", api_value: "1080p" }],
   supported_aspect_ratios: ["16:9"],
-  supported_durations: { min: 4, max: 12, step: 4 },
+  supported_durations: { min: 4, max: 12, step: 1 },
 };
 
 function quoteStub(overrides: Partial<{ credits: bigint; catalogVersion: number; tier: string }> = {}) {

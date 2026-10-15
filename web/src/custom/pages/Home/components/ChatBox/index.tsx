@@ -20,7 +20,7 @@ import {
   videoModeRefsSignature,
 } from '@/custom/pages/CanvasPage/tools/video/videoModes';
 import type { VideoMediaRef, VideoMediaRefs } from '@/custom/pages/CanvasPage/tools/video/videoMediaRefs';
-import { configuredVideoModes, effectiveVideoParams, frameSlotCountOf, isFrameMode, lockedDurationOf, lockedRatioOf, type VideoMode } from '@/custom/utils/video-modes';
+import { allowsAutoDurationOf, configuredVideoModes, effectiveVideoParams, frameSlotCountOf, isFrameMode, lockedDurationOf, lockedRatioOf, type VideoMode } from '@/custom/utils/video-modes';
 import { type AssetRecord } from '@/custom/api/assets';
 import { getCurrentUser, subscribe } from '@/shared/utils/auth';
 import { remoteImageCrossOrigin, resolveMediaSrc } from '@/shared/utils/remoteImageCors';
@@ -189,6 +189,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
     if (m.supported_durations) {
       const d = m.supported_durations;
       setDuration((prev) => {
+        if (prev === -1 && allowsAutoDurationOf(m.features, videoMode)) return prev;
         if (prev >= d.min && prev <= d.max) return prev;
         if (typeof m.default_duration === 'number' && m.default_duration >= d.min && m.default_duration <= d.max) {
           return m.default_duration;
@@ -201,7 +202,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
       setDuration(lockedDuration);
     } else {
       setDuration((prev) => {
-        if (prev > 0) return prev;
+        if (prev > 0 || (prev === -1 && allowsAutoDurationOf(m.features, videoMode))) return prev;
         const d = m.supported_durations;
         if (!d) return prev;
         const base = typeof m.default_duration === 'number' ? m.default_duration : d.min;
@@ -211,7 +212,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
     if (!isFrameMode(videoMode)) {
       const enabled = enabledVideoModes(videoRefsProjection, configuredVideoModes(m.features));
       const target = resolveVideoMode(defaultVideoModeFor(videoRefsProjection), enabled);
-      if (target && target !== videoMode) {
+      if (target && target !== videoMode && !enabled.includes(videoMode)) {
         setVideoMode(target);
         showToast('已根据当前素材切换生成模式');
       }
@@ -626,7 +627,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
     }
     if (lockedDuration != null) {
       setDuration(lockedDuration);
-    } else if (duration < 0) {
+    } else if (duration < 0 && !(duration === -1 && allowsAutoDurationOf(selectedVideoModel?.features, key))) {
       const range = selectedVideoModel?.supported_durations;
       const base = typeof selectedVideoModel?.default_duration === 'number'
         ? selectedVideoModel.default_duration
@@ -1101,18 +1102,29 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                     disabled={videoDurationLocked != null}
                     onClick={() => toggleDropdown('duration')}
                   >
-                    <span>{videoDurationLocked != null ? '⏱ 跟随原视频' : `⏱ ${duration}s`}</span>
+                    <span>{duration === -1 ? (videoMode === 'edit' && videoDurationLocked != null ? '⏱ 跟随原视频' : '⏱ 自动') : `⏱ ${duration}s`}</span>
                     <ChevronDown size={12} strokeWidth={2} />
                   </button>
                   {openDropdown === 'duration' && videoDurationLocked == null && videoDurationRange && (
                     <div className={`${styles.dropdownMenuDown} ${styles.durationDropdown}`}>
-                      <DurationSlider
+                      {allowsAutoDurationOf(selectedVideoModel?.features, videoMode) && (
+                        <label>
+                          <input
+                            type="checkbox"
+                            aria-label="自动时长，由模型选择"
+                            checked={duration === -1}
+                            onChange={(e) => setDuration(e.target.checked ? -1 : videoDurationRange.min)}
+                          />
+                          自动，由模型选择时长
+                        </label>
+                      )}
+                      {duration !== -1 && <DurationSlider
                         value={duration}
                         onChange={setDuration}
                         min={videoDurationRange.min}
                         max={videoDurationRange.max}
                         step={videoDurationRange.step}
-                      />
+                      />}
                     </div>
                   )}
                 </div>
