@@ -23,8 +23,25 @@ vi.mock('@/shared/api/http', () => ({ isApiError: () => false }));
 let root: Root;
 let mountNode: HTMLDivElement;
 
+function pointerClick(target: EventTarget) {
+  const init = { bubbles: true, cancelable: true, button: 0, pointerId: 1, pointerType: 'mouse' };
+  target.dispatchEvent(new PointerEvent('pointerdown', init));
+  target.dispatchEvent(new MouseEvent('mousedown', init));
+  target.dispatchEvent(new PointerEvent('pointerup', init));
+  target.dispatchEvent(new MouseEvent('mouseup', init));
+  target.dispatchEvent(new MouseEvent('click', init));
+}
+
 beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  const proto = HTMLElement.prototype as HTMLElement & {
+    hasPointerCapture?: (id: number) => boolean;
+    setPointerCapture?: (id: number) => void;
+    releasePointerCapture?: (id: number) => void;
+  };
+  proto.hasPointerCapture ??= () => false;
+  proto.setPointerCapture ??= () => {};
+  proto.releasePointerCapture ??= () => {};
   api.fetchSkillCategories.mockResolvedValue([]);
   api.fetchSkillLibrary.mockResolvedValue({
     current: 1,
@@ -115,12 +132,12 @@ describe('SkillModal', () => {
     });
 
     await act(async () => {
-      (document.body.querySelector('button[title="更多操作"]') as HTMLButtonElement).click();
+      pointerClick(document.body.querySelector('button[title="更多操作"]') as HTMLButtonElement);
     });
     expect(document.body.textContent).toContain('查看');
 
     await act(async () => {
-      (document.body.querySelector('button[title="查看技能详情"]') as HTMLButtonElement).click();
+      pointerClick(document.body.querySelector('[title="查看技能详情"]') as HTMLElement);
       await Promise.resolve();
     });
     expect(api.fetchSkillContent).toHaveBeenCalledWith('official-skill');
@@ -149,12 +166,12 @@ describe('SkillModal', () => {
     expect(document.body.textContent).toContain('分镜脚本');
 
     await act(async () => {
-      (document.body.querySelector('button[title="更多操作"]') as HTMLButtonElement).click();
+      pointerClick(document.body.querySelector('button[title="更多操作"]') as HTMLButtonElement);
     });
     expect(document.body.textContent).toContain('查看');
 
     await act(async () => {
-      (document.body.querySelector('button[title="查看技能详情"]') as HTMLButtonElement).click();
+      pointerClick(document.body.querySelector('[title="查看技能详情"]') as HTMLElement);
       await Promise.resolve();
     });
     expect(api.fetchSkillContent).toHaveBeenCalledWith('lib-skill');

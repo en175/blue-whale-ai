@@ -33,6 +33,7 @@ import { isApiError } from '@/shared/api/http';
 import Select from '@/custom/components/Select';
 import Tabs from '@/custom/components/Tabs';
 import ConfirmModal from '@/custom/components/ConfirmModal';
+import DropdownMenu from '@/custom/components/DropdownMenu';
 
 interface SkillModalProps {
   open: boolean;
@@ -87,8 +88,6 @@ export default function SkillModal({ open, onClose, onUseSkill }: SkillModalProp
   const mineLoadedRef = useRef(false);
   const mineGridRef = useRef<HTMLDivElement>(null);
 
-  const [menuSkillId, setMenuSkillId] = useState<string | null>(null);
-  const menuWrapRef = useRef<HTMLDivElement | null>(null);
   const [detailTarget, setDetailTarget] = useState<SkillRecord | null>(null);
   const [detailContent, setDetailContent] = useState('');
   const [detailLoading, setDetailLoading] = useState(false);
@@ -192,20 +191,6 @@ export default function SkillModal({ open, onClose, onUseSkill }: SkillModalProp
     }
   };
 
-  useEffect(() => {
-    if (!open) setMenuSkillId(null);
-  }, [open]);
-
-  useEffect(() => {
-    if (!menuSkillId) return;
-    const onDown = (e: MouseEvent) => {
-      if (menuWrapRef.current?.contains(e.target as Node)) return;
-      setMenuSkillId(null);
-    };
-    document.addEventListener('mousedown', onDown);
-    return () => document.removeEventListener('mousedown', onDown);
-  }, [menuSkillId]);
-
   if (!open) return null;
 
   function SkillMarkdown({ text }: { text: string }) {
@@ -271,7 +256,6 @@ export default function SkillModal({ open, onClose, onUseSkill }: SkillModalProp
   const openDetail = (s: SkillRecord) => {
     const id = s.creative_skill_id;
     if (!id) return;
-    setMenuSkillId(null);
     setDetailTarget(s);
     setDetailLoading(true);
     setDetailContent('');
@@ -419,30 +403,29 @@ export default function SkillModal({ open, onClose, onUseSkill }: SkillModalProp
               {coverLibrary.map((s) => {
                 const added = !!s.added;
                 const sid = s.creative_skill_id ?? s.name ?? '';
-                const menuOpen = menuSkillId === sid;
                 return (
                   <div key={sid} className={styles.card}>
-                    {}
-                    <div ref={menuOpen ? menuWrapRef : undefined} className={styles.cardMenu}>
-                      <button
-                        className={`${styles.menuBtn} ${menuOpen ? styles.menuBtnOpen : ''}`}
-                        onClick={() => setMenuSkillId(menuOpen ? null : sid)}
-                        title="更多操作"
-                      >
-                        <MoreHorizontal size={14} strokeWidth={2} />
-                      </button>
-                      {menuOpen && (
-                        <div className={styles.cardMenuDropdown}>
-                          <button
-                            className={styles.cardMenuOption}
-                            onClick={() => openDetail(s)}
-                            title="查看技能详情"
-                          >
-                            <Eye size={13} strokeWidth={2} />
-                            <span>查看</span>
+                    <div className={styles.cardMenu}>
+                      <DropdownMenu
+                        trigger={
+                          <button className={styles.menuBtn} type="button" title="更多操作">
+                            <MoreHorizontal size={14} strokeWidth={2} />
                           </button>
-                        </div>
-                      )}
+                        }
+                        items={[
+                          {
+                            key: 'view',
+                            title: '查看技能详情',
+                            label: (
+                              <>
+                                <Eye size={13} strokeWidth={2} />
+                                <span>查看</span>
+                              </>
+                            ),
+                            onSelect: () => openDetail(s),
+                          },
+                        ]}
+                      />
                     </div>
                     <img className={styles.coverImg} src={resolveMediaSrc(s.cover_url)} crossOrigin={remoteImageCrossOrigin(s.cover_url)} alt={s.name ?? ''} />
                     <div className={styles.cardBody}>
@@ -477,36 +460,34 @@ export default function SkillModal({ open, onClose, onUseSkill }: SkillModalProp
           </>
         )}
 
-        {}
         {tab === 'mine' && (
           <div className={styles.mineWrap}>
             <div ref={mineGridRef} className={styles.cardGrid} onScroll={handleMineScroll}>
               {coverMine.map((s) => {
                 const sid = s.creative_skill_id ?? s.name ?? '';
-                const menuOpen = menuSkillId === sid;
                 return (
                   <div key={sid} className={styles.card}>
-                    {}
-                    <div ref={menuOpen ? menuWrapRef : undefined} className={styles.cardMenu}>
-                      <button
-                        className={`${styles.menuBtn} ${menuOpen ? styles.menuBtnOpen : ''}`}
-                        onClick={() => setMenuSkillId(menuOpen ? null : sid)}
-                        title="更多操作"
-                      >
-                        <MoreHorizontal size={14} strokeWidth={2} />
-                      </button>
-                      {menuOpen && (
-                        <div className={styles.cardMenuDropdown}>
-                          <button
-                            className={styles.cardMenuOption}
-                            onClick={() => openDetail(s)}
-                            title="查看技能详情"
-                          >
-                            <Eye size={13} strokeWidth={2} />
-                            <span>查看</span>
+                    <div className={styles.cardMenu}>
+                      <DropdownMenu
+                        trigger={
+                          <button className={styles.menuBtn} type="button" title="更多操作">
+                            <MoreHorizontal size={14} strokeWidth={2} />
                           </button>
-                        </div>
-                      )}
+                        }
+                        items={[
+                          {
+                            key: 'view',
+                            title: '查看技能详情',
+                            label: (
+                              <>
+                                <Eye size={13} strokeWidth={2} />
+                                <span>查看</span>
+                              </>
+                            ),
+                            onSelect: () => openDetail(s),
+                          },
+                        ]}
+                      />
                     </div>
                     <img className={styles.coverImg} src={resolveMediaSrc(s.cover_url)} crossOrigin={remoteImageCrossOrigin(s.cover_url)} alt={s.name ?? ''} />
                     <div className={styles.cardBody}>
