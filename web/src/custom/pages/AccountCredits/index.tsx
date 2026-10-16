@@ -14,6 +14,7 @@ import { ORDER_STATUS_LABEL, type OrderStatus } from '@/custom/enums';
 import { taskTypeLabel } from '@/shared/enums/taskTypeLabels';
 import { useDocumentTitle } from '@/shared/seo/useDocumentTitle';
 import { formatBeijingDateTime } from './format';
+import Checkbox from '@/custom/components/Checkbox';
 import Empty from '@/custom/components/Empty';
 import ExportDialog from './ExportDialog';
 import SummaryCards from './SummaryCards';
@@ -116,7 +117,7 @@ function FilterSelect({
                     setOpen(false);
                   }}
                 >
-                  <span className={styles.check}>{active ? '✓' : ''}</span>
+                  <Checkbox checked={active} />
                   {item.label}
                 </button>
               </li>

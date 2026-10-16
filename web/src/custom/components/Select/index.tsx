@@ -1,7 +1,8 @@
 import * as SelectPrimitive from '@radix-ui/react-select';
-import { Check, ChevronDown } from 'lucide-react';
+import { ChevronDown } from 'lucide-react';
 import { useCallback } from 'react';
 import type { MouseEvent as ReactMouseEvent, ReactNode } from 'react';
+import Checkbox from '@/custom/components/Checkbox';
 import { joinClassNames } from '@/custom/utils/class-names';
 import styles from './index.module.css';
 
@@ -111,13 +112,7 @@ export default function Select<V extends string = string>({
                 data-testid={option.testId}
                 className={joinClassNames(styles.option, option.value === value ? styles.optionActive : '')}
               >
-                <span
-                  className={styles.check}
-                  data-selected={option.value === value ? 'true' : 'false'}
-                  aria-hidden
-                >
-                  <Check size={14} strokeWidth={2} />
-                </span>
+                <Checkbox checked={option.value === value} />
                 <SelectPrimitive.ItemText>{option.label}</SelectPrimitive.ItemText>
               </SelectPrimitive.Item>
             ))}
