@@ -13,7 +13,7 @@ import { useAuthStore } from '@/shared/stores/auth';
 import { useRechargeUiStore } from '@/custom/stores/recharge';
 import AccountModal from './AccountModal';
 import RechargeModal from './RechargeModal';
-import LoginModal from '@/custom/components/LoginModal';
+import LoginModal, { type LoginModalMode } from '@/custom/components/LoginModal';
 import { USER_DROPDOWN_MENU_ITEMS } from './menuItems';
 
 const menuIcons = {
@@ -28,7 +28,7 @@ export default function UserDropdown() {
   const [showAccount, setShowAccount] = useState(false);
   const showRecharge = useRechargeUiStore((s) => s.open);
   const closeRecharge = useRechargeUiStore((s) => s.closeRecharge);
-  const [showLogin, setShowLogin] = useState(false);
+  const [loginMode, setLoginMode] = useState<LoginModalMode | null>(null);
   const [loggingOut, setLoggingOut] = useState(false);
   const credits = useAuthStore((s) => s.credits);
   const setUsage = useAuthStore((s) => s.setUsage);
@@ -79,10 +79,17 @@ export default function UserDropdown() {
   if (!user) {
     return (
       <div className={styles.wrapper} ref={ref}>
-        <button className={styles.loginBtn} onClick={() => setShowLogin(true)}>
-          登录
-        </button>
-        {showLogin && <LoginModal onClose={() => setShowLogin(false)} />}
+        <div className={styles.guestActions}>
+          <button className={styles.loginBtn} onClick={() => setLoginMode('password')}>
+            登录
+          </button>
+          <button className={styles.loginBtn} onClick={() => setLoginMode('register')}>
+            注册
+          </button>
+        </div>
+        {loginMode && (
+          <LoginModal initialMode={loginMode} onClose={() => setLoginMode(null)} />
+        )}
       </div>
     );
   }

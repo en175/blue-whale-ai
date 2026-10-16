@@ -16,6 +16,7 @@ vi.mock('@/custom/api/auth', async (importOriginal) => {
     sendCode: vi.fn(async () => null),
     loginWithPassword: vi.fn(),
     loginWithCode: vi.fn(),
+    registerWithPassword: vi.fn(),
     fetchMe: vi.fn(async () => null),
   };
 });
@@ -65,8 +66,8 @@ afterEach(async () => {
   mountNode?.remove();
 });
 
-describe('LoginModal（IKJA4R 账号密码 / 手机号验证码 双态）', () => {
-  it('通过共用 Modal 以 Portal 渲染，默认是账号密码态', async () => {
+describe('LoginModal（账号密码 / 手机号验证码 / 注册）', () => {
+  it('通过共用 Modal 以 Portal 渲染，默认是账号密码态并展示创建账号', async () => {
     await renderLoginModal();
 
     expect(mountNode.querySelector('[role="dialog"]')).toBeNull();
@@ -74,7 +75,7 @@ describe('LoginModal（IKJA4R 账号密码 / 手机号验证码 双态）', () =
     expect(document.body.querySelector('[data-semantic="mask"]')).not.toBeNull();
     expect(document.body.querySelector('input[placeholder="请输入账号"]')).not.toBeNull();
     expect(document.body.querySelector('input[placeholder="请输入密码"]')).not.toBeNull();
-    expect(document.body.textContent).not.toContain('创建账号');
+    expect(buttonByText('创建账号')).not.toBeNull();
   });
 
   it('关闭按钮走统一 onCancel', async () => {
@@ -185,5 +186,45 @@ describe('LoginModal（IKJA4R 账号密码 / 手机号验证码 双态）', () =
       ]);
       expect(links.every((link) => link.target === '_blank' && link.rel === 'noreferrer')).toBe(true);
     }
+  });
+
+  it('创建账号切到注册态，返回登录切回账号密码态', async () => {
+    await renderLoginModal();
+
+    await act(async () => buttonByText('创建账号')?.click());
+
+    expect(document.body.querySelector('h2')?.textContent).toBe('注册');
+    expect(document.body.querySelector('input[placeholder="账号（至少3位）"]')).not.toBeNull();
+    expect(document.body.querySelector('input[placeholder="密码（8 位以上）"]')).not.toBeNull();
+    expect(document.body.querySelector('input[placeholder="确认密码"]')).not.toBeNull();
+    expect(buttonByText('注册')?.disabled).toBe(true);
+
+    await act(async () => buttonByText('已有账号？返回登录')?.click());
+
+    expect(document.body.querySelector('h2')?.textContent).toBe('登录');
+    expect(document.body.querySelector('input[placeholder="请输入账号"]')).not.toBeNull();
+  });
+
+  it('协议未勾选时注册按钮不可用，勾选且口令合规后可点', async () => {
+    await renderLoginModal({ initialMode: 'register' });
+    const accountInput = document.body.querySelector<HTMLInputElement>(
+      'input[placeholder="账号（至少3位）"]',
+    )!;
+    const passwordInput = document.body.querySelector<HTMLInputElement>(
+      'input[placeholder="密码（8 位以上）"]',
+    )!;
+    const confirmInput = document.body.querySelector<HTMLInputElement>(
+      'input[placeholder="确认密码"]',
+    )!;
+
+    await act(async () => {
+      setInputValue(accountInput, 'alice');
+      setInputValue(passwordInput, '12345678');
+      setInputValue(confirmInput, '12345678');
+    });
+    expect(buttonByText('注册')?.disabled).toBe(true);
+
+    await act(async () => agreementCheckbox()?.click());
+    expect(buttonByText('注册')?.disabled).toBe(false);
   });
 });
