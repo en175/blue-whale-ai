@@ -265,11 +265,6 @@
   text-overflow: ellipsis;
 }
 
-.historyItemCheck {
-  flex-shrink: 0;
-  color: var(--color-text-primary);
-}
-
 .historyItemActive .historyItemLabel {
   color: var(--color-text-primary);
   font-weight: 500;

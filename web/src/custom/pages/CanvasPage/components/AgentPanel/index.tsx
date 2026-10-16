@@ -9,9 +9,9 @@ import {
   PictureInPicture2,
   BookText,
   MessageSquare,
-  Check,
   RotateCcw,
 } from 'lucide-react';
+import Checkbox from '@/custom/components/Checkbox';
 import Empty from '@/custom/components/Empty';
 import styles from './index.module.css';
 import { fetchMySkills } from '@/custom/api/skills';
@@ -818,7 +818,7 @@ export default function AgentPanel({ open = true, onClose, initialInput, initial
                                 setHistoryOpen(false);
                               }}
                             >
-                              {s.session_id === sessionId && <Check size={12} strokeWidth={2.5} className={styles.historyItemCheck} />}
+                              <Checkbox checked={s.session_id === sessionId} />
                               <span className={styles.historyItemText}>{s.title || '新对话'}</span>
                             </button>
                             <button
