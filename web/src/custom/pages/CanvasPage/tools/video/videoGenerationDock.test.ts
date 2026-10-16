@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { Edge, Node } from '@xyflow/react';
-import { createGenerationDockCoordinator } from '../../generationDockCoordinator';
+import { createGenerationDockCoordinator } from '../../generation/generationDockCoordinator';
 import { createVideoGenerationDock } from './videoGenerationDock';
 import type { VideoGenerationDockHost, VideoDockTask } from './videoGenerationDock';
 

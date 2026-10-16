@@ -1,7 +1,7 @@
 import { SMART_MATTING_BACKGROUND_COLOR_LABELS, SMART_MATTING_FORMAT_LABELS, SMART_MATTING_MODE_LABELS } from '@/custom/enums';
 import { useRef, useState } from 'react';
 import { ArrowUp, ChevronDown, X, Zap } from 'lucide-react';
-import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../followDialog';
+import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../agent/followDialog';
 import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
 import { SMART_MATTING_BACKGROUND_COLORS, SMART_MATTING_FORMATS, type SmartMattingBackgroundColor, type SmartMattingFormat, type SmartMattingMode } from '../../tools/image/smartMatting';
 import styles from './index.module.css';

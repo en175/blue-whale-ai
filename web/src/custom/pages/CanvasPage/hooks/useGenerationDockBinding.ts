@@ -1,14 +1,14 @@
 import { useRef, useState, useSyncExternalStore, type ReactNode, type RefObject } from 'react';
 import type { Node } from '@xyflow/react';
 import type { VideoGenSeedParams } from '../components/BottomDialog';
-import { createGenerationDockCoordinator } from '../generationDockCoordinator';
+import { createGenerationDockCoordinator } from '../generation/generationDockCoordinator';
 import { createImageGenerationDock, type ImageGenerationDockHost } from '../tools/image/imageGenerationDock';
 import { createVideoGenerationDock, type VideoGenerationDockHost } from '../tools/video/videoGenerationDock';
 import { createAudioMusicGenerationDocks, type AudioGenerationDockHost, type MusicGenerationDockHost } from '../tools/audio/audioMusicGenerationDock';
-import { createTextGenerationDock, type TextGenerationDockHost } from '../textGenerationDock';
-import { createToolGenerationDock } from '../toolGenerationDock';
-import { createCanvasToolSessions, type CanvasToolView } from '../canvasToolSessions';
-import type { ToolSessionDeps } from '../toolSessionCoordinator';
+import { createTextGenerationDock, type TextGenerationDockHost } from '../generation/textGenerationDock';
+import { createToolGenerationDock } from '../tool-runtime/toolGenerationDock';
+import { createCanvasToolSessions, type CanvasToolView } from '../tool-runtime/canvasToolSessions';
+import type { ToolSessionDeps } from '../tool-runtime/toolSessionCoordinator';
 
 type CanvasToolSessions = ReturnType<typeof createCanvasToolSessions>;
 

@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Node } from '@xyflow/react';
 import CanvasPage from '../index';
 import type { GenerationModel } from '@/custom/api/generation';
-import { imageMediaRefsOf } from '../mediaRefs';
+import { imageMediaRefsOf } from '../media/mediaRefs';
 
 vi.mock('@/custom/api/generationQuote', async (importActual) => ({
   ...(await importActual<typeof import('@/custom/api/generationQuote')>()),

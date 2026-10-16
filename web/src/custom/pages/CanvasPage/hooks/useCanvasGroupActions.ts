@@ -1,6 +1,6 @@
 import { type Dispatch, type RefObject, type SetStateAction, useCallback } from 'react';
 import type { Node } from '@xyflow/react';
-import { newNodeId } from '../nodeId';
+import { newNodeId } from '../graph/nodeId';
 import type { CanvasHistoryApi } from './useCanvasHistory';
 import type { CanvasGraph } from './useCanvasGraph';
 import {
@@ -14,7 +14,7 @@ import {
   MIN_GROUP_MEMBERS,
   type CanvasGroup,
   type GroupFrameDragResult,
-} from '../canvasGroups';
+} from '../graph/canvasGroups';
 
 export interface CanvasGroupActionsHost {
   graph: CanvasGraph;

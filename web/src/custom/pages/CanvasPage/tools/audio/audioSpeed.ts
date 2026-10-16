@@ -5,7 +5,7 @@ import {
   type AudioSpeedInput,
 } from '@lib/contracts/audio-speed';
 import { mediaContentBox } from '../../components/MediaNode/mediaContentSize';
-import { readAssetId } from '../../mediaRefs';
+import { readAssetId } from '../../media/mediaRefs';
 
 export const AUDIO_SPEED_UNAVAILABLE_REASON = '音频不可用，无法调速';
 

@@ -5,13 +5,13 @@ import type { QueryClient } from '@tanstack/react-query';
 import { useAuthPromptStore } from '@/shared/stores/authPrompt';
 import { openRechargeForCreditsError } from '@/custom/utils/creditsGate';
 import { generationRecoveryPageOptions } from '@/custom/api/canvasRecovery';
-import { createGenerationRuntime, type GenerationRuntime, type GenerationRuntimeHost } from '../generationRuntime/runtime';
-import { normalGenerationTask } from '../generationRuntime/normalGeneration';
-import { storyboardTask } from '../generationRuntime/storyboardTasks';
-import { audioMixTask, audioVideoMuxTask } from '../generationRuntime/mixMuxTasks';
-import { sceneSplitTask, vocalSplitTask } from '../generationRuntime/multiOutputTasks';
-import { videoToolsTask } from '../generationRuntime/videoTools';
-import type { RuntimeNodeView } from '../generationRuntime/types';
+import { createGenerationRuntime, type GenerationRuntime, type GenerationRuntimeHost } from '../generation/runtime';
+import { normalGenerationTask } from '../generation/normalGeneration';
+import { storyboardTask } from '../generation/storyboardTasks';
+import { audioMixTask, audioVideoMuxTask } from '../generation/mixMuxTasks';
+import { sceneSplitTask, vocalSplitTask } from '../generation/multiOutputTasks';
+import { videoToolsTask } from '../generation/videoTools';
+import type { RuntimeNodeView } from '../generation/types';
 
 import type { MediaDims } from '../components/MediaNode/mediaContentSize';
 

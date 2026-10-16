@@ -4,8 +4,8 @@ import type { Node } from '@xyflow/react';
 import { createAudioTrimSession, createAudioSpeedSession, createVocalSplitSession, type VocalSplitPayload, type AudioToolSessionHost, type AudioToolSubmission, type VocalSplitSessionHost } from './audioToolSessions';
 import type { AudioSpeedInput } from '@lib/contracts/audio-speed';
 import type { AudioTrimInput } from '@lib/contracts/audio-trim';
-import { createToolSessionRuntime } from '../../toolSessionRuntime';
-import { type ToolSessionDeps } from '../../toolSessionCoordinator';
+import { createToolSessionRuntime } from '../../tool-runtime/toolSessionRuntime';
+import { type ToolSessionDeps } from '../../tool-runtime/toolSessionCoordinator';
 
 const deps: ToolSessionDeps = {
 

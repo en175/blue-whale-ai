@@ -34,8 +34,8 @@ vi.mock('@/custom/api/canvasRecovery', async (importActual) => ({
     next_cursor: null,
   })),
 }));
-vi.mock('../characterLibraryDeposit', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../characterLibraryDeposit')>()),
+vi.mock('../assets/characterLibraryDeposit', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../assets/characterLibraryDeposit')>()),
   depositCanvasAssetToCharacterLibrary: vi.fn(async () => ({ materialId: 'asset-compliance-test' })),
 }));
 

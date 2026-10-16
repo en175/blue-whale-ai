@@ -5,7 +5,7 @@ import { unifiedTextNodeText } from '@lib/contracts/text-node-markdown';
 import { type MediaMention, type MediaRef } from '@lib/contracts/text-node-media';
 import { type SharedAssetView } from '@/custom/api/sharedAssets';
 
-import type { CanvasGalleryRef } from '../collectMediaBlocks';
+import type { CanvasGalleryRef } from '../media/collectMediaBlocks';
 import type { MediaDims } from '../components/MediaNode/mediaContentSize';
 
 type PickChannel = 'image' | 'video' | 'audio' | 'product' | 'asset';

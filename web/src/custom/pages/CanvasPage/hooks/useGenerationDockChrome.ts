@@ -1,8 +1,8 @@
 import { useEffect } from 'react';
 import type { Node } from '@xyflow/react';
 import { isEditableKeyboardTarget } from '../components/Canvas/keyboardDelete';
-import type { createGenerationDockCoordinator } from '../generationDockCoordinator';
-import type { createCanvasToolSessions } from '../canvasToolSessions';
+import type { createGenerationDockCoordinator } from '../generation/generationDockCoordinator';
+import type { createCanvasToolSessions } from '../tool-runtime/canvasToolSessions';
 
 export interface GenerationDockChromeInput {
   generationDock: ReturnType<typeof createGenerationDockCoordinator>;

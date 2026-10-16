@@ -20,7 +20,7 @@ vi.mock('@/custom/api/material', () => ({
   updateAssetGroup: vi.fn(),
 }));
 
-vi.mock('../../characterLibraryUpload', () => ({ uploadMaterialLibraryFiles }));
+vi.mock('../../assets/characterLibraryUpload', () => ({ uploadMaterialLibraryFiles }));
 
 vi.mock('@/shared/api/http', () => ({ isApiError: () => false }));
 

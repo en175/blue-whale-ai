@@ -3,7 +3,7 @@ import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, expect, it, vi } from 'vitest';
 import AtMentionMenu, { type ReferencedMentionItem } from './index';
-import type { AtMentionItem } from '../../atMention';
+import type { AtMentionItem } from '../../agent/atMention';
 
 let root: Root;
 let host: HTMLDivElement;

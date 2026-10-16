@@ -1,8 +1,8 @@
 import type { Node, Viewport } from '@xyflow/react';
-import { computeFollowAnchor, type FollowDialogAnchor } from '../followDialog';
-import { nodeBoxOf } from '../canvasPureNodeHelpers';
+import { computeFollowAnchor, type FollowDialogAnchor } from '../agent/followDialog';
+import { nodeBoxOf } from '../graph/canvasPureNodeHelpers';
 import { mediaCardToolbarVisible } from '../components/MediaNode/toolbarVisibility';
-import type { createCanvasToolSessions } from '../canvasToolSessions';
+import type { createCanvasToolSessions } from '../tool-runtime/canvasToolSessions';
 
 export function useCanvasFollowToolbar(input: {
   showImageDialog: boolean;

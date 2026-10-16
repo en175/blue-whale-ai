@@ -4,7 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ImageDialog, { type ImageTextAttachment, type UploadedFile } from './index';
-import type { ImageMediaRef } from '../../mediaRefs';
+import type { ImageMediaRef } from '../../media/mediaRefs';
 
 
 const fetchGenerationModels = vi.hoisted(() =>

@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { readPromptRefText, typePromptRefRaw } from '../../testing/promptRefEditor';
 import MusicDialog from './index';
 import type { AudioRefItem } from '../AudioDialog';
-import type { AtMentionItem } from '../../atMention';
+import type { AtMentionItem } from '../../agent/atMention';
 
 let root: Root;
 let container: HTMLDivElement;

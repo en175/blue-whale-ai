@@ -1,7 +1,7 @@
 import { type ConnectGenKind, type VideoRefRole } from '@/custom/enums';
 import type { RefObject } from 'react';
 import type { Edge, Node } from '@xyflow/react';
-import { canConnectSourcesToGen, genKindOf, wouldCreateCycle } from '../connectAbility';
+import { canConnectSourcesToGen, genKindOf, wouldCreateCycle } from '../graph/connectAbility';
 import { audioVideoMuxVideoError, isAudioVideoMuxDraftNode } from '../tools/audio/audioVideoMux';
 
 import type { CanvasDraftCardCreatorsHandles } from './useCanvasDraftCardCreators';

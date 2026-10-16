@@ -1,11 +1,11 @@
 import type { RefObject } from 'react';
 import type { Node } from '@xyflow/react';
-import { apiErrorMessage, isSilentAuthError } from '../toolSessionCapture';
+import { apiErrorMessage, isSilentAuthError } from '../tool-runtime/toolSessionCapture';
 import { isAudioMixNodeId } from '../tools/audio/audioMix';
 import { audioVideoMuxIdentityOf } from '../tools/audio/audioVideoMux';
-import { isImageToolsCard, imageToolsRetryPayloadOf, type ImageToolsPayload } from '../generationRuntime/imageTools';
-import { videoToolFrozenPayload } from '../generationRuntime/videoTools';
-import type { RecoverySeedSource, RecoverySeedTarget } from '../generationRuntime/types';
+import { isImageToolsCard, imageToolsRetryPayloadOf, type ImageToolsPayload } from '../generation/imageTools';
+import { videoToolFrozenPayload } from '../generation/videoTools';
+import type { RecoverySeedSource, RecoverySeedTarget } from '../generation/types';
 import type { FrameInterpolationIdentity } from '../tools/video/frameInterpolation';
 import type { VideoEnhanceIdentity } from '../tools/video/videoEnhance';
 

@@ -4,7 +4,7 @@ import {
   type CanvasToolHosts,
   type CanvasToolKind,
   type CanvasToolView,
-} from '../canvasToolSessions';
+} from '../tool-runtime/canvasToolSessions';
 import { buildAudioVideoMuxIdentity } from '../tools/audio/audioVideoMux';
 import { buildImageOutpaintInput } from '../tools/image/imageOutpaint';
 

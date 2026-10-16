@@ -1,6 +1,6 @@
 import { SCENE_SPLIT_GRANULARITY_LABELS } from '@/custom/enums';
 import { ArrowUp, X, Zap } from 'lucide-react';
-import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../followDialog';
+import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../agent/followDialog';
 import { SCENE_SPLIT_GRANULARITIES, type SceneSplitGranularity } from '../../tools/video/sceneSplit';
 import styles from './index.module.css';
 

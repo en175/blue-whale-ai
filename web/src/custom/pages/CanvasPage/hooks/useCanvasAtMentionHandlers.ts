@@ -3,7 +3,7 @@ import type { Node } from '@xyflow/react';
 import { isFrameMode, normalizeVideoMode, frameSlotCountOf, type VideoMode } from '@/custom/utils/video-modes';
 import { videoRefSourceError, type VideoMediaRef } from '../tools/video/videoMediaRefs';
 
-import type { AtMentionItem } from '../atMention';
+import type { AtMentionItem } from '../agent/atMention';
 import type { UploadedFile } from '../components/ImageDialog';
 import type { AudioRefItem } from '../components/AudioDialog';
 export interface CanvasAtMentionHandlersHost {

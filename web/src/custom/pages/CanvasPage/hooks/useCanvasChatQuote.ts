@@ -3,8 +3,8 @@ import type { Node } from '@xyflow/react';
 import type { SessionContentBlock } from '@/custom/api/agentSessions';
 import { createConversationQuote } from '@/custom/api/canvas';
 import { isApiError } from '@/shared/api/http';
-import { collectMediaBlocks } from '../collectMediaBlocks';
-import { QUOTE_TEXT_LIMIT, extractTextNodeText, quoteChipLabel, readPromptSource, textQuoteBlock, type QuoteConversationInput } from '../quoteConversation';
+import { collectMediaBlocks } from '../media/collectMediaBlocks';
+import { QUOTE_TEXT_LIMIT, extractTextNodeText, quoteChipLabel, readPromptSource, textQuoteBlock, type QuoteConversationInput } from '../agent/quoteConversation';
 
 export interface CanvasChatQuoteHost {
   currentId: string;

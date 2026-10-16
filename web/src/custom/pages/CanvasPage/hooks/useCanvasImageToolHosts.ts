@@ -3,10 +3,10 @@ import type { Node } from '@xyflow/react';
 import { toast as globalToast } from '@/custom/components/Toast';
 import type { ImageOutpaintInput } from '@lib/contracts/image-outpaint';
 import { uploadAssetFile } from '@/custom/utils/upload';
-import { newNodeId } from '../nodeId';
-import { imageToolTargetBesideSource } from '../canvasPureNodeHelpers';
-import { hasCustomName } from '../canvasNodeUtils';
-import { isSilentAuthError } from '../toolSessionCapture';
+import { newNodeId } from '../graph/nodeId';
+import { imageToolTargetBesideSource } from '../graph/canvasPureNodeHelpers';
+import { hasCustomName } from '../graph/canvasNodeUtils';
+import { isSilentAuthError } from '../tool-runtime/toolSessionCapture';
 import { imageEnhanceDraftPosition } from '../tools/image/imageEnhance';
 import { IMAGE_ERASE_EDGE_ORIGIN, rasterizeMaskToPngFile } from '../tools/image/imageErase';
 import { IMAGE_CUTOUT_EDGE_ORIGIN } from '@lib/contracts/image-cutout';
@@ -15,12 +15,12 @@ import { IMAGE_OUTPAINT_EDGE_ORIGIN, buildImageOutpaintInput, type ImageOutpaint
 import type { OutpaintFrozenInput, OutpaintTaskSubmission, CutoutSubmission } from '../tools/image/imageToolSessions';
 import type { ImageEraseTaskSubmission, SubtitleEraseTaskSubmission } from '../tools/image/maskToolSessions';
 import type { ImageEnhanceSubmission } from '../tools/compound/panelToolSessions';
-import type { CanvasToolHosts } from '../canvasToolSessions';
-import { createImageToolsTask, type ImageToolsPayload } from '../generationRuntime/imageTools';
-import { videoToolsTask, type VideoToolPayload } from '../generationRuntime/videoTools';
-import { seedTargetOfNode, seedSourcesOfNode } from '../generationRuntime/seedFacts';
-import type { RecoverySeedSource, RecoverySeedTarget, RuntimeNodeView } from '../generationRuntime/types';
-import type { GenerationRuntime, GenerationRuntimeHost } from '../generationRuntime/runtime';
+import type { CanvasToolHosts } from '../tool-runtime/canvasToolSessions';
+import { createImageToolsTask, type ImageToolsPayload } from '../generation/imageTools';
+import { videoToolsTask, type VideoToolPayload } from '../generation/videoTools';
+import { seedTargetOfNode, seedSourcesOfNode } from '../generation/seedFacts';
+import type { RecoverySeedSource, RecoverySeedTarget, RuntimeNodeView } from '../generation/types';
+import type { GenerationRuntime, GenerationRuntimeHost } from '../generation/runtime';
 import type { CanvasDraftCardCreatorsHandles } from './useCanvasDraftCardCreators';
 
 type ImageToolTarget = {

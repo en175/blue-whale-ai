@@ -116,8 +116,8 @@ const runtimeMock = vi.hoisted(() => {
     },
   };
 });
-vi.mock('../generationRuntime/runtime', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../generationRuntime/runtime')>();
+vi.mock('../generation/runtime', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../generation/runtime')>();
   return { ...actual, createGenerationRuntime: () => runtimeMock.runtime };
 });
 

@@ -6,9 +6,9 @@ import { uploadAssetFile } from '@/custom/utils/upload';
 import { compliancePatchFromMaterialStatus } from '@/custom/utils/video-reference-compliance';
 import { isFileRejected } from '@/custom/utils/fileSignature';
 import type { MediaDims } from '../components/MediaNode/mediaContentSize';
-import { copyImageToClipboard, readCanvasClipboard } from '../clipboardPaste';
-import { hasCustomName } from '../canvasNodeUtils';
-import { newNodeId } from '../nodeId';
+import { copyImageToClipboard, readCanvasClipboard } from './clipboardPaste';
+import { hasCustomName } from '../graph/canvasNodeUtils';
+import { newNodeId } from '../graph/nodeId';
 import type { CanvasNodeActions } from './useCanvasNodeFactories';
 
 export type UploadDropActions = CanvasNodeActions & {

@@ -1,6 +1,6 @@
 import { type VideoSubtitleEraseMode } from '@/custom/enums';
 import { ArrowUp, HelpCircle, Redo2, RotateCcw, Square, Undo2, X, Zap } from 'lucide-react';
-import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../followDialog';
+import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../agent/followDialog';
 
 import styles from './index.module.css';
 

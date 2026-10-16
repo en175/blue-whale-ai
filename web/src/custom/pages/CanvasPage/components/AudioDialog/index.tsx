@@ -10,8 +10,8 @@ import Select from '@/custom/components/Select';
 import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
 import { useAudioDurations } from '../../hooks/useAudioDurations';
 
-import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../followDialog';
-import type { AtMentionItem } from '../../atMention';
+import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../agent/followDialog';
+import type { AtMentionItem } from '../../agent/atMention';
 import { docHasAnyRef, docHasInvalidRef, type PromptDoc } from '@/custom/utils/prompt-doc';
 import AudioPromptEditor, { type AudioPromptEditorHandle } from './AudioPromptEditor';
 import RefThumbnail, { INSERT_REF_AT_SELECTION_TITLE } from '../RefThumbnail';

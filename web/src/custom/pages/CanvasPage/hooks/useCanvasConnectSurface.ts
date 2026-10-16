@@ -2,7 +2,7 @@ import type { Dispatch, RefObject, SetStateAction } from 'react';
 import type { Edge, Node, OnEdgesChange } from '@xyflow/react';
 import type { MediaMention, MediaRef } from '@lib/contracts/text-node-media';
 import type { GenerationModel } from '@/custom/api/generation';
-import { createConnectValidators } from '../canvasConnectValidation';
+import { createConnectValidators } from '../graph/canvasConnectValidation';
 import type { CanvasHistoryApi } from './useCanvasHistory';
 import { useCanvasConnectPair } from './useCanvasConnectPair';
 import { useCanvasEdgeOps } from './useCanvasEdgeOps';

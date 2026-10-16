@@ -3,8 +3,8 @@ import { useCallback, type Dispatch, type RefObject, type SetStateAction } from 
 import type { Connection, Edge, Node, OnEdgesChange } from '@xyflow/react';
 import { draftVideoModeOf } from '../tools/video/videoModes';
 import { frameSlotCountOf, isFrameMode, type VideoMode } from '@/custom/utils/video-modes';
-import { canConnectSourcesToGen, genKindOf, isConnectableSource, wouldCreateCycle } from '../connectAbility';
-import { imageRefSourceError } from '../mediaRefs';
+import { canConnectSourcesToGen, genKindOf, isConnectableSource, wouldCreateCycle } from '../graph/connectAbility';
+import { imageRefSourceError } from '../media/mediaRefs';
 import { mergedVideoMediaRefsOf } from '../tools/video/videoMediaRefs';
 import {
   AUDIO_VIDEO_MUX_AUDIO_EDGE_LOCKED_REASON,

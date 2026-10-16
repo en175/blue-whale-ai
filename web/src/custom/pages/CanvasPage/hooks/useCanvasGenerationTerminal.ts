@@ -8,14 +8,14 @@ import { audioMixTerminalPatch, isAudioMixNodeId } from '../tools/audio/audioMix
 import { audioSpeedTerminalPatch, isAudioSpeedNodeId } from '../tools/audio/audioSpeed';
 import { audioTrimTerminalPatch, isAudioTrimNodeId } from '../tools/audio/audioTrim';
 import { audioVideoMuxErrorText, audioVideoMuxIdentityOf, audioVideoMuxResultName } from '../tools/audio/audioVideoMux';
-import { draftFileNameOf, hasCustomName } from '../canvasNodeUtils';
-import type { SpawnBox } from '../draftSpawn';
+import { draftFileNameOf, hasCustomName } from '../graph/canvasNodeUtils';
+import type { SpawnBox } from '../graph/draftSpawn';
 import { frameInterpolationErrorText } from '../tools/video/frameInterpolation';
-import type { GenerationRuntime } from '../generationRuntime/runtime';
-import { cancelledTerminalAction } from '../mediaReEdit';
-import { isMediaExtractNodeId, mediaExtractTerminalPatch } from '../mediaExtract';
-import { readAssetId } from '../mediaRefs';
-import { newNodeId } from '../nodeId';
+import type { GenerationRuntime } from '../generation/runtime';
+import { cancelledTerminalAction } from '../media/mediaReEdit';
+import { isMediaExtractNodeId, mediaExtractTerminalPatch } from '../media/mediaExtract';
+import { readAssetId } from '../media/mediaRefs';
+import { newNodeId } from '../graph/nodeId';
 import {
   SCENE_SPLIT_EDGE_ORIGIN,
   SCENE_SPLIT_NODE_GAP,
@@ -26,7 +26,7 @@ import {
   type SceneSplitIdentity,
 } from '../tools/video/sceneSplit';
 import { smartMattingErrorText, type SmartMattingIdentity } from '../tools/image/smartMatting';
-import { nextUsedInputState } from '../textIndexSync';
+import { nextUsedInputState } from '../graph/textIndexSync';
 
 import { videoEnhanceErrorText } from '../tools/video/videoEnhance';
 import {

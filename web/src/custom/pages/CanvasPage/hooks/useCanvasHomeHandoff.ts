@@ -6,7 +6,7 @@ import { takeGenHandoff, type GenHandoff } from '@/custom/utils/gen-handoff';
 import type { VideoGenSeedParams } from '../components/BottomDialog';
 import { isFrameMode } from '@/custom/utils/video-modes';
 
-import { fetchUrlAsFile } from '../canvasPureNodeHelpers';
+import { fetchUrlAsFile } from '../graph/canvasPureNodeHelpers';
 import { buildImageJobReferences, buildVideoJobReferencesFromList } from '../tools/video/videoJobReferences';
 import type { CanvasGenerationSubmissionHandles } from './useCanvasGenerationSubmission';
 

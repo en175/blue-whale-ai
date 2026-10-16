@@ -5,17 +5,17 @@ import { toast as globalToast } from '@/custom/components/Toast';
 import { isApiError } from '@/shared/api/http';
 import { newIdempotencyKey } from '@/shared/api/idempotencyKey';
 import { uploadAssetFile } from '@/custom/utils/upload';
-import { newNodeId } from '../nodeId';
-import { hasGenerationRecord } from '../mediaReEdit';
-import { readAssetId } from '../mediaRefs';
+import { newNodeId } from '../graph/nodeId';
+import { hasGenerationRecord } from '../media/mediaReEdit';
+import { readAssetId } from '../media/mediaRefs';
 import { mediaCardToolbarVisible } from '../components/MediaNode/toolbarVisibility';
 import {
   MEDIA_EXTRACT_EDGE_ORIGIN,
   MEDIA_EXTRACT_NODE_PREFIX,
   buildMediaExtractPlaceholderNode,
   mediaExtractNodeId,
-} from '../mediaExtract';
-import type { CanvasToolHosts } from '../canvasToolSessions';
+} from '../media/mediaExtract';
+import type { CanvasToolHosts } from '../tool-runtime/canvasToolSessions';
 import { type AudioVideoSplitSubmission } from '../tools/audio/audioVideoSplitSession';
 import {
   AUDIO_TRIM_EDGE_ORIGIN,
@@ -46,12 +46,12 @@ import { SMART_MATTING_EDGE_ORIGIN, buildSmartMattingPlaceholderNode } from '../
 import { imageEnhanceDraftPosition } from '../tools/image/imageEnhance';
 import { type SmartMattingSubmission } from '../tools/image/smartMattingSession';
 import { IMAGE_CROP_EDGE_ORIGIN, type ImageCropIdentity } from '../tools/image/imageCrop';
-import { type ToolSessionDeps } from '../toolSessionCoordinator';
-import type { GenerationRuntime, GenerationRuntimeHost } from '../generationRuntime/runtime';
-import { audioMixTask, audioVideoMuxTask, staleMixSubmitError, watchMixSubmit } from '../generationRuntime/mixMuxTasks';
-import { sceneSplitTask, vocalSplitTask } from '../generationRuntime/multiOutputTasks';
-import { seedTargetOfNode, seedSourcesOfNode } from '../generationRuntime/seedFacts';
-import type { RuntimeNodeView } from '../generationRuntime/types';
+import { type ToolSessionDeps } from '../tool-runtime/toolSessionCoordinator';
+import type { GenerationRuntime, GenerationRuntimeHost } from '../generation/runtime';
+import { audioMixTask, audioVideoMuxTask, staleMixSubmitError, watchMixSubmit } from '../generation/mixMuxTasks';
+import { sceneSplitTask, vocalSplitTask } from '../generation/multiOutputTasks';
+import { seedTargetOfNode, seedSourcesOfNode } from '../generation/seedFacts';
+import type { RuntimeNodeView } from '../generation/types';
 
 import type { CanvasDraftCardCreatorsHandles } from './useCanvasDraftCardCreators';
 import type { CanvasImageToolHostsHandles } from './useCanvasImageToolHosts';

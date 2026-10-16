@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { X, ArrowUp } from 'lucide-react';
 import { VIDEO_ENHANCE_RESOLUTIONS, type VideoEnhanceResolution } from '@lib/contracts/video-enhance';
 
-import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../followDialog';
+import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../agent/followDialog';
 import styles from './index.module.css';
 
 interface VideoEnhanceDialogProps {

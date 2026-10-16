@@ -6,7 +6,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Node } from '@xyflow/react';
 import CanvasPage from '../../index';
-import { MEDIA_EXTRACT_EDGE_ORIGIN } from '../../mediaExtract';
+import { MEDIA_EXTRACT_EDGE_ORIGIN } from '../../media/mediaExtract';
 import type { GenerationModel } from '@/custom/api/generation';
 
 vi.mock('@/custom/api/generationQuote', async (importActual) => ({

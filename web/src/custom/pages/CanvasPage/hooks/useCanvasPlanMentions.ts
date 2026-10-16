@@ -3,10 +3,10 @@ import { useCallback, useMemo, type Dispatch, type SetStateAction } from 'react'
 import { promptBindingList } from '@lib/contracts/prompt-target';
 import { promptMentionSchema } from '@lib/contracts/prompt-preview';
 import type { Edge, Node, Viewport } from '@xyflow/react';
-import { planReferenceErrorFor, pickMarkedIdsFor, complianceBlockedIds, pendingPlanSyncsOf, canvasMediaOf, atMentionItemsOf } from '../canvasPureNodeHelpers';
+import { planReferenceErrorFor, pickMarkedIdsFor, complianceBlockedIds, pendingPlanSyncsOf, canvasMediaOf, atMentionItemsOf } from '../graph/canvasPureNodeHelpers';
 import type { CanvasPickItem } from '../components/AudioDialog';
-import type { AtMentionItem } from '../atMention';
-import { mergedImageRefsOf, mergedVideoRefsWithTextIndex } from '../textIndexSync';
+import type { AtMentionItem } from '../agent/atMention';
+import { mergedImageRefsOf, mergedVideoRefsWithTextIndex } from '../graph/textIndexSync';
 import { videoRefIdentityIds } from '../tools/video/videoMediaRefs';
 
 export function useCanvasPlanMentions(input: {

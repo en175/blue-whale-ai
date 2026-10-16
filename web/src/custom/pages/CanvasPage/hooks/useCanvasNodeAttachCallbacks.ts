@@ -2,7 +2,7 @@ import type { Dispatch, RefObject, SetStateAction } from 'react';
 import type { Node } from '@xyflow/react';
 import { unifiedTextNodeText } from '@lib/contracts/text-node-markdown';
 import type { MediaMention, MediaRef } from '@lib/contracts/text-node-media';
-import type { CanvasGalleryRef } from '../collectMediaBlocks';
+import type { CanvasGalleryRef } from '../media/collectMediaBlocks';
 import type { MediaDims } from '../components/MediaNode/mediaContentSize';
 import type { DraftCardActions } from './useCanvasDraftCardCreators';
 

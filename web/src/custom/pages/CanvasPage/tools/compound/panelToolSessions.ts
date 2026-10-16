@@ -3,11 +3,11 @@ import { buildImageEnhanceInput, restoreImageEnhanceParams, type ImageEnhanceIde
 import { buildVideoEnhanceInput, restoreVideoEnhanceResolution, type VideoEnhanceIdentity } from '../video/videoEnhance';
 import type { VideoEnhanceResolution } from '@lib/contracts/video-enhance';
 import { buildFrameInterpolationInput, restoreFrameInterpolationFps, type FrameInterpolationIdentity, type FrameInterpolationFps } from '../video/frameInterpolation';
-import { readAssetId } from '../../mediaRefs';
-import { apiErrorMessage, capturePanelIdentity, isSilentAuthError } from '../../toolSessionCapture';
-import type { ToolSessionDefinition } from '../../toolSessionRuntime';
+import { readAssetId } from '../../media/mediaRefs';
+import { apiErrorMessage, capturePanelIdentity, isSilentAuthError } from '../../tool-runtime/toolSessionCapture';
+import type { ToolSessionDefinition } from '../../tool-runtime/toolSessionRuntime';
 
-import type { CanvasToolKind } from '../../canvasToolSessions';
+import type { CanvasToolKind } from '../../tool-runtime/canvasToolSessions';
 
 interface PanelSubmission<Payload, Identity> { projectId: string; nodeId: string; payload: Payload; identity: Identity }
 export type ImageEnhanceSubmission = PanelSubmission<NonNullable<ReturnType<typeof buildImageEnhanceInput>>, ImageEnhanceIdentity>;

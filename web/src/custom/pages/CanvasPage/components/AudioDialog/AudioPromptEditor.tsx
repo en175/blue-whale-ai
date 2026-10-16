@@ -3,7 +3,7 @@ import { flattenPromptDocWith, type PromptDoc, type PromptRefKey } from '@/custo
 import PromptRefEditor, { type PromptRefEditorHandle, type MentionState } from '../PromptRefEditor';
 import type { AssetRefMeta } from '../PromptRefEditor/AssetRefNode';
 import AtMentionMenu from '../AtMentionMenu';
-import type { AtMentionItem } from '../../atMention';
+import type { AtMentionItem } from '../../agent/atMention';
 import type { ImageTextAttachment } from '../ImageDialog';
 import { audioRefItemMediaTypeOf } from '../../tools/audio/audioMediaRefs';
 import type { AudioRefItem } from './index';

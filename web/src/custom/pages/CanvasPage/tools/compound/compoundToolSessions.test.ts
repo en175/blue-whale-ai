@@ -1,10 +1,10 @@
 import { openOtherTool } from '../../testing/openOtherTool';
 import { expect, it } from 'vitest';
 import type { Node } from '@xyflow/react';
-import { createToolSessionRuntime } from '../../toolSessionRuntime';
+import { createToolSessionRuntime } from '../../tool-runtime/toolSessionRuntime';
 import { audioVideoMuxIdentityOf } from '../audio/audioVideoMux';
 import { createAudioMixSession, addAudioMixInput, createAudioVideoMuxSession, type AudioMixHost, type AudioMixSubmission, type AudioVideoMuxHost, type AudioVideoMuxSubmission } from './compoundToolSessions';
-import type { ToolSessionDeps } from '../../toolSessionCoordinator';
+import type { ToolSessionDeps } from '../../tool-runtime/toolSessionCoordinator';
 
 const deps: ToolSessionDeps = { dismissGenPanels() {}, selectNode() {} };
 const audio = (id = 'a1', assetId = '8'): Node => ({ id, type: 'mediaNode', position: { x: 20, y: 30 }, data: { mediaType: 'audio', assetId, src: `https://assets/${id}.mp3`, fileName: '原音频.mp3' } });

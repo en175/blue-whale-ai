@@ -12,9 +12,9 @@ import {
   type CanvasRecoverySaveData,
   type RecoveryChange,
 } from '@/custom/api/canvasRecovery';
-import { readRecoveryErrorReason } from '../canvasPureNodeHelpers';
-import { groupToNode, type CanvasGroup } from '../canvasGroups';
-import type { GenerationRuntime } from '../generationRuntime/runtime';
+import { readRecoveryErrorReason } from '../graph/canvasPureNodeHelpers';
+import { groupToNode, type CanvasGroup } from '../graph/canvasGroups';
+import type { GenerationRuntime } from '../generation/runtime';
 
 export const EMPTY_CLEAR_CONFLICT_TOAST = '画布已被其他会话更新，本次清空未保存，请刷新页面复核';
 export const EMPTY_OVERWRITE_REJECTED_TOAST = '画布内容与服务端不一致，已阻止清空保存，请刷新页面复核';

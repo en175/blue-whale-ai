@@ -1,6 +1,6 @@
 import type { Dispatch, RefObject, SetStateAction } from 'react';
 import type { Node } from '@xyflow/react';
-import { applyDraggedNodesToGroups, type CanvasGroup } from '../canvasGroups';
+import { applyDraggedNodesToGroups, type CanvasGroup } from '../graph/canvasGroups';
 import type { CanvasGraph } from './useCanvasGraph';
 
 export interface CanvasNodeDragHandlersHost {

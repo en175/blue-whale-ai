@@ -17,8 +17,8 @@ import {
   type FrameInterpolationFps,
   type FrameInterpolationIdentity,
 } from '../tools/video/frameInterpolation';
-import { readAssetId, imageRefSourceError } from '../mediaRefs';
-import { hasCustomName } from '../canvasNodeUtils';
+import { readAssetId, imageRefSourceError } from '../media/mediaRefs';
+import { hasCustomName } from '../graph/canvasNodeUtils';
 
 export interface CanvasToolDraftCreatorsHost {
   mediaNodesRef: RefObject<Node[]>;

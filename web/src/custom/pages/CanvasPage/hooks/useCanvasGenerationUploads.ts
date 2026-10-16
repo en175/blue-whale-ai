@@ -4,9 +4,9 @@ import type { Edge, Node } from '@xyflow/react';
 import { fetchUploadPresign, putToPresignedUrl, completeUpload, type UploadCompleteData } from '@/custom/api/assets';
 import { probeMediaMeta } from '@/custom/utils/upload';
 import { checkFileBeforeUpload } from '@/custom/utils/fileSignature';
-import { fetchUrlAsFile } from '../canvasPureNodeHelpers';
-import { isImageDraftNode } from '../mediaRefs';
-import { mergedImageRefsOf } from '../textIndexSync';
+import { fetchUrlAsFile } from '../graph/canvasPureNodeHelpers';
+import { isImageDraftNode } from '../media/mediaRefs';
+import { mergedImageRefsOf } from '../graph/textIndexSync';
 import type { UploadedFile, ImageTextAttachment } from '../components/ImageDialog';
 
 export interface CanvasGenerationUploadsInput {

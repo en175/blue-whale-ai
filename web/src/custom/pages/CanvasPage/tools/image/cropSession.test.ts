@@ -3,8 +3,8 @@ import { openOtherTool } from '../../testing/openOtherTool';
 import { afterEach, expect, it, vi } from 'vitest';
 import type { Node } from '@xyflow/react';
 import type { UploadCompleteData } from '@/custom/api/assets';
-import { createToolSessionRuntime } from '../../toolSessionRuntime';
-import { type ToolSessionDeps } from '../../toolSessionCoordinator';
+import { createToolSessionRuntime } from '../../tool-runtime/toolSessionRuntime';
+import { type ToolSessionDeps } from '../../tool-runtime/toolSessionCoordinator';
 import { createCropSession, applyCropPreset } from './cropSession';
 
 const deps: ToolSessionDeps = {

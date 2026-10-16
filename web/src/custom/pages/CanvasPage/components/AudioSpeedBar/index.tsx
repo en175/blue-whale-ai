@@ -10,7 +10,7 @@ import {
   roundAudioSpeed,
   speedToPos,
 } from '@lib/contracts/audio-speed';
-import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../followDialog';
+import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../agent/followDialog';
 import { audioSpeedLabel } from '../../tools/audio/audioSpeed';
 import styles from './index.module.css';
 

@@ -1,7 +1,7 @@
 import { type CropPresetKey, CROP_PRESET_LABELS } from '@/custom/enums';
 import { ArrowUp } from 'lucide-react';
 import RatioGroup from '@/custom/components/RatioGroup';
-import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../followDialog';
+import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../agent/followDialog';
 import { CROP_PRESET_ORDER } from '../../tools/image/imageCrop';
 import styles from './index.module.css';
 

@@ -1,6 +1,6 @@
 import type { Edge, Node } from '@xyflow/react';
 import { AUDIO_VIDEO_MUX_RESULT_NAME_SUFFIX } from '@lib/contracts/audio-video-mux';
-import { readAssetId } from '../../mediaRefs';
+import { readAssetId } from '../../media/mediaRefs';
 
 export const AUDIO_VIDEO_MUX_EDGE_ORIGIN = 'audio-video-mux';
 

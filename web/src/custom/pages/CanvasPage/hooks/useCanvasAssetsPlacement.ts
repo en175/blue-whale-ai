@@ -11,13 +11,13 @@ import {
 import type { UploadedFile } from '../components/ImageDialog';
 import type { AudioRefItem } from '../components/AudioDialog';
 import type { MediaDims } from '../components/MediaNode/mediaContentSize';
-import { assetDisplayName } from '../canvasPureNodeHelpers';
-import { newNodeId } from '../nodeId';
-import { baseSourceError, imageMediaRefsOf, isMaterialLibraryId, readAssetId } from '../mediaRefs';
+import { assetDisplayName } from '../graph/canvasPureNodeHelpers';
+import { newNodeId } from '../graph/nodeId';
+import { baseSourceError, imageMediaRefsOf, isMaterialLibraryId, readAssetId } from '../media/mediaRefs';
 import { asVideoRefMediaType, mergedVideoMediaRefsOf, occupiedVideoRefIds, type VideoMediaRef, type VideoMediaRefs } from '../tools/video/videoMediaRefs';
 import { audioRefItemMediaTypeOf, checkAddAudioRef } from '../tools/audio/audioMediaRefs';
-import { mergedAudioRefsWithTextIndex } from '../textIndexSync';
-import { importLivenessLibraryAssets, isPendingLivenessLibraryAsset } from '../livenessLibraryImport';
+import { mergedAudioRefsWithTextIndex } from '../graph/textIndexSync';
+import { importLivenessLibraryAssets, isPendingLivenessLibraryAsset } from '../assets/livenessLibraryImport';
 import type { CanvasNodeActions } from './useCanvasNodeFactories';
 
 export interface CanvasAssetsPlacementHost {

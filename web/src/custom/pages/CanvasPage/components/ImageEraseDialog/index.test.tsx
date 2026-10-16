@@ -7,8 +7,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ImageEraseDialog from './index';
 import { rasterizeMaskToPngFile } from '../../tools/image/imageErase';
 import { createImageEraseSession } from '../../tools/image/maskToolSessions';
-import { createToolSessionRuntime } from '../../toolSessionRuntime';
-import { type ToolSessionDeps } from '../../toolSessionCoordinator';
+import { createToolSessionRuntime } from '../../tool-runtime/toolSessionRuntime';
+import { type ToolSessionDeps } from '../../tool-runtime/toolSessionCoordinator';
 import type { MaskOp } from '../../tools/image/eraseMask';
 
 let root: Root | null = null;

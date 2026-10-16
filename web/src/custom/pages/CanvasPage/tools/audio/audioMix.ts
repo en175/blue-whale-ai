@@ -1,6 +1,6 @@
 import type { Node } from '@xyflow/react';
 import { AUDIO_MIX_OUTPUT_FORMATS, type AudioMixCreate } from '@lib/contracts/audio-mix';
-import { baseSourceError, readAssetId } from '../../mediaRefs';
+import { baseSourceError, readAssetId } from '../../media/mediaRefs';
 import { mediaContentBox } from '../../components/MediaNode/mediaContentSize';
 
 export const AUDIO_MIX_EDGE_ORIGIN = 'audio-mix';

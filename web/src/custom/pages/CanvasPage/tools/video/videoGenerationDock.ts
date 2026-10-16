@@ -2,9 +2,9 @@ import { type MediaGenStatus, type VideoRefRole } from '@/custom/enums';
 import type { ReactNode } from 'react';
 import type { Edge, Node } from '@xyflow/react';
 import { restorePromptDoc } from '@/custom/utils/prompt-doc';
-import { draftSeedEquals, type VideoDraftSeed } from '../../draftSeed';
-import { hasGenerationRecord } from '../../mediaReEdit';
-import { mediaDockSelectionVisibility, holdGenerationDockSubmission, reportGenerationDockSubmissionError, runSynchronousGenerationDockSubmission, type DockSelection, type GenerationDockSubmissionHost } from '../../generationDockCoordinator';
+import { draftSeedEquals, type VideoDraftSeed } from '../../graph/draftSeed';
+import { hasGenerationRecord } from '../../media/mediaReEdit';
+import { mediaDockSelectionVisibility, holdGenerationDockSubmission, reportGenerationDockSubmissionError, runSynchronousGenerationDockSubmission, type DockSelection, type GenerationDockSubmissionHost } from '../../generation/generationDockCoordinator';
 import type { PromptDoc } from '@/custom/utils/prompt-doc';
 import type { GenerationRefItem, VideoJobParameters } from '@/custom/api/jobs';
 import { composedPromptLimitError } from '@/custom/utils/prompt-max-length';
@@ -14,7 +14,7 @@ import { buildVideoJobReferences } from './videoJobReferences';
 import type { VideoGenSeedParams, VideoDraftParamsPatch, VideoGenOptions } from '../../components/BottomDialog/index';
 
 import { checkAddVideoRef, freshVideoCanvasRefs, videoRefConflict, type VideoMediaRef, type VideoMediaRefs } from './videoMediaRefs';
-import { mergedVideoRefsWithTextIndex, videoTextIndexSendError } from '../../textIndexSync';
+import { mergedVideoRefsWithTextIndex, videoTextIndexSendError } from '../../graph/textIndexSync';
 import { draftVideoModeOf, videoModeAfterRefAdd } from './videoModes';
 
 export interface VideoDockEntry { nodeId?: string; preset?: VideoGenSeedParams; intent?: 'manual' | 'selection' }

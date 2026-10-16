@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Node } from '@xyflow/react';
 import { createSceneSplitSession, type SceneSplitSubmission } from './sceneSplitSession';
-import { createToolSessionRuntime } from '../../toolSessionRuntime';
+import { createToolSessionRuntime } from '../../tool-runtime/toolSessionRuntime';
 import { createAudioVideoSplitSession } from '../audio/audioVideoSplitSession';
 
 const deps = { dismissGenPanels() {}, selectNode() {} };

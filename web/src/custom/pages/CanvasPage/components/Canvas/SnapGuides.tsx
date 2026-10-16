@@ -1,5 +1,5 @@
 import { useViewport } from '@xyflow/react';
-import type { SnapGuide } from '../../snapAlignment';
+import type { SnapGuide } from '../../graph/snapAlignment';
 import styles from './index.module.css';
 
 export default function SnapGuides({ guides }: { guides: SnapGuide[] }) {

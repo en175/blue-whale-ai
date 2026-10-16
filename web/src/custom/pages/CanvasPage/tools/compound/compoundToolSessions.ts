@@ -3,11 +3,11 @@ import type { Node } from '@xyflow/react';
 import { isApiError } from '@/shared/api/http';
 import type { AudioMixCreate } from '@lib/contracts/audio-mix';
 import { audioMixCandidate, audioMixSourceError, type AudioMixFormat, type AudioMixInputSelection } from '../audio/audioMix';
-import { readAssetId, cardNameOfNode } from '../../mediaRefs';
-import { apiErrorMessage, cloneSourceNode } from '../../toolSessionCapture';
+import { readAssetId, cardNameOfNode } from '../../media/mediaRefs';
+import { apiErrorMessage, cloneSourceNode } from '../../tool-runtime/toolSessionCapture';
 import type { CreateAudioVideoMuxPayload } from '@/custom/api/jobs';
 import { audioVideoMuxIdentityOf, audioVideoMuxSourceError, audioVideoMuxVideoError, isAudioVideoMuxDraftNode, type AudioVideoMuxIdentity, type AudioVideoMuxBoundVideo } from '../audio/audioVideoMux';
-import type { ToolSessionDefinition, ToolSubmissionContext } from '../../toolSessionRuntime';
+import type { ToolSessionDefinition, ToolSubmissionContext } from '../../tool-runtime/toolSessionRuntime';
 
 export interface AudioMixState {
   sourceNodeId: string;

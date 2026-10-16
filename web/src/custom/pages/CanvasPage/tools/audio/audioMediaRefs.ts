@@ -3,9 +3,9 @@ import { AUDIO_SPEED_EDGE_ORIGIN } from './audioSpeed';
 import { AUDIO_TRIM_EDGE_ORIGIN } from './audioTrim';
 import { AUDIO_MIX_EDGE_ORIGIN } from './audioMix';
 import { AUDIO_VIDEO_MUX_EDGE_ORIGIN } from './audioVideoMux';
-import { MEDIA_EXTRACT_EDGE_ORIGIN } from '../../mediaExtract';
-import { baseSourceError, cardNameOfNode, readAssetId } from '../../mediaRefs';
-import { panelCanvasRefError } from '../../refSourceTypes';
+import { MEDIA_EXTRACT_EDGE_ORIGIN } from '../../media/mediaExtract';
+import { baseSourceError, cardNameOfNode, readAssetId } from '../../media/mediaRefs';
+import { panelCanvasRefError } from '../../media/refSourceTypes';
 
 export const MAX_AUDIO_MEDIA_REFS = 3;
 export const MAX_AUDIO_IMAGE_REFS = 1;

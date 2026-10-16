@@ -12,7 +12,7 @@ import {
   type GroupBBox,
   type GroupFrameDragResult,
   type PositionRecord,
-} from '../../canvasGroups';
+} from '../../graph/canvasGroups';
 import styles from './index.module.css';
 
 function isPassthroughOverlayTarget(target: EventTarget | null): boolean {

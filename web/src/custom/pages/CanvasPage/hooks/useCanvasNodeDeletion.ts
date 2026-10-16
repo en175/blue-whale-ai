@@ -2,7 +2,7 @@ import type { Dispatch, RefObject, SetStateAction } from 'react';
 import type { Edge, Node } from '@xyflow/react';
 import { releaseRemovedPromptSources } from '@lib/contracts/prompt-target';
 import { isAudioMixNodeId } from '../tools/audio/audioMix';
-import type { GenerationRuntime } from '../generationRuntime/runtime';
+import type { GenerationRuntime } from '../generation/runtime';
 import type { CanvasHistoryApi } from './useCanvasHistory';
 
 export interface CanvasNodeDeletionHost {

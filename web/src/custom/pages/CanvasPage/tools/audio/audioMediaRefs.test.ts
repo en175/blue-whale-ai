@@ -7,7 +7,7 @@ import {
   isAudioDraftNode,
   MAX_AUDIO_MEDIA_REFS,
 } from './audioMediaRefs';
-import { MEDIA_EXTRACT_EDGE_ORIGIN } from '../../mediaExtract';
+import { MEDIA_EXTRACT_EDGE_ORIGIN } from '../../media/mediaExtract';
 import { AUDIO_SPEED_EDGE_ORIGIN } from './audioSpeed';
 import { AUDIO_TRIM_EDGE_ORIGIN } from './audioTrim';
 import { AUDIO_MIX_EDGE_ORIGIN } from './audioMix';

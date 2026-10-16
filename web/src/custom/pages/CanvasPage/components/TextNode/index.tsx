@@ -8,7 +8,7 @@ import { nodeTitleSizing } from '../nodeTitleSizing';
 import { commitCardName } from '../cardName';
 import CanvasContextMenu from '../CanvasContextMenu';
 import AtMentionMenu from '../AtMentionMenu';
-import type { AtMentionItem } from '../../atMention';
+import type { AtMentionItem } from '../../agent/atMention';
 import styles from './index.module.css';
 import chipStyles from '../mediaChip.module.css';
 import { PROMPT_TEXT_LIMITS } from '@lib/contracts/prompt-text-limits';
@@ -18,7 +18,7 @@ import FollowToolbarLayer from './FollowToolbarLayer';
 import { type MediaMention, type MediaRef } from '@lib/contracts/text-node-media';
 import { renderPromptMentions, readPromptMentions, applyMediaMentionState, createMediaMentionChip } from './promptMentions';
 import { applyMarkdownInputRule } from './markdownInputRules';
-import { useSoloNodeSelected } from '../../useSoloNodeSelected';
+import { useSoloNodeSelected } from '../../hooks/useSoloNodeSelected';
 
 const MAX_TEXT_LENGTH = PROMPT_TEXT_LIMITS.text;
 

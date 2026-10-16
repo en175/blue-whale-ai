@@ -17,8 +17,8 @@ vi.mock('@/custom/api/generationQuote', async (importActual) => ({
     queryFn: async () => ({ credits: null, quote_revision: null }),
   })),
 }));
-vi.mock('../characterLibraryDeposit', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../characterLibraryDeposit')>()),
+vi.mock('../assets/characterLibraryDeposit', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../assets/characterLibraryDeposit')>()),
   depositCanvasAssetToCharacterLibrary: vi.fn(async () => ({ materialId: 'asset-compliance-test' })),
 }));
 

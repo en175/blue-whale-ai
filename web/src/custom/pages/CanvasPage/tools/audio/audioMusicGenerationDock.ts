@@ -4,13 +4,13 @@ import type { Edge, Node } from '@xyflow/react';
 import type { PromptDoc } from '@/custom/utils/prompt-doc';
 import type { AudioRefItem } from '../../components/AudioDialog/index';
 import type { MusicGenOptions } from '../../components/MusicDialog/index';
-import { draftSeedEquals, type AudioDraftSeed } from '../../draftSeed';
+import { draftSeedEquals, type AudioDraftSeed } from '../../graph/draftSeed';
 import { restorePromptDoc } from '@/custom/utils/prompt-doc';
-import { hasGenerationRecord } from '../../mediaReEdit';
+import { hasGenerationRecord } from '../../media/mediaReEdit';
 
-import { mergedAudioRefsWithTextIndex, audioTextIndexSendError } from '../../textIndexSync';
-import type { DockSelection } from '../../generationDockCoordinator';
-import { mediaDockSelectionVisibility, captureGenerationDockSubmission, holdGenerationDockSubmission, reportGenerationDockSubmissionError, type GenerationDockSubmissionHost } from '../../generationDockCoordinator';
+import { mergedAudioRefsWithTextIndex, audioTextIndexSendError } from '../../graph/textIndexSync';
+import type { DockSelection } from '../../generation/generationDockCoordinator';
+import { mediaDockSelectionVisibility, captureGenerationDockSubmission, holdGenerationDockSubmission, reportGenerationDockSubmissionError, type GenerationDockSubmissionHost } from '../../generation/generationDockCoordinator';
 import { composeImageSendPrompt } from '../../components/ImageDialog/composeImageSendPrompt';
 import { composedPromptLimitError } from '@/custom/utils/prompt-max-length';
 import { audioRefItemMediaTypeOf } from './audioMediaRefs';

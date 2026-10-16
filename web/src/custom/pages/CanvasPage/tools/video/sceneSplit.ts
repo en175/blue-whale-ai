@@ -6,7 +6,7 @@ import {
 } from '@lib/contracts/video-scene-split';
 import { readJobFailText } from '@/custom/api/jobs';
 import { mediaContentBox } from '../../components/MediaNode/mediaContentSize';
-import { overlaps, type SpawnBox } from '../../draftSpawn';
+import { overlaps, type SpawnBox } from '../../graph/draftSpawn';
 
 export const SCENE_SPLIT_ENTRY_HINT = '将视频按场景切分为多张片段卡片';
 

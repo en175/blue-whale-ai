@@ -1,7 +1,7 @@
 import type { Node } from '@xyflow/react';
-import { apiErrorMessage, captureMediaSource } from '../../toolSessionCapture';
+import { apiErrorMessage, captureMediaSource } from '../../tool-runtime/toolSessionCapture';
 import { SCENE_SPLIT_DEFAULT_GRANULARITY, type SceneSplitGranularity } from './sceneSplit';
-import type { ToolSessionDefinition } from '../../toolSessionRuntime';
+import type { ToolSessionDefinition } from '../../tool-runtime/toolSessionRuntime';
 
 export interface SceneSplitState {
   nodeId: string;

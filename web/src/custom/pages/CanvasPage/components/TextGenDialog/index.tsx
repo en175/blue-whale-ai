@@ -3,7 +3,7 @@ import { ArrowUp, SlidersHorizontal, X } from 'lucide-react';
 import { fetchGenerationModels, type GenerationModel } from '@/custom/api/generation';
 import { promptMaxLengthOf } from '@/custom/utils/prompt-max-length';
 import Select from '@/custom/components/Select';
-import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../followDialog';
+import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../agent/followDialog';
 import type { ImageTextAttachment } from '../ImageDialog';
 import styles from './index.module.css';
 

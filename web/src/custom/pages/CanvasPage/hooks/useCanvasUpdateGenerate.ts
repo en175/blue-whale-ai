@@ -11,7 +11,7 @@ import {
   mergedAudioRefsWithTextIndex,
   audioTextIndexSendError,
   DEFAULT_IMAGE_REFERENCE_LIMIT,
-} from '../textIndexSync';
+} from '../graph/textIndexSync';
 import { orderRefStripItems, videoRefStripKey } from '../components/RefThumbnail/strip-dnd';
 import { draftVideoModeOf, defaultVideoModeFor } from '../tools/video/videoModes';
 import { lockedDurationOf, effectiveVideoParams, type VideoModeFeatures } from '@/custom/utils/video-modes';

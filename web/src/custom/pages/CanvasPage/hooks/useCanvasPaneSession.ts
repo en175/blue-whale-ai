@@ -1,9 +1,9 @@
 import type { RefObject } from 'react';
 import type { Edge, Node } from '@xyflow/react';
-import { imageRefSourceError } from '../mediaRefs';
+import { imageRefSourceError } from '../media/mediaRefs';
 import { readRefRole, videoRefSourceError } from '../tools/video/videoMediaRefs';
-import type { ToolSessionDeps } from '../toolSessionCoordinator';
-import type { createCanvasToolSessions } from '../canvasToolSessions';
+import type { ToolSessionDeps } from '../tool-runtime/toolSessionCoordinator';
+import type { createCanvasToolSessions } from '../tool-runtime/canvasToolSessions';
 
 type ShowToast = (type: 'success' | 'error' | 'warn', msg: string) => void;
 type ToolRuntime = ReturnType<typeof createCanvasToolSessions>['runtime'];

@@ -1,7 +1,7 @@
 import type { Edge, Node } from '@xyflow/react';
 import { DEFAULT_VIDEO_REFERENCE_MAX, videoReferenceMaxForMode } from '@/custom/utils/model-reference-limits';
 import { VIDEO_REFERENCE_NOT_APPROVED_MESSAGE } from '@/custom/utils/video-reference-compliance';
-import { baseSourceError, cardNameOfNode, isMaterialLibraryId, readAssetId } from '../../mediaRefs';
+import { baseSourceError, cardNameOfNode, isMaterialLibraryId, readAssetId } from '../../media/mediaRefs';
 import { type VideoRefRole } from '@/custom/enums';
 
 export function asVideoRefMediaType(type: unknown): 'image' | 'video' | 'audio' {

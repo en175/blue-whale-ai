@@ -9,7 +9,7 @@ import {
   isComplianceFailedError,
   resolveCharacterLibraryMaterialId,
   waitComplianceAssetReady,
-} from '../characterLibraryDeposit';
+} from '../assets/characterLibraryDeposit';
 
 export interface CanvasComplianceHost {
   setMediaNodes: Dispatch<SetStateAction<Node[]>>;

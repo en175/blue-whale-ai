@@ -11,7 +11,7 @@ vi.mock('@/custom/utils/video-modes', () => ({
   isFrameMode: () => false,
 }));
 vi.mock('../tools/video/videoMediaRefs', () => ({ mergedVideoMediaRefsOf: () => ({}) }));
-vi.mock('../mediaRefs', () => ({ imageRefSourceError: () => null }));
+vi.mock('../media/mediaRefs', () => ({ imageRefSourceError: () => null }));
 vi.mock('../tools/audio/audioVideoMux', () => ({
   AUDIO_VIDEO_MUX_AUDIO_EDGE_LOCKED_REASON: '音视频合成绑定边锁定',
   audioVideoMuxIdentityOf: () => null,

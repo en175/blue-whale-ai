@@ -11,7 +11,7 @@ import {
 } from '@/custom/api/projects';
 import { defaultProjectName } from '@/custom/utils/projectName';
 import type { CanvasProject } from '../components/ProjectSelector';
-import { shouldReturnToProjectsAfterDelete } from '../canvasQuery';
+import { shouldReturnToProjectsAfterDelete } from '../graph/canvasQuery';
 
 export interface CanvasProjectsHost {
   currentId: string;

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef } from 'react';
-import { createImageToolsTask } from '../generationRuntime/imageTools';
-import { type GenerationRuntime, type GenerationRuntimeHost } from '../generationRuntime/runtime';
+import { createImageToolsTask } from '../generation/imageTools';
+import { type GenerationRuntime, type GenerationRuntimeHost } from '../generation/runtime';
 
 export function useCanvasGenerationRuntime() {
   const locallyRemovedGenerationNodesRef = useRef<Set<string>>(new Set());

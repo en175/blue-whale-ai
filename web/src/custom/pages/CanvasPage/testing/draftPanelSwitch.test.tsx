@@ -744,7 +744,7 @@ describe('IKIJ61 草稿面板 seed 等值写入与互关清绑定', () => {
 
 describe('IKIJ61 draftSeedEquals 内容等值契约', () => {
   it('ts 不同其余字段等值 → 等值；targetNodeId / 参数 / attachments 内容差异 → 不等值', async () => {
-    const { draftSeedEquals } = await import('../draftSeed');
+    const { draftSeedEquals } = await import('../graph/draftSeed');
     const seedA = { ts: 1, text: '正文', targetNodeId: 'd1', params: { modelId: 'm1', ratio: '1:1' }, attachments: [{ nodeId: 't1', title: '文本' }] };
     const seedB = { ts: 2, text: '正文', targetNodeId: 'd1', params: { modelId: 'm1', ratio: '1:1' }, attachments: [{ nodeId: 't1', title: '文本' }] };
 

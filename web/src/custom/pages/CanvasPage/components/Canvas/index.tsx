@@ -24,7 +24,7 @@ import { useCallback, useEffect, useRef, useMemo, useState, type ReactNode } fro
 import ZoomControl from '../ZoomControl';
 import TextNode from '../TextNode';
 import MediaNode from '../MediaNode';
-import { mediaInputStale, firstTextSourceOf } from '../../textIndexSync';
+import { mediaInputStale, firstTextSourceOf } from '../../graph/textIndexSync';
 import ProductNode from '../ProductNode';
 import AssetCardNode from '../AssetCardNode';
 import CustomEdge from '../CustomEdge';
@@ -48,8 +48,8 @@ import ConnectionPreview from './ConnectionPreview';
 import SnapGuides from './SnapGuides';
 import OutpaintFrame from '../OutpaintFrame';
 import type { ExpandSides, SourceRect } from '../../tools/image/imageOutpaint';
-import { EMPTY_SNAP_GUIDES, isPositionChangeWithPosition, snapDragChanges } from '../../snapDragChanges';
-import type { SnapGuide, SnapNodeLike } from '../../snapAlignment';
+import { EMPTY_SNAP_GUIDES, isPositionChangeWithPosition, snapDragChanges } from '../../graph/snapDragChanges';
+import type { SnapGuide, SnapNodeLike } from '../../graph/snapAlignment';
 import {
   MIN_GROUP_MEMBERS,
   exclusiveMembersInGroup,
@@ -57,7 +57,7 @@ import {
   groupMemberZ,
   type CanvasGroup,
   type GroupFrameDragResult,
-} from '../../canvasGroups';
+} from '../../graph/canvasGroups';
 
 import styles from './index.module.css';
 
