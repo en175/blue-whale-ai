@@ -12,7 +12,7 @@
 | 任何 Gitee MCP 调用；带工单开工、收口、返工、PR 创建/合并 | `docs/agents/issue-tracker.md` |
 | 测试验证：任务收口、提交审查、创建/更新 PR、合并前 | `docs/agents/testing-strategy.md` |
 | Blue-Whale 账号密码登录：浏览器自动化、本地服务确认、测试站直连 | `agent-rules/app-login.md` |
-| 前端产品实现：`web/` 页面、组件、API 客户端、TanStack Query | `.agents/skills/frontend-delivery/SKILL.md`；缺陷读 `references/bugfix.md`，新服务端状态读写读 `references/request.md` |
+| 前端产品实现：`web/` 页面、组件、API 客户端、TanStack Query | `agent-rules/frontend-web.md` + `.agents/skills/frontend-delivery/SKILL.md`；缺陷读 `references/bugfix.md`，新服务端状态读写读 `references/request.md` |
 | PR 模板、Hook 兜底清单 | `docs/agents/commit-and-review.md` |
 | 新建产品文档、产品文档/技能资产归位 | `docs/README.md` |
 
