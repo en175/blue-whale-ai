@@ -857,8 +857,7 @@ describe('IKDWL8 视频失效引用保护', () => {
 const MODE_LABELS = ['文生视频', '全能参考', '图片参考', '图生视频', '首尾帧', '视频编辑', '视频延长'];
 
 function modeButton(): HTMLButtonElement {
-  return container.querySelector<HTMLButtonElement>('[aria-label="选择生成模式"]')
-    ?? [...container.querySelectorAll('button')].find((b) => MODE_LABELS.includes(b.textContent ?? ''))!;
+  return [...container.querySelectorAll('button')].find((b) => MODE_LABELS.includes(b.textContent ?? ''))!;
 }
 
 async function expectMode(label: string) {
