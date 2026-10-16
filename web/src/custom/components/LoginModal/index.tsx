@@ -174,6 +174,7 @@ export default function LoginModal({
           phone: login.phone,
           hasPassword: login.has_password,
           isAdmin: false,
+          roles: [],
         };
     useAuthStore.getState().applyLogin(login, user);
     fetchAdminSession()

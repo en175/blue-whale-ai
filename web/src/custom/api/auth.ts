@@ -24,6 +24,7 @@ export interface MeData {
   created_at: string;
   has_password?: boolean;
   is_admin?: boolean;
+  roles?: string[];
 }
 
 export const toSessionUser = (m: MeData): SessionUser => ({
@@ -34,6 +35,7 @@ export const toSessionUser = (m: MeData): SessionUser => ({
   avatar: m.avatar ?? undefined,
   hasPassword: m.has_password ?? true,
   isAdmin: m.is_admin ?? false,
+  roles: m.roles ?? [],
 });
 
 export async function loginWithPassword(username: string, password: string) {

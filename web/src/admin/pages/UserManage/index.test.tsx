@@ -3,13 +3,35 @@ import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider, notifyManager } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ApiError } from '@/shared/api/http';
+import { useAuthStore, type SessionUser } from '@/shared/stores/auth';
 import UserManage from './index';
 
 const adminApi = vi.hoisted(() => ({
   fetchAdminUsers: vi.fn(),
   manageAdminUser: vi.fn(),
   fetchOperationLogs: vi.fn(),
+  fetchUserRoles: vi.fn(),
+  grantUserRole: vi.fn(),
+  revokeUserRole: vi.fn(),
 }));
+
+const SUPER_ADMIN: SessionUser = {
+  userId: 1,
+  username: 'root',
+  email: '',
+  phone: '',
+  hasPassword: true,
+  isAdmin: true,
+  roles: ['user', 'super_admin'],
+};
+
+const PLAIN_ADMIN: SessionUser = {
+  ...SUPER_ADMIN,
+  userId: 9,
+  username: 'ops',
+  roles: ['user', 'admin'],
+};
 
 vi.mock('@/admin/api/adminUsers', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/admin/api/adminUsers')>();
@@ -19,6 +41,10 @@ vi.mock('@/admin/api/adminUsers', async (importOriginal) => {
     adminUsersOptions: (params: Parameters<typeof actual.fetchAdminUsers>[0]) => ({
       queryKey: actual.adminUserKeys.list(params),
       queryFn: () => adminApi.fetchAdminUsers(params),
+    }),
+    userRolesOptions: (userId: number) => ({
+      queryKey: actual.adminUserKeys.roles(userId),
+      queryFn: () => adminApi.fetchUserRoles(userId),
     }),
   };
 });
@@ -81,6 +107,10 @@ beforeEach(() => {
   });
   adminApi.fetchOperationLogs.mockResolvedValue([]);
   adminApi.manageAdminUser.mockResolvedValue({ credits: 10, duplicated: false });
+  adminApi.fetchUserRoles.mockResolvedValue({ roles: ['user'] });
+  adminApi.grantUserRole.mockResolvedValue({ roles: ['user', 'admin'] });
+  adminApi.revokeUserRole.mockResolvedValue({ roles: ['user'] });
+  useAuthStore.setState({ user: SUPER_ADMIN });
 });
 
 afterEach(async () => {
@@ -316,5 +346,82 @@ describe('UserManage 服务端筛选与分页', () => {
       el.textContent?.includes('累计充值'),
     );
     expect(th?.querySelector('button[aria-label="累计充值的口径"]')).not.toBeNull();
+  });
+});
+
+describe('UserManage 角色授权入口', () => {
+  const roleEntry = () =>
+    document.querySelector<HTMLButtonElement>('button[aria-label="设置角色 Alice"]');
+
+  async function settle() {
+    await act(async () => {
+      await Promise.resolve();
+    });
+  }
+
+  async function openRoleModal() {
+    await renderPage();
+    await act(async () => roleEntry()?.click());
+    await settle();
+  }
+
+  function modalButton(label: string, action: '授予' | '撤销') {
+    return [...document.querySelectorAll<HTMLButtonElement>('button')].find(
+      (b) => b.textContent?.trim() === action && b.closest('tr')?.textContent?.includes(label),
+    );
+  }
+
+  it('超级管理员：列表行有「设置角色」入口', async () => {
+    await renderPage();
+
+    expect(roleEntry()).not.toBeNull();
+  });
+
+  it('★ 普通管理员：不渲染该入口（与后端「仅超管可设角色」口径一致）', async () => {
+    useAuthStore.setState({ user: PLAIN_ADMIN });
+
+    await renderPage();
+
+    expect(roleEntry()).toBeNull();
+  });
+
+  it('按当前持有给出「授予 / 撤销」：持有的可撤销，未持有的可授予', async () => {
+    adminApi.fetchUserRoles.mockResolvedValue({ roles: ['user', 'admin'] });
+    await openRoleModal();
+
+    expect(modalButton('普通用户', '撤销')).toBeDefined();
+    expect(modalButton('管理员', '撤销')).toBeDefined();
+    expect(modalButton('超级管理员', '授予')).toBeDefined();
+    expect(modalButton('超级管理员', '撤销')).toBeUndefined();
+  });
+
+  it('授予未持有的角色：调 grantUserRole', async () => {
+    await openRoleModal();
+
+    await act(async () => modalButton('超级管理员', '授予')?.click());
+    await settle();
+
+    expect(adminApi.grantUserRole).toHaveBeenCalledWith(42, 'super_admin');
+  });
+
+  it('撤销已持有的角色：调 revokeUserRole', async () => {
+    await openRoleModal();
+
+    await act(async () => modalButton('普通用户', '撤销')?.click());
+    await settle();
+
+    expect(adminApi.revokeUserRole).toHaveBeenCalledWith(42, 'user');
+  });
+
+  it('后端拒绝时把原因显示在弹窗里（如撤销最后一个超管）', async () => {
+    adminApi.revokeUserRole.mockRejectedValue(
+      new ApiError(409, '系统必须保留至少一个超级管理员', 409),
+    );
+    await openRoleModal();
+
+    await act(async () => modalButton('普通用户', '撤销')?.click());
+    await settle();
+
+    expect(document.body.textContent).toContain('系统必须保留至少一个超级管理员');
   });
 });

@@ -1,14 +1,20 @@
-import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { Coins, Lock, LockOpen, Search } from 'lucide-react';
+import { useState, useSyncExternalStore } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Coins, Lock, LockOpen, Search, ShieldCheck } from 'lucide-react';
 import {
+  adminUserKeys,
   adminUsersOptions,
+  BUILTIN_ROLES,
+  grantUserRole,
   manageAdminUser,
+  revokeUserRole,
+  userRolesOptions,
   type AdminUserRow,
 } from '@/admin/api/adminUsers';
 import { type UserManageAction } from '@/admin/enums';
 import { operationLogsOptions, type OperationLog } from '@/admin/api/adminOperationLogs';
 import { isApiError } from '@/shared/api/http';
+import { isSuperAdmin, subscribe } from '@/shared/utils/auth';
 import { newIdempotencyKey } from '@/shared/api/idempotencyKey';
 import { formatLogIp } from '@/admin/formatLogIp';
 import { normalizeAdminUserKeyword } from './userSearch';
@@ -92,6 +98,8 @@ export default function UserManage() {
   const [detailUser, setDetailUser] = useState<AdminUserRow | null>(null);
   const [adjustUser, setAdjustUser] = useState<AdminUserRow | null>(null);
   const [freezeUser, setFreezeUser] = useState<AdminUserRow | null>(null);
+  const [roleUser, setRoleUser] = useState<AdminUserRow | null>(null);
+  const superAdmin = useSyncExternalStore(subscribe, isSuperAdmin);
 
   const query = {
     page: paging.page,
@@ -176,6 +184,16 @@ export default function UserManage() {
             }
             onClick={() => setFreezeUser(u)}
           />
+          {superAdmin && (
+            <Button
+              size="sm"
+              variant="ghost"
+              title="设置角色"
+              aria-label={`设置角色 ${u.nickname}`}
+              icon={<ShieldCheck size={15} strokeWidth={2} />}
+              onClick={() => setRoleUser(u)}
+            />
+          )}
         </div>
       ),
     },
@@ -194,7 +212,11 @@ export default function UserManage() {
     <>
       <AdminQueryTable
         title="用户管理"
-        subtitle="管理用户积分、查看调整记录与操作日志、冻结/解冻账户"
+        subtitle={
+          superAdmin
+            ? '管理用户积分、查看调整记录与操作日志、冻结/解冻账户、设置角色'
+            : '管理用户积分、查看调整记录与操作日志、冻结/解冻账户'
+        }
         hasFilters={filters.hasApplied}
         filteredEmptyMessage="没有匹配的用户"
         emptyMessage="暂无用户"
@@ -264,6 +286,16 @@ export default function UserManage() {
           user={freezeUser}
           onClose={() => setFreezeUser(null)}
           onConfirm={(params) => doManage(freezeUser.userId, params)}
+        />
+      )}
+
+      {roleUser && (
+        <RoleModal
+          user={roleUser}
+          onClose={() => {
+            setRoleUser(null);
+            void list.refetch();
+          }}
         />
       )}
     </>
@@ -593,6 +625,91 @@ function FreezeModal({
       {error && (
         <div style={{ marginTop: 12 }}>
           <Alert tone="danger">{error}</Alert>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+function RoleModal({ user, onClose }: { user: AdminUserRow; onClose: () => void }) {
+  const queryClient = useQueryClient();
+  const rolesQuery = useQuery(userRolesOptions(user.userId));
+  const current = rolesQuery.data?.roles ?? [];
+
+  const toggle = useMutation({
+    mutationFn: ({ code, grant }: { code: string; grant: boolean }) =>
+      grant ? grantUserRole(user.userId, code) : revokeUserRole(user.userId, code),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: adminUserKeys.all });
+    },
+  });
+
+  const errorText = toggle.isError
+    ? isApiError(toggle.error)
+      ? toggle.error.message
+      : '操作失败，请稍后重试'
+    : rolesQuery.isError
+      ? isApiError(rolesQuery.error)
+        ? rolesQuery.error.message
+        : '获取角色失败'
+      : '';
+
+  return (
+    <Modal
+      open
+      title="设置角色"
+      width={560}
+      onClose={onClose}
+      footer={<Button onClick={onClose}>关闭</Button>}
+    >
+      <MetaRow
+        items={[{ label: '用户', value: `${user.nickname}（${user.userId}）` }]}
+        tone="sunken"
+      />
+
+      <Table>
+        <thead>
+          <tr>
+            <th>
+              角色{' '}
+              <Hint label="角色说明" title="角色决定什么">
+                <div>
+                  决定该用户能否进入管理端。<b>超级管理员</b>可管理他人角色，授予前请确认。
+                </div>
+              </Hint>
+            </th>
+            <th>说明</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          {BUILTIN_ROLES.map((r) => {
+            const held = current.includes(r.code);
+            return (
+              <tr key={r.code}>
+                <td>
+                  <Badge tone={held ? 'success' : 'neutral'}>{r.label}</Badge>
+                </td>
+                <td>{r.hint}</td>
+                <td>
+                  <Button
+                    size="sm"
+                    variant={held ? 'danger' : 'primary'}
+                    disabled={rolesQuery.isPending || toggle.isPending}
+                    onClick={() => toggle.mutate({ code: r.code, grant: !held })}
+                  >
+                    {held ? '撤销' : '授予'}
+                  </Button>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </Table>
+
+      {errorText && (
+        <div style={{ marginTop: 12 }}>
+          <Alert tone="danger">{errorText}</Alert>
         </div>
       )}
     </Modal>

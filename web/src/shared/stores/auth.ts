@@ -35,6 +35,7 @@ export interface SessionUser {
   avatar?: string;
   hasPassword: boolean;
   isAdmin: boolean;
+  roles?: string[];
 }
 
 export interface LoginPayload {
