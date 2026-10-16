@@ -21,6 +21,7 @@ public class TransactionRow {
     private Long generationJobId;
 
     private String status;
+    private String chargeState;
 
     private LocalDateTime createdAt;
 
@@ -52,6 +53,8 @@ public class TransactionRow {
     public void setGenerationJobId(Long generationJobId) { this.generationJobId = generationJobId; }
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }
+    public String getChargeState() { return chargeState; }
+    public void setChargeState(String chargeState) { this.chargeState = chargeState; }
     public LocalDateTime getCreatedAt() { return createdAt; }
     public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
     public LocalDateTime getSettledAt() { return settledAt; }

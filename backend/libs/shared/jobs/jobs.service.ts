@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, Logger } from "@nestjs/common";
 import {
   RESOURCE_NOT_FOUND_CODE,
   VIDEO_SCENE_SPLIT_RESULT_KEYS,
@@ -18,6 +18,7 @@ import {
 } from "@lib/shared/persistence/index.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";
+import { sharedBillingClient } from "@lib/shared/billing/billing-client.js";
 import { fallbackErrorCode, messageFor, projectPublicError } from "./generation-job-error-projection.js";
 
 const MAX_BATCH_IDS = 100;
@@ -45,6 +46,7 @@ export interface AdminJobListResult {
 
 @Injectable()
 export class JobsService {
+  private readonly logger = new Logger(JobsService.name);
   private repoInstance?: ReturnType<typeof createJobRepo>;
 
   private get repo(): ReturnType<typeof createJobRepo> {
@@ -87,6 +89,7 @@ export class JobsService {
     if (query.projectId !== undefined) filter.projectId = query.projectId;
     if (query.ids !== undefined) filter.ids = [...new Set(query.ids)];
     const page = await this.repo.listByUser(userId, filter);
+    await this.resolveCancelledChargeStates(userId, page.records);
     return ok({
       ...page,
       records: page.records.map(({ stored_error: storedError, ...record }) => ({
@@ -124,6 +127,7 @@ export class JobsService {
     if (!job) return fail(RESOURCE_NOT_FOUND_CODE, "资源不存在");
     const owned = await this.project.findOwnedById(job.project_id, userId);
     if (!owned) return fail(RESOURCE_NOT_FOUND_CODE, "资源不存在");
+    await this.resolveCancelledChargeStates(userId, [job]);
 
     if (job.status === "failed") {
       const projected = projectPublicError(job.stored_error, job.type);
@@ -167,5 +171,28 @@ export class JobsService {
       charge_state: job.charge_state,
       actual_credits: job.actual_credits,
     });
+  }
+
+  private async resolveCancelledChargeStates(userId: string, records: {
+    job_id: string; type: string; status: string; video_stage: string; charge_state: string | null;
+  }[]): Promise<void> {
+    const jobs = records.filter((job) => job.type === "video" && job.status === "cancelled" &&
+      (job.video_stage === "sample" || job.video_stage === "final"));
+    for (const job of jobs) job.charge_state = null;
+    for (let offset = 0; offset < jobs.length; offset += MAX_BATCH_IDS) {
+      const batch = jobs.slice(offset, offset + MAX_BATCH_IDS);
+      try {
+        const page = await sharedBillingClient().listTransactions({
+          userId: Number(userId), typeFilters: ["consume"],
+          generationJobIds: batch.map((job) => job.job_id), page: 1, pageSize: batch.length,
+        }, { timeoutMs: 1_000 });
+        for (const job of batch) {
+          const state = page.items.find((item) => item.type === "consume" && item.generationJobId === job.job_id)?.chargeState;
+          if (state === "charged" || state === "refunded") job.charge_state = state;
+        }
+      } catch {
+        this.logger.warn("取消任务计费状态查询失败，本次返回未确认状态");
+      }
+    }
   }
 }

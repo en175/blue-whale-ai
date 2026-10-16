@@ -50,6 +50,7 @@ public class TransactionRepository {
                 row.getCreatedAt(),
                 row.getSettledAt(),
                 row.getLotSource(),
-                row.getLotCreatedAt());
+                row.getLotCreatedAt(),
+                row.getChargeState());
     }
 }

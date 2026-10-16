@@ -78,6 +78,7 @@ export interface BillingTransaction {
   generationJobId: string | null;
   lotSource: string;
   lotCreatedAt: string;
+  chargeState?: string;
 }
 
 export interface BillingTransactionPage {
@@ -99,7 +100,7 @@ export interface BillingClient {
   charge(request: BillingChargeRequest): Promise<BillingChargeResult>;
   quote(request: BillingQuoteRequest): Promise<BillingQuoteResult>;
   queryBalance(userId: number): Promise<BillingBalance>;
-  listTransactions(query: BillingListTransactionsQuery): Promise<BillingTransactionPage>;
+  listTransactions(query: BillingListTransactionsQuery, options?: { timeoutMs: number }): Promise<BillingTransactionPage>;
   listCreditLots(query: BillingListLotsQuery): Promise<BillingCreditLotPage>;
 }
 
@@ -216,7 +217,7 @@ export function createBillingClient(baseUrl: string): BillingClient {
       };
     },
 
-    async listTransactions(query) {
+    async listTransactions(query, options) {
       const response = await client.listTransactions(
         create(ListTransactionsRequestSchema, {
           userId: BigInt(query.userId),
@@ -233,6 +234,7 @@ export function createBillingClient(baseUrl: string): BillingClient {
                 },
               }),
         }),
+        options,
       );
       return {
         items: response.items.map((item) => ({
@@ -248,6 +250,7 @@ export function createBillingClient(baseUrl: string): BillingClient {
             item.generationJobId === undefined ? null : String(item.generationJobId),
           lotSource: item.lotSource,
           lotCreatedAt: item.lotCreatedAt,
+          chargeState: item.chargeState,
         })),
         total: Number(response.page?.total ?? 0),
       };

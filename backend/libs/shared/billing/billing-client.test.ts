@@ -18,11 +18,41 @@ import {
 import {
   QueryBalanceResponseSchema,
   SourceCreditsSchema,
+  ListTransactionsResponseSchema,
 } from '../../contracts/gen/billing/v1/billing_pb.js';
 
 vi.mock('@connectrpc/connect-node', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@connectrpc/connect-node')>();
   return { ...actual, createGrpcTransport: () => grpcStubTransport() };
+});
+
+describe('任务计费状态查询契约', () => {
+  it('传递用户与任务过滤，保留明确的退款状态', async () => {
+    freshGrpcUrl();
+    grpcBillingService({ listTransactions: (request) => {
+      expect(request.userId).toBe(9012n);
+      expect(request.generationJobIds).toEqual([901201n]);
+      return create(ListTransactionsResponseSchema, { items: [
+        { id: 'res:1', type: 'consume', generationJobId: 901201n, chargeState: 'refunded' },
+      ] });
+    } });
+    const response = await createBillingClient(billingEndpoint()).listTransactions({ userId: 9012, generationJobIds: ['901201'] });
+    expect(response.items[0]).toMatchObject({ generationJobId: '901201', chargeState: 'refunded' });
+  });
+
+  it('旧服务缺少字段时保留空值，不从零金额推断退款', async () => {
+    freshGrpcUrl();
+    grpcBillingService({ listTransactions: () => create(ListTransactionsResponseSchema, { items: [{ amount: 0n, status: 'done' }] }) });
+    const response = await createBillingClient(billingEndpoint()).listTransactions({ userId: 9012 });
+    expect(response.items[0]?.chargeState).toBe('');
+  });
+
+  it('查询在调用方指定的截止时间内失败', async () => {
+    freshGrpcUrl();
+    grpcBillingService({ listTransactions: async () => new Promise(() => {}) });
+    await expect(createBillingClient(billingEndpoint()).listTransactions({ userId: 9012 }, { timeoutMs: 20 }))
+      .rejects.toMatchObject({ code: Code.DeadlineExceeded });
+  });
 });
 
 describe('billingEndpoint', () => {

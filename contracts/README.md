@@ -65,6 +65,14 @@ catalog 规则里 `baseUnit` / `dims` / `multipliers` 用的 key，
 ⚠️ `generation-job-terminal` 是**新 topic**，broker 上不存在时 billing 的 push consumer 起不来（订阅一个无路由的 topic 会直接抛错），
 部署前须先在 broker 上建好。
 
+## 取消任务的计费查询
+
+IKM12Y 复用 `BillingService.ListTransactions`，由 backend 传入已校验归属的用户与任务 ID，读取计费主库已提交的状态，不缓存、不回写任务扩展表。`UserTransaction.charge_state` 使用新字段号 12，消费行取 `billing_cost_reservations.status`，值为 `charged` 或 `refunded`；非消费行和旧服务返回空字符串。`status=done` 只表示流水状态，金额为零也不能替代退款状态。
+
+`GET /api/jobs/:id` 与用户任务列表对 `cancelled` 的 `sample`、`final` 视频任务使用此字段。退款事务提交后，下一次成功读取计费主库的请求即收敛为 `refunded`；事务提交前读取仍为 `charged`。查询超时预算为 1 秒，接口不可用、缺少流水、字段为空或无法识别时返回 `charge_state=null`，表示未确认，不使用任务扩展表的陈旧值。任务状态仍为 `cancelled`，普通任务和其他状态保持原有语义。列表每批最多查询 100 个任务。
+
+本次只改变状态来源，`actual_credits` 保持原有语义。查询不触发扣款或退款。重复、迟到的终态消息继续由现有退款事务与幂等约束处理，查询端没有可被旧结果覆盖的持久缓存。先部署支持字段 12 的计费服务，再部署消费者；旧计费服务期间返回未确认状态。
+
 ## 生成
 
 ```bash

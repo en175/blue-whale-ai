@@ -52,6 +52,7 @@
              NULL         AS reserved_credits,
              NULL         AS generation_job_id,
              'done'       AS status,
+             NULL         AS charge_state,
              l.gmt_create AS created_at,
              l.gmt_create AS settled_at,
              'grant'      AS kind,
@@ -85,6 +86,7 @@
              r.reserved_credits AS reserved_credits,
              r.generation_job_id AS generation_job_id,
              'done' AS status,
+             r.status AS charge_state,
              r.gmt_create AS created_at,
              r.gmt_modified AS settled_at,
              'consume' AS kind,
@@ -112,6 +114,7 @@
              NULL AS reserved_credits,
              NULL AS generation_job_id,
              'done' AS status,
+             NULL AS charge_state,
              MIN(e.gmt_create) AS created_at,
              MIN(e.gmt_create) AS settled_at,
              'ledger' AS kind,
@@ -151,7 +154,7 @@
 
   <select id="selectPage" resultType="com.bluewhale.billing.infrastructure.persistence.row.TransactionRow">
     SELECT t.tx_id, t.user_id, t.type, t.direction, t.title, t.amount, t.reserved_credits,
-           t.status, t.created_at, t.settled_at, t.generation_job_id, t.kind, t.src_id,
+           t.status, t.charge_state, t.created_at, t.settled_at, t.generation_job_id, t.kind, t.src_id,
            t.lot_source, t.lot_created_at
     FROM (
       <include refid="transactionUnion"/>
