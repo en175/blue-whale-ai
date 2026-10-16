@@ -5,7 +5,7 @@ import { ArrowUp, Film, Video, X, Zap } from 'lucide-react';
 import { assetPageQueryOptions } from '@/custom/api/assets';
 import { resolveMediaSrc } from '@/shared/utils/remoteImageCors';
 import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../agent/followDialog';
-import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
+import { useDismissOnOutside } from '../../hooks/shared/useDismissOnOutside';
 import { AUDIO_VIDEO_MUX_TITLE, type AudioVideoMuxBoundVideo, type AudioVideoMuxIdentity } from '../../tools/audio/audioVideoMux';
 import Empty from '@/custom/components/Empty';
 import styles from './index.module.css';

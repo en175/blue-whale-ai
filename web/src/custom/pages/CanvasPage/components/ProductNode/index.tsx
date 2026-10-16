@@ -1,6 +1,6 @@
 import { useRef, useState, useCallback, useEffect } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
-import { useSoloNodeSelected } from '../../hooks/useSoloNodeSelected';
+import { useSoloNodeSelected } from '../../hooks/chrome/useSoloNodeSelected';
 import { AtSign, Upload, X, Box, MousePointerClick, ImageOff, Plus } from 'lucide-react';
 import { toast } from '@/custom/components/Toast';
 import { uploadAssetFile } from '@/custom/utils/upload';

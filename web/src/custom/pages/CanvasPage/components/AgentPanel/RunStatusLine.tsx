@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import styles from './index.module.css';
-import { deriveRunStatus, formatElapsed, formatTokens, type RunStatus } from '../../hooks/runStatusLine';
-import type { TurnOutcome } from '../../hooks/useAgentSession';
+import { deriveRunStatus, formatElapsed, formatTokens, type RunStatus } from '../../hooks/agent/runStatusLine';
+import type { TurnOutcome } from '../../hooks/agent/useAgentSession';
 
 const RUN_STATUS_MARK: Record<RunStatus['phase'], string> = {
   dispatching: '✶',

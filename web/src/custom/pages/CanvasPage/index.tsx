@@ -1,9 +1,9 @@
 import { type PromptBinding } from '@lib/contracts/prompt-target';
-import { useState, useRef, useMemo } from 'react';
+import { useState, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { newNodeId } from './graph/nodeId';
-import { nodeBoxOf, appliedCardIdsOf } from './graph/canvasPureNodeHelpers';
+import { nodeBoxOf } from './graph/canvasPureNodeHelpers';
 import { imageRefSourceError } from './media/mediaRefs';
 import { audioRefSourceError } from './tools/audio/audioMediaRefs';
 
@@ -21,72 +21,72 @@ import {
   isConnectableSource,
 } from './graph/connectAbility';
 import { mapBackendNode, resolveNodeAssets } from './graph/canvasNodeUtils';
-import { useCanvasHydration } from './hooks/useCanvasHydration';
-import { useCanvasHistory } from './hooks/useCanvasHistory';
-import { useCanvasPageMutations } from './hooks/useCanvasPageMutations';
-import { useCanvasPageDocument } from './hooks/useCanvasPageDocument';
-import { useCanvasNodeActions } from './hooks/useCanvasNodeActions';
-import { useAssetHoverBridge } from './hooks/useAssetHoverBridge';
-import { useCanvasPickers } from './hooks/useCanvasPickers';
-import { useCanvasGenerationTerminal } from './hooks/useCanvasGenerationTerminal';
-import { useCanvasGenerationSubmission } from './hooks/useCanvasGenerationSubmission';
-import { useCanvasAssetActions } from './hooks/useCanvasAssetActions';
-import { useCanvasNodeFactories } from './hooks/useCanvasNodeFactories';
-import { useCanvasSave } from './hooks/useCanvasSave';
-import { useCanvasSaveSession } from './hooks/useCanvasSaveSession';
-import { useCanvasSessionBootstrap } from './hooks/useCanvasSessionBootstrap';
+import { useCanvasHydration } from './hooks/document/useCanvasHydration';
+import { useCanvasHistory } from './hooks/document/useCanvasHistory';
+import { useCanvasPageMutations } from './hooks/document/useCanvasPageMutations';
+import { useCanvasPageDocument } from './hooks/document/useCanvasPageDocument';
+import { useCanvasNodeActions } from './hooks/chrome/useCanvasNodeActions';
+import { useAssetHoverBridge } from './hooks/shared/useAssetHoverBridge';
+import { useCanvasPickers } from './hooks/tools/useCanvasPickers';
+import { useCanvasGenerationTerminal } from './hooks/generation/useCanvasGenerationTerminal';
+import { useCanvasGenerationSubmission } from './hooks/generation/useCanvasGenerationSubmission';
+import { useCanvasAssetActions } from './hooks/shared/useCanvasAssetActions';
+import { useCanvasNodeFactories } from './hooks/chrome/useCanvasNodeFactories';
+import { useCanvasSave } from './hooks/document/useCanvasSave';
+import { useCanvasSaveSession } from './hooks/document/useCanvasSaveSession';
+import { useCanvasSessionBootstrap } from './hooks/document/useCanvasSessionBootstrap';
 import { showToast } from '@/custom/components/Toast';
-import { useCanvasViewportSurface } from './hooks/useCanvasViewportSurface';
-import { useCanvasGenerationModels } from './hooks/useCanvasGenerationModels';
-import { useCanvasProjectRoute } from './hooks/useCanvasProjectRoute';
-import { useCanvasWorkbenchChrome } from './hooks/useCanvasWorkbenchChrome';
-import { useCanvasToolWorkspace } from './hooks/useCanvasToolWorkspace';
-import { useCanvasDocument } from './hooks/useCanvasDocument';
-import { useCanvasGenerationRuntime } from './hooks/useCanvasGenerationRuntime';
-import { useCanvasHydrationFlags } from './hooks/useCanvasHydrationFlags';
-import { useCanvasPlanMentions } from './hooks/useCanvasPlanMentions';
-import { useCanvasFollowToolbar } from './hooks/useCanvasFollowToolbar';
-import { useCanvasHomeAgentInject } from './hooks/useCanvasHomeAgentInject';
-import { useCanvasOrphanEdges } from './hooks/useCanvasOrphanEdges';
-import { useCanvasUndoHotkeys } from './hooks/useCanvasUndoHotkeys';
-import { useCanvasChromeActions } from './hooks/useCanvasChromeActions';
-import { useCanvasRefStripOrder } from './hooks/useCanvasRefStripOrder';
-import { useCanvasCompliance } from './hooks/useCanvasCompliance';
-import { useCanvasProjects } from './hooks/useCanvasProjects';
-import { useCanvasClipboard } from './hooks/useCanvasClipboard';
-import { useCanvasUploadDrop } from './hooks/useCanvasUploadDrop';
-import { useCanvasPickSessionClick } from './hooks/useCanvasPickSessionClick';
-import { useCanvasNodeClickDispatch } from './hooks/useCanvasNodeClickDispatch';
-import { useCanvasNodeAttachCallbacks } from './hooks/useCanvasNodeAttachCallbacks';
-import { useCanvasHomeHandoff } from './hooks/useCanvasHomeHandoff';
-import { useCanvasApplyAgentCard } from './hooks/useCanvasApplyAgentCard';
-import { useCanvasRetryJob } from './hooks/useCanvasRetryJob';
-import { useCanvasAssetsPlacement } from './hooks/useCanvasAssetsPlacement';
-import { useCanvasUpdateGenerate } from './hooks/useCanvasUpdateGenerate';
-import { useCanvasToolDraftCreators } from './hooks/useCanvasToolDraftCreators';
-import { useCanvasChatQuote } from './hooks/useCanvasChatQuote';
-import { useCanvasDraftCardCreators } from './hooks/useCanvasDraftCardCreators';
-import { useCanvasAtMentionHandlers } from './hooks/useCanvasAtMentionHandlers';
-import { useCanvasConnectHandlers } from './hooks/useCanvasConnectHandlers';
-import { useCanvasNodeDragHandlers } from './hooks/useCanvasNodeDragHandlers';
-import { useCanvasDraftRefActions } from './hooks/useCanvasDraftRefActions';
-import { useCanvasTextNodeFactories } from './hooks/useCanvasTextNodeFactories';
-import { useCanvasToolJobSubmissions } from './hooks/useCanvasToolJobSubmissions';
-import { useCanvasImageToolHosts } from './hooks/useCanvasImageToolHosts';
-import { useCanvasCompoundToolHosts } from './hooks/useCanvasCompoundToolHosts';
-import { useGenerationRuntimeBinding } from './hooks/useGenerationRuntimeBinding';
-import { useGenerationDockBinding } from './hooks/useGenerationDockBinding';
-import { useGenerationDockChrome } from './hooks/useGenerationDockChrome';
-import { useCanvasAgentSurface } from './hooks/useCanvasAgentSurface';
-import { useCanvasGenerationUploads } from './hooks/useCanvasGenerationUploads';
-import { useCanvasSelectionBridge } from './hooks/useCanvasSelectionBridge';
-import { useCanvasNodeDeletion } from './hooks/useCanvasNodeDeletion';
-import { useCanvasConnectSurface } from './hooks/useCanvasConnectSurface';
-import { useCanvasJobFlight } from './hooks/useCanvasJobFlight';
-import { useCanvasReferencePlan } from './hooks/useCanvasReferencePlan';
-import { useCanvasPaneSession } from './hooks/useCanvasPaneSession';
-import { useCanvasSpawn } from './hooks/useCanvasSpawn';
-import { useCanvasGroupActions } from './hooks/useCanvasGroupActions';
+import { useCanvasViewportSurface } from './hooks/chrome/useCanvasViewportSurface';
+import { useCanvasGenerationModels } from './hooks/generation/useCanvasGenerationModels';
+import { useCanvasProjectRoute } from './hooks/document/useCanvasProjectRoute';
+import { useCanvasWorkbenchChrome } from './hooks/chrome/useCanvasWorkbenchChrome';
+import { useCanvasToolWorkspace } from './hooks/tools/useCanvasToolWorkspace';
+import { useCanvasDocument } from './hooks/document/useCanvasDocument';
+import { useCanvasGenerationRuntime } from './hooks/generation/useCanvasGenerationRuntime';
+import { useCanvasHydrationFlags } from './hooks/document/useCanvasHydrationFlags';
+import { useCanvasPlanMentions } from './hooks/shared/useCanvasPlanMentions';
+import { useCanvasFollowToolbar } from './hooks/tools/useCanvasFollowToolbar';
+import { useCanvasHomeAgentInject } from './hooks/tools/useCanvasHomeAgentInject';
+import { useCanvasOrphanEdges } from './hooks/document/useCanvasOrphanEdges';
+import { useCanvasUndoHotkeys } from './hooks/chrome/useCanvasUndoHotkeys';
+import { useCanvasChromeActions } from './hooks/chrome/useCanvasChromeActions';
+import { useCanvasRefStripOrder } from './hooks/tools/useCanvasRefStripOrder';
+import { useCanvasCompliance } from './hooks/document/useCanvasCompliance';
+import { useCanvasProjects } from './hooks/document/useCanvasProjects';
+import { useCanvasClipboard } from './hooks/chrome/useCanvasClipboard';
+import { useCanvasUploadDrop } from './hooks/chrome/useCanvasUploadDrop';
+import { useCanvasPickSessionClick } from './hooks/tools/useCanvasPickSessionClick';
+import { useCanvasNodeClickDispatch } from './hooks/chrome/useCanvasNodeClickDispatch';
+import { useCanvasNodeAttachCallbacks } from './hooks/chrome/useCanvasNodeAttachCallbacks';
+import { useCanvasHomeHandoff } from './hooks/tools/useCanvasHomeHandoff';
+import { useCanvasApplyAgentCard } from './hooks/tools/useCanvasApplyAgentCard';
+import { useCanvasRetryJob } from './hooks/generation/useCanvasRetryJob';
+import { useCanvasAssetsPlacement } from './hooks/shared/useCanvasAssetsPlacement';
+import { useCanvasUpdateGenerate } from './hooks/generation/useCanvasUpdateGenerate';
+import { useCanvasToolDraftCreators } from './hooks/tools/useCanvasToolDraftCreators';
+import { useCanvasChatQuote } from './hooks/tools/useCanvasChatQuote';
+import { useCanvasDraftCardCreators } from './hooks/tools/useCanvasDraftCardCreators';
+import { useCanvasAtMentionHandlers } from './hooks/tools/useCanvasAtMentionHandlers';
+import { useCanvasConnectHandlers } from './hooks/chrome/useCanvasConnectHandlers';
+import { useCanvasNodeDragHandlers } from './hooks/chrome/useCanvasNodeDragHandlers';
+import { useCanvasDraftRefActions } from './hooks/tools/useCanvasDraftRefActions';
+import { useCanvasTextNodeFactories } from './hooks/shared/useCanvasTextNodeFactories';
+import { useCanvasToolJobSubmissions } from './hooks/generation/useCanvasToolJobSubmissions';
+import { useCanvasImageToolHosts } from './hooks/tools/useCanvasImageToolHosts';
+import { useCanvasCompoundToolHosts } from './hooks/tools/useCanvasCompoundToolHosts';
+import { useGenerationRuntimeBinding } from './hooks/generation/useGenerationRuntimeBinding';
+import { useGenerationDockBinding } from './hooks/generation/useGenerationDockBinding';
+import { useGenerationDockChrome } from './hooks/generation/useGenerationDockChrome';
+import { useCanvasAgentSurface } from './hooks/chrome/useCanvasAgentSurface';
+import { useCanvasGenerationUploads } from './hooks/generation/useCanvasGenerationUploads';
+import { useCanvasSelectionBridge } from './hooks/chrome/useCanvasSelectionBridge';
+import { useCanvasNodeDeletion } from './hooks/chrome/useCanvasNodeDeletion';
+import { useCanvasConnectSurface } from './hooks/chrome/useCanvasConnectSurface';
+import { useCanvasJobFlight } from './hooks/generation/useCanvasJobFlight';
+import { useCanvasReferencePlan } from './hooks/shared/useCanvasReferencePlan';
+import { useCanvasPaneSession } from './hooks/chrome/useCanvasPaneSession';
+import { useCanvasSpawn } from './hooks/chrome/useCanvasSpawn';
+import { useCanvasGroupActions } from './hooks/shared/useCanvasGroupActions';
 import {
   groupToNode,
   parseGroupsFromNodes,
@@ -199,7 +199,7 @@ export default function CanvasPage() {
     edges, setEdges, onEdgesChange, edgesRef,
     groups, setGroups, groupsRef,
     graph, findCanvasNode, patchMediaNode, handleMediaDims, isGeneratingNode,
-    textAttachmentsOf, textAttachmentsForSend,
+    textAttachmentsOf, textAttachmentsForSend, appliedCardIds,
   } = useCanvasDocument(toolMode, submittingNodeId);
   const referencePlanRef = useRef<(source: string, target: string, syncBindings?: PromptBinding[]) => Promise<void>>(async () => {});
   const {
@@ -310,16 +310,6 @@ export default function CanvasPage() {
     hoveredAssetNodeId,
     toolSessions,
   });
-  toolViewRef.current = {
-    nodes: mediaNodes, viewport: liveViewport, size: wrapperSize, nodeBox: nodeBoxOf,
-    projectId: currentId, submittingNodeId,
-    dragHiddenIds: anchoredOverlayHiddenIds,
-    createEnhanceDraft: (id) => handleNodeEnhanceImage(id),
-    createVideoEnhanceDraft: (id) => handleNodeVideoEnhance(id),
-    createFrameInterpolationDraft: (id) => handleNodeFrameInterpolation(id),
-    changeVideoParams: (id, resolution) => handleVideoEnhanceParamsChange(id, resolution),
-    changeFrameParams: (id, fps) => handleFrameInterpolationParamsChange(id, fps),
-  };
   const {
     draftErrorsRef,
     handleDraftError,
@@ -1131,13 +1121,14 @@ export default function CanvasPage() {
     addCanvasEdge: (source, target, refRole, marker) => addCanvasEdge(source, target, refRole, marker),
     generationDock: { updateVideoDraft: (input) => generationDock.updateDraft('video', input) },
   });
-  const {
-    handleNodeEnhanceImage,
-    handleNodeVideoEnhance,
-    handleVideoEnhanceParamsChange,
-    handleNodeFrameInterpolation,
-    handleFrameInterpolationParamsChange,
-  } = useCanvasToolDraftCreators({
+  useCanvasToolDraftCreators({
+    toolViewRef,
+    mediaNodes,
+    liveViewport,
+    wrapperSize,
+    currentId,
+    submittingNodeId,
+    anchoredOverlayHiddenIds,
     mediaNodesRef,
     showToast,
     createImageDraftCard,
@@ -1210,7 +1201,6 @@ export default function CanvasPage() {
     showToast,
     dismissGenPanels,
   });
-  const appliedCardIds = useMemo(() => appliedCardIdsOf(textNodes), [textNodes]);
   useGenerationRuntimeBinding({
     generationRuntimeHostRef,
     generationRuntimeRef,

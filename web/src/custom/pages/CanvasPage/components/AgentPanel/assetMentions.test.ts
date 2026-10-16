@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { Turn } from '../../hooks/sessionTimeline';
-import type { ChatMessage } from '../../hooks/useAgentSession';
+import type { Turn } from '../../hooks/agent/sessionTimeline';
+import type { ChatMessage } from '../../hooks/agent/useAgentSession';
 import { collectKnownAssets, rehypeAssetMentions, splitByAssetMentions, type KnownAsset } from './assetMentions';
 
 const smoke: KnownAsset = { assetId: '1001', label: '_smoke.jpg', mediaType: 'image' };

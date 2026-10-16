@@ -18,7 +18,7 @@ import FollowToolbarLayer from './FollowToolbarLayer';
 import { type MediaMention, type MediaRef } from '@lib/contracts/text-node-media';
 import { renderPromptMentions, readPromptMentions, applyMediaMentionState, createMediaMentionChip } from './promptMentions';
 import { applyMarkdownInputRule } from './markdownInputRules';
-import { useSoloNodeSelected } from '../../hooks/useSoloNodeSelected';
+import { useSoloNodeSelected } from '../../hooks/chrome/useSoloNodeSelected';
 
 const MAX_TEXT_LENGTH = PROMPT_TEXT_LIMITS.text;
 

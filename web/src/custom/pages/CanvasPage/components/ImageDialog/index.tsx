@@ -44,7 +44,7 @@ import { refOverflowToast } from '@/custom/utils/ref-overflow';
 import type { ImageMediaRef } from '../../media/mediaRefs';
 import { cardNameOfNode, localNodeIdOf } from '../../media/mediaRefs';
 
-import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
+import { useDismissOnOutside } from '../../hooks/shared/useDismissOnOutside';
 import AtMentionMenu from '../AtMentionMenu';
 import AttachmentActionBar from '../AttachmentActionBar';
 import { type AtMentionItem } from '../../agent/atMention';

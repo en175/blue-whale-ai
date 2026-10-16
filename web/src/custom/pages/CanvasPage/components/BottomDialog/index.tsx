@@ -19,7 +19,7 @@ import RatioGroup from '@/custom/components/RatioGroup';
 import Select from '@/custom/components/Select';
 import GenerationQuoteBadge from '../GenerationQuoteBadge';
 import { buildVideoJobReferences } from '../../tools/video/videoJobReferences';
-import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
+import { useDismissOnOutside } from '../../hooks/shared/useDismissOnOutside';
 import {
   docHasAnyRef,
   docHasInvalidRef,

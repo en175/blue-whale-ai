@@ -129,7 +129,7 @@ const canvasDocMock = vi.hoisted(() => ({
   refetch: vi.fn(),
 }));
 
-vi.mock('../hooks/useCanvasDoc', () => ({
+vi.mock('../hooks/document/useCanvasDoc', () => ({
   useCanvasDoc: () => canvasDocMock,
 }));
 

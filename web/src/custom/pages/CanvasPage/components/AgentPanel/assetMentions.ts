@@ -1,6 +1,6 @@
 import type { SessionContentBlock } from '@/custom/api/agentSessions';
-import type { ChatMessage } from '../../hooks/useAgentSession';
-import type { Turn } from '../../hooks/sessionTimeline';
+import type { ChatMessage } from '../../hooks/agent/useAgentSession';
+import type { Turn } from '../../hooks/agent/sessionTimeline';
 
 export interface KnownAsset {
   assetId: string;

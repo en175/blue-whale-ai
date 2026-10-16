@@ -1,7 +1,7 @@
 import { useRef, type ReactNode } from 'react';
 import { useStore } from '@xyflow/react';
 import { computeFollowAnchorAbove } from '../../agent/followDialog';
-import { useSoloNodeSelected } from '../../hooks/useSoloNodeSelected';
+import { useSoloNodeSelected } from '../../hooks/chrome/useSoloNodeSelected';
 import { shouldSuppressCanvasSelection } from '../Canvas/chromeHitGuard';
 import { useOverlayWheelPassthrough } from '../Canvas/canvasWheelPassthrough';
 import styles from './index.module.css';

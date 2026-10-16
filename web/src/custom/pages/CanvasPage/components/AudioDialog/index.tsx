@@ -7,8 +7,8 @@ import { checkReferenceLimits, audioReferenceMaxOf, imageReferenceMaxOfForAudio 
 import { remoteImageCrossOrigin, resolveMediaSrc } from '@/shared/utils/remoteImageCors';
 import Empty from '@/custom/components/Empty';
 import Select from '@/custom/components/Select';
-import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
-import { useAudioDurations } from '../../hooks/useAudioDurations';
+import { useDismissOnOutside } from '../../hooks/shared/useDismissOnOutside';
+import { useAudioDurations } from '../../hooks/shared/useAudioDurations';
 
 import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../agent/followDialog';
 import type { AtMentionItem } from '../../agent/atMention';

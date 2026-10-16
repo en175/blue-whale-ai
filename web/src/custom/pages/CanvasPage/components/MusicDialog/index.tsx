@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { X, AudioLines, Upload, Move, Music, ArrowUp } from 'lucide-react';
 import { toast } from '@/custom/components/Toast';
-import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
-import { useAudioDurations } from '../../hooks/useAudioDurations';
+import { useDismissOnOutside } from '../../hooks/shared/useDismissOnOutside';
+import { useAudioDurations } from '../../hooks/shared/useAudioDurations';
 import type { AudioRefItem, CanvasPickItem } from '../AudioDialog';
 import type { AtMentionItem } from '../../agent/atMention';
 import { docHasInvalidRef, type PromptDoc } from '@/custom/utils/prompt-doc';

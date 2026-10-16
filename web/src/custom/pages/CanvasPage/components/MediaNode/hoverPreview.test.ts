@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { HOVER_PREVIEW_DELAY_MS, videoHoverPreviewBlocked, videoHoverPreviewEligible } from './hoverPreview';
 import type { VideoHoverPreviewInput } from './hoverPreview';
 
-import { isMultiNodeSelection } from '../../hooks/useSoloNodeSelected';
+import { isMultiNodeSelection } from '../../hooks/chrome/useSoloNodeSelected';
 
 const _genStatusCoversMediaGenStatus: VideoHoverPreviewInput['genStatus'] = undefined as MediaGenStatus | undefined;
 const _mediaGenStatusCoveredByGenStatus: MediaGenStatus | undefined = undefined as VideoHoverPreviewInput['genStatus'];

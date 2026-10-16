@@ -150,7 +150,7 @@ const canvasDocMock = {
     acceptDoc: vi.fn(),
   },
 };
-vi.mock('../../hooks/useCanvasDoc', () => ({
+vi.mock('../../hooks/document/useCanvasDoc', () => ({
   useCanvasDoc: () => canvasDocMock.current,
 }));
 

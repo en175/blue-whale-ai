@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react';
 import { ArrowUp, ChevronDown, X } from 'lucide-react';
 import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../agent/followDialog';
-import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
+import { useDismissOnOutside } from '../../hooks/shared/useDismissOnOutside';
 import { AUDIO_VIDEO_SPLIT_FORMATS, type AudioVideoSplitFormat } from '../../tools/audio/audioVideoSplit';
 import styles from './index.module.css';
 
