@@ -289,15 +289,7 @@ export default function UserManage() {
         />
       )}
 
-      {roleUser && (
-        <RoleModal
-          user={roleUser}
-          onClose={() => {
-            setRoleUser(null);
-            void list.refetch();
-          }}
-        />
-      )}
+      {roleUser && <RoleModal user={roleUser} onClose={() => setRoleUser(null)} />}
     </>
   );
 }
@@ -644,15 +636,17 @@ function RoleModal({ user, onClose }: { user: AdminUserRow; onClose: () => void 
     },
   });
 
+  const rolesErrorText = rolesQuery.isError
+    ? isApiError(rolesQuery.error)
+      ? rolesQuery.error.message
+      : '获取角色失败'
+    : '';
+
   const errorText = toggle.isError
     ? isApiError(toggle.error)
       ? toggle.error.message
       : '操作失败，请稍后重试'
-    : rolesQuery.isError
-      ? isApiError(rolesQuery.error)
-        ? rolesQuery.error.message
-        : '获取角色失败'
-      : '';
+    : '';
 
   return (
     <Modal
@@ -683,27 +677,50 @@ function RoleModal({ user, onClose }: { user: AdminUserRow; onClose: () => void 
           </tr>
         </thead>
         <tbody>
-          {BUILTIN_ROLES.map((r) => {
-            const held = current.includes(r.code);
-            return (
-              <tr key={r.code}>
-                <td>
-                  <Badge tone={held ? 'success' : 'neutral'}>{r.label}</Badge>
-                </td>
-                <td>{r.hint}</td>
-                <td>
-                  <Button
-                    size="sm"
-                    variant={held ? 'danger' : 'primary'}
-                    disabled={rolesQuery.isPending || toggle.isPending}
-                    onClick={() => toggle.mutate({ code: r.code, grant: !held })}
-                  >
-                    {held ? '撤销' : '授予'}
-                  </Button>
-                </td>
-              </tr>
-            );
-          })}
+          {rolesQuery.isPending && (
+            <tr>
+              <td colSpan={3}>
+                <Empty message="加载中…" />
+              </td>
+            </tr>
+          )}
+          {rolesQuery.isError && (
+            <tr>
+              <td colSpan={3}>
+                <Empty
+                  message={rolesErrorText}
+                  extra={
+                    <Button size="sm" onClick={() => void rolesQuery.refetch()}>
+                      重试
+                    </Button>
+                  }
+                />
+              </td>
+            </tr>
+          )}
+          {!rolesQuery.isPending &&
+            !rolesQuery.isError &&
+            BUILTIN_ROLES.map((r) => {
+              const held = current.includes(r.code);
+              return (
+                <tr key={r.code}>
+                  <td>
+                    <Badge tone={held ? 'success' : 'neutral'}>{r.label}</Badge>
+                  </td>
+                  <td>{r.hint}</td>
+                  <td>
+                    <Button
+                      size="sm"
+                      variant={held ? 'danger' : 'primary'}
+                      disabled={toggle.isPending}
+                      onClick={() => toggle.mutate({ code: r.code, grant: !held })}
+                    >
+                      {held ? '撤销' : '授予'}
+                    </Button>
+                  </td>
+                </tr>
+              );
+            })}
         </tbody>
       </Table>
 

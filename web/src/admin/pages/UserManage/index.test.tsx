@@ -424,4 +424,37 @@ describe('UserManage 角色授权入口', () => {
 
     expect(document.body.textContent).toContain('系统必须保留至少一个超级管理员');
   });
+
+  it('★ 老会话（持久化数据里没有 roles）→ 入口不渲染，不误放', async () => {
+    useAuthStore.setState({
+      user: {
+        userId: 1,
+        username: 'root',
+        email: '',
+        phone: '',
+        hasPassword: true,
+        isAdmin: true,
+      },
+    });
+
+    await renderPage();
+
+    expect(roleEntry()).toBeNull();
+  });
+
+  it('弹窗按该行用户拉角色：GET 带对 userId', async () => {
+    await openRoleModal();
+
+    expect(adminApi.fetchUserRoles).toHaveBeenCalledWith(42);
+  });
+
+  it('★ 角色拉取失败：不显示可点的「授予」，改为表内报错 + 重试', async () => {
+    adminApi.fetchUserRoles.mockRejectedValue(new ApiError(500, '获取角色失败', 500));
+
+    await openRoleModal();
+
+    expect(modalButton('超级管理员', '授予')).toBeUndefined();
+    expect(modalButton('普通用户', '撤销')).toBeUndefined();
+    expect(document.body.textContent).toContain('重试');
+  });
 });
