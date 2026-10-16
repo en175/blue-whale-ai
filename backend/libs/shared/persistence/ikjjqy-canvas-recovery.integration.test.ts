@@ -41,11 +41,12 @@ import {
   resolveCanvasRecoveryItems,
 } from "./generation-canvas-recovery-repo.js";
 import { saveCanvasWithRecovery } from "./canvas-recovery-save.js";
+import { createCanvasRepo } from "./canvas-repo.js";
 import { multiResultNodeId } from "./canvas-recovery-multi-output.js";
 import { createJobWithinTx } from "./generation-command-repo.js";
 import { VideoSceneSplitsService } from "@lib/shared/video-scene-splits/video-scene-splits.service.js";
 import { VocalSplitsService } from "@lib/shared/vocal-splits/vocal-splits.service.js";
-import type { PrismaClient } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
 
 const databaseUrl = process.env.IKJJQY_DATABASE_URL;
 
@@ -113,7 +114,7 @@ describe.skipIf(!databaseUrl)("多结果任务逐项恢复与删除（IKJJQY）"
   }
 
 
-  async function succeedSceneSplitJob(jobId: string, segments: Array<{ index: number; assetId: string }>) {
+  async function succeedSceneSplitJob(jobId: string, segments: Array<{ index: number; assetId: string }>, payload?: Prisma.InputJsonValue) {
     await raw.query(
       "UPDATE generation_jobs SET status='succeeded', output_asset_ids=CAST(? AS JSON) WHERE id = ?",
       [JSON.stringify(segments.map(segment => segment.assetId)), Number(jobId)],
@@ -124,7 +125,7 @@ describe.skipIf(!databaseUrl)("多结果任务逐项恢复与删除（IKJJQY）"
         event: "succeeded",
         status: "succeeded",
         message: "场景切分完成",
-        payload: {
+        payload: payload ?? {
           duration: 10,
           segments: segments.map(segment => ({
             segment_index: segment.index,
@@ -407,6 +408,89 @@ describe.skipIf(!databaseUrl)("多结果任务逐项恢复与删除（IKJJQY）"
     expect(resolved[0]!.items.map(item => item.output_key)).toEqual(["segment:1"]);
   });
 
+  it("任务 3416 日志恢复四段、原子替换占位并保存删除，三次回读不复活", async () => {
+    const canvasRepo = createCanvasRepo(prisma);
+    const created = await acceptJob({
+      submissionId: UUID_A, node: "scene-node-3416", revision: 0,
+      type: "video_scene_split",
+      input: { source_asset_id: "8166", target_node_id: "scene-node-3416", granularity: "standard" },
+    });
+    if (!("generation_job_id" in created)) throw new Error("受理失败");
+    const payload = {
+      duration: 30.08,
+      segments: [
+        { segment_index: 1, start_time: 0, end_time: 2.0416667, segment_asset_id: "8215" },
+        { segment_index: 2, start_time: 2.0416667, end_time: 3.5, segment_asset_id: "8216" },
+        { segment_index: 3, start_time: 3.5, end_time: 4.75, segment_asset_id: "8217" },
+        { segment_index: 4, start_time: 4.75, end_time: 30.041666, segment_asset_id: "8218" },
+      ],
+      asset_ids: ["8215", "8216", "8217", "8218"],
+    };
+    await succeedSceneSplitJob(created.generation_job_id,
+      payload.segments.map(segment => ({ index: segment.segment_index, assetId: segment.segment_asset_id })), payload);
+    const page = await listCanvasRecoveryPage(prisma, PROJECT_ID, 50, null);
+    const record = page.records.find(item => item.submission_id === UUID_A)!;
+    expect(record.items.map(item => [item.output_key, item.asset_id, item.state, item.revision])).toEqual([
+      ["$target", null, "pending", 1],
+      ["segment:1", "8215", "pending", 0],
+      ["segment:2", "8216", "pending", 0],
+      ["segment:3", "8217", "pending", 0],
+      ["segment:4", "8218", "pending", 0],
+    ]);
+    const source = { id: "source-8166", type: "mediaNode", position: { x: 100, y: 200 }, data: { assetId: "8166" } };
+    const segmentNodes = payload.segments.map(segment => markerNode(
+      multiResultNodeId(UUID_A, `segment:${segment.segment_index}`), UUID_A,
+      `segment:${segment.segment_index}`, segment.segment_asset_id,
+    ));
+    segmentNodes[2]!.position = { x: 1500, y: 700 };
+    const nodes = [source, ...segmentNodes];
+    await expectRejection(save({
+      commandId: UUID_B, version: null, nodes: [source],
+      changes: [{ id: recoveryItemId(UUID_A, "$target"), rev: 1, action: "remove" }],
+    }), 409, RECOVERY_REASONS.itemConflict);
+    await expectRejection(save({
+      commandId: UUID_C, version: null, nodes: [source, segmentNodes[0]!],
+      changes: [
+        { id: recoveryItemId(UUID_A, "$target"), rev: 1, action: "replaceTarget" },
+        { id: recoveryItemId(UUID_A, "segment:1"), rev: 0, action: "apply" },
+      ],
+    }), 422, RECOVERY_REASONS.documentMismatch);
+    expect((await listCanvasRecoveryPage(prisma, PROJECT_ID, 50, null)).records).toEqual(page.records);
+    expect(await canvasRepo.getByProject(PROJECT_ID)).toMatchObject({ id: null, version: null, nodes: null });
+
+    const saved = await save({
+      commandId: UUID_D, version: null, nodes,
+      changes: [
+        { id: recoveryItemId(UUID_A, "$target"), rev: 1, action: "replaceTarget" },
+        ...record.items.filter(item => item.output_key !== "$target")
+          .map(item => ({ id: item.recovery_item_id, rev: item.revision, action: "apply" })),
+      ],
+    });
+    expect(saved.recoveryReceipt.changes.map(item => [item.state, item.revision])).toEqual([
+      ["replaced", 2], ["present", 1], ["present", 1], ["present", 1], ["present", 1],
+    ]);
+    const remainingNodes = nodes.filter(node => node.id !== multiResultNodeId(UUID_A, "segment:2"));
+    const removed = await save({
+      commandId: UUID_E, version: saved.version, nodes: remainingNodes,
+      changes: [{ id: recoveryItemId(UUID_A, "segment:2"), rev: 1, action: "remove" }],
+    });
+    expect(removed.recoveryReceipt.changes).toEqual([
+      expect.objectContaining({ recoveryItemId: recoveryItemId(UUID_A, "segment:2"), state: "removed", revision: 2 }),
+    ]);
+    for (let refresh = 0; refresh < 3; refresh += 1) {
+      const recovery = await listCanvasRecoveryPage(prisma, PROJECT_ID, 50, null);
+      expect(recovery.records[0]!.items.map(item => [item.output_key, item.state, item.revision])).toEqual([
+        ["$target", "replaced", 2], ["segment:1", "present", 1], ["segment:2", "removed", 2],
+        ["segment:3", "present", 1], ["segment:4", "present", 1],
+      ]);
+      const document = await canvasRepo.getByProject(PROJECT_ID);
+      expect(JSON.parse(document.nodes ?? "null")).toEqual(remainingNodes);
+      expect(document.version).toBe(removed.version);
+      const resolved = await resolveCanvasRecoveryItems(prisma, PROJECT_ID, [recoveryItemId(UUID_A, "segment:2")]);
+      expect(resolved[0]!.items).toEqual([expect.objectContaining({ state: "removed", revision: 2 })]);
+    }
+  });
+
   it("★ 4b. 只删占位遗漏结果 → 422（扇出完整性）", async () => {
     const created = await acceptJob({
       submissionId: UUID_A, node: "scene-node-3", revision: 0,
@@ -591,6 +675,28 @@ describe.skipIf(!databaseUrl)("多结果任务逐项恢复与删除（IKJJQY）"
       where: { project_id_submission_id: { project_id: BigInt(PROJECT_ID), submission_id: UUID_A } },
     });
     expect(submission?.target_state).toBe("pending");
+  });
+
+  it.each(["failed", "cancelled"])("场景切分 %s 占位仍可删除且恢复查询保留删除状态", async (status) => {
+    const created = await acceptJob({
+      submissionId: UUID_A, node: "scene-terminal", revision: 0,
+      type: "video_scene_split",
+      input: { source_asset_id: "8166", target_node_id: "scene-terminal", granularity: "standard" },
+    });
+    if (!("generation_job_id" in created)) throw new Error("受理失败");
+    await raw.query("UPDATE generation_jobs SET status=? WHERE id=?", [status, Number(created.generation_job_id)]);
+    const source = { id: "source-8166", type: "mediaNode", position: { x: 100, y: 200 }, data: { assetId: "8166" } };
+    const saved = await save({
+      commandId: UUID_D, version: null, nodes: [source],
+      changes: [{ id: recoveryItemId(UUID_A, "$target"), rev: 1, action: "remove" }],
+    });
+    expect(saved.recoveryReceipt.changes).toEqual([
+      expect.objectContaining({ recoveryItemId: recoveryItemId(UUID_A, "$target"), state: "removed", revision: 2 }),
+    ]);
+    const page = await listCanvasRecoveryPage(prisma, PROJECT_ID, 50, null);
+    expect(page.records[0]!.items).toEqual([
+      expect.objectContaining({ output_key: "$target", state: "removed", revision: 2 }),
+    ]);
   });
 
   it("★ 10. 版本冲突整笔回滚：扇出保存中一项 revision 过期 → 409 且全部不落", async () => {
