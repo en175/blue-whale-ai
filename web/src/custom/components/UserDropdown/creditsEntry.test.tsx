@@ -51,6 +51,17 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
+describe('UserDropdown 未登录入口', () => {
+  it('未登录时同时展示登录和注册', async () => {
+    setSession(null);
+    await renderMenu();
+    expect([...document.body.querySelectorAll('button')].map((button) => button.textContent?.trim())).toEqual([
+      '登录',
+      '注册',
+    ]);
+  });
+});
+
 describe('UserDropdown 积分管理入口', () => {
   it('点击积分管理新开独立页', async () => {
     await renderMenu();

@@ -32,6 +32,12 @@
   flex-shrink: 0;
 }
 
+.guestActions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
 .loginBtn {
   height: 40px;
   padding: 0 var(--spacing-lg);
