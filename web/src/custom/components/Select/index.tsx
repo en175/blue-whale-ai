@@ -111,7 +111,13 @@ export default function Select<V extends string = string>({
                 data-testid={option.testId}
                 className={joinClassNames(styles.option, option.value === value ? styles.optionActive : '')}
               >
-                {option.value === value && <Check size={14} strokeWidth={2} className={styles.check} />}
+                <span
+                  className={styles.check}
+                  data-selected={option.value === value ? 'true' : 'false'}
+                  aria-hidden
+                >
+                  <Check size={14} strokeWidth={2} />
+                </span>
                 <SelectPrimitive.ItemText>{option.label}</SelectPrimitive.ItemText>
               </SelectPrimitive.Item>
             ))}
