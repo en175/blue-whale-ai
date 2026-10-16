@@ -155,9 +155,27 @@
 - C 端组件只放 `custom/components/`，B 端只放 `admin/components/`（及 `admin/ui/`）。两端组件不互相引用，不抽到 `shared/`。
 - 新增枚举先搜 `shared/enums/`、`admin/enums/`、`custom/enums/`，能复用则复用。两端通用放 `shared/enums/`，仅 B / 仅 C 放对应端，不跨模块的留在原地。单模块内联 `as const` 不动。
 - 同一作用域已有 `utils/` 时不要再加 `lib/`。
-- 页面私有组件不进 `components/`，除非至少两个页面真实复用。
+- 页面私有组件不进 `custom/components/` / `admin/components/`，除非至少两个页面真实复用。页面自己的 `components/` 仍放该页私有 UI。
 - 单文件约超 1000 行，或职责超过展示 / 逻辑 / 纯函数中的两类，再拆。
-- `CanvasPage` 这类历史大文件：新逻辑落子模块，禁止往主文件堆。
+
+### 12.1 CanvasPage
+
+路径：`web/src/custom/pages/CanvasPage/`。根目录只保留入口（`index.tsx`、入口样式、入口测试）。新逻辑按表落子目录，禁止写入根 `index.tsx`。
+
+| 目录 | 放什么 |
+| --- | --- |
+| `components/` | 页面私有 UI（节点、Dock、弹层、工具条） |
+| `hooks/` | 页面 hook。再按 `agent` / `chrome` / `document` / `generation` / `shared` / `tools` 分 |
+| `tools/` | 工具会话与面板逻辑。再按 `audio` / `image` / `video` / `compound` 分 |
+| `generation/` | 生成运行时、Dock 协调、任务定义 |
+| `graph/` | 节点、连线、对齐、草稿落点 |
+| `media/` | 媒体引用、提取、远程拉取 |
+| `assets/` | 资产库、角色库、打包下载 |
+| `agent/` | Agent 侧纯逻辑（非 hook） |
+| `tool-runtime/` | 工具注册与会话协调。存量 kebab 名，新目录不要再 kebab |
+| `testing/`、`__fixtures__/` | 跨模块的页面级测试与夹具。单模块测试跟源码放一起 |
+
+对不上上表时，跟职责最近的现有目录，不要在根上再摊文件。
 
 ---
 

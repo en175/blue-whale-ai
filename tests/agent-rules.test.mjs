@@ -92,6 +92,10 @@ test("frontend-delivery auto-loads for web work and routes new fetches to TanSta
   assert.match(frontendWeb, /新加和本任务改到的代码/);
   assert.match(frontendWeb, /存量不合格处不要求立刻改/);
   assert.doesNotMatch(frontendWeb, /console\.log/);
+  assert.match(frontendWeb, /### 12\.1 CanvasPage/);
+  assert.match(frontendWeb, /禁止写入根 `index\.tsx`/);
+  assert.match(frontendWeb, /tool-runtime/);
+  assert.match(frontendWeb, /generation\//);
   assert.match(policy, /allow_implicit_invocation: true/);
   assert.match(request, /@tanstack\/react-query/);
   assert.match(request, /queryOptions/);
