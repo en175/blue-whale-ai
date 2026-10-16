@@ -141,6 +141,14 @@
 
 .check {
   flex-shrink: 0;
+  display: inline-flex;
+  width: 14px;
+  height: 14px;
+  visibility: hidden;
+}
+
+.check[data-selected='true'] {
+  visibility: visible;
 }
 
 @media (pointer: coarse) {
