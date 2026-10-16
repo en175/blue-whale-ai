@@ -3,8 +3,8 @@ import type { Dispatch, RefObject, SetStateAction } from 'react';
 import type { Edge, Node, Viewport } from '@xyflow/react';
 import type { CanvasDoc } from '@/custom/api/canvas';
 import type { SnapshotAsset } from '@/custom/api/projects';
-import type { CanvasGroup } from '../canvasGroups';
-import type { GenerationRuntime } from '../generationRuntime/runtime';
+import type { CanvasGroup } from '../graph/canvasGroups';
+import type { GenerationRuntime } from '../generation/runtime';
 
 export interface CanvasHydrationHost {
   currentId: string;

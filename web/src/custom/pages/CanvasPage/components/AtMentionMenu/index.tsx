@@ -4,7 +4,7 @@ import { createPortal } from 'react-dom';
 import { AlignJustify, AudioLines, ChevronRight, Image as ImageIcon, Video } from 'lucide-react';
 import Empty from '@/custom/components/Empty';
 import SearchInput from '@/custom/components/SearchInput';
-import { filterAtMentionItems, type AtMentionItem } from '../../atMention';
+import { filterAtMentionItems, type AtMentionItem } from '../../agent/atMention';
 import { computeFlyoutOffset } from './flyoutAnchor';
 import { remoteImageCrossOrigin, resolveMediaSrc } from '@/shared/utils/remoteImageCors';
 import styles from './index.module.css';

@@ -1,7 +1,7 @@
 import type { Dispatch, RefObject, SetStateAction } from 'react';
 import type { Node } from '@xyflow/react';
 import type { MediaMention } from '@lib/contracts/text-node-media';
-import { newNodeId } from '../nodeId';
+import { newNodeId } from '../graph/nodeId';
 import type { DraftCardActions } from './useCanvasDraftCardCreators';
 
 export interface CanvasTextNodeFactoriesHost {

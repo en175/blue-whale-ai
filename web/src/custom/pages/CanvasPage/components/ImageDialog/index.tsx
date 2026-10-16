@@ -41,14 +41,14 @@ import RefThumbnail, { INSERT_REF_APPEND_TITLE } from '../RefThumbnail';
 import { useMixedRefStrip, orderRefStripItems, useRefStripDrag, type RefStripOrderProps } from '../RefThumbnail/strip-dnd';
 import { pickRatioForSize, ratiosForSelectedSize } from '@/custom/utils/image-size-ratios';
 import { refOverflowToast } from '@/custom/utils/ref-overflow';
-import type { ImageMediaRef } from '../../mediaRefs';
-import { cardNameOfNode, localNodeIdOf } from '../../mediaRefs';
+import type { ImageMediaRef } from '../../media/mediaRefs';
+import { cardNameOfNode, localNodeIdOf } from '../../media/mediaRefs';
 
 import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
 import AtMentionMenu from '../AtMentionMenu';
 import AttachmentActionBar from '../AttachmentActionBar';
-import { type AtMentionItem } from '../../atMention';
-import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../followDialog';
+import { type AtMentionItem } from '../../agent/atMention';
+import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../agent/followDialog';
 import styles from './index.module.css';
 
 export interface UploadedFile {

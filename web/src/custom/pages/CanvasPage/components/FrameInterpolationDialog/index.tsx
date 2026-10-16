@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { X, ArrowUp } from 'lucide-react';
-import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../followDialog';
+import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../agent/followDialog';
 import {
   FRAME_INTERPOLATION_DEFAULT_FPS,
   FRAME_INTERPOLATION_FPS_VALUES,

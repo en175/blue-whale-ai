@@ -1,6 +1,6 @@
 import { useCallback, useRef, type RefObject } from 'react';
 import type { Node, OnSelectionChangeParams } from '@xyflow/react';
-import type { DockSelection } from '../generationDockCoordinator';
+import type { DockSelection } from '../generation/generationDockCoordinator';
 
 type DraftEntry = { hidden: boolean; visible: boolean; open(): void };
 

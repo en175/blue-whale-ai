@@ -7,12 +7,12 @@ import type { UploadedFile } from '../../components/ImageDialog/index';
 import { composeImageSendPrompt } from '../../components/ImageDialog/composeImageSendPrompt';
 import type { GenerationRefItem } from '@/custom/api/jobs';
 import { buildImageJobReferences } from '../video/videoJobReferences';
-import { imageTextIndexSendError, mergedImageRefsOf, DEFAULT_IMAGE_REFERENCE_LIMIT } from '../../textIndexSync';
-import { imageRefSourceError } from '../../mediaRefs';
-import { extractTextNodeText } from '../../quoteConversation';
-import { draftSeedEquals, type ImageDraftSeed } from '../../draftSeed';
-import { hasGenerationRecord } from '../../mediaReEdit';
-import { mediaDockSelectionVisibility, captureGenerationDockSubmission, runGenerationDockSubmission, type DockSelection, type GenerationDockSubmissionHost } from '../../generationDockCoordinator';
+import { imageTextIndexSendError, mergedImageRefsOf, DEFAULT_IMAGE_REFERENCE_LIMIT } from '../../graph/textIndexSync';
+import { imageRefSourceError } from '../../media/mediaRefs';
+import { extractTextNodeText } from '../../agent/quoteConversation';
+import { draftSeedEquals, type ImageDraftSeed } from '../../graph/draftSeed';
+import { hasGenerationRecord } from '../../media/mediaReEdit';
+import { mediaDockSelectionVisibility, captureGenerationDockSubmission, runGenerationDockSubmission, type DockSelection, type GenerationDockSubmissionHost } from '../../generation/generationDockCoordinator';
 
 export interface ImageDockEntry { nodeId?: string; seed?: ImageDraftSeed | null; intent?: 'manual' | 'selection' }
 export interface ImageDockPatch { targetNodeId?: string; prompt?: string; promptDoc?: StoredPromptDoc; modelId?: string; size?: string; ratio?: string; attachments?: { targetNodeId?: string; removeNodeId?: string; orderedNodeIds?: string[] } }

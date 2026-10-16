@@ -5,8 +5,8 @@ import type { RefObject } from 'react';
 import type { Node } from '@xyflow/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
-vi.mock('../draftSpawn', () => ({ nextDraftPosition: (input: { dockTop: number }) => ({ x: 10, y: 20, dockTop: input.dockTop }) }));
-vi.mock('../canvasPureNodeHelpers', () => ({ nodeBoxOf: () => ({ width: 1, height: 1 }) }));
+vi.mock('../graph/draftSpawn', () => ({ nextDraftPosition: (input: { dockTop: number }) => ({ x: 10, y: 20, dockTop: input.dockTop }) }));
+vi.mock('../graph/canvasPureNodeHelpers', () => ({ nodeBoxOf: () => ({ width: 1, height: 1 }) }));
 
 import { useCanvasSpawn, type CanvasSpawnHost } from './useCanvasSpawn';
 import { createCanvasGraph } from './useCanvasGraph';

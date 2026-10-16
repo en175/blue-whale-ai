@@ -2,7 +2,7 @@
 import { isValidElement, type ReactElement, type ReactNode } from 'react';
 import { describe, expect, it } from 'vitest';
 import { canvasToolSessionFixture } from './canvasToolSessionFixture';
-import type { CanvasToolKind } from '../canvasToolSessions';
+import type { CanvasToolKind } from '../tool-runtime/canvasToolSessions';
 
 const ANCHOR_ID: Record<CanvasToolKind, string> = {
   erase: 'image',

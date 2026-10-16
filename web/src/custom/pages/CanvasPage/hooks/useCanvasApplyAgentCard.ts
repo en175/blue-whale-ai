@@ -5,8 +5,8 @@ import type { GenerationCardBlock } from '@/custom/api/agentSessions';
 import type { CanvasDoc, CanvasRecord } from '@/custom/api/canvas';
 import { saveCanvasDoc } from '@/custom/api/canvas';
 import type { SnapshotAsset } from '@/custom/api/projects';
-import { newNodeId } from '../nodeId';
-import { appliedPlanAssetIds, dropReversedTextIndexEdges, replaceMissingPlanMediaNodes, textIndexEdgesForAppliedPlan } from '../planApplyEdges';
+import { newNodeId } from '../graph/nodeId';
+import { appliedPlanAssetIds, dropReversedTextIndexEdges, replaceMissingPlanMediaNodes, textIndexEdgesForAppliedPlan } from '../graph/planApplyEdges';
 
 export interface CanvasApplyAgentCardHost {
   currentId: string;

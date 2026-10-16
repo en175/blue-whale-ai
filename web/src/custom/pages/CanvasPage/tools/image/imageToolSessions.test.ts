@@ -1,8 +1,8 @@
 import { openOtherTool } from '../../testing/openOtherTool';
 import { expect, it } from 'vitest';
 import type { Node } from '@xyflow/react';
-import { createToolSessionRuntime } from '../../toolSessionRuntime';
-import { type ToolSessionDeps } from '../../toolSessionCoordinator';
+import { createToolSessionRuntime } from '../../tool-runtime/toolSessionRuntime';
+import { type ToolSessionDeps } from '../../tool-runtime/toolSessionCoordinator';
 import { createCutoutSession, createOutpaintSession, type OutpaintFrozenInput, type CutoutSubmission } from './imageToolSessions';
 
 const deps: ToolSessionDeps = {

@@ -9,7 +9,7 @@ import {
   type MaterialAsset,
   type MaterialAssetType,
 } from '@/custom/api/material';
-import { uploadMaterialLibraryFiles } from '../../characterLibraryUpload';
+import { uploadMaterialLibraryFiles } from '../../assets/characterLibraryUpload';
 import { VIDEO_REFERENCE_NOT_APPROVED_MESSAGE, isUnapprovedVideoMaterialStatus } from '@/custom/utils/video-reference-compliance';
 import AssetMasonry from '@/custom/pages/Assets/components/AssetMasonry';
 import CharacterLibrary from '@/custom/pages/Assets/components/CharacterLibrary';

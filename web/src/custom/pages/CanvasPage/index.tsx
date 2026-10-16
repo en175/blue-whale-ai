@@ -2,12 +2,12 @@ import { type PromptBinding } from '@lib/contracts/prompt-target';
 import { useState, useRef, useMemo } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
-import { newNodeId } from './nodeId';
-import { nodeBoxOf, appliedCardIdsOf } from './canvasPureNodeHelpers';
-import { imageRefSourceError } from './mediaRefs';
+import { newNodeId } from './graph/nodeId';
+import { nodeBoxOf, appliedCardIdsOf } from './graph/canvasPureNodeHelpers';
+import { imageRefSourceError } from './media/mediaRefs';
 import { audioRefSourceError } from './tools/audio/audioMediaRefs';
 
-import { hasGenerationRecord } from './mediaReEdit';
+import { hasGenerationRecord } from './media/mediaReEdit';
 import {
   mergedVideoMediaRefsOf,
   videoRefSourceError,
@@ -19,8 +19,8 @@ import { serializeEdges, serializeNodes } from '@/custom/api/canvas';
 import {
   availableGenKinds,
   isConnectableSource,
-} from './connectAbility';
-import { mapBackendNode, resolveNodeAssets } from './canvasNodeUtils';
+} from './graph/connectAbility';
+import { mapBackendNode, resolveNodeAssets } from './graph/canvasNodeUtils';
 import { useCanvasHydration } from './hooks/useCanvasHydration';
 import { useCanvasHistory } from './hooks/useCanvasHistory';
 import { useCanvasPageMutations } from './hooks/useCanvasPageMutations';
@@ -90,12 +90,12 @@ import { useCanvasGroupActions } from './hooks/useCanvasGroupActions';
 import {
   groupToNode,
   parseGroupsFromNodes,
-} from './canvasGroups';
+} from './graph/canvasGroups';
 import {
   readCanvasIdFromSearch,
-} from './canvasQuery';
-import { useGenerationDockHosts } from './generationDockHosts';
-import CanvasPageShell from './CanvasPageShell';
+} from './graph/canvasQuery';
+import { useGenerationDockHosts } from './generation/generationDockHosts';
+import CanvasPageShell from './components/CanvasPageShell';
 export default function CanvasPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();

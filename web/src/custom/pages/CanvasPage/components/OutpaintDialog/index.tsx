@@ -2,7 +2,7 @@ import { type OutpaintPresetKey, OUTPAINT_PRESET_LABELS } from '@/custom/enums';
 import { useEffect, useRef, useState } from 'react';
 import { X, ArrowUp, ChevronDown } from 'lucide-react';
 import RatioIcon from '@/custom/components/RatioIcon';
-import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../followDialog';
+import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../agent/followDialog';
 import { OUTPAINT_PRESET_ORDER, matchOutpaintPreset, maxExpandPerSide, outpaintPresetAvailability, type ExpandSides } from '../../tools/image/imageOutpaint';
 import styles from './index.module.css';
 

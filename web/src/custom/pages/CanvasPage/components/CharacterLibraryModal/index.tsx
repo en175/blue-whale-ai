@@ -21,7 +21,7 @@ import { isApiError } from '@/shared/api/http';
 import { toast } from '@/custom/components/Toast';
 import Empty from '@/custom/components/Empty';
 import Tabs from '@/custom/components/Tabs';
-import { uploadMaterialLibraryFiles } from '../../characterLibraryUpload';
+import { uploadMaterialLibraryFiles } from '../../assets/characterLibraryUpload';
 import { VIDEO_REFERENCE_NOT_APPROVED_MESSAGE } from '@/custom/utils/video-reference-compliance';
 import { resolveMediaSrc } from '@/shared/utils/remoteImageCors';
 import styles from './index.module.css';

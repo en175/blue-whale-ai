@@ -1,10 +1,10 @@
 import type { Node } from '@xyflow/react';
-import { apiErrorMessage, captureMediaSource, isSilentAuthError } from '../../toolSessionCapture';
+import { apiErrorMessage, captureMediaSource, isSilentAuthError } from '../../tool-runtime/toolSessionCapture';
 import {
   SMART_MATTING_DEFAULT_BACKGROUND_COLOR, SMART_MATTING_DEFAULT_FORMAT, buildSmartMattingInput,
   type SmartMattingMode, type SmartMattingFormat, type SmartMattingBackgroundColor, type SmartMattingParams,
 } from './smartMatting';
-import type { ToolSessionDefinition } from '../../toolSessionRuntime';
+import type { ToolSessionDefinition } from '../../tool-runtime/toolSessionRuntime';
 
 export interface SmartMattingState {
   nodeId: string;

@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import type { Edge, Node } from '@xyflow/react';
 import { AUDIO_SPEED_NODE_PREFIX } from '../tools/audio/audioSpeed';
 import { AUDIO_TRIM_NODE_PREFIX } from '../tools/audio/audioTrim';
-import { MEDIA_EXTRACT_NODE_PREFIX } from '../mediaExtract';
+import { MEDIA_EXTRACT_NODE_PREFIX } from '../media/mediaExtract';
 import { VOCAL_SPLIT_NODE_PREFIX, VOCAL_SPLIT_TRACK_NODE_PREFIX } from '../tools/audio/vocalSplit';
 import {
   useCanvasGenerationTerminal,

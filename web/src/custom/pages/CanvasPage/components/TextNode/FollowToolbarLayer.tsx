@@ -1,7 +1,7 @@
 import type { ReactNode, Ref } from 'react';
 import { createPortal } from 'react-dom';
 import { useStore } from '@xyflow/react';
-import { computeFollowAnchorAbove } from '../../followDialog';
+import { computeFollowAnchorAbove } from '../../agent/followDialog';
 import layerStyles from '../NodeFollowToolbar/index.module.css';
 
 export interface FollowToolbarLayerProps {

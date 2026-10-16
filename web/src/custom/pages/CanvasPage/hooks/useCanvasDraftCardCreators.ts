@@ -2,7 +2,7 @@ import type { Dispatch, RefObject, SetStateAction } from 'react';
 import type { Node } from '@xyflow/react';
 import type { MediaMention, MediaRef } from '@lib/contracts/text-node-media';
 import type { MediaDims } from '../components/MediaNode/mediaContentSize';
-import { newNodeId } from '../nodeId';
+import { newNodeId } from '../graph/nodeId';
 import { defaultVideoModeFor } from '../tools/video/videoModes';
 import type { CanvasNodeActions } from './useCanvasNodeFactories';
 

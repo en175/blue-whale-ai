@@ -3,7 +3,7 @@ import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import TextNode from './index';
-import { computeFollowAnchorAbove } from '../../followDialog';
+import { computeFollowAnchorAbove } from '../../agent/followDialog';
 import styles from './index.module.css';
 
 beforeAll(() => {

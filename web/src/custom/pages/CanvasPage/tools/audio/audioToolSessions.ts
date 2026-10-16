@@ -4,8 +4,8 @@ import { buildAudioSpeedInput, type AudioSpeedInput } from '@lib/contracts/audio
 import type { AudioTrimFormat } from './audioTrim';
 import type { AudioTrimSelection } from './audioTrimGeometry';
 import { VOCAL_SPLIT_DEFAULT_FORMAT, VOCAL_SPLIT_DEFAULT_SESSION_SCENE, type VocalSplitFormat, type VocalSplitScene } from './vocalSplit';
-import { apiErrorMessage, captureMediaSource, captureSourceAsset, cloneSourceNode, requireProjectId } from '../../toolSessionCapture';
-import type { ToolSessionDefinition } from '../../toolSessionRuntime';
+import { apiErrorMessage, captureMediaSource, captureSourceAsset, cloneSourceNode, requireProjectId } from '../../tool-runtime/toolSessionCapture';
+import type { ToolSessionDefinition } from '../../tool-runtime/toolSessionRuntime';
 
 export interface AudioToolSubmission<Payload> {
   projectId: string;

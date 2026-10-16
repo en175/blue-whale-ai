@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { Node } from '@xyflow/react';
 import { createAudioVideoSplitSession, type AudioVideoSplitSubmission } from './audioVideoSplitSession';
-import { createToolSessionRuntime } from '../../toolSessionRuntime';
-import { type ToolSessionDeps } from '../../toolSessionCoordinator';
+import { createToolSessionRuntime } from '../../tool-runtime/toolSessionRuntime';
+import { type ToolSessionDeps } from '../../tool-runtime/toolSessionCoordinator';
 
 const deps: ToolSessionDeps = {
 

@@ -1,11 +1,11 @@
 import type { Node } from '@xyflow/react';
-import { apiErrorMessage, captureMediaSource } from '../../toolSessionCapture';
+import { apiErrorMessage, captureMediaSource } from '../../tool-runtime/toolSessionCapture';
 import {
   AUDIO_VIDEO_SPLIT_DEFAULT_FORMAT,
   AUDIO_VIDEO_SPLIT_MISSING_ASSET_REASON,
   type AudioVideoSplitFormat,
 } from './audioVideoSplit';
-import type { ToolSessionDefinition } from '../../toolSessionRuntime';
+import type { ToolSessionDefinition } from '../../tool-runtime/toolSessionRuntime';
 
 export interface AudioVideoSplitState {
   nodeId: string;

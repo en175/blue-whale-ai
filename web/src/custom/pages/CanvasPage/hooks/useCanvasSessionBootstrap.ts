@@ -7,7 +7,7 @@ import {
   findLastOpenedProjectId,
   findLatestCreatedProjectId,
   pickCanvasIdAfterLoad,
-} from '../canvasQuery';
+} from '../graph/canvasQuery';
 
 export function useCanvasSessionBootstrap(input: {
   currentId: string;

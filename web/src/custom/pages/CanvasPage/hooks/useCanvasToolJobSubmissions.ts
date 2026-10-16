@@ -6,8 +6,8 @@ import { frameInterpolationRecoveryOptions } from '@/custom/api/frameInterpolati
 import { fetchJobStatus, type JobDetail } from '@/custom/api/jobs';
 import type { FrameInterpolationSubmission, VideoEnhanceSubmission } from '../tools/compound/panelToolSessions';
 import type { FrameInterpolationIdentity } from '../tools/video/frameInterpolation';
-import type { VideoToolPayload } from '../generationRuntime/videoTools';
-import type { GenerationRuntime } from '../generationRuntime/runtime';
+import type { VideoToolPayload } from '../generation/videoTools';
+import type { GenerationRuntime } from '../generation/runtime';
 
 type InFlightRequest = { projectId: string | null; loadEpoch: object };
 

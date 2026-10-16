@@ -59,8 +59,8 @@ import {
 } from '@/custom/utils/model-reference-limits';
 import { OMNI_REFERENCE_FOLLOW_HINT } from '@/custom/utils/video-reference-hints';
 import AtMentionMenu from '../AtMentionMenu';
-import { type AtMentionItem } from '../../atMention';
-import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../followDialog';
+import { type AtMentionItem } from '../../agent/atMention';
+import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../agent/followDialog';
 import {
   defaultVideoModeFor,
   enabledVideoModes,

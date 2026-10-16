@@ -1,8 +1,8 @@
 import { SCENE_SPLIT_GRANULARITY_LABELS } from '@/custom/enums';
 import { describe, expect, it } from 'vitest';
 import { SCENE_SPLIT_DEFAULT_GRANULARITY, SCENE_SPLIT_EDGE_ORIGIN, SCENE_SPLIT_ENTRY_HINT, SCENE_SPLIT_GRANULARITIES, SCENE_SPLIT_MAX_DURATION_SECONDS, SCENE_SPLIT_MISSING_ASSET_REASON, SCENE_SPLIT_OVER_DURATION_REASON, buildSceneSplitPlaceholderNode, sceneSplitDisplayName, sceneSplitErrorText, sceneSplitFanoutLayout, sceneSplitGateReason, sceneSplitSegmentBox, sceneSplitSegmentLabel } from './sceneSplit';
-import type { SpawnBox } from '../../draftSpawn';
-import { overlaps as draftOverlaps } from '../../draftSpawn';
+import type { SpawnBox } from '../../graph/draftSpawn';
+import { overlaps as draftOverlaps } from '../../graph/draftSpawn';
 
 describe('sceneSplitGateReason（场景切分门槛预检，IKH8BJ）', () => {
   it('已关联资产且时长未超限放行（assetId 字符串/数字形态均放行）', () => {

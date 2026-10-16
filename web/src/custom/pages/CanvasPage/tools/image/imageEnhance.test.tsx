@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Node } from '@xyflow/react';
 import CanvasPage from '../../index';
 import { IMAGE_ENHANCE_EDGE_ORIGIN } from './imageEnhance';
-import { imageMediaRefsOf } from '../../mediaRefs';
+import { imageMediaRefsOf } from '../../media/mediaRefs';
 import type { GenerationModel } from '@/custom/api/generation';
 
 vi.mock('@/custom/api/generationQuote', async (importActual) => ({

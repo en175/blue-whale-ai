@@ -2,7 +2,7 @@ import { VOCAL_SPLIT_SCENE_OPTIONS } from '@/custom/enums';
 import { useState } from 'react';
 import { ArrowUp, ChevronDown, X } from 'lucide-react';
 import DropdownMenu from '@/custom/components/DropdownMenu';
-import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../followDialog';
+import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../agent/followDialog';
 import { VOCAL_SPLIT_FORMATS, vocalSplitSceneHint, vocalSplitSceneLabel, type VocalSplitFormat, type VocalSplitScene } from '../../tools/audio/vocalSplit';
 import styles from './index.module.css';
 

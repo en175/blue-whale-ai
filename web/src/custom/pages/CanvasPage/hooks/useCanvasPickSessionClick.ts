@@ -3,11 +3,11 @@ import type { Dispatch, RefObject, SetStateAction } from 'react';
 import type { Node } from '@xyflow/react';
 import type { UploadedFile } from '../components/ImageDialog';
 import type { AudioRefItem } from '../components/AudioDialog';
-import { readNodeAssetId } from '../canvasNodeUtils';
-import { panelCanvasRefError } from '../refSourceTypes';
-import { readAssetId } from '../mediaRefs';
+import { readNodeAssetId } from '../graph/canvasNodeUtils';
+import { panelCanvasRefError } from '../media/refSourceTypes';
+import { readAssetId } from '../media/mediaRefs';
 import { audioRefMediaTypeOf, audioRefSourceError } from '../tools/audio/audioMediaRefs';
-import { videoFreeRefItemOf } from '../canvasPureNodeHelpers';
+import { videoFreeRefItemOf } from '../graph/canvasPureNodeHelpers';
 import { checkAddVideoRef, incomingVideoRefOccupied, isLibraryOnlyVideoRef, mergedVideoMediaRefsOf, videoRefSourceError, type VideoMediaRef, type VideoMediaRefs, type VideoRefCapabilities } from '../tools/video/videoMediaRefs';
 
 export interface CanvasPickSessionClickHost {

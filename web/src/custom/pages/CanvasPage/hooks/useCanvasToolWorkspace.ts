@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
-import { createCanvasToolSessions, useCanvasToolSessionEffects, type CanvasToolHosts, type CanvasToolView } from '../canvasToolSessions';
-import { type ToolSessionDeps } from '../toolSessionCoordinator';
+import { createCanvasToolSessions, useCanvasToolSessionEffects, type CanvasToolHosts, type CanvasToolView } from '../tool-runtime/canvasToolSessions';
+import { type ToolSessionDeps } from '../tool-runtime/toolSessionCoordinator';
 import type { CanvasHistoryApi } from './useCanvasHistory';
 
 export function useCanvasToolWorkspace(currentId: string) {

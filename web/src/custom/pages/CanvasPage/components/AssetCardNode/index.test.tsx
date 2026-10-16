@@ -7,7 +7,7 @@ import AssetCardNode, { type AssetCardNodeData } from './index';
 import AssetCardToolbar from './Toolbar';
 import NodeFollowToolbar from '../NodeFollowToolbar';
 import { useAssetHoverBridge } from '../../hooks/useAssetHoverBridge';
-import { computeFollowAnchorAbove } from '../../followDialog';
+import { computeFollowAnchorAbove } from '../../agent/followDialog';
 import styles from './index.module.css';
 
 let root: Root;

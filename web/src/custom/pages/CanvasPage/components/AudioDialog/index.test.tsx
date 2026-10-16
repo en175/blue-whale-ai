@@ -9,7 +9,7 @@ import { clickSelectOption } from '../../testing/radixSelect';
 import type { ImageTextAttachment } from '../ImageDialog';
 import { INSERT_REF_AT_SELECTION_TITLE } from '../RefThumbnail';
 import { readPromptRefText, typePromptRefText, typePromptRefRaw, promptRefEditorInstance } from '../../testing/promptRefEditor';
-import type { AtMentionItem } from '../../atMention';
+import type { AtMentionItem } from '../../agent/atMention';
 import { silenceApiConsoleInfo } from '../../testing/silenceApiLogs';
 import { installFetchGuard } from '../../testing/fetchGuard';
 

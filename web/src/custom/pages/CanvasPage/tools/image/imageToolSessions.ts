@@ -1,6 +1,6 @@
 import { type OutpaintPresetKey } from '@/custom/enums';
 import type { Node } from '@xyflow/react';
-import { apiErrorMessage, captureMediaSource, captureSourceAsset, cloneSourceNode, isSilentAuthError, requireProjectId } from '../../toolSessionCapture';
+import { apiErrorMessage, captureMediaSource, captureSourceAsset, cloneSourceNode, isSilentAuthError, requireProjectId } from '../../tool-runtime/toolSessionCapture';
 import {
   IMAGE_CUTOUT_CONTOUR_SIZE_DEFAULT, buildImageCutoutRequest, imageCutoutSceneGateReason,
   type ImageCutoutRequest, type ImageCutoutScene,
@@ -8,7 +8,7 @@ import {
 import { mediaContentBox } from '../../components/MediaNode/mediaContentSize';
 import { ZERO_EXPANDS, outpaintGateReason, expandRatiosOf, presetExpands, maxExpandPerSide, type ExpandSides } from './imageOutpaint';
 import type { ImageOutpaintInput } from '@lib/contracts/image-outpaint';
-import type { ToolSessionDefinition } from '../../toolSessionRuntime';
+import type { ToolSessionDefinition } from '../../tool-runtime/toolSessionRuntime';
 
 export interface CutoutState {
   nodeId: string;

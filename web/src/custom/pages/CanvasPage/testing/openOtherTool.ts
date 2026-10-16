@@ -1,7 +1,7 @@
 import { createCropSession } from '../tools/image/cropSession';
 import { createAudioTrimSession } from '../tools/audio/audioToolSessions';
-import type { createToolSessionRuntime } from '../toolSessionRuntime';
-import type { ToolSessionDeps } from '../toolSessionCoordinator';
+import type { createToolSessionRuntime } from '../tool-runtime/toolSessionRuntime';
+import type { ToolSessionDeps } from '../tool-runtime/toolSessionCoordinator';
 
 export function openOtherTool(
   runtime: ReturnType<typeof createToolSessionRuntime>,

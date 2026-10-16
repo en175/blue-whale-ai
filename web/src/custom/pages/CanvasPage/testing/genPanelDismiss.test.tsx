@@ -7,9 +7,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Edge, Node } from '@xyflow/react';
 import CanvasPage from '../index';
 import { clickSelectOption } from './radixSelect';
-import type { GenerationDockDefinition } from '../generationDockCoordinator';
-import { createTextGenerationDock } from '../textGenerationDock';
-import TextGenerationDockPanel from '../textGenerationDockPanel';
+import type { GenerationDockDefinition } from '../generation/generationDockCoordinator';
+import { createTextGenerationDock } from '../generation/textGenerationDock';
+import TextGenerationDockPanel from '../generation/textGenerationDockPanel';
 
 
 const addedDock = vi.hoisted(() => {
@@ -17,8 +17,8 @@ const addedDock = vi.hoisted(() => {
   return { open: () => {}, active: (): string | null => null, nodes };
 });
 
-vi.mock('../generationDockCoordinator', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../generationDockCoordinator')>();
+vi.mock('../generation/generationDockCoordinator', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../generation/generationDockCoordinator')>();
   return { ...actual, createGenerationDockCoordinator<R extends Record<string, GenerationDockDefinition>>(registry: R) {
     const added: ReturnType<typeof createTextGenerationDock> = createTextGenerationDock(() => ({
       getNodes: () => addedDock.nodes, getEdges: () => [], attachmentsOf: () => [], beginEdit() {},
@@ -72,8 +72,8 @@ vi.mock('@/custom/api/canvasRecovery', async (importActual) => ({
     next_cursor: null,
   })),
 }));
-vi.mock('../characterLibraryDeposit', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../characterLibraryDeposit')>()),
+vi.mock('../assets/characterLibraryDeposit', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../assets/characterLibraryDeposit')>()),
   depositCanvasAssetToCharacterLibrary: vi.fn(async () => ({ materialId: 'asset-compliance-test' })),
 }));
 

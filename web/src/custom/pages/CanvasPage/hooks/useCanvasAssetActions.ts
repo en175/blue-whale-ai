@@ -6,10 +6,10 @@ import { fetchAllAssets, fetchAssetDetail, type AssetRecord } from '@/custom/api
 import { isApiError } from '@/shared/api/http';
 import { saveSharedAsset, type SaveSharedAssetRequest } from '@/custom/api/sharedAssets';
 
-import { fetchRemoteMedia } from '../fetchRemoteMedia';
+import { fetchRemoteMedia } from '../media/fetchRemoteMedia';
 import { downloadFileNameOf, resolveDownloadMime } from '../components/cardName';
-import { blobToUint8Array, buildStoreZip, sniffMediaMime, uniqueDownloadName } from '../groupDownloadZip';
-import { extractTextNodeText } from '../quoteConversation';
+import { blobToUint8Array, buildStoreZip, sniffMediaMime, uniqueDownloadName } from '../assets/groupDownloadZip';
+import { extractTextNodeText } from '../agent/quoteConversation';
 
 export interface CanvasAssetActionsHost {
   mediaNodesRef: RefObject<Node[]>;

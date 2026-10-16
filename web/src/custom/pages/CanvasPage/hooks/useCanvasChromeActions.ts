@@ -3,7 +3,7 @@ import type { Dispatch, SetStateAction } from 'react';
 import type { MaterialAsset } from '@/custom/api/material';
 
 import type { UploadedFile } from '../components/ImageDialog';
-import type { CanvasGalleryRef } from '../collectMediaBlocks';
+import type { CanvasGalleryRef } from '../media/collectMediaBlocks';
 
 export function useCanvasChromeActions(input: {
   setAssetsModalDefaultTab: Dispatch<SetStateAction<string | undefined>>;

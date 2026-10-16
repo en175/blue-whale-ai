@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { PromptDoc } from '@/custom/utils/prompt-doc';
 import type { Edge, Node } from '@xyflow/react';
-import { createGenerationDockCoordinator } from '../../generationDockCoordinator';
+import { createGenerationDockCoordinator } from '../../generation/generationDockCoordinator';
 import { createAudioMusicGenerationDocks, type AudioGenerationDockHost, type AudioDockTask, type MusicGenerationDockHost } from './audioMusicGenerationDock';
 
 function fixture() {

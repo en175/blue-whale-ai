@@ -4,7 +4,7 @@ import { useInfiniteQuery } from '@tanstack/react-query';
 import { ArrowUp, Film, Video, X, Zap } from 'lucide-react';
 import { assetPageQueryOptions } from '@/custom/api/assets';
 import { resolveMediaSrc } from '@/shared/utils/remoteImageCors';
-import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../followDialog';
+import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../agent/followDialog';
 import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
 import { AUDIO_VIDEO_MUX_TITLE, type AudioVideoMuxBoundVideo, type AudioVideoMuxIdentity } from '../../tools/audio/audioVideoMux';
 import Empty from '@/custom/components/Empty';

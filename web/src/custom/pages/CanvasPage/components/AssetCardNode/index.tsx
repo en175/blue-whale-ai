@@ -10,8 +10,8 @@ import { uploadAssetFile } from '@/custom/utils/upload';
 import { remoteImageCrossOrigin, resolveMediaSrc } from '@/shared/utils/remoteImageCors';
 import { isFileRejected } from '@/custom/utils/fileSignature';
 import type { UploadCompleteData } from '@/custom/api/assets';
-import type { CanvasGalleryRef } from '../../collectMediaBlocks';
-import { useAssetImageRefLimit } from '../../modelCaps';
+import type { CanvasGalleryRef } from '../../media/collectMediaBlocks';
+import { useAssetImageRefLimit } from '../../generation/modelCaps';
 import { assetCardKindOf } from './toolbarVisibility';
 import styles from './index.module.css';
 

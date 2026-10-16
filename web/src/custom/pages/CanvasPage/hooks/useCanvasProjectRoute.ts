@@ -1,5 +1,5 @@
 import { useEffect, useRef, type Dispatch, type RefObject, type SetStateAction } from 'react';
-import { canvasLocationSearch, readCanvasIdFromSearch } from '../canvasQuery';
+import { canvasLocationSearch, readCanvasIdFromSearch } from '../graph/canvasQuery';
 
 export function useCanvasProjectRoute(input: {
   currentId: string;

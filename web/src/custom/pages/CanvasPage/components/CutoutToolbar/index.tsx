@@ -2,7 +2,7 @@ import { useState } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { X, ArrowUp, ChevronDown, Scan, User, Package, CircleDot, Crop } from 'lucide-react';
 import DropdownMenu from '@/custom/components/DropdownMenu';
-import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../followDialog';
+import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../agent/followDialog';
 import {
   IMAGE_CUTOUT_CONTOUR_SIZE_MIN,
   IMAGE_CUTOUT_CONTOUR_SLIDER_MAX,

@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react';
 import type { AudioRefItem } from '../components/AudioDialog';
 import type { UploadedFile } from '../components/ImageDialog';
-import type { CanvasGalleryRef } from '../collectMediaBlocks';
+import type { CanvasGalleryRef } from '../media/collectMediaBlocks';
 import type { SessionContentBlock } from '@/custom/api/agentSessions';
 
 import { type PickChannel, type VideoRefRole } from '@/custom/enums';

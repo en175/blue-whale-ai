@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from 'react';
-import { persistSnapAlignmentEnabled, readSnapAlignmentEnabled } from '../snapPreference';
+import { persistSnapAlignmentEnabled, readSnapAlignmentEnabled } from '../graph/snapPreference';
 
 import { type ToolMode, type CardFilter } from '@/custom/enums';
 

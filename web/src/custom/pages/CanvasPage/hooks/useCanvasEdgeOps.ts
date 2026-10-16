@@ -3,9 +3,9 @@ import type { Dispatch, RefObject, SetStateAction } from 'react';
 import type { Edge, Node } from '@xyflow/react';
 import { promptMentionSchema, validPromptMentions, type PromptMention } from '@lib/contracts/prompt-preview';
 import { promptBindingList, promptBindingsSchema, releaseRemovedPromptSources } from '@lib/contracts/prompt-target';
-import { readAssetId } from '../mediaRefs';
-import { extractTextNodeText } from '../quoteConversation';
-import { planBindingsCoveredBy } from '../canvasNodeUtils';
+import { readAssetId } from '../media/mediaRefs';
+import { extractTextNodeText } from '../agent/quoteConversation';
+import { planBindingsCoveredBy } from '../graph/canvasNodeUtils';
 
 import type { CanvasHistoryApi } from './useCanvasHistory';
 

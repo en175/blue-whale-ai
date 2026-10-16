@@ -1,5 +1,5 @@
 import { type VideoSubtitleEraseMode, type EraseTool } from '@/custom/enums';
-import { apiErrorMessage, captureMediaSource } from '../../toolSessionCapture';
+import { apiErrorMessage, captureMediaSource } from '../../tool-runtime/toolSessionCapture';
 import { mediaContentBox } from '../../components/MediaNode/mediaContentSize';
 import type { Node } from '@xyflow/react';
 import type { ImageEraseInput } from '@lib/contracts/image-erase';
@@ -8,7 +8,7 @@ import { buildVideoSubtitleEraseInput, type VideoSubtitleEraseInput } from '../v
 import { EMPTY_SUBTITLE_BOX_EDIT, applySubtitleBox, canAddSubtitleBox, type SubtitleBoxEditState, type SubtitleBoxOp, type SubtitleBoxPoint } from '../video/subtitleEraseBoxes';
 import { maskHasPaintArea } from './imageErase';
 
-import type { ToolSessionDefinition } from '../../toolSessionRuntime';
+import type { ToolSessionDefinition } from '../../tool-runtime/toolSessionRuntime';
 
 export interface ImageEraseState {
   nodeId: string;

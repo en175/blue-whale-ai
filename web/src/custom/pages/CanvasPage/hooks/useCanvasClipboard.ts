@@ -3,8 +3,8 @@ import type { Dispatch, RefObject, SetStateAction } from 'react';
 import type { Node } from '@xyflow/react';
 import type { CanvasHistoryApi } from './useCanvasHistory';
 import type { MediaMention } from '@lib/contracts/text-node-media';
-import { readCanvasClipboard } from '../clipboardPaste';
-import { newNodeId } from '../nodeId';
+import { readCanvasClipboard } from './clipboardPaste';
+import { newNodeId } from '../graph/nodeId';
 
 interface CanvasClipboardSnapshot {
   kind: 'text' | 'media';

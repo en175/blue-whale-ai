@@ -2,8 +2,8 @@ import { openOtherTool } from '../../testing/openOtherTool';
 import type { Node } from '@xyflow/react';
 import { ApiError } from '@/shared/api/http';
 import { describe, expect, it } from 'vitest';
-import { createToolSessionRuntime } from '../../toolSessionRuntime';
-import type { ToolSessionDeps } from '../../toolSessionCoordinator';
+import { createToolSessionRuntime } from '../../tool-runtime/toolSessionRuntime';
+import type { ToolSessionDeps } from '../../tool-runtime/toolSessionCoordinator';
 import { createImageEnhanceSession, createFrameInterpolationSession, createVideoEnhanceSession, type PanelToolHost, type VideoEnhanceSubmission } from './panelToolSessions';
 
 const deps: ToolSessionDeps = { dismissGenPanels() {}, selectNode() {} };

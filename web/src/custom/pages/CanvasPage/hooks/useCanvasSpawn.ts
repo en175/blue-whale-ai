@@ -1,6 +1,6 @@
 import { useCallback, useRef, type RefObject } from 'react';
-import { nextDraftPosition } from '../draftSpawn';
-import { nodeBoxOf } from '../canvasPureNodeHelpers';
+import { nextDraftPosition } from '../graph/draftSpawn';
+import { nodeBoxOf } from '../graph/canvasPureNodeHelpers';
 import type { CanvasGraph } from './useCanvasGraph';
 
 const DOCK_RESERVE_PX = 300;

@@ -1,6 +1,6 @@
 import { useRef, useState, useCallback } from 'react';
 import type { Edge, Node } from '@xyflow/react';
-import type { CanvasGroup, GroupFrameDragResult } from '../canvasGroups';
+import type { CanvasGroup, GroupFrameDragResult } from '../graph/canvasGroups';
 
 const MAX_HISTORY = 50;
 

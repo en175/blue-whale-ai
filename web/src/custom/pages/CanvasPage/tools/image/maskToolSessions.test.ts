@@ -2,8 +2,8 @@ import { expect, it } from 'vitest';
 import type { Node } from '@xyflow/react';
 import type { VideoSubtitleEraseInput } from '../video/videoSubtitleErase';
 import type { MaskOp } from './eraseMask';
-import { createToolSessionRuntime } from '../../toolSessionRuntime';
-import { type ToolSessionDeps } from '../../toolSessionCoordinator';
+import { createToolSessionRuntime } from '../../tool-runtime/toolSessionRuntime';
+import { type ToolSessionDeps } from '../../tool-runtime/toolSessionCoordinator';
 import { createImageEraseSession, createSubtitleEraseSession, beginSubtitleBox, moveSubtitleBox, endSubtitleBox, beginEraseStroke, moveEraseStroke, endEraseStroke, type ImageEraseTaskSubmission, type ImageEraseHost } from './maskToolSessions';
 
 const deps: ToolSessionDeps = {

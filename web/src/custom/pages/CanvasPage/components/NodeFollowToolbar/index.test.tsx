@@ -4,7 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ReactFlowProvider, useStoreApi } from '@xyflow/react';
 import NodeFollowToolbar from './index';
-import { computeFollowAnchorAbove } from '../../followDialog';
+import { computeFollowAnchorAbove } from '../../agent/followDialog';
 
 let root: Root;
 let mountNode: HTMLDivElement;
