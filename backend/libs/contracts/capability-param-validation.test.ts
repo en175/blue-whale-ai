@@ -167,6 +167,29 @@ describe("checkGenerationParamLimit", () => {
       size: "1080p", aspect_ratio: "16:9", duration: 5.5,
     })?.field).toBe("duration");
   });
+
+  it.each([
+    [4, 0.1, 5],
+    [4, 0.2, 10],
+    [4, 0.3, 4.9],
+    [4.1, 0.1, 4.2],
+  ])("小数步长合法时长通过：min=%s step=%s duration=%s", (min, step, duration) => {
+    expect(checkGenerationParamLimit({
+      ...videoCapability,
+      supported_durations: { min, max: 30, step },
+    }, {
+      size: "1080p", aspect_ratio: "16:9", duration,
+    })).toBeNull();
+  });
+
+  it.each([4.05, 5.1, 3.8, 30.2])("小数步长仍拒绝错步长或越界时长：%s", (duration) => {
+    expect(checkGenerationParamLimit({
+      ...videoCapability,
+      supported_durations: { min: 4, max: 30, step: 0.2 },
+    }, {
+      size: "1080p", aspect_ratio: "16:9", duration,
+    })?.field).toBe("duration");
+  });
 });
 
 describe("toGenerationParamCheckInput", () => {

@@ -332,8 +332,12 @@ function durationInRange(
 
     return true;
   }
-  return duration >= range.min && duration <= range.max
-    && (range.step === undefined || (duration - range.min) % range.step === 0);
+  if (duration < range.min || duration > range.max) return false;
+  if (range.step === undefined) return true;
+  const steps = (duration - range.min) / range.step;
+  const nearest = range.min + Math.round(steps) * range.step;
+  const tolerance = Number.EPSILON * Math.max(1, Math.abs(duration), Math.abs(nearest)) * 4;
+  return Number.isFinite(nearest) && Math.abs(duration - nearest) <= tolerance;
 }
 
 export function aspectRatioIds(value: unknown): string[] {
