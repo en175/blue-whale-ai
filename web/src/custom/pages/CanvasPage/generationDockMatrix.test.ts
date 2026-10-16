@@ -3,13 +3,13 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import type { Edge, Node } from '@xyflow/react';
 import { createGenerationDockCoordinator, type DockSelection } from './generationDockCoordinator';
-import { createImageGenerationDock, type ImageGenerationDockHost } from './imageGenerationDock';
-import { createVideoGenerationDock, type VideoGenerationDockHost } from './videoGenerationDock';
-import { createAudioMusicGenerationDocks, type AudioGenerationDockHost, type MusicGenerationDockHost } from './audioMusicGenerationDock';
+import { createImageGenerationDock, type ImageGenerationDockHost } from './tools/image/imageGenerationDock';
+import { createVideoGenerationDock, type VideoGenerationDockHost } from './tools/video/videoGenerationDock';
+import { createAudioMusicGenerationDocks, type AudioGenerationDockHost, type MusicGenerationDockHost } from './tools/audio/audioMusicGenerationDock';
 import { createTextGenerationDock, type TextGenerationDockHost } from './textGenerationDock';
 import { createToolGenerationDock } from './toolGenerationDock';
 import { createToolSessionRuntime } from './toolSessionRuntime';
-import { createImageEnhanceSession, createVideoEnhanceSession, createFrameInterpolationSession, type PanelToolHost } from './panelToolSessions';
+import { createImageEnhanceSession, createVideoEnhanceSession, createFrameInterpolationSession, type PanelToolHost } from './tools/compound/panelToolSessions';
 
 const mediaKinds = ['image', 'video', 'audio'] as const;
 const toolKinds = ['imageEnhance', 'videoEnhance', 'frameInterpolation'] as const;

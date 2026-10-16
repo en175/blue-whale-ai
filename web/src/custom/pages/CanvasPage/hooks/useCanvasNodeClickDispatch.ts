@@ -9,7 +9,7 @@ import { hasGenerationRecord, isInPlaceRegenTarget } from '../mediaReEdit';
 import { readNodeAssetId } from '../canvasNodeUtils';
 import { readAssetId } from '../mediaRefs';
 
-import { asVideoRefMediaType, videoRefSourceError, type VideoMediaRef } from '../videoMediaRefs';
+import { asVideoRefMediaType, videoRefSourceError, type VideoMediaRef } from '../tools/video/videoMediaRefs';
 import type { ToolSessionDeps } from '../toolSessionCoordinator';
 
 type ProductPickResult = { ts: number; productId: string; image: { id: string; src: string; enabled: boolean; type?: 'image' | 'video'; assetId?: string } };

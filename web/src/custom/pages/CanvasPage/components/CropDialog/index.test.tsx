@@ -6,7 +6,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import CropDialog from './index';
-import { CROP_PRESET_ORDER } from '../../imageCrop';
+import { CROP_PRESET_ORDER } from '../../tools/image/imageCrop';
 
 let root: Root;
 let mountNode: HTMLDivElement;

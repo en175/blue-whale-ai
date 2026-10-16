@@ -2,7 +2,7 @@ import { useRef, useState } from 'react';
 import { ArrowUp, ChevronDown, X } from 'lucide-react';
 import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../followDialog';
 import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
-import { AUDIO_VIDEO_SPLIT_FORMATS, type AudioVideoSplitFormat } from '../../audioVideoSplit';
+import { AUDIO_VIDEO_SPLIT_FORMATS, type AudioVideoSplitFormat } from '../../tools/audio/audioVideoSplit';
 import styles from './index.module.css';
 
 interface VideoAudioSplitDialogProps {

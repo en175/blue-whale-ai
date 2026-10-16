@@ -20,7 +20,7 @@ import {
 import RatioGroup from '@/custom/components/RatioGroup';
 import Select from '@/custom/components/Select';
 import GenerationQuoteBadge from '../GenerationQuoteBadge';
-import { buildImageJobReferences } from '../../videoJobReferences';
+import { buildImageJobReferences } from '../../tools/video/videoJobReferences';
 import {
   PROMPT_DOC_VERSION,
   docHasAnyRef,

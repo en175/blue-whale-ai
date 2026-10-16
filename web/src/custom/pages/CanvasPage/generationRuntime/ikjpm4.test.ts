@@ -3,7 +3,7 @@ import { ApiError } from '@/shared/api/http';
 import { createAudioMix } from '@/custom/api/jobs';
 import { audioMixCreateSchema } from '@lib/contracts/audio-mix';
 import type { CanvasBinding, GenerationRecoveryRecord } from '@/custom/api/canvasRecovery';
-import { AUDIO_MIX_EDGE_ORIGIN, isAudioMixNodeId } from '../audioMix';
+import { AUDIO_MIX_EDGE_ORIGIN, isAudioMixNodeId } from '../tools/audio/audioMix';
 import {
   DEPS, flush, deferred, bindingView, mixCreated, setupAudioMixRecovery, type MixCreateResult,
 } from './audioMixRecoveryTestKit';

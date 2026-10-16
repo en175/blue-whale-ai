@@ -7,7 +7,7 @@ import { planReferenceErrorFor, pickMarkedIdsFor, complianceBlockedIds, pendingP
 import type { CanvasPickItem } from '../components/AudioDialog';
 import type { AtMentionItem } from '../atMention';
 import { mergedImageRefsOf, mergedVideoRefsWithTextIndex } from '../textIndexSync';
-import { videoRefIdentityIds } from '../videoMediaRefs';
+import { videoRefIdentityIds } from '../tools/video/videoMediaRefs';
 
 export function useCanvasPlanMentions(input: {
   imageSeed: { targetNodeId?: string } | null | undefined;

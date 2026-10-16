@@ -5,8 +5,8 @@ import {
   type CanvasToolKind,
   type CanvasToolView,
 } from '../canvasToolSessions';
-import { buildAudioVideoMuxIdentity } from '../audioVideoMux';
-import { buildImageOutpaintInput } from '../imageOutpaint';
+import { buildAudioVideoMuxIdentity } from '../tools/audio/audioVideoMux';
+import { buildImageOutpaintInput } from '../tools/image/imageOutpaint';
 
 export function canvasToolSessionFixture() {
   let projectId = 'p1';

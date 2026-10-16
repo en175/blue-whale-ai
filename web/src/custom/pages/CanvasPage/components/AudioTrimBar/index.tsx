@@ -1,8 +1,8 @@
 import { ArrowUp, ChevronDown, X, Zap } from 'lucide-react';
 import DropdownMenu from '@/custom/components/DropdownMenu';
 import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../followDialog';
-import { AUDIO_TRIM_FORMATS, type AudioTrimFormat } from '../../audioTrim';
-import { audioTrimRangeLabel } from '../../audioTrimGeometry';
+import { AUDIO_TRIM_FORMATS, type AudioTrimFormat } from '../../tools/audio/audioTrim';
+import { audioTrimRangeLabel } from '../../tools/audio/audioTrimGeometry';
 import styles from './index.module.css';
 
 interface AudioTrimBarProps {

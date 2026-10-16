@@ -4,7 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { ReactFlowProvider } from '@xyflow/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import SubtitleEraseBoxesLayer from './SubtitleEraseBoxesLayer';
-import type { SubtitleBoxOp } from '../../subtitleEraseBoxes';
+import type { SubtitleBoxOp } from '../../tools/video/subtitleEraseBoxes';
 
 let root: Root | null = null;
 let container: HTMLDivElement | null = null;

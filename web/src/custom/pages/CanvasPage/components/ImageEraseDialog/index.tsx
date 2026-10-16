@@ -1,7 +1,7 @@
 import { useRef } from 'react';
 import { Brush, Eraser, Square, TypeOutline, Undo2, Redo2, X, ArrowUp } from 'lucide-react';
 import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../followDialog';
-import type { MaskCoordinateSpace } from '../../eraseMask';
+import type { MaskCoordinateSpace } from '../../tools/image/eraseMask';
 import styles from './index.module.css';
 import { type EraseTool } from '@/custom/enums';
 

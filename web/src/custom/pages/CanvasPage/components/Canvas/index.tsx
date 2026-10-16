@@ -47,7 +47,7 @@ import {
 import ConnectionPreview from './ConnectionPreview';
 import SnapGuides from './SnapGuides';
 import OutpaintFrame from '../OutpaintFrame';
-import type { ExpandSides, SourceRect } from '../../imageOutpaint';
+import type { ExpandSides, SourceRect } from '../../tools/image/imageOutpaint';
 import { EMPTY_SNAP_GUIDES, isPositionChangeWithPosition, snapDragChanges } from '../../snapDragChanges';
 import type { SnapGuide, SnapNodeLike } from '../../snapAlignment';
 import {

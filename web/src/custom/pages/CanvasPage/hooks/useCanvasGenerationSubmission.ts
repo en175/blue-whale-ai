@@ -29,8 +29,8 @@ import type { RecoverySeedSource, RecoverySeedTarget } from '../generationRuntim
 import { readAssetId } from '../mediaRefs';
 import { isInPlaceRegenTarget } from '../mediaReEdit';
 import { newNodeId } from '../nodeId';
-import { mergedVideoMediaRefsOf, videoRefSourceError } from '../videoMediaRefs';
-import { draftVideoModeOf } from '../videoModes';
+import { mergedVideoMediaRefsOf, videoRefSourceError } from '../tools/video/videoMediaRefs';
+import { draftVideoModeOf } from '../tools/video/videoModes';
 import type { CanvasGenerationTerminalHost } from './useCanvasGenerationTerminal';
 
 type ToolMode = 'drag' | 'select';

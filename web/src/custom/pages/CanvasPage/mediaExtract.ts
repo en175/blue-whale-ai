@@ -1,6 +1,6 @@
 import { readJobFailText } from '@/custom/api/jobs';
 import { mediaContentBox } from './components/MediaNode/mediaContentSize';
-import { AUDIO_VIDEO_SPLIT_DEFAULT_FORMAT, type AudioVideoSplitFormat } from './audioVideoSplit';
+import { AUDIO_VIDEO_SPLIT_DEFAULT_FORMAT, type AudioVideoSplitFormat } from './tools/audio/audioVideoSplit';
 
 export const MEDIA_EXTRACT_NODE_PREFIX = 'media-extract-';
 

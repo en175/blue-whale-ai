@@ -8,7 +8,7 @@ import BottomDialog from './index';
 import { clickSelectOption } from '../../testing/radixSelect';
 import styles from './index.module.css';
 import { REF_SOURCE_ENTRY_TITLE } from '../RefSourceMenu';
-import type { VideoMediaRef, VideoMediaRefs } from '../../videoMediaRefs';
+import type { VideoMediaRef, VideoMediaRefs } from '../../tools/video/videoMediaRefs';
 
 
 

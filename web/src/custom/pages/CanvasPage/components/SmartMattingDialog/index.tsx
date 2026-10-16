@@ -3,7 +3,7 @@ import { useRef, useState } from 'react';
 import { ArrowUp, ChevronDown, X, Zap } from 'lucide-react';
 import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../followDialog';
 import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
-import { SMART_MATTING_BACKGROUND_COLORS, SMART_MATTING_FORMATS, type SmartMattingBackgroundColor, type SmartMattingFormat, type SmartMattingMode } from '../../smartMatting';
+import { SMART_MATTING_BACKGROUND_COLORS, SMART_MATTING_FORMATS, type SmartMattingBackgroundColor, type SmartMattingFormat, type SmartMattingMode } from '../../tools/image/smartMatting';
 import styles from './index.module.css';
 
 interface SmartMattingDialogProps {

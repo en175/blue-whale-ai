@@ -9,7 +9,7 @@ import {
   videoReferenceMaxOf,
   UNRESOLVED_IMAGE_REFERENCE_LIMIT,
 } from '@/custom/utils/model-reference-limits';
-import type { VideoRefCapabilities } from './videoMediaRefs';
+import type { VideoRefCapabilities } from './tools/video/videoMediaRefs';
 
 export function videoRefCapsOfModel(model?: GenerationModel | null): VideoRefCapabilities | null {
   if (!model) return null;

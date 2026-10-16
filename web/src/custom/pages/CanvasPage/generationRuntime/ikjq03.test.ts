@@ -5,7 +5,7 @@ import { serializeNodes, serializeEdges } from '@/custom/api/canvas';
 import type { CanvasBinding, GenerationRecoveryRecord } from '@/custom/api/canvasRecovery';
 import { audioMixCreateSchema } from '@lib/contracts/audio-mix';
 import { canvasBindingSchema } from '@lib/contracts/canvas-recovery';
-import { audioMixTerminalPatch, AUDIO_MIX_EDGE_ORIGIN } from '../audioMix';
+import { audioMixTerminalPatch, AUDIO_MIX_EDGE_ORIGIN } from '../tools/audio/audioMix';
 import { audioMixTask } from './mixMuxTasks';
 import { deferred, flush, setupAudioMixRecovery } from './audioMixRecoveryTestKit';
 

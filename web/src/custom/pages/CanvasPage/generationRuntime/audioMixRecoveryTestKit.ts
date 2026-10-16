@@ -6,10 +6,10 @@ import type { GenerationRecoveryRecord } from '@/custom/api/canvasRecovery';
 import { createGenerationRuntime } from './runtime';
 import { audioMixTask, staleMixSubmitError, watchMixSubmit } from './mixMuxTasks';
 import { seedSourcesOfNode } from './seedFacts';
-import { createAudioMixSession, type AudioMixHost } from '../compoundToolSessions';
+import { createAudioMixSession, type AudioMixHost } from '../tools/compound/compoundToolSessions';
 import { createToolSessionRuntime } from '../toolSessionRuntime';
 import type { ToolSessionDeps } from '../toolSessionCoordinator';
-import { buildAudioMixPlaceholderNode, findAudioMixPosition } from '../audioMix';
+import { buildAudioMixPlaceholderNode, findAudioMixPosition } from '../tools/audio/audioMix';
 import type { GenerationRuntimeHost, RuntimeNodeView } from './types';
 
 export const DEPS: ToolSessionDeps = { dismissGenPanels() {}, selectNode() {} };

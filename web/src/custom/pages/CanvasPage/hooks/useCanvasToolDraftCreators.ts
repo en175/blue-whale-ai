@@ -1,13 +1,13 @@
 import type { RefObject } from 'react';
 import type { Node } from '@xyflow/react';
 import type { VideoEnhanceResolution } from '@lib/contracts/video-enhance';
-import { IMAGE_ENHANCE_EDGE_ORIGIN, imageEnhanceDraftPosition } from '../imageEnhance';
+import { IMAGE_ENHANCE_EDGE_ORIGIN, imageEnhanceDraftPosition } from '../tools/image/imageEnhance';
 import {
   VIDEO_ENHANCE_EDGE_ORIGIN,
   videoEnhanceDraftPosition,
   videoEnhanceGateReason,
   type VideoEnhanceIdentity,
-} from '../videoEnhance';
+} from '../tools/video/videoEnhance';
 import {
   FRAME_INTERPOLATION_DEFAULT_FPS,
   FRAME_INTERPOLATION_EDGE_ORIGIN,
@@ -16,7 +16,7 @@ import {
   frameInterpolationGateReason,
   type FrameInterpolationFps,
   type FrameInterpolationIdentity,
-} from '../frameInterpolation';
+} from '../tools/video/frameInterpolation';
 import { readAssetId, imageRefSourceError } from '../mediaRefs';
 import { hasCustomName } from '../canvasNodeUtils';
 

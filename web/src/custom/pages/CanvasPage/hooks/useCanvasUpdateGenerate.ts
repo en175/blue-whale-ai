@@ -13,10 +13,10 @@ import {
   DEFAULT_IMAGE_REFERENCE_LIMIT,
 } from '../textIndexSync';
 import { orderRefStripItems, videoRefStripKey } from '../components/RefThumbnail/strip-dnd';
-import { draftVideoModeOf, defaultVideoModeFor } from '../videoModes';
+import { draftVideoModeOf, defaultVideoModeFor } from '../tools/video/videoModes';
 import { lockedDurationOf, effectiveVideoParams, type VideoModeFeatures } from '@/custom/utils/video-modes';
-import { videoRefConflict, type VideoMediaRefs } from '../videoMediaRefs';
-import { buildImageJobReferences, buildVideoJobReferences } from '../videoJobReferences';
+import { videoRefConflict, type VideoMediaRefs } from '../tools/video/videoMediaRefs';
+import { buildImageJobReferences, buildVideoJobReferences } from '../tools/video/videoJobReferences';
 import type { ImageTextAttachment } from '../components/ImageDialog';
 import { isTaskTypeParamConstraintCode } from '@/custom/utils/video-reference-hints';
 import type { CanvasGenerationSubmissionHandles } from './useCanvasGenerationSubmission';

@@ -5,22 +5,22 @@ import type { ImageTextAttachment, UploadedFile } from './components/ImageDialog
 import type { AudioRefItem, CanvasPickItem } from './components/AudioDialog';
 
 import type { AtMentionItem } from './atMention';
-import type { VideoMediaRefs } from './videoMediaRefs';
+import type { VideoMediaRefs } from './tools/video/videoMediaRefs';
 import type { FollowDialogAnchor } from './followDialog';
 
-import { audioRefItemMediaTypeOf } from './audioMediaRefs';
+import { audioRefItemMediaTypeOf } from './tools/audio/audioMediaRefs';
 import { fetchUrlAsFile } from './canvasPureNodeHelpers';
 import { promptMaxLengthOfModel } from '@/custom/utils/prompt-max-length';
-import type { ImageGenerationDockHost } from './imageGenerationDock';
-import type { VideoGenerationDockHost } from './videoGenerationDock';
-import type { AudioGenerationDockHost, MusicGenerationDockHost } from './audioMusicGenerationDock';
+import type { ImageGenerationDockHost } from './tools/image/imageGenerationDock';
+import type { VideoGenerationDockHost } from './tools/video/videoGenerationDock';
+import type { AudioGenerationDockHost, MusicGenerationDockHost } from './tools/audio/audioMusicGenerationDock';
 import type { TextGenerationDockHost } from './textGenerationDock';
 import type { CanvasGenerationSubmissionHandles } from './hooks/useCanvasGenerationSubmission';
 import { useGenerationDockBinding } from './hooks/useGenerationDockBinding';
-import ImageGenerationDockPanel from './imageGenerationDockPanel';
-import VideoGenerationDockPanel from './videoGenerationDockPanel';
-import AudioGenerationDockPanel from './audioGenerationDockPanel';
-import MusicGenerationDockPanel from './musicGenerationDockPanel';
+import ImageGenerationDockPanel from './tools/image/imageGenerationDockPanel';
+import VideoGenerationDockPanel from './tools/video/videoGenerationDockPanel';
+import AudioGenerationDockPanel from './tools/audio/audioGenerationDockPanel';
+import MusicGenerationDockPanel from './tools/audio/musicGenerationDockPanel';
 import TextGenerationDockPanel from './textGenerationDockPanel';
 
 export interface GenerationDockHostsDeps {

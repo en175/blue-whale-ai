@@ -18,8 +18,8 @@ import {
   nextVideoModeOnRefsChange,
   resolveVideoMode,
   videoModeRefsSignature,
-} from '@/custom/pages/CanvasPage/videoModes';
-import type { VideoMediaRef, VideoMediaRefs } from '@/custom/pages/CanvasPage/videoMediaRefs';
+} from '@/custom/pages/CanvasPage/tools/video/videoModes';
+import type { VideoMediaRef, VideoMediaRefs } from '@/custom/pages/CanvasPage/tools/video/videoMediaRefs';
 import { configuredVideoModes, effectiveVideoParams, frameSlotCountOf, isFrameMode, lockedDurationOf, lockedRatioOf, type VideoMode } from '@/custom/utils/video-modes';
 import { type AssetRecord } from '@/custom/api/assets';
 import { getCurrentUser, subscribe } from '@/shared/utils/auth';

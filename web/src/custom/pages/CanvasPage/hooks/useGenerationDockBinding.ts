@@ -2,9 +2,9 @@ import { useRef, useState, useSyncExternalStore, type ReactNode, type RefObject 
 import type { Node } from '@xyflow/react';
 import type { VideoGenSeedParams } from '../components/BottomDialog';
 import { createGenerationDockCoordinator } from '../generationDockCoordinator';
-import { createImageGenerationDock, type ImageGenerationDockHost } from '../imageGenerationDock';
-import { createVideoGenerationDock, type VideoGenerationDockHost } from '../videoGenerationDock';
-import { createAudioMusicGenerationDocks, type AudioGenerationDockHost, type MusicGenerationDockHost } from '../audioMusicGenerationDock';
+import { createImageGenerationDock, type ImageGenerationDockHost } from '../tools/image/imageGenerationDock';
+import { createVideoGenerationDock, type VideoGenerationDockHost } from '../tools/video/videoGenerationDock';
+import { createAudioMusicGenerationDocks, type AudioGenerationDockHost, type MusicGenerationDockHost } from '../tools/audio/audioMusicGenerationDock';
 import { createTextGenerationDock, type TextGenerationDockHost } from '../textGenerationDock';
 import { createToolGenerationDock } from '../toolGenerationDock';
 import { createCanvasToolSessions, type CanvasToolView } from '../canvasToolSessions';

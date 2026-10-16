@@ -7,7 +7,7 @@ import type { VideoGenSeedParams } from '../components/BottomDialog';
 import { isFrameMode } from '@/custom/utils/video-modes';
 
 import { fetchUrlAsFile } from '../canvasPureNodeHelpers';
-import { buildImageJobReferences, buildVideoJobReferencesFromList } from '../videoJobReferences';
+import { buildImageJobReferences, buildVideoJobReferencesFromList } from '../tools/video/videoJobReferences';
 import type { CanvasGenerationSubmissionHandles } from './useCanvasGenerationSubmission';
 
 export interface CanvasHomeHandoffHost {

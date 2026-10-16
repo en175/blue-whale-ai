@@ -2,10 +2,10 @@ import { createElement } from 'react';
 import { renderToString } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import type { Edge, Node } from '@xyflow/react';
-import { AUDIO_SPEED_NODE_PREFIX } from '../audioSpeed';
-import { AUDIO_TRIM_NODE_PREFIX } from '../audioTrim';
+import { AUDIO_SPEED_NODE_PREFIX } from '../tools/audio/audioSpeed';
+import { AUDIO_TRIM_NODE_PREFIX } from '../tools/audio/audioTrim';
 import { MEDIA_EXTRACT_NODE_PREFIX } from '../mediaExtract';
-import { VOCAL_SPLIT_NODE_PREFIX, VOCAL_SPLIT_TRACK_NODE_PREFIX } from '../vocalSplit';
+import { VOCAL_SPLIT_NODE_PREFIX, VOCAL_SPLIT_TRACK_NODE_PREFIX } from '../tools/audio/vocalSplit';
 import {
   useCanvasGenerationTerminal,
   type CanvasGenerationTerminalHandles,

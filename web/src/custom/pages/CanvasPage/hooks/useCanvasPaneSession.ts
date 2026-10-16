@@ -1,7 +1,7 @@
 import type { RefObject } from 'react';
 import type { Edge, Node } from '@xyflow/react';
 import { imageRefSourceError } from '../mediaRefs';
-import { readRefRole, videoRefSourceError } from '../videoMediaRefs';
+import { readRefRole, videoRefSourceError } from '../tools/video/videoMediaRefs';
 import type { ToolSessionDeps } from '../toolSessionCoordinator';
 import type { createCanvasToolSessions } from '../canvasToolSessions';
 

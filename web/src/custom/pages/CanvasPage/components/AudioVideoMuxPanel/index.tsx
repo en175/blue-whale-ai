@@ -6,7 +6,7 @@ import { assetPageQueryOptions } from '@/custom/api/assets';
 import { resolveMediaSrc } from '@/shared/utils/remoteImageCors';
 import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../followDialog';
 import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
-import { AUDIO_VIDEO_MUX_TITLE, type AudioVideoMuxBoundVideo, type AudioVideoMuxIdentity } from '../../audioVideoMux';
+import { AUDIO_VIDEO_MUX_TITLE, type AudioVideoMuxBoundVideo, type AudioVideoMuxIdentity } from '../../tools/audio/audioVideoMux';
 import Empty from '@/custom/components/Empty';
 import styles from './index.module.css';
 

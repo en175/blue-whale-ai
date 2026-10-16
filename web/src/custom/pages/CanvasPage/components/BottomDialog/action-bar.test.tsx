@@ -12,7 +12,7 @@ import {
 import barStyles from '../AttachmentActionBar/index.module.css';
 import { REF_SOURCE_ENTRY_TITLE } from '../RefSourceMenu';
 import dialogStyles from './index.module.css';
-import type { VideoMediaRef, VideoMediaRefs } from '../../videoMediaRefs';
+import type { VideoMediaRef, VideoMediaRefs } from '../../tools/video/videoMediaRefs';
 
 
 const fetchGenerationModels = vi.hoisted(() => vi.fn());

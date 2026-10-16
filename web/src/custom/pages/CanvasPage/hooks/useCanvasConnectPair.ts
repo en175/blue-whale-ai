@@ -1,17 +1,17 @@
 import { type VideoRefRole } from '@/custom/enums';
 import { useCallback, type Dispatch, type RefObject, type SetStateAction } from 'react';
 import type { Connection, Edge, Node, OnEdgesChange } from '@xyflow/react';
-import { draftVideoModeOf } from '../videoModes';
+import { draftVideoModeOf } from '../tools/video/videoModes';
 import { frameSlotCountOf, isFrameMode, type VideoMode } from '@/custom/utils/video-modes';
 import { canConnectSourcesToGen, genKindOf, isConnectableSource, wouldCreateCycle } from '../connectAbility';
 import { imageRefSourceError } from '../mediaRefs';
-import { mergedVideoMediaRefsOf } from '../videoMediaRefs';
+import { mergedVideoMediaRefsOf } from '../tools/video/videoMediaRefs';
 import {
   AUDIO_VIDEO_MUX_AUDIO_EDGE_LOCKED_REASON,
   audioVideoMuxIdentityOf,
   isAudioVideoMuxAudioEdge,
   isAudioVideoMuxBindEdge,
-} from '../audioVideoMux';
+} from '../tools/audio/audioVideoMux';
 
 type ShowToast = (type: 'success' | 'error' | 'warn', msg: string) => void;
 

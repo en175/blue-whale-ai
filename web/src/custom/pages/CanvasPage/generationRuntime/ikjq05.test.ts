@@ -11,7 +11,7 @@ import { videoFrameInterpolationInputSchema } from '@lib/contracts/video-frame-i
 import { serializeNodes } from '@/custom/api/canvas';
 import { readJobFailText, type CreateJobPayload, type JobDetail } from '@/custom/api/jobs';
 import type { CanvasBinding, GenerationRecoveryRecord } from '@/custom/api/canvasRecovery';
-import { videoEnhanceErrorText } from '../videoEnhance';
+import { videoEnhanceErrorText } from '../tools/video/videoEnhance';
 import { createGenerationRuntime } from './runtime';
 import { normalGenerationTask } from './normalGeneration';
 import { videoToolsTask, type VideoToolPayload } from './videoTools';

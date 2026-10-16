@@ -5,7 +5,7 @@ import type { AssetRefMeta } from '../PromptRefEditor/AssetRefNode';
 import AtMentionMenu from '../AtMentionMenu';
 import type { AtMentionItem } from '../../atMention';
 import type { ImageTextAttachment } from '../ImageDialog';
-import { audioRefItemMediaTypeOf } from '../../audioMediaRefs';
+import { audioRefItemMediaTypeOf } from '../../tools/audio/audioMediaRefs';
 import type { AudioRefItem } from './index';
 
 interface Props {

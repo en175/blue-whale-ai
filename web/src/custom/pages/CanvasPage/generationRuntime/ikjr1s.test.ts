@@ -3,7 +3,7 @@ import type { Edge, Node } from '@xyflow/react';
 import { retryAudioMix } from '@/custom/api/jobs';
 import { serializeNodes, serializeEdges } from '@/custom/api/canvas';
 import { canvasBindingSchema } from '@lib/contracts/canvas-recovery';
-import { audioMixTerminalPatch, buildAudioMixPlaceholderNode, AUDIO_MIX_EDGE_ORIGIN } from '../audioMix';
+import { audioMixTerminalPatch, buildAudioMixPlaceholderNode, AUDIO_MIX_EDGE_ORIGIN } from '../tools/audio/audioMix';
 import { setupAudioMixRecovery, bindingView, deferred, flush } from './audioMixRecoveryTestKit';
 
 vi.mock('@/custom/api/jobs', async (importOriginal) => ({

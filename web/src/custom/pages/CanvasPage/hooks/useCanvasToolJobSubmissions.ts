@@ -4,8 +4,8 @@ import { isApiError } from '@/shared/api/http';
 import type { QueryClient } from '@tanstack/react-query';
 import { frameInterpolationRecoveryOptions } from '@/custom/api/frameInterpolationRecovery';
 import { fetchJobStatus, type JobDetail } from '@/custom/api/jobs';
-import type { FrameInterpolationSubmission, VideoEnhanceSubmission } from '../panelToolSessions';
-import type { FrameInterpolationIdentity } from '../frameInterpolation';
+import type { FrameInterpolationSubmission, VideoEnhanceSubmission } from '../tools/compound/panelToolSessions';
+import type { FrameInterpolationIdentity } from '../tools/video/frameInterpolation';
 import type { VideoToolPayload } from '../generationRuntime/videoTools';
 import type { GenerationRuntime } from '../generationRuntime/runtime';
 

@@ -7,7 +7,7 @@ import {
   IMAGE_ENHANCE_TIER_CAPABILITY,
   type ImageEnhanceVersionTier,
 } from '@lib/contracts/image-enhance';
-import { freezeImageEnhanceParams, imageEnhanceTierAvailability, pickImageEnhanceTier, type ImageEnhancePanelParams } from '../../imageEnhance';
+import { freezeImageEnhanceParams, imageEnhanceTierAvailability, pickImageEnhanceTier, type ImageEnhancePanelParams } from '../../tools/image/imageEnhance';
 import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../followDialog';
 import ProviderModelSelect from './ProviderModelSelect';
 import styles from './index.module.css';

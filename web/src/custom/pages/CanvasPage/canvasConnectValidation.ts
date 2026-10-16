@@ -2,9 +2,9 @@ import { type VideoRefRole } from '@/custom/enums';
 import type { Edge, Node } from '@xyflow/react';
 import type { GenerationModel } from '@/custom/api/generation';
 import { imageMediaRefsOf, imageRefSourceError, isImageDraftNode, readAssetId } from './mediaRefs';
-import { mergedVideoMediaRefsOf, videoRefSourceError, checkAddVideoRef, isVideoDraftNode, type VideoMediaRefs, type VideoRefCapabilities } from './videoMediaRefs';
+import { mergedVideoMediaRefsOf, videoRefSourceError, checkAddVideoRef, isVideoDraftNode, type VideoMediaRefs, type VideoRefCapabilities } from './tools/video/videoMediaRefs';
 import { videoRefCapsOfModel } from './modelCaps';
-import { draftVideoModeOf, videoModeAfterRefAdd } from './videoModes';
+import { draftVideoModeOf, videoModeAfterRefAdd } from './tools/video/videoModes';
 import { imageReferenceMaxOf, supportsAudioReferenceOf, supportsVideoReferenceOf } from '@/custom/utils/model-reference-limits';
 import {
   audioRefMediaTypeOf,
@@ -12,7 +12,7 @@ import {
   audioMergedRefsError,
   checkAddAudioRef,
   isAudioDraftNode,
-} from './audioMediaRefs';
+} from './tools/audio/audioMediaRefs';
 import { mergedAudioRefsWithTextIndex } from './textIndexSync';
 import { refOverflowToast } from '@/custom/utils/ref-overflow';
 

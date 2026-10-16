@@ -6,7 +6,7 @@ import {
   dragAudioTrimHandleEnd,
   dragAudioTrimHandleStart,
   type AudioTrimSelection,
-} from '../../audioTrimGeometry';
+} from '../../tools/audio/audioTrimGeometry';
 import styles from './AudioTrimOverlay.module.css';
 
 export interface AudioTrimOverlayProps {

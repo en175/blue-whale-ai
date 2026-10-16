@@ -1,8 +1,8 @@
 import type { Edge, Node } from '@xyflow/react';
-import { IMAGE_CROP_EDGE_ORIGIN } from './imageCrop';
-import { IMAGE_ENHANCE_EDGE_ORIGIN } from './imageEnhance';
-import { IMAGE_ERASE_EDGE_ORIGIN } from './imageErase';
-import { IMAGE_OUTPAINT_EDGE_ORIGIN } from './imageOutpaint';
+import { IMAGE_CROP_EDGE_ORIGIN } from './tools/image/imageCrop';
+import { IMAGE_ENHANCE_EDGE_ORIGIN } from './tools/image/imageEnhance';
+import { IMAGE_ERASE_EDGE_ORIGIN } from './tools/image/imageErase';
+import { IMAGE_OUTPAINT_EDGE_ORIGIN } from './tools/image/imageOutpaint';
 import { IMAGE_CUTOUT_EDGE_ORIGIN } from '@lib/contracts/image-cutout';
 import { VIDEO_SUBTITLE_ERASE_EDGE_ORIGIN } from '@lib/contracts/video-subtitle-erase';
 

@@ -1,6 +1,6 @@
 import { useCallback, useId, useRef } from 'react';
 import { useStore } from '@xyflow/react';
-import type { MaskOp, MaskPoint } from '../../eraseMask';
+import type { MaskOp, MaskPoint } from '../../tools/image/eraseMask';
 
 export interface EraseMaskLayerProps {
   ops: readonly MaskOp[];
