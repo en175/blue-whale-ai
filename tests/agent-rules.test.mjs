@@ -77,13 +77,21 @@ test("frontend-delivery auto-loads for web work and routes new fetches to TanSta
   const skill = read(".claude/skills/frontend-delivery/SKILL.md");
   const request = read(".claude/skills/frontend-delivery/references/request.md");
   const policy = read(".claude/skills/frontend-delivery/agents/openai.yaml");
+  const frontendWeb = read("agent-rules/frontend-web.md");
 
   assert.doesNotMatch(rootRules, /仅明确调用 `frontend-delivery`/);
+  assert.match(rootRules, /agent-rules\/frontend-web\.md/);
   assert.match(rootRules, /frontend-delivery\/SKILL\.md/);
   assert.match(rootRules, /references\/request\.md/);
   assert.match(skill, /^description: Use when.*web\//m);
   assert.match(skill, /Load this skill for any `web\/` product work/);
+  assert.match(skill, /agent-rules\/frontend-web\.md/);
+  assert.match(skill, /Do not expand the task to retrofit existing violations/);
   assert.match(skill, /references\/request\.md/);
+  assert.match(skill, /web\/src\/shared\/api\/http\.ts/);
+  assert.match(frontendWeb, /新加和本任务改到的代码/);
+  assert.match(frontendWeb, /存量不合格处不要求立刻改/);
+  assert.doesNotMatch(frontendWeb, /console\.log/);
   assert.match(policy, /allow_implicit_invocation: true/);
   assert.match(request, /@tanstack\/react-query/);
   assert.match(request, /queryOptions/);

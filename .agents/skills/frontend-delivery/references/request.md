@@ -1,6 +1,6 @@
 # Frontend server state (TanStack Query)
 
-Constraint for **newly generated** `web/` code. Transport stays `web/src/api/http.ts` (`apiRequest` / `http`, envelope unwrap, 401, default toast, `silent`). Do not migrate existing `useEffect` fetch in the same change.
+Constraint for **newly generated** `web/` code. Transport stays `web/src/shared/api/http.ts` (`apiRequest` / `http`, envelope unwrap, 401, default toast, `silent`). Do not migrate existing `useEffect` fetch in the same change.
 
 ```
 New page / new data source / new polling?
@@ -43,12 +43,12 @@ Never retry 4xx (401 would re-enter `handleUnauthorized`).
 
 ## queryOptions
 
-Co-locate with the resource in `web/src/api/<resource>.ts`. `queryFn` calls `apiRequest` / `http` with `{ silent: true }`. Pages import the factory, not a raw path string.
+Co-locate with the resource in `web/src/custom/api/` or `web/src/admin/api/`. Shared transport is `web/src/shared/api/http.ts`. `queryFn` calls `apiRequest` / `http` with `{ silent: true }`. Pages import the factory, not a raw path string.
 
 ```ts
-// web/src/api/projects.ts — next to existing fetch helpers
+// web/src/custom/api/projects.ts — next to existing fetch helpers
 import { queryOptions } from '@tanstack/react-query'
-import { apiRequest } from './http'
+import { apiRequest } from '@/shared/api/http'
 
 export const projectKeys = {
   all: ['projects'] as const,
