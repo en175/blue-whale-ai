@@ -5,6 +5,7 @@ import { createLab } from './server';
 import { handleCreateGenerationJob } from '../../../backend/libs/shared/generation/handle-create-generation-job';
 import { parseModelUpdateBody } from '../../../backend/libs/shared/model-capability/constants';
 import { toFeatures } from '../../../backend/libs/shared/persistence/model-capability-repo';
+import { clickSelectOption } from '@/custom/pages/CanvasPage/testing/radixSelect';
 
 it.each(['C3', 'C4', 'C5', 'H1', 'A1'])('验收场景 %s 可操作并生成证据', async (caseId) => {
   vi.resetModules(); localStorage.clear();
@@ -60,7 +61,7 @@ it.each(['C3', 'C4', 'C5', 'H1', 'A1'])('验收场景 %s 可操作并生成证�
     await click(asset);
     const confirm = [...document.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent?.includes('确认') || item.textContent?.includes('确定'));
     await click(confirm);
-    await click(button('视频编辑')); await click(button('视频延长'));
+    await click(button('视频编辑')); await clickSelectOption('视频延长');
     const duration = [...document.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent?.includes('⏱'));
     await click(duration);
     const auto = document.querySelector<HTMLInputElement>('[aria-label="自动时长，由模型选择"]');

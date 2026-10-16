@@ -7,7 +7,7 @@ import BottomDialog, { type VideoDraftParamsPatch } from '@/custom/pages/CanvasP
 import ChatBox from '@/custom/pages/Home/components/ChatBox';
 import ModelFormModal from '@/admin/pages/ModelList/ModelFormModal';
 import type { AdminModel } from '@/admin/api/adminModels';
-import { useCanvasUpdateGenerate } from '@/custom/pages/CanvasPage/hooks/useCanvasUpdateGenerate';
+import { useCanvasUpdateGenerate } from '@/custom/pages/CanvasPage/hooks/generation/useCanvasUpdateGenerate';
 import type { Node } from '@xyflow/react';
 import { takeGenHandoff } from '@/custom/utils/gen-handoff';
 import { setSession } from '@/shared/utils/auth';

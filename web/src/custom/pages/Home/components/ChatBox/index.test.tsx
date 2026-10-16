@@ -6,7 +6,7 @@ import type { GenerationModel } from '@/custom/api/generation';
 import ChatBox from './index';
 import styles from './index.module.css';
 import { OMNI_REFERENCE_FOLLOW_HINT } from '@/custom/utils/video-reference-hints';
-import { selectOptionByText } from '@/custom/pages/CanvasPage/testing/radixSelect';
+import { clickSelectOption, selectOptionByText } from '@/custom/pages/CanvasPage/testing/radixSelect';
 
 
 const { fetchGenerationModels, navigate, pickerOnSelect } = vi.hoisted(() => ({
@@ -203,7 +203,7 @@ describe('IKLUVP 首页延长时长', () => {
     await renderChatBox();
     await switchToVideoTabAndInject([videoAsset]);
     await act(async () => { buttonByLabel('视频编辑').click(); });
-    await act(async () => { buttonByLabel('视频延长').click(); });
+    await clickSelectOption('视频延长');
     expect(mountNode.textContent).not.toContain('跟随原视频');
     await act(async () => { buttonByLabel('⏱ 自动').click(); });
     const automatic = mountNode.querySelector<HTMLInputElement>('[aria-label="自动时长，由模型选择"]')!;
@@ -213,7 +213,7 @@ describe('IKLUVP 首页延长时长', () => {
     await act(async () => { automatic.click(); });
     expect(buttonByLabel('⏱ 自动')).toBeTruthy();
     await act(async () => { buttonByLabel('视频延长').click(); });
-    await act(async () => { buttonByLabel('全能参考').click(); });
+    await clickSelectOption('全能参考');
     expect(mountNode.textContent).not.toContain('⏱ 自动');
     expect(mountNode.textContent).not.toContain('-1s');
   });
