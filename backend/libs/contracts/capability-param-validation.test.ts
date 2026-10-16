@@ -162,14 +162,33 @@ describe("checkGenerationParamLimit", () => {
     ).toBeNull();
   });
 
-  it("非整数时长（5.5）在能力范围内通过——步进约束由前端 slider 保证，服务端不重复校验", () => {
-    expect(
-      checkGenerationParamLimit(videoCapability, {
-        size: "1080p",
-        aspect_ratio: "16:9",
-        duration: 5.5,
-      }),
-    ).toBeNull();
+  it("不符合能力步长的非整数时长被拒", () => {
+    expect(checkGenerationParamLimit(videoCapability, {
+      size: "1080p", aspect_ratio: "16:9", duration: 5.5,
+    })?.field).toBe("duration");
+  });
+
+  it.each([
+    [4, 0.1, 5],
+    [4, 0.2, 10],
+    [4, 0.3, 4.9],
+    [4.1, 0.1, 4.2],
+  ])("小数步长合法时长通过：min=%s step=%s duration=%s", (min, step, duration) => {
+    expect(checkGenerationParamLimit({
+      ...videoCapability,
+      supported_durations: { min, max: 30, step },
+    }, {
+      size: "1080p", aspect_ratio: "16:9", duration,
+    })).toBeNull();
+  });
+
+  it.each([4.05, 5.1, 3.8, 30.2])("小数步长仍拒绝错步长或越界时长：%s", (duration) => {
+    expect(checkGenerationParamLimit({
+      ...videoCapability,
+      supported_durations: { min: 4, max: 30, step: 0.2 },
+    }, {
+      size: "1080p", aspect_ratio: "16:9", duration,
+    })?.field).toBe("duration");
   });
 });
 
@@ -222,7 +241,7 @@ describe("checkGenerationParamLimit 任务类型约束（IKFPYX）", () => {
       first_frame: { allowed_ratios: ["adaptive"] },
       first_last_frame: { allowed_ratios: ["adaptive"] },
       edit: { allowed_ratios: ["adaptive"], allowed_durations: [-1] },
-      extend: { allowed_ratios: ["adaptive"] },
+      extend: { allowed_ratios: ["adaptive"], allow_auto_duration: true },
     },
   };
 
@@ -279,25 +298,31 @@ describe("checkGenerationParamLimit 任务类型约束（IKFPYX）", () => {
     expect(err?.field).toBe("duration");
   });
 
-  it("extend 任务：时长走基础范围，-1 被拒（只有 edit 锁跟随）", () => {
-    for (const d of [4, 10]) {
-      expect(
-        checkGenerationParamLimit(taskCapability, {
-          size: "1080p",
-          aspect_ratio: "adaptive",
-          duration: d,
-          mode: "extend",
-        }),
-      ).toBeNull();
-    }
-    expect(
-      checkGenerationParamLimit(taskCapability, {
-        size: "1080p",
-        aspect_ratio: "adaptive",
-        duration: -1,
-        mode: "extend",
-      })?.field,
-    ).toBe("duration");
+  it.each([-1, 4, 10, 30])("延长允许自动或基础范围内的 %s 秒", (duration) => {
+    expect(checkGenerationParamLimit(taskCapability, {
+      size: "1080p", aspect_ratio: "adaptive", duration, mode: "extend",
+    })).toBeNull();
+  });
+
+  it.each([3, 31, 0, -2, 4.5])("延长拒绝非法时长 %s", (duration) => {
+    expect(checkGenerationParamLimit(taskCapability, {
+      size: "1080p", aspect_ratio: "adaptive", duration, mode: "extend",
+    })?.field).toBe("duration");
+  });
+
+  it.each([undefined, null, false])("未开放自动时长的配置 %s 不接受 -1", (allow_auto_duration) => {
+    expect(checkGenerationParamLimit({ ...taskCapability,
+      task_types: { extend: { allow_auto_duration } },
+    }, { size: "1080p", aspect_ratio: "adaptive", duration: -1, mode: "extend" })?.field).toBe("duration");
+  });
+
+  it("只能自动优先，自动可选不覆盖步长", () => {
+    expect(checkGenerationParamLimit({ ...taskCapability,
+      task_types: { edit: { allowed_durations: [-1], allow_auto_duration: true } },
+    }, { size: "1080p", aspect_ratio: "adaptive", duration: 10, mode: "edit" })?.field).toBe("duration");
+    expect(checkGenerationParamLimit({ ...taskCapability,
+      supported_durations: { min: 4, max: 30, step: 2 },
+    }, { size: "1080p", aspect_ratio: "adaptive", duration: 5, mode: "extend" })?.field).toBe("duration");
   });
 
   it("未配 task_types → 回落基础能力行（-1 仍被拒）", () => {

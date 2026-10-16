@@ -162,6 +162,11 @@ function featuresFieldErr(features: unknown): string | null {
         )
           return `视频模式比例(task_types.${mode}.allowed_ratios)须为非空字符串数组或 null`;
       }
+      const autoDuration = (entry as Record<string, unknown>).allow_auto_duration;
+      if (autoDuration !== undefined && autoDuration !== null && typeof autoDuration !== "boolean")
+        return `视频模式自动时长(task_types.${mode}.allow_auto_duration)须为布尔值或 null`;
+      if (autoDuration === true && mode !== "edit" && mode !== "extend")
+        return "自动可选时长(allow_auto_duration)仅支持 edit / extend 模式";
       const durations = (entry as Record<string, unknown>).allowed_durations;
       if (durations !== undefined && durations !== null) {
         if (!Array.isArray(durations) || durations.length !== 1 || durations[0] !== -1)

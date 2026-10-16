@@ -15,6 +15,8 @@ import {
   parseGptMatrix,
   pickTaskTypeRatios,
   pickTaskTypeFollowDuration,
+  pickTaskTypeAutoDuration,
+  pickTaskTypeEnabled,
   ratiosFromModel,
   readFeature,
   sizesFromModel,
@@ -772,4 +774,23 @@ describe('音频 / 文本行（IKHBDO）', () => {
     expect(result.value.supported_durations).toBeNull();
     expect(result.value.default_duration).toBe(12);
   });
+});
+
+
+it('IKLUVP 管理端写入自动可选并保留比例和扩展配置', () => {
+  expect(buildTaskTypes({ extend: { extra: 7 } }, { extend: ['adaptive'] },
+    { extend: true }, {}, { extend: true })).toEqual({
+    extend: { extra: 7, allowed_ratios: ['adaptive'], allow_auto_duration: true },
+  });
+});
+
+
+it('IKLUVP 管理端三种时长语义可往返与取消', () => {
+  const task_types = { extend: { allow_auto_duration: true }, edit: { allowed_durations: [-1] }, omni: {} };
+  const features = { task_types };
+  expect(buildTaskTypes(task_types, {}, pickTaskTypeEnabled(features),
+    pickTaskTypeFollowDuration(features), pickTaskTypeAutoDuration(features))).toEqual(task_types);
+  expect(buildTaskTypes(task_types, {}, { extend: true }, {}, {})).toEqual({ extend: {} });
+  expect(buildTaskTypes(task_types, {}, { extend: true }, { extend: true }, { extend: true }))
+    .toEqual({ extend: { allowed_durations: [-1] } });
 });

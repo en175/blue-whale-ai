@@ -14,7 +14,7 @@ import {
 } from '../../graph/textIndexSync';
 import { orderRefStripItems, videoRefStripKey } from '../../components/RefThumbnail/strip-dnd';
 import { draftVideoModeOf, defaultVideoModeFor } from '../../tools/video/videoModes';
-import { lockedDurationOf, effectiveVideoParams, type VideoModeFeatures } from '@/custom/utils/video-modes';
+import { allowsAutoDurationOf, effectiveVideoParams, type VideoModeFeatures } from '@/custom/utils/video-modes';
 import { videoRefConflict, type VideoMediaRefs } from '../../tools/video/videoMediaRefs';
 import { buildImageJobReferences, buildVideoJobReferences } from '../../tools/video/videoJobReferences';
 import type { ImageTextAttachment } from '../../components/ImageDialog';
@@ -188,7 +188,7 @@ export function useCanvasUpdateGenerate(host: CanvasUpdateGenerateHost): CanvasU
       };
       const fallbackMode = draftVideoModeOf(data, draftRefs) ?? defaultVideoModeFor(draftRefs);
       const modeFeatures = draftModelOf(nodeId, 'video')?.features;
-      const lockedDuration = lockedDurationOf(modeFeatures, fallbackMode);
+      const allowsAutoDuration = allowsAutoDurationOf(modeFeatures, fallbackMode);
       const wireParams = effectiveVideoParams(modeFeatures, fallbackMode, {
         aspectRatio,
         duration,
@@ -197,7 +197,7 @@ export function useCanvasUpdateGenerate(host: CanvasUpdateGenerateHost): CanvasU
         !wireParams.aspect_ratio ||
         !resolution ||
         !Number.isFinite(wireParams.duration) ||
-        (wireParams.duration <= 0 && wireParams.duration !== lockedDuration)
+        (wireParams.duration <= 0 && !(wireParams.duration === -1 && allowsAutoDuration))
       ) {
         showToast('warn', '缺少视频参数，请先打开面板确认比例、分辨率和时长');
         return;

@@ -1326,6 +1326,28 @@ describe("handleCreateGenerationJob 单数组 references（IKDJNZ）", () => {
       parameters: { ...VIDEO_BODY.parameters, prompt, aspect_ratio: aspect, duration },
     });
 
+    it.each([-1, 4, 10, 30])("IKLUVP 显式延长时长 %s 被接纳并原样冻结", async (duration) => {
+      const { deps, createJob } = buildVideoDeps({
+        ...SEEDANCE_2_5_ROW,
+        features: {
+          ...SEEDANCE_2_5_ROW.features,
+          task_types: {
+            ...SEEDANCE_2_5_ROW.features.task_types,
+            extend: { allowed_ratios: ["adaptive"], allow_auto_duration: true },
+          },
+        },
+      });
+      const body = bodyOf("延长这段视频", "adaptive", duration);
+      const result = await handleCreateGenerationJob("u1", "p1", {
+        ...body,
+        parameters: { ...body.parameters, mode: "extend" },
+      }, null, deps);
+      expect(result.code).toBe(200);
+      expect(createJob.mock.calls[0]?.[0]).toMatchObject({
+        input: { video_mode: "extend", duration, aspect_ratio: "adaptive" },
+      });
+    });
+
     it("编辑 + 9:16 → 4xx task_type_param_constraint + 用户向文案，不建任务（不扣费）", async () => {
       const { deps, createJob } = buildVideoDeps(SEEDANCE_2_5_ROW);
       const result = await handleCreateGenerationJob("u1", "p1", bodyOf("把背景替换成海边", "9:16"), null, deps);
@@ -2248,7 +2270,7 @@ const VIDEO_PARAMS_OK = {
     model_id: "doubao-seedance-2-0-260128",
     aspect_ratio: "16:9",
     resolution: "720p",
-    duration: 8,
+    duration: 10,
   },
 };
 

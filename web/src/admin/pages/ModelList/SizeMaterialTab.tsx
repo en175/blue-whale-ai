@@ -84,6 +84,8 @@ interface SizeMaterialTabProps {
     setDraft: (value: Record<string, string>) => void;
     add: (taskType: string) => void;
     remove: (taskType: string, ratio: string) => void;
+    autoDuration: Record<string, boolean>;
+    toggleAutoDuration: (taskType: string) => void;
     followDuration: Record<string, boolean>;
     toggleFollowDuration: (taskType: string) => void;
   };
@@ -461,7 +463,7 @@ export default function SizeMaterialTab({
       {}
       {type === 'video' && (
         <>
-          <h3 style={SECTION}>视频模式 task_types <Hint>勾选 = 该模式对模型开放；未勾选的模式不出现。比例留空 = 该模式沿用基础「比例选项」。勾「时长跟随原视频」= 该模式的时长由上游按源素材决定、用户不可选（只对消费源素材的模式有意义）。</Hint></h3>
+          <h3 style={SECTION}>视频模式 task_types <Hint>勾选 = 该模式对模型开放；未勾选的模式不出现。比例留空 = 该模式沿用基础「比例选项」。勾「仅自动时长」时用户不可选秒数；勾「允许自动或指定秒数」时可选自动或基础范围内秒数。编辑自动时长跟随原视频，延长自动时长由模型选择。</Hint></h3>
           {TASK_TYPE_KEYS.map((taskType) => (
             <div style={TASK_ROW} key={taskType}>
               <Checkbox
@@ -473,8 +475,16 @@ export default function SizeMaterialTab({
                 checked={!!taskTypes.followDuration[taskType]}
                 disabled={!taskTypes.enabled[taskType]}
                 onChange={() => taskTypes.toggleFollowDuration(taskType)}
-                label="时长跟随原视频"
+                label="仅自动时长"
               />
+              {(taskType === 'edit' || taskType === 'extend') && (
+                <Checkbox
+                  checked={!taskTypes.followDuration[taskType] && !!taskTypes.autoDuration[taskType]}
+                  disabled={!taskTypes.enabled[taskType] || !!taskTypes.followDuration[taskType]}
+                  onChange={() => taskTypes.toggleAutoDuration(taskType)}
+                  label="允许自动或指定秒数"
+                />
+              )}
               <div style={CHIP_LIST}>
                 {(taskTypes.ratios[taskType] ?? []).map((ratio) => (
                   <Chip key={ratio} onClick={() => taskTypes.remove(taskType, ratio)}>

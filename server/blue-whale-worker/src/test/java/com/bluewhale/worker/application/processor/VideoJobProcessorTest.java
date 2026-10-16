@@ -1598,6 +1598,23 @@ class VideoJobProcessorTest {
             assertThat(processor.buildSubmitRequest(claim).videoTaskType()).isEqualTo("edit");
         }
 
+        @org.junit.jupiter.params.ParameterizedTest
+        @org.junit.jupiter.params.provider.ValueSource(doubles = {-1, 4, 10, 30})
+        @DisplayName("IKLUVP 冻结延长模式原样消费自动和指定秒数")
+        void extendDurationPreservedFromSnapshot(double duration) {
+            Map<String, Object> input = baseInput();
+            input.put("duration", duration);
+            input.put("video_mode", "extend");
+            input.put("aspect_ratio", "adaptive");
+            input.put("references", List.of(Map.of("role", "reference", "type", "video",
+                    "material_id", "Asset-video-1")));
+            ClaimedVideoJobDto claim = videoClaim("304", false, null, 0, 0, null, input);
+            var request = processor.buildSubmitRequest(claim);
+            assertThat(request.videoTaskType()).isEqualTo("extend");
+            assertThat(request.duration()).isEqualTo(duration);
+            assertThat(request.ratio()).isEqualTo("adaptive");
+        }
+
         @Test
         @DisplayName("IKK1T9：冻结模式为 text2video 时 duration=-1 仍拒（不因推断漏网）")
         void autoDurationRejectedForFrozenTextToVideoMode() {

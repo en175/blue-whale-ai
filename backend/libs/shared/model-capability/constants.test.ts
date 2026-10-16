@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { toFeatures } from "../persistence/model-capability-repo.js";
 import { parseModelCreateBody, parseModelUpdateBody } from "./constants.js";
 
 describe("parseModelCreateBody", () => {
@@ -810,4 +811,29 @@ describe("parseModelUpdateBody · 比例档元素形态（ADR-0123）", () => {
       parseModelUpdateBody({ supported_aspect_ratios: ["16:9"] }),
     ).toMatchObject({ ok: true });
   });
+});
+
+
+describe("IKLUVP 自动可选能力写入", () => {
+  it.each(["true", 1, [], {}])("拒绝非布尔标记 %j", (value) => {
+    expect(parseModelUpdateBody({ features: { task_types: {
+      extend: { allow_auto_duration: value },
+    } } })).toMatchObject({ ok: false });
+  });
+});
+
+
+it.each([true, false, null])("IKLUVP 配置写入与目录归一保留自动选择 %s", (allow_auto_duration) => {
+  const features = { task_types: { extend: { allow_auto_duration, allowed_ratios: ["adaptive"] }, edit: { allowed_durations: [-1] } } };
+  const parsed = parseModelUpdateBody({ features });
+  expect(parsed).toMatchObject({ ok: true, value: { features } });
+  if (!parsed.ok) throw new Error(parsed.error);
+  expect(toFeatures(parsed.value.features).task_types).toEqual(features.task_types);
+  expect(toFeatures({ taskTypes: features.task_types }).task_types).toEqual(features.task_types);
+});
+
+
+it.each(["text2video", "omni", "image_reference", "first_frame", "first_last_frame"])("IKLUVP 不为执行侧未支持的模式 %s 开放自动", (mode) => {
+  expect(parseModelUpdateBody({ features: { task_types: { [mode]: { allow_auto_duration: true } } } }))
+    .toMatchObject({ ok: false });
 });

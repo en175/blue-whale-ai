@@ -70,7 +70,7 @@ import {
   resolveVideoMode,
   videoModeRefsSignature,
 } from '../../tools/video/videoModes';
-import { configuredVideoModes, effectiveVideoParams, frameSlotCountOf, isFrameMode, isVideoMode, lockedDurationOf, lockedRatioOf, normalizeVideoMode, type VideoMode } from '@/custom/utils/video-modes';
+import { allowsAutoDurationOf, configuredVideoModes, effectiveVideoParams, frameSlotCountOf, isFrameMode, isVideoMode, lockedDurationOf, lockedRatioOf, normalizeVideoMode, type VideoMode } from '@/custom/utils/video-modes';
 import styles from './index.module.css';
 
 export interface VideoGenOptions {
@@ -354,6 +354,7 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
   const supportsAdaptiveRatio = !!hasAspectRatio(currentModel?.supported_aspect_ratios, 'adaptive');
   const ratioLocked = lockedRatioOf(currentModel?.features, selectedMode);
   const durationLocked = lockedDurationOf(currentModel?.features, selectedMode);
+  const allowsAutoDuration = allowsAutoDurationOf(currentModel?.features, selectedMode);
 
   const fallbackDurationOf = (model: GenerationModel | null | undefined): number => {
     const range = model?.supported_durations;
@@ -368,13 +369,13 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
       if (duration !== durationLocked) setDuration(durationLocked);
       return;
     }
-    if (duration < 0) {
+    if (duration < 0 && !(duration === -1 && allowsAutoDuration)) {
       const next = fallbackDurationOf(currentModel);
       setDuration(next);
       syncDraftParams({ duration: next });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ratioLocked, durationLocked, selectedRatio, duration, currentModel]);
+  }, [ratioLocked, durationLocked, allowsAutoDuration, selectedRatio, duration, currentModel]);
   const isImageReference = selectedMode === 'image_reference';
   const showOmniFollowHint = selectedMode === 'omni'
     && supportsAdaptiveRatio
@@ -516,10 +517,12 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
     if (lockedDuration != null) {
       setDuration(lockedDuration);
       patch.duration = lockedDuration;
-    } else if (duration < 0) {
+    } else if (duration < 0 && !(duration === -1 && allowsAutoDurationOf(currentModel?.features, key))) {
       const nextDuration = fallbackDurationOf(currentModel);
       setDuration(nextDuration);
       patch.duration = nextDuration;
+    } else if (duration === -1) {
+      patch.duration = duration;
     }
     syncDraftParams(patch);
   };
@@ -540,7 +543,7 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
     : !sizeOptions.some(option => option.key === selectedSize) ? '原分辨率不可用，请重新选择分辨率'
 
     : !ratioLocked && !ratioOptions.some(option => option.id === selectedRatio) ? '原比例不兼容，请重新选择比例'
-    : !durationLocked && durationRange && (duration < durationRange.min || duration > durationRange.max
+    : !durationLocked && !(duration === -1 && allowsAutoDuration) && durationRange && (duration < durationRange.min || duration > durationRange.max
       || (duration - durationRange.min) % durationRange.step !== 0)
       ? '原时长不兼容，请重新选择时长'
     : hasInvalidRef ? '正文有已失效的素材标签，请点击标签替换或删除后再发送'
@@ -641,7 +644,8 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
           }
           if (typeof initialParams.duration === 'number' && target.supported_durations) {
             const d = target.supported_durations;
-            const clamped = Math.min(Math.max(initialParams.duration, d.min), d.max);
+            const clamped = initialParams.duration === -1 && allowsAutoDurationOf(target.features, normalizeVideoMode(initialParams.mode))
+              ? -1 : Math.min(Math.max(initialParams.duration, d.min), d.max);
             setDuration(clamped);
             patch.duration = clamped;
           }
@@ -1013,23 +1017,39 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
             <>
               <span className={styles.configLabel}>时长</span>
               <div className={styles.durationRange}>
-                <span>跟随原视频</span>
+                <span>{selectedMode === 'edit' ? '跟随原视频' : '自动，由模型选择'}</span>
               </div>
             </>
           ) : durationRange && (
             <>
               <div className={styles.durationHead}>
                 <span className={styles.configLabel}>时长</span>
-                <span className={styles.durationValue}>{duration}s</span>
+                <span className={styles.durationValue}>{duration === -1 ? '自动' : `${duration}s`}</span>
               </div>
+              {allowsAutoDuration && (
+                <label>
+                  <input
+                    type="checkbox"
+                    aria-label="自动时长，由模型选择"
+                    checked={duration === -1}
+                    disabled={readOnly}
+                    onChange={(e) => {
+                      const next = e.target.checked ? -1 : fallbackDurationOf(currentModel);
+                      setDuration(next);
+                      syncDraftParams({ duration: next });
+                    }}
+                  />
+                  自动，由模型选择时长
+                </label>
+              )}
               <input
                 type="range"
                 className={styles.durationSlider}
                 min={durationRange.min}
                 max={durationRange.max}
                 step={durationRange.step}
-                value={duration}
-                disabled={readOnly}
+                value={duration === -1 ? durationRange.min : duration}
+                disabled={readOnly || duration === -1}
                 onChange={(e) => {
                   const v = Number(e.target.value);
                   setDuration(v);
@@ -1252,7 +1272,7 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
             <span className={styles.barDivider}>|</span>
             <span>{currentSizeLabel}</span>
             <span className={styles.barDivider}>|</span>
-            <span>{durationLocked ? '跟随原视频' : `${duration}s`}</span>
+            <span>{duration === -1 ? (selectedMode === 'edit' && durationLocked ? '跟随原视频' : '自动') : `${duration}s`}</span>
           </button>
         </div>
 
