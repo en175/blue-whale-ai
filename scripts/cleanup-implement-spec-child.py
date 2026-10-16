@@ -76,9 +76,10 @@ def rebase_lineage_proves(root: Path, common_dir: Path, source_branch: str,
                 raise CleanupError("同步证明含无效提交 SHA，未清理。")
             if not isinstance(children, dict):
                 raise CleanupError("同步证明缺少子任务映射，未清理。")
-            direct = (children.get(child_branch) == child_head
-                      and git(root, "merge-base", "--is-ancestor", child_head,
-                              original, check=False).returncode == 0)
+            direct = (child_head == original
+                      or (children.get(child_branch) == child_head
+                          and git(root, "merge-base", "--is-ancestor", child_head,
+                                  original, check=False).returncode == 0))
             chained = any(git(root, "merge-base", "--is-ancestor", previous,
                               original, check=False).returncode == 0 for previous in reachable)
             if not direct and not chained:
@@ -135,30 +136,36 @@ def cleanup(root: Path, snapshot_path: Path) -> dict[str, str]:
     source_branch = str(snapshot["source_branch"])
     target_branch = str(snapshot["target_branch"])
     source_head = str(snapshot["head_sha"])
-    if snapshot["state"] != "opened" or not re.fullmatch(r"[0-9a-f]{40}", source_head):
-        raise CleanupError("PR 快照必须是已开放且带有效源 HEAD 的记录。")
+    if snapshot["state"] not in {"opened", "merged"} or not re.fullmatch(r"[0-9a-f]{40}", source_head):
+        raise CleanupError("PR 快照必须是已开放或已合并且带有效源 HEAD 的记录。")
     if source_branch == child_branch or target_branch != child["target_branch"]:
         raise CleanupError("PR 源分支或目标发布线与子任务记录不符。")
     entries = worktrees(root)
-    integration_roots = [path for path, branch in entries if branch == source_branch]
-    if len(integration_roots) != 1:
-        raise CleanupError("找不到唯一的 PR 集成任务 worktree。")
-    integration = read_task_metadata(integration_roots[0], target_branch)
-    if integration["task_branch"] != source_branch:
-        raise CleanupError("PR 集成任务元数据不符。")
+    merged = snapshot["state"] == "merged"
+    if not merged:
+        integration_roots = [path for path, branch in entries if branch == source_branch]
+        if len(integration_roots) != 1:
+            raise CleanupError("找不到唯一的 PR 集成任务 worktree。")
+        integration = read_task_metadata(integration_roots[0], target_branch)
+        if integration["task_branch"] != source_branch:
+            raise CleanupError("PR 集成任务元数据不符。")
 
-    fetched = git(root, "fetch", "--no-tags", "origin", f"refs/heads/{source_branch}", check=False)
+    remote_branch = target_branch if merged else source_branch
+    fetched = git(root, "fetch", "--no-tags", "origin", f"refs/heads/{remote_branch}", check=False)
     if fetched.returncode:
-        raise CleanupError("无法读取远端 PR 源分支，未清理：" + fetched.stderr.strip())
+        raise CleanupError("无法读取远端 PR 核验分支，未清理：" + fetched.stderr.strip())
     fetched_head = output(root, "rev-parse", "FETCH_HEAD^{commit}")
-    if fetched_head != source_head:
+    if merged and git(root, "merge-base", "--is-ancestor", source_head,
+                      fetched_head, check=False).returncode:
+        raise CleanupError("远端目标发布线尚未包含已合并 PR 的源 HEAD，未清理。")
+    if not merged and fetched_head != source_head:
         raise CleanupError("PR 快照与远端源分支 HEAD 不一致，未清理。")
-    direct_ancestor = git(root, "merge-base", "--is-ancestor", child_head, fetched_head,
+    direct_ancestor = git(root, "merge-base", "--is-ancestor", child_head, source_head,
                           check=False).returncode == 0
     if not direct_ancestor:
         if rebase_lineage_proves(root, common_dir, source_branch, target_branch,
                                  int(snapshot["pull_request_id"]), child_branch,
-                                 child_head, fetched_head):
+                                 child_head, source_head):
             direct_ancestor = True
     if not direct_ancestor:
         slug = source_branch.replace("/", "%")
@@ -187,14 +194,14 @@ def cleanup(root: Path, snapshot_path: Path) -> dict[str, str]:
                        check=False).returncode):
             raise CleanupError("线性化记录未证明子任务内容进入已核验的 PR 源分支，未清理。")
         verified_head = str(lineage["verified_head"])
-        if verified_head != fetched_head and not rebase_lineage_proves(
+        if verified_head != source_head and not rebase_lineage_proves(
                 root, common_dir, source_branch, target_branch,
                 int(snapshot["pull_request_id"]), child_branch, child_head,
-                fetched_head, initial_verified=verified_head):
+                source_head, initial_verified=verified_head):
             raise CleanupError("线性化后的同步证明未接续到当前 PR 源提交，未清理。")
-    remote_line = output(root, "ls-remote", "--heads", "origin", f"refs/heads/{source_branch}")
+    remote_line = output(root, "ls-remote", "--heads", "origin", f"refs/heads/{remote_branch}")
     if not remote_line or remote_line.split()[0] != fetched_head:
-        raise CleanupError("远端 PR 源分支在核验期间变化，未清理。")
+        raise CleanupError("远端 PR 核验分支在核验期间变化，未清理。")
     if output(root, "rev-parse", "HEAD") != child_head or output(root, "status", "--porcelain"):
         raise CleanupError("子任务工作树在核验期间变化，未清理。")
     main_roots = [path for path, _ in entries
