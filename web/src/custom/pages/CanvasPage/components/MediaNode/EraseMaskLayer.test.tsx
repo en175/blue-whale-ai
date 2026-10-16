@@ -4,7 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { ReactFlowProvider } from '@xyflow/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import EraseMaskLayer from './EraseMaskLayer';
-import type { MaskOp } from '../../eraseMask';
+import type { MaskOp } from '../../tools/image/eraseMask';
 
 let root: Root | null = null;
 let container: HTMLDivElement | null = null;

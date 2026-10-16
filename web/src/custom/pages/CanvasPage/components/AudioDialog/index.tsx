@@ -2,7 +2,7 @@ import { type MediaGenStatus } from '@/custom/enums';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { X, AudioLines, ArrowUp, Maximize2, Minimize2 } from 'lucide-react';
 import { fetchGenerationModels, type GenerationModel } from '@/custom/api/generation';
-import { checkAddAudioRef, audioRefItemMediaTypeOf } from '../../audioMediaRefs';
+import { checkAddAudioRef, audioRefItemMediaTypeOf } from '../../tools/audio/audioMediaRefs';
 import { checkReferenceLimits, audioReferenceMaxOf, imageReferenceMaxOfForAudio } from '@/custom/utils/model-reference-limits';
 import { remoteImageCrossOrigin, resolveMediaSrc } from '@/shared/utils/remoteImageCors';
 import Empty from '@/custom/components/Empty';

@@ -15,8 +15,8 @@ import {
   type TextProvidedRef,
 } from '@lib/contracts/text-index-sync';
 import { imageMediaRefsOf, type ImageMediaRef } from './mediaRefs';
-import { audioMediaRefsOf, audioMergedRefsError, type AudioMediaRef } from './audioMediaRefs';
-import { mergedVideoMediaRefsOf, type VideoMediaRef, type VideoMediaRefs } from './videoMediaRefs';
+import { audioMediaRefsOf, audioMergedRefsError, type AudioMediaRef } from './tools/audio/audioMediaRefs';
+import { mergedVideoMediaRefsOf, type VideoMediaRef, type VideoMediaRefs } from './tools/video/videoMediaRefs';
 import { UNRESOLVED_IMAGE_REFERENCE_LIMIT } from '@/custom/utils/model-reference-limits';
 
 export const DEFAULT_IMAGE_REFERENCE_LIMIT = UNRESOLVED_IMAGE_REFERENCE_LIMIT;

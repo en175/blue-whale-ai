@@ -6,9 +6,9 @@ import type { AudioRefItem } from '../components/AudioDialog';
 import { readNodeAssetId } from '../canvasNodeUtils';
 import { panelCanvasRefError } from '../refSourceTypes';
 import { readAssetId } from '../mediaRefs';
-import { audioRefMediaTypeOf, audioRefSourceError } from '../audioMediaRefs';
+import { audioRefMediaTypeOf, audioRefSourceError } from '../tools/audio/audioMediaRefs';
 import { videoFreeRefItemOf } from '../canvasPureNodeHelpers';
-import { checkAddVideoRef, incomingVideoRefOccupied, isLibraryOnlyVideoRef, mergedVideoMediaRefsOf, videoRefSourceError, type VideoMediaRef, type VideoMediaRefs, type VideoRefCapabilities } from '../videoMediaRefs';
+import { checkAddVideoRef, incomingVideoRefOccupied, isLibraryOnlyVideoRef, mergedVideoMediaRefsOf, videoRefSourceError, type VideoMediaRef, type VideoMediaRefs, type VideoRefCapabilities } from '../tools/video/videoMediaRefs';
 
 export interface CanvasPickSessionClickHost {
   mediaNodesRef: RefObject<Node[]>;

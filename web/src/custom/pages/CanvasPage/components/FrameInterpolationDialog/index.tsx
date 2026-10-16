@@ -7,7 +7,7 @@ import {
   FRAME_INTERPOLATION_SEND_HINT,
   frameInterpolationFpsLabel,
   type FrameInterpolationFps,
-} from '../../frameInterpolation';
+} from '../../tools/video/frameInterpolation';
 import styles from './index.module.css';
 
 interface FrameInterpolationDialogProps {

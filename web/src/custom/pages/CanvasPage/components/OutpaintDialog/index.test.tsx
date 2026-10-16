@@ -3,7 +3,7 @@ import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import OutpaintDialog from './index';
-import type { ExpandSides } from '../../imageOutpaint';
+import type { ExpandSides } from '../../tools/image/imageOutpaint';
 
 let root: Root | null = null;
 let container: HTMLDivElement | null = null;

@@ -42,7 +42,7 @@ function defaultImportLocalsByComponentDir(file: string, wanted: ReadonlySet<str
   const map = new Map<string, string>();
   sourceFile.forEachChild((stmt) => {
     if (!ts.isImportDeclaration(stmt) || !ts.isStringLiteral(stmt.moduleSpecifier)) return;
-    const match = stmt.moduleSpecifier.text.match(/^\.\/components\/([A-Za-z0-9_]+?)(?:\/index)?$/);
+    const match = stmt.moduleSpecifier.text.match(/^(?:\.\/|\.\.\/(?:\.\.\/)*)components\/([A-Za-z0-9_]+?)(?:\/index)?$/);
     if (!match || !wanted.has(match[1])) return;
     const local = stmt.importClause?.name?.text;
     if (local) map.set(match[1], local);
@@ -94,27 +94,26 @@ function spreadsResources(node: ts.JsxOpeningElement | ts.JsxSelfClosingElement)
   );
 }
 
-function tsxFilesDirectlyUnder(dir: string): string[] {
-  return fs
-    .readdirSync(dir, { withFileTypes: true })
-    .filter((entry) => entry.isFile() && entry.name.endsWith('.tsx') && !entry.name.endsWith('.test.tsx'))
-    .map((entry) => path.join(dir, entry.name));
+function productionTsxFiles(): string[] {
+  const componentRoot = path.join(PAGE_DIR, 'components') + path.sep;
+  return tsxFilesUnder(PAGE_DIR).filter((file) => !file.startsWith(componentRoot));
 }
 
 function overlayWrapperModule(overlayName: string): string {
-  const matches = tsxFilesDirectlyUnder(PAGE_DIR).filter((file) =>
+  const matches = productionTsxFiles().filter((file) =>
     defaultImportLocalsByComponentDir(file, new Set([overlayName])).has(overlayName),
   );
-  expect(matches.length, `未找到 CanvasPage 目录下默认导入 ./components/${overlayName} 的包装模块`).toBe(1);
+  expect(matches.length, `未找到 CanvasPage 下默认导入 components/${overlayName} 的包装模块`).toBe(1);
   return matches[0];
 }
 
-function defaultImportLocalOf(file: string, moduleSpecifier: string): string | null {
+function defaultImportLocalOfModuleBase(file: string, wrapperBase: string): string | null {
   const sourceFile = ts.createSourceFile(file, fs.readFileSync(file, 'utf8'), ts.ScriptTarget.ESNext, true, ts.ScriptKind.TSX);
   let local: string | null = null;
   sourceFile.forEachChild((stmt) => {
     if (!ts.isImportDeclaration(stmt) || !ts.isStringLiteral(stmt.moduleSpecifier)) return;
-    if (stmt.moduleSpecifier.text !== moduleSpecifier) return;
+    const spec = stmt.moduleSpecifier.text;
+    if (spec !== `./${wrapperBase}` && !spec.endsWith(`/${wrapperBase}`)) return;
     const name = stmt.importClause?.name?.text;
     if (name) local = name;
   });
@@ -154,11 +153,11 @@ describe('IKJU9T 页面级锚定浮层出口机械护栏', () => {
 
       const wrapperFile = overlayWrapperModule(name);
       const wrapperBase = path.basename(wrapperFile, '.tsx');
-      const exitFile = tsxFilesDirectlyUnder(PAGE_DIR).find(
-        (file) => defaultImportLocalOf(file, `./${wrapperBase}`) != null,
+      const exitFile = productionTsxFiles().find(
+        (file) => file !== wrapperFile && defaultImportLocalOfModuleBase(file, wrapperBase) != null,
       );
       expect(exitFile, `${name} 的包装模块 ${wrapperBase} 未在画布页出口模块中默认导入`).toBeTruthy();
-      const wrapperLocal = defaultImportLocalOf(exitFile!, `./${wrapperBase}`);
+      const wrapperLocal = defaultImportLocalOfModuleBase(exitFile!, wrapperBase);
       const exitSource = ts.createSourceFile(
         exitFile!,
         fs.readFileSync(exitFile!, 'utf8'),
@@ -184,7 +183,7 @@ describe('IKJU9T 页面级锚定浮层出口机械护栏', () => {
         ts.ScriptKind.TSX,
       );
       const overlayLocal = defaultImportLocalsByComponentDir(wrapperFile, new Set([name])).get(name);
-      expect(overlayLocal, `${wrapperBase} 未默认导入 ./components/${name}`).toBeTruthy();
+      expect(overlayLocal, `${wrapperBase} 未默认导入 components/${name}`).toBeTruthy();
       const wrapperSites = jsxElementsNamed(wrapperSource, overlayLocal!);
       expect(wrapperSites.length, `${wrapperBase} 未渲染 ${name}`).toBeGreaterThan(0);
       wrapperSites.forEach((site, i) => {

@@ -6,7 +6,7 @@ import { assetPageQueryOptions } from '@/custom/api/assets';
 import { isApiError } from '@/shared/api/http';
 import { uploadAssetFile } from '@/custom/utils/upload';
 import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../followDialog';
-import { AUDIO_MIX_FORMATS, audioMixSourceError, type AudioMixFormat, type AudioMixInputSelection } from '../../audioMix';
+import { AUDIO_MIX_FORMATS, audioMixSourceError, type AudioMixFormat, type AudioMixInputSelection } from '../../tools/audio/audioMix';
 import { cardNameOfNode, readAssetId } from '../../mediaRefs';
 import DropdownMenu from '@/custom/components/DropdownMenu';
 import Empty from '@/custom/components/Empty';

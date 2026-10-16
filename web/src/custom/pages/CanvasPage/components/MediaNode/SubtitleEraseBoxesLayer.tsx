@@ -1,6 +1,6 @@
 import { useCallback, useRef } from 'react';
 import { useStore } from '@xyflow/react';
-import type { SubtitleBoxOp, SubtitleBoxPoint } from '../../subtitleEraseBoxes';
+import type { SubtitleBoxOp, SubtitleBoxPoint } from '../../tools/video/subtitleEraseBoxes';
 
 export interface SubtitleEraseBoxesLayerProps {
   boxes: readonly SubtitleBoxOp[];

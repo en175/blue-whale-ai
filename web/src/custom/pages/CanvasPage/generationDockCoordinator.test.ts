@@ -2,11 +2,11 @@ import { createElement, Fragment } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { createGenerationDockCoordinator } from './generationDockCoordinator';
-import { createImageGenerationDock } from './imageGenerationDock';
+import { createImageGenerationDock } from './tools/image/imageGenerationDock';
 import type { Node } from '@xyflow/react';
 import { createToolSessionRuntime } from './toolSessionRuntime';
 import { createToolGenerationDock } from './toolGenerationDock';
-import type { ImageGenerationDockHost } from './imageGenerationDock';
+import type { ImageGenerationDockHost } from './tools/image/imageGenerationDock';
 
 function imageHost(nodes: Node[]): ImageGenerationDockHost {
   return {

@@ -4,13 +4,13 @@ import type { Dispatch, RefObject, SetStateAction } from 'react';
 import type { Edge, Node } from '@xyflow/react';
 import { fetchJobStatus, readJobFailText } from '@/custom/api/jobs';
 import type { SnapshotAsset } from '@/custom/api/projects';
-import { audioMixTerminalPatch, isAudioMixNodeId } from '../audioMix';
-import { audioSpeedTerminalPatch, isAudioSpeedNodeId } from '../audioSpeed';
-import { audioTrimTerminalPatch, isAudioTrimNodeId } from '../audioTrim';
-import { audioVideoMuxErrorText, audioVideoMuxIdentityOf, audioVideoMuxResultName } from '../audioVideoMux';
+import { audioMixTerminalPatch, isAudioMixNodeId } from '../tools/audio/audioMix';
+import { audioSpeedTerminalPatch, isAudioSpeedNodeId } from '../tools/audio/audioSpeed';
+import { audioTrimTerminalPatch, isAudioTrimNodeId } from '../tools/audio/audioTrim';
+import { audioVideoMuxErrorText, audioVideoMuxIdentityOf, audioVideoMuxResultName } from '../tools/audio/audioVideoMux';
 import { draftFileNameOf, hasCustomName } from '../canvasNodeUtils';
 import type { SpawnBox } from '../draftSpawn';
-import { frameInterpolationErrorText } from '../frameInterpolation';
+import { frameInterpolationErrorText } from '../tools/video/frameInterpolation';
 import type { GenerationRuntime } from '../generationRuntime/runtime';
 import { cancelledTerminalAction } from '../mediaReEdit';
 import { isMediaExtractNodeId, mediaExtractTerminalPatch } from '../mediaExtract';
@@ -24,11 +24,11 @@ import {
   sceneSplitSegmentBox,
   sceneSplitSegmentLabel,
   type SceneSplitIdentity,
-} from '../sceneSplit';
-import { smartMattingErrorText, type SmartMattingIdentity } from '../smartMatting';
+} from '../tools/video/sceneSplit';
+import { smartMattingErrorText, type SmartMattingIdentity } from '../tools/image/smartMatting';
 import { nextUsedInputState } from '../textIndexSync';
 
-import { videoEnhanceErrorText } from '../videoEnhance';
+import { videoEnhanceErrorText } from '../tools/video/videoEnhance';
 import {
   VOCAL_SPLIT_DEFAULT_FORMAT,
   VOCAL_SPLIT_EDGE_ORIGIN,
@@ -38,7 +38,7 @@ import {
   vocalSplitSourceName,
   vocalSplitTerminalPatch,
   type VocalSplitIdentity,
-} from '../vocalSplit';
+} from '../tools/audio/vocalSplit';
 
 export type JobTerminalDetail = Awaited<ReturnType<typeof fetchJobStatus>>;
 

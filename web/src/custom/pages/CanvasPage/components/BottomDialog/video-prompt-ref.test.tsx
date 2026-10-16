@@ -6,7 +6,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { $getSelection, $isRangeSelection } from 'lexical';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import BottomDialog from './index';
-import type { VideoMediaRef, VideoMediaRefs } from '../../videoMediaRefs';
+import type { VideoMediaRef, VideoMediaRefs } from '../../tools/video/videoMediaRefs';
 import type { PromptDoc } from '@/custom/utils/prompt-doc';
 import { collapseCaretAt, promptRefCaretOffset, promptRefEditorInstance, readPromptRefText, typePromptRefRaw, typePromptRefText } from '../../testing/promptRefEditor';
 

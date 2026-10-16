@@ -8,11 +8,11 @@ import {
   type MediaToolCanvasBindingView, readJobFailText,
 } from '@/custom/api/jobs';
 import type { CanvasBinding, GenerationRecoveryRecord } from '@/custom/api/canvasRecovery';
-import { isAudioSpeedNodeId } from '../audioSpeed';
-import { isAudioTrimNodeId } from '../audioTrim';
+import { isAudioSpeedNodeId } from '../tools/audio/audioSpeed';
+import { isAudioTrimNodeId } from '../tools/audio/audioTrim';
 import { isMediaExtractNodeId } from '../mediaExtract';
-import { buildFrameInterpolationInput, restoreFrameInterpolationRetryFps } from '../frameInterpolation';
-import { buildVideoEnhanceInput, restoreVideoEnhanceResolution } from '../videoEnhance';
+import { buildFrameInterpolationInput, restoreFrameInterpolationRetryFps } from '../tools/video/frameInterpolation';
+import { buildVideoEnhanceInput, restoreVideoEnhanceResolution } from '../tools/video/videoEnhance';
 import { isRecoveryTargetSettled } from './types';
 import type {
   GenerationRuntimeHost, GenerationTaskDefinition, RecoveryCardPlan, TaskSubmissionInput,

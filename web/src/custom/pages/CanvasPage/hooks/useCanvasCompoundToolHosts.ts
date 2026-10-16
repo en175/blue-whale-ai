@@ -16,36 +16,36 @@ import {
   mediaExtractNodeId,
 } from '../mediaExtract';
 import type { CanvasToolHosts } from '../canvasToolSessions';
-import { type AudioVideoSplitSubmission } from '../audioVideoSplitSession';
+import { type AudioVideoSplitSubmission } from '../tools/audio/audioVideoSplitSession';
 import {
   AUDIO_TRIM_EDGE_ORIGIN,
   AUDIO_TRIM_NODE_PREFIX,
   audioTrimNodeId,
   buildAudioTrimPlaceholderNode,
-} from '../audioTrim';
-import { type VocalSplitPayload, type AudioToolSubmission } from '../audioToolSessions';
+} from '../tools/audio/audioTrim';
+import { type VocalSplitPayload, type AudioToolSubmission } from '../tools/audio/audioToolSessions';
 import type { AudioTrimInput } from '@lib/contracts/audio-trim';
-import { AUDIO_MIX_EDGE_ORIGIN, buildAudioMixPlaceholderNode, findAudioMixPosition } from '../audioMix';
+import { AUDIO_MIX_EDGE_ORIGIN, buildAudioMixPlaceholderNode, findAudioMixPosition } from '../tools/audio/audioMix';
 import {
   AUDIO_SPEED_EDGE_ORIGIN,
   AUDIO_SPEED_NODE_PREFIX,
   audioSpeedNodeId,
   buildAudioSpeedPlaceholderNode,
-} from '../audioSpeed';
+} from '../tools/audio/audioSpeed';
 import type { AudioSpeedInput } from '@lib/contracts/audio-speed';
 import {
   AUDIO_VIDEO_MUX_EDGE_ORIGIN,
   AUDIO_VIDEO_MUX_TITLE,
   buildAudioVideoMuxIdentity,
   isAudioVideoMuxBindEdge,
-} from '../audioVideoMux';
-import { VOCAL_SPLIT_EDGE_ORIGIN, buildVocalSplitPlaceholderNode } from '../vocalSplit';
-import { SCENE_SPLIT_EDGE_ORIGIN, buildSceneSplitPlaceholderNode } from '../sceneSplit';
-import { type SceneSplitSubmission } from '../sceneSplitSession';
-import { SMART_MATTING_EDGE_ORIGIN, buildSmartMattingPlaceholderNode } from '../smartMatting';
-import { imageEnhanceDraftPosition } from '../imageEnhance';
-import { type SmartMattingSubmission } from '../smartMattingSession';
-import { IMAGE_CROP_EDGE_ORIGIN, type ImageCropIdentity } from '../imageCrop';
+} from '../tools/audio/audioVideoMux';
+import { VOCAL_SPLIT_EDGE_ORIGIN, buildVocalSplitPlaceholderNode } from '../tools/audio/vocalSplit';
+import { SCENE_SPLIT_EDGE_ORIGIN, buildSceneSplitPlaceholderNode } from '../tools/video/sceneSplit';
+import { type SceneSplitSubmission } from '../tools/video/sceneSplitSession';
+import { SMART_MATTING_EDGE_ORIGIN, buildSmartMattingPlaceholderNode } from '../tools/image/smartMatting';
+import { imageEnhanceDraftPosition } from '../tools/image/imageEnhance';
+import { type SmartMattingSubmission } from '../tools/image/smartMattingSession';
+import { IMAGE_CROP_EDGE_ORIGIN, type ImageCropIdentity } from '../tools/image/imageCrop';
 import { type ToolSessionDeps } from '../toolSessionCoordinator';
 import type { GenerationRuntime, GenerationRuntimeHost } from '../generationRuntime/runtime';
 import { audioMixTask, audioVideoMuxTask, staleMixSubmitError, watchMixSubmit } from '../generationRuntime/mixMuxTasks';

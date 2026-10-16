@@ -6,7 +6,7 @@ import {
   maxExpandPerSide,
   type ExpandSides,
   type SourceRect,
-} from '../../imageOutpaint';
+} from '../../tools/image/imageOutpaint';
 import styles from './index.module.css';
 
 interface OutpaintFrameProps {

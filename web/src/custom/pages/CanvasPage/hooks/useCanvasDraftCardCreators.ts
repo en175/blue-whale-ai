@@ -3,7 +3,7 @@ import type { Node } from '@xyflow/react';
 import type { MediaMention, MediaRef } from '@lib/contracts/text-node-media';
 import type { MediaDims } from '../components/MediaNode/mediaContentSize';
 import { newNodeId } from '../nodeId';
-import { defaultVideoModeFor } from '../videoModes';
+import { defaultVideoModeFor } from '../tools/video/videoModes';
 import type { CanvasNodeActions } from './useCanvasNodeFactories';
 
 export type DraftCardActions = CanvasNodeActions & {

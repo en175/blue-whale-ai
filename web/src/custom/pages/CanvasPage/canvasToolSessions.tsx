@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import { createToolSessionRuntime } from './toolSessionRuntime';
 import { type ToolSessionDeps } from './toolSessionCoordinator';
 import { assembleCanvasTools } from './canvasToolRegistry';
-import { canUndoMaskEdit, canRedoMaskEdit, undoMaskEdit, redoMaskEdit } from './eraseMask';
+import { canUndoMaskEdit, canRedoMaskEdit, undoMaskEdit, redoMaskEdit } from './tools/image/eraseMask';
 import { isEditableKeyboardTarget } from './components/Canvas/keyboardDelete';
 import { createCanvasToolEntries } from './canvasToolEntries';
 import type { CanvasToolHosts, CanvasToolView } from './canvasToolEntries';

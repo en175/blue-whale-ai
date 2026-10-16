@@ -1,7 +1,7 @@
 import { type VideoRefRole } from '@/custom/enums';
 import type { Dispatch, RefObject, SetStateAction } from 'react';
 import type { Edge, Node } from '@xyflow/react';
-import { readDraftMaterialRefs, type VideoMediaRef } from '../videoMediaRefs';
+import { readDraftMaterialRefs, type VideoMediaRef } from '../tools/video/videoMediaRefs';
 import type { CanvasHistoryApi } from './useCanvasHistory';
 
 type VideoFreeRefUpdate = {

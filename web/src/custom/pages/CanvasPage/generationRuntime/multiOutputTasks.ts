@@ -5,12 +5,12 @@ import type { GenerationRecoveryRecord } from '@/custom/api/canvasRecovery';
 import {
   SCENE_SPLIT_EDGE_ORIGIN, SCENE_SPLIT_NODE_GAP, sceneSplitFanoutLayout, sceneSplitSegmentBox,
   sceneSplitSegmentLabel, type SceneSplitGranularity, type SceneSplitIdentity,
-} from '../sceneSplit';
+} from '../tools/video/sceneSplit';
 import {
   VOCAL_SPLIT_DEFAULT_FORMAT, VOCAL_SPLIT_EDGE_ORIGIN, VOCAL_SPLIT_NODE_GAP, isVocalSplitNodeId,
   vocalSplitSourceName, vocalSplitTrackDisplayName, type VocalSplitFormat, type VocalSplitIdentity,
   type VocalSplitScene,
-} from '../vocalSplit';
+} from '../tools/audio/vocalSplit';
 import type { VocalSplitTrackType } from '@lib/contracts/vocal-split';
 import { mediaContentBox } from '../components/MediaNode/mediaContentSize';
 import { isJobInFlight } from './types';

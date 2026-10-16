@@ -3,7 +3,7 @@ import type { Node } from '@xyflow/react';
 import { createGenerationDockCoordinator } from './generationDockCoordinator';
 import { createToolGenerationDock } from './toolGenerationDock';
 import { createToolSessionRuntime } from './toolSessionRuntime';
-import { createImageEnhanceSession, createFrameInterpolationSession, createVideoEnhanceSession, type PanelToolHost } from './panelToolSessions';
+import { createImageEnhanceSession, createFrameInterpolationSession, createVideoEnhanceSession, type PanelToolHost } from './tools/compound/panelToolSessions';
 
 function fixture() {
   const nodes: Node[] = [{ id: 'target', position: { x: 0, y: 0 }, data: { draft: true, videoEnhance: { sourceAssetId: '5' } } }];

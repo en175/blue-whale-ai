@@ -1,11 +1,11 @@
 import { createGenerationJob, retryGenerationJob, cancelGenerationJob, type CreateJobPayload } from '@/custom/api/jobs';
 import type { GenerationRecoveryRecord } from '@/custom/api/canvasRecovery';
-import { isAudioMixNodeId } from '../audioMix';
-import { isAudioSpeedNodeId } from '../audioSpeed';
-import { isAudioTrimNodeId } from '../audioTrim';
+import { isAudioMixNodeId } from '../tools/audio/audioMix';
+import { isAudioSpeedNodeId } from '../tools/audio/audioSpeed';
+import { isAudioTrimNodeId } from '../tools/audio/audioTrim';
 import { isMediaExtractNodeId } from '../mediaExtract';
-import { isVocalSplitNodeId } from '../vocalSplit';
-import { audioVideoMuxIdentityOf } from '../audioVideoMux';
+import { isVocalSplitNodeId } from '../tools/audio/vocalSplit';
+import { audioVideoMuxIdentityOf } from '../tools/audio/audioVideoMux';
 import type { Node } from '@xyflow/react';
 import { isJobInFlight, isRecoveryTargetSettled, readMarker } from './types';
 import type {

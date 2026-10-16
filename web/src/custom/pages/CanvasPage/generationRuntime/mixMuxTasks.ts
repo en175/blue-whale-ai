@@ -4,8 +4,8 @@ import {
 } from '@/custom/api/jobs';
 import type { AudioMixCreate } from '@lib/contracts/audio-mix';
 import type { GenerationRecoveryRecord } from '@/custom/api/canvasRecovery';
-import { isAudioMixNodeId, buildAudioMixPlaceholderNode, audioMixSourceError, AUDIO_MIX_EDGE_ORIGIN, AUDIO_MIX_FORMATS, type AudioMixFormat } from '../audioMix';
-import { audioVideoMuxIdentityOf, buildAudioVideoMuxPlaceholderNode } from '../audioVideoMux';
+import { isAudioMixNodeId, buildAudioMixPlaceholderNode, audioMixSourceError, AUDIO_MIX_EDGE_ORIGIN, AUDIO_MIX_FORMATS, type AudioMixFormat } from '../tools/audio/audioMix';
+import { audioVideoMuxIdentityOf, buildAudioVideoMuxPlaceholderNode } from '../tools/audio/audioVideoMux';
 import type { Node } from '@xyflow/react';
 import { isJobInFlight } from './types';
 import type {

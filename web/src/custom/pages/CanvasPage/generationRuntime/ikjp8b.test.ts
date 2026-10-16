@@ -7,10 +7,10 @@ import { seedSourcesOfNode, seedTargetOfNode } from './seedFacts';
 import {
   createAudioMixSession, createAudioVideoMuxSession,
   type AudioMixHost, type AudioVideoMuxHost,
-} from '../compoundToolSessions';
+} from '../tools/compound/compoundToolSessions';
 import { createToolSessionRuntime } from '../toolSessionRuntime';
 import type { ToolSessionDeps } from '../toolSessionCoordinator';
-import { buildAudioVideoMuxIdentity } from '../audioVideoMux';
+import { buildAudioVideoMuxIdentity } from '../tools/audio/audioVideoMux';
 import type { GenerationRuntimeHost, RuntimeNodeView } from './types';
 
 vi.mock('@/custom/api/jobs', async (importOriginal) => ({

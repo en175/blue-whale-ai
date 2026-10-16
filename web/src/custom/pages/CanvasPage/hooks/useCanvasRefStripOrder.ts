@@ -2,7 +2,7 @@ import { type Dispatch, type RefObject, type SetStateAction } from 'react';
 import type { Edge, Node } from '@xyflow/react';
 import type { ImageTextAttachment } from '../components/ImageDialog';
 import type { createGenerationDockCoordinator } from '../generationDockCoordinator';
-import { mergedVideoMediaRefsOf, readDraftMaterialRefs } from '../videoMediaRefs';
+import { mergedVideoMediaRefsOf, readDraftMaterialRefs } from '../tools/video/videoMediaRefs';
 
 export interface CanvasRefStripOrderHost {
   setEdges: Dispatch<SetStateAction<Edge[]>>;

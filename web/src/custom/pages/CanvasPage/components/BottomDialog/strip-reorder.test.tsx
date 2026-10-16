@@ -4,7 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import BottomDialog from './index';
-import type { VideoMediaRef, VideoMediaRefs } from '../../videoMediaRefs';
+import type { VideoMediaRef, VideoMediaRefs } from '../../tools/video/videoMediaRefs';
 import type { ImageTextAttachment } from '../ImageDialog';
 
 

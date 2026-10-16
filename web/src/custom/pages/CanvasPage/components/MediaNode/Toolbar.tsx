@@ -1,23 +1,23 @@
 import { useCallback } from 'react';
 import { Info, Download, AtSign, ZoomIn, Eraser, Crop, Maximize2, WandSparkles, Scissors, Gauge, Layers, Clapperboard, Film, type LucideIcon } from 'lucide-react';
-import { outpaintGateReason } from '../../imageOutpaint';
-import { imageEraseGateReason } from '../../imageErase';
-import { imageCutoutGateReason } from '../../imageCutout';
-import { videoSubtitleEraseGateReason } from '../../videoSubtitleErase';
-import { AUDIO_VIDEO_SPLIT_ENTRY_HINT, audioVideoSplitGateReason } from '../../audioVideoSplit';
-import { audioTrimGateReason } from '../../audioTrim';
-import { audioMixSourceError } from '../../audioMix';
-import { audioSpeedGateReason } from '../../audioSpeed';
-import { audioVideoMuxSourceError } from '../../audioVideoMux';
-import { SCENE_SPLIT_ENTRY_HINT, sceneSplitGateReason } from '../../sceneSplit';
+import { outpaintGateReason } from '../../tools/image/imageOutpaint';
+import { imageEraseGateReason } from '../../tools/image/imageErase';
+import { imageCutoutGateReason } from '../../tools/image/imageCutout';
+import { videoSubtitleEraseGateReason } from '../../tools/video/videoSubtitleErase';
+import { AUDIO_VIDEO_SPLIT_ENTRY_HINT, audioVideoSplitGateReason } from '../../tools/audio/audioVideoSplit';
+import { audioTrimGateReason } from '../../tools/audio/audioTrim';
+import { audioMixSourceError } from '../../tools/audio/audioMix';
+import { audioSpeedGateReason } from '../../tools/audio/audioSpeed';
+import { audioVideoMuxSourceError } from '../../tools/audio/audioVideoMux';
+import { SCENE_SPLIT_ENTRY_HINT, sceneSplitGateReason } from '../../tools/video/sceneSplit';
 import {
   SMART_MATTING_ENTRY_HINT,
   SMART_MATTING_GREENSCREEN_HINT,
   SMART_MATTING_PORTRAIT_HINT,
   smartMattingGateReason,
-} from '../../smartMatting';
-import { VIDEO_ENHANCE_ENTRY_HINT, videoEnhanceGateReason } from '../../videoEnhance';
-import { FRAME_INTERPOLATION_ENTRY_HINT, frameInterpolationGateReason } from '../../frameInterpolation';
+} from '../../tools/image/smartMatting';
+import { VIDEO_ENHANCE_ENTRY_HINT, videoEnhanceGateReason } from '../../tools/video/videoEnhance';
+import { FRAME_INTERPOLATION_ENTRY_HINT, frameInterpolationGateReason } from '../../tools/video/frameInterpolation';
 import { mediaNodeToolbarVisibility, mediaCardToolbarVisible } from './toolbarVisibility';
 import SubtitleEraseMenu, { type SubtitleEraseMenuItem } from './SubtitleEraseMenu';
 import AudioVideoSplitMenu, { type AudioVideoSplitMenuItem } from './AudioVideoSplitMenu';

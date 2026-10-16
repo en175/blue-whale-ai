@@ -3,7 +3,7 @@ import { act, createElement, type ComponentProps } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import CutoutToolbar from './index';
-import type { ImageCutoutScene } from '../../imageCutout';
+import type { ImageCutoutScene } from '../../tools/image/imageCutout';
 
 type ToolbarProps = ComponentProps<typeof CutoutToolbar>;
 

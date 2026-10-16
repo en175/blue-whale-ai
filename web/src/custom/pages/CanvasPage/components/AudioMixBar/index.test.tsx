@@ -5,7 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { Node } from '@xyflow/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import AudioMixBar from './index';
-import type { AudioMixInputSelection } from '../../audioMix';
+import type { AudioMixInputSelection } from '../../tools/audio/audioMix';
 
 const mocks = vi.hoisted(() => ({
   apiRequest: vi.fn(),

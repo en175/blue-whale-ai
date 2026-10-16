@@ -7,7 +7,7 @@ import {
   IMAGE_CUTOUT_CONTOUR_SIZE_MIN,
   IMAGE_CUTOUT_CONTOUR_SLIDER_MAX,
   type ImageCutoutScene,
-} from '../../imageCutout';
+} from '../../tools/image/imageCutout';
 import styles from './index.module.css';
 
 interface CutoutToolbarProps {

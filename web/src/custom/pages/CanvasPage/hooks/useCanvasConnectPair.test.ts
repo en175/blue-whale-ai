@@ -5,14 +5,14 @@ import type { Dispatch, RefObject, SetStateAction } from 'react';
 import type { Connection, Edge, Node } from '@xyflow/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
-vi.mock('../videoModes', () => ({ draftVideoModeOf: () => null }));
+vi.mock('../tools/video/videoModes', () => ({ draftVideoModeOf: () => null }));
 vi.mock('@/custom/utils/video-modes', () => ({
   frameSlotCountOf: () => 0,
   isFrameMode: () => false,
 }));
-vi.mock('../videoMediaRefs', () => ({ mergedVideoMediaRefsOf: () => ({}) }));
+vi.mock('../tools/video/videoMediaRefs', () => ({ mergedVideoMediaRefsOf: () => ({}) }));
 vi.mock('../mediaRefs', () => ({ imageRefSourceError: () => null }));
-vi.mock('../audioVideoMux', () => ({
+vi.mock('../tools/audio/audioVideoMux', () => ({
   AUDIO_VIDEO_MUX_AUDIO_EDGE_LOCKED_REASON: '音视频合成绑定边锁定',
   audioVideoMuxIdentityOf: () => null,
   isAudioVideoMuxAudioEdge: () => false,

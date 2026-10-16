@@ -4,7 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { ReactFlowProvider } from '@xyflow/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import OutpaintFrame from './index';
-import type { ExpandSides } from '../../imageOutpaint';
+import type { ExpandSides } from '../../tools/image/imageOutpaint';
 
 const RECT = { x: 1000, y: 500, width: 400, height: 300 };
 

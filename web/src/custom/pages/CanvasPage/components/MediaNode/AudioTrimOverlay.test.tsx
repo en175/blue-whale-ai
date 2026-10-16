@@ -3,7 +3,7 @@ import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import AudioTrimOverlay from './AudioTrimOverlay';
-import { AUDIO_TRIM_MIN_SEGMENT_SECONDS } from '../../audioTrimGeometry';
+import { AUDIO_TRIM_MIN_SEGMENT_SECONDS } from '../../tools/audio/audioTrimGeometry';
 
 let root: Root | null = null;
 let container: HTMLDivElement | null = null;

@@ -5,15 +5,15 @@ import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { newNodeId } from './nodeId';
 import { nodeBoxOf, appliedCardIdsOf } from './canvasPureNodeHelpers';
 import { imageRefSourceError } from './mediaRefs';
-import { audioRefSourceError } from './audioMediaRefs';
+import { audioRefSourceError } from './tools/audio/audioMediaRefs';
 
 import { hasGenerationRecord } from './mediaReEdit';
 import {
   mergedVideoMediaRefsOf,
   videoRefSourceError,
-} from './videoMediaRefs';
+} from './tools/video/videoMediaRefs';
 
-import { audioVideoMuxInFlightSourceIdsOf } from './audioVideoMux';
+import { audioVideoMuxInFlightSourceIdsOf } from './tools/audio/audioVideoMux';
 import type { CanvasProject } from './components/ProjectSelector';
 import { serializeEdges, serializeNodes } from '@/custom/api/canvas';
 import {

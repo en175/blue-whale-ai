@@ -18,7 +18,7 @@ import { generationQuoteOptions } from '@/custom/api/generationQuote';
 import RatioGroup from '@/custom/components/RatioGroup';
 import Select from '@/custom/components/Select';
 import GenerationQuoteBadge from '../GenerationQuoteBadge';
-import { buildVideoJobReferences } from '../../videoJobReferences';
+import { buildVideoJobReferences } from '../../tools/video/videoJobReferences';
 import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
 import {
   docHasAnyRef,
@@ -39,7 +39,7 @@ import RefThumbnail, { INSERT_REF_APPEND_TITLE } from '../RefThumbnail';
 import RefSourceMenu from '../RefSourceMenu';
 import AttachmentActionBar from '../AttachmentActionBar';
 import { useMixedRefStrip, orderRefStripItems, videoRefStripKey, useRefStripDrag, type RefStripOrderProps, type StripDragItemProps } from '../RefThumbnail/strip-dnd';
-import { refIdOf, videoLabelMapOf } from '../../videoPromptRefs';
+import { refIdOf, videoLabelMapOf } from '../../tools/video/videoPromptRefs';
 import { type ImageTextAttachment } from '../ImageDialog';
 import { composeImageSendPrompt } from '../ImageDialog/composeImageSendPrompt';
 import {
@@ -48,7 +48,7 @@ import {
   promptMaxLengthOf,
 } from '@/custom/utils/prompt-max-length';
 
-import { canAddRefRole, hasAnyMediaRef, videoRefConflict, isLibraryOnlyVideoRef, type VideoMediaRef, type VideoMediaRefs, type VideoRefCapabilities } from '../../videoMediaRefs';
+import { canAddRefRole, hasAnyMediaRef, videoRefConflict, isLibraryOnlyVideoRef, type VideoMediaRef, type VideoMediaRefs, type VideoRefCapabilities } from '../../tools/video/videoMediaRefs';
 import {
   audioReferenceMaxOf,
   videoReferenceMaxOf,
@@ -69,7 +69,7 @@ import {
   normalizeStoredVideoMode,
   resolveVideoMode,
   videoModeRefsSignature,
-} from '../../videoModes';
+} from '../../tools/video/videoModes';
 import { configuredVideoModes, effectiveVideoParams, frameSlotCountOf, isFrameMode, isVideoMode, lockedDurationOf, lockedRatioOf, normalizeVideoMode, type VideoMode } from '@/custom/utils/video-modes';
 import styles from './index.module.css';
 
