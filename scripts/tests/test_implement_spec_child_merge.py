@@ -441,6 +441,101 @@ class ImplementSpecChildMergeTest(unittest.TestCase):
         self.assertNotEqual(run("git", "show-ref", "--verify", f"refs/heads/{CHILD_ONE}",
                                 cwd=self.main, check=False).returncode, 0)
 
+    def merged_snapshot_without_source(self, source_head):
+        self.git(self.main, "switch", "release/test")
+        self.git(self.main, "merge", "--no-ff", "--no-edit", INTEGRATION)
+        self.git(self.main, "push", "origin", "release/test")
+        self.git(self.main, "push", "origin", "--delete", INTEGRATION)
+        self.git(self.main, "worktree", "remove", str(self.integration))
+        self.git(self.main, "branch", "-d", INTEGRATION)
+        snapshot = self.snapshot(source_head)
+        data = json.loads(snapshot.read_text(encoding="utf-8"))
+        data["state"] = "merged"
+        snapshot.write_text(json.dumps(data), encoding="utf-8")
+        return snapshot
+
+    def test_cleanup_accepts_merged_pr_after_source_and_integration_removal(self):
+        self.commit(self.child_one, "one.txt", "one\n")
+        self.assertEqual(self.invoke(self.child_one).returncode, 0)
+        source_head = self.git(self.integration, "rev-parse", "HEAD")
+        self.git(self.integration, "push", "origin", INTEGRATION)
+        snapshot = self.merged_snapshot_without_source(source_head)
+        result = self.cleanup(snapshot)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertFalse(self.child_one.exists())
+        self.assertNotEqual(run("git", "show-ref", "--verify", f"refs/heads/{CHILD_ONE}",
+                                cwd=self.main, check=False).returncode, 0)
+        self.assertEqual((self.main / "one.txt").read_text(), "one\n")
+
+    def test_cleanup_rejects_merged_snapshot_not_present_in_remote_release(self):
+        self.commit(self.child_one, "one.txt", "one\n")
+        self.assertEqual(self.invoke(self.child_one).returncode, 0)
+        source_head = self.git(self.integration, "rev-parse", "HEAD")
+        snapshot = self.snapshot(source_head)
+        data = json.loads(snapshot.read_text(encoding="utf-8"))
+        data["state"] = "merged"
+        snapshot.write_text(json.dumps(data), encoding="utf-8")
+        result = self.cleanup(snapshot)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("目标发布线尚未包含", result.stdout)
+        self.assertEqual(self.git(self.child_one, "rev-parse", "HEAD"), source_head)
+
+    def test_cleanup_rejects_child_only_present_in_later_release_commits(self):
+        self.commit(self.child_one, "one.txt", "one\n")
+        self.assertEqual(self.invoke(self.child_one).returncode, 0)
+        source_head = self.git(self.integration, "rev-parse", "HEAD")
+        self.git(self.integration, "push", "origin", INTEGRATION)
+        child_head = self.commit(self.child_one, "later.txt", "later\n")
+        self.git(self.main, "switch", "release/test")
+        self.git(self.main, "merge", "--no-ff", "--no-edit", CHILD_ONE)
+        snapshot = self.merged_snapshot_without_source(source_head)
+        result = self.cleanup(snapshot)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("尚未包含子任务提交", result.stdout)
+        self.assertEqual(self.git(self.child_one, "rev-parse", "HEAD"), child_head)
+
+    def test_cleanup_rejects_closed_pr_and_dirty_child_after_merge(self):
+        self.commit(self.child_one, "one.txt", "one\n")
+        self.assertEqual(self.invoke(self.child_one).returncode, 0)
+        source_head = self.git(self.integration, "rev-parse", "HEAD")
+        self.git(self.integration, "push", "origin", INTEGRATION)
+        snapshot = self.merged_snapshot_without_source(source_head)
+        original = snapshot.read_text(encoding="utf-8")
+        data = json.loads(original)
+        data["state"] = "closed"
+        snapshot.write_text(json.dumps(data), encoding="utf-8")
+        rejected = self.cleanup(snapshot)
+        self.assertNotEqual(rejected.returncode, 0)
+        self.assertIn("已开放或已合并", rejected.stdout)
+        snapshot.write_text(original, encoding="utf-8")
+        (self.child_one / "unsaved.txt").write_text("unsaved\n", encoding="utf-8")
+        rejected = self.cleanup(snapshot)
+        self.assertNotEqual(rejected.returncode, 0)
+        self.assertIn("工作区不干净", rejected.stdout)
+        self.assertEqual((self.child_one / "unsaved.txt").read_text(), "unsaved\n")
+
+    def test_cleanup_rejects_remote_release_change_after_fetch(self):
+        self.commit(self.child_one, "one.txt", "one\n")
+        self.assertEqual(self.invoke(self.child_one).returncode, 0)
+        source_head = self.git(self.integration, "rev-parse", "HEAD")
+        self.git(self.integration, "push", "origin", INTEGRATION)
+        snapshot = self.merged_snapshot_without_source(source_head)
+        fake_bin = self.root / "fake-cleanup-git"
+        fake_bin.mkdir()
+        fake_git = fake_bin / "git"
+        fake_git.write_text(
+            '#!/bin/sh\ncase "$*" in *"ls-remote --heads origin refs/heads/release/test"*)'
+            ' printf "%040d\\trefs/heads/release/test\\n" 0; exit 0;; esac\n'
+            'exec "$REAL_GIT" "$@"\n', encoding="utf-8"
+        )
+        fake_git.chmod(0o755)
+        env = {**os.environ, "PATH": str(fake_bin) + os.pathsep + os.environ["PATH"],
+               "REAL_GIT": shutil.which("git")}
+        result = self.cleanup(snapshot, env=env)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("核验期间变化", result.stdout)
+        self.assertTrue(self.child_one.exists())
+
     def test_cleanup_rejects_unmerged_child(self):
         self.commit(self.child_one, "one.txt", "one\n")
         self.git(self.integration, "push", "origin", INTEGRATION)

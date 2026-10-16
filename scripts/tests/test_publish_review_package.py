@@ -870,6 +870,78 @@ class PublishReviewPackageTest(unittest.TestCase):
         self.assertEqual("release\n", (self.worktree / "release.txt").read_text(encoding="utf-8"))
         self.assertEqual("next\n", (self.worktree / "release-next.txt").read_text(encoding="utf-8"))
 
+    def merged_rebased_child(self, *, source_as_child=False):
+        child_branch, child_root = self.implement_spec_child(inherited=True)
+        if source_as_child:
+            self.git("merge", "--ff-only", self.git("rev-parse", "HEAD"), cwd=child_root)
+        self.git("push", "origin", BRANCH)
+        before = self.pr_snapshot()
+        (self.main / "release.txt").write_text("release\n", encoding="utf-8")
+        self.git("add", "release.txt", cwd=self.main)
+        self.git("commit", "-m", "chore: advance release", cwd=self.main)
+        self.git("push", "origin", "release/prod", cwd=self.main)
+        synced = run("bash", str(SYNC_SCRIPT), "sync", "--json", cwd=self.worktree)
+        self.assertEqual(synced.returncode, 0, synced.stdout + synced.stderr)
+        published = self.invoke_update(before)
+        self.assertEqual(published.returncode, 0, published.stdout + published.stderr)
+        after = self.pr_snapshot()
+        verified = run("bash", str(VERIFY_SCRIPT), "--update-pr", "65",
+                       "--pr-snapshot", str(after), "--json", cwd=self.worktree)
+        self.assertEqual(verified.returncode, 0, verified.stdout + verified.stderr)
+        finalized = run("bash", str(SYNC_SCRIPT), "finalize", "--json", cwd=self.worktree)
+        self.assertEqual(finalized.returncode, 0, finalized.stdout + finalized.stderr)
+        source_head = self.git("rev-parse", "HEAD")
+        self.git("merge", "--no-ff", "--no-edit", BRANCH, cwd=self.main)
+        self.git("push", "origin", "release/prod", cwd=self.main)
+        self.git("push", "origin", "--delete", BRANCH, cwd=self.main)
+        self.git("worktree", "remove", str(self.worktree), cwd=self.main)
+        self.git("branch", "-d", BRANCH, cwd=self.main)
+        common = Path(self.git("rev-parse", "--git-common-dir", cwd=child_root))
+        record = common / "blue-whale" / "implement-spec-rebase-lineage" / BRANCH.replace("/", "%") / f"{source_head}.json"
+        return child_branch, child_root, source_head, record
+
+    def test_merged_pr_cleanup_proves_original_source_without_child_mapping(self) -> None:
+        child_branch, child_root, source_head, record = self.merged_rebased_child(source_as_child=True)
+        data = json.loads(record.read_text(encoding="utf-8"))
+        data["child_heads"].pop(child_branch, None)
+        record.write_text(json.dumps(data), encoding="utf-8")
+        snapshot = self.pr_snapshot(state="merged", head_sha=source_head, changed_files=[])
+        cleaned = run(sys.executable, CLEANUP_CHILD_SCRIPT, "--pr-snapshot", str(snapshot),
+                      "--json", cwd=child_root)
+        self.assertEqual(cleaned.returncode, 0, cleaned.stdout + cleaned.stderr)
+        self.assertFalse(child_root.exists())
+        self.assertEqual("child\n", (self.main / "child.txt").read_text(encoding="utf-8"))
+
+    def test_merged_pr_cleanup_proves_rebased_child_without_integration_worktree(self) -> None:
+        child_branch, child_root, source_head, _ = self.merged_rebased_child()
+        snapshot = self.pr_snapshot(state="merged", head_sha=source_head, changed_files=[])
+        cleaned = run(sys.executable, CLEANUP_CHILD_SCRIPT, "--pr-snapshot", str(snapshot),
+                      "--json", cwd=child_root)
+        self.assertEqual(cleaned.returncode, 0, cleaned.stdout + cleaned.stderr)
+        self.assertFalse(child_root.exists())
+        self.assertNotEqual(run("git", "show-ref", "--verify", f"refs/heads/{child_branch}",
+                                cwd=self.main).returncode, 0)
+
+    def test_merged_pr_cleanup_rejects_invalid_original_source_proof(self) -> None:
+        child_branch, child_root, source_head, record = self.merged_rebased_child(source_as_child=True)
+        data = json.loads(record.read_text(encoding="utf-8"))
+        data["child_heads"].pop(child_branch, None)
+        original = json.dumps(data)
+        data["merged_tree"] = "0" * 40
+        record.write_text(json.dumps(data), encoding="utf-8")
+        snapshot = self.pr_snapshot(state="merged", head_sha=source_head, changed_files=[])
+        rejected = run(sys.executable, CLEANUP_CHILD_SCRIPT, "--pr-snapshot", str(snapshot),
+                       "--json", cwd=child_root)
+        self.assertNotEqual(rejected.returncode, 0)
+        self.assertIn("同步证明未通过", rejected.stdout)
+        self.assertTrue(child_root.exists())
+        record.write_text(original, encoding="utf-8")
+        wrong_pr = self.pr_snapshot(iid=66, state="merged", head_sha=source_head, changed_files=[])
+        rejected = run(sys.executable, CLEANUP_CHILD_SCRIPT, "--pr-snapshot", str(wrong_pr),
+                       "--json", cwd=child_root)
+        self.assertNotEqual(rejected.returncode, 0)
+        self.assertTrue(child_root.exists())
+
     def test_sync_rejects_child_tree_mismatch_before_pr_update(self) -> None:
         self.implement_spec_child()
         self.git("push", "origin", BRANCH)
