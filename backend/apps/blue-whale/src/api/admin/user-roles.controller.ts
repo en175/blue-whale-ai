@@ -15,6 +15,7 @@ import {
 } from "@lib/shared/identity/index.js";
 import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
 import { AdminGuard } from "@lib/infra/guard/admin.guard.js";
+import { SuperAdminGuard } from "@lib/infra/guard/super-admin.guard.js";
 import { AdminException } from "@lib/shared/errors/admin-error.js";
 import { OperationLogService } from "@lib/shared/operation-log/operation-log.service.js";
 import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js";
@@ -41,6 +42,7 @@ export class AdminUserRolesController {
   }
 
   @Post(":userId/roles")
+  @UseGuards(SuperAdminGuard)
   async grant(
     @CurrentUser() operator: AuthenticatedUser,
     @Param("userId") rawUserId: string,
@@ -63,6 +65,7 @@ export class AdminUserRolesController {
   }
 
   @Delete(":userId/roles/:code")
+  @UseGuards(SuperAdminGuard)
   async revoke(
     @CurrentUser() operator: AuthenticatedUser,
     @Param("userId") rawUserId: string,

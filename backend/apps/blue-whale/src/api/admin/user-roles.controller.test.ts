@@ -1,4 +1,5 @@
 import { LastSuperAdminError } from "@lib/core/identity/roles.js";
+import { SuperAdminGuard } from "@lib/infra/guard/super-admin.guard.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AdminUserRolesController } from "./user-roles.controller.js";
@@ -111,5 +112,20 @@ describe("AdminUserRolesController", () => {
       success: true,
     });
     expect(identity.grantRole).toHaveBeenCalled();
+  });
+});
+
+describe("AdminUserRolesController 超管守卫声明", () => {
+  function guardsOf(handler: (...args: never[]) => unknown): unknown[] {
+    return (Reflect.getMetadata("__guards__", handler) as unknown[] | undefined) ?? [];
+  }
+
+  it("★ 授予与撤销都挂 SuperAdminGuard（普通管理员不可设角色）", () => {
+    expect(guardsOf(AdminUserRolesController.prototype.grant)).toContain(SuperAdminGuard);
+    expect(guardsOf(AdminUserRolesController.prototype.revoke)).toContain(SuperAdminGuard);
+  });
+
+  it("列出角色不要求超管（普通管理员可读）", () => {
+    expect(guardsOf(AdminUserRolesController.prototype.list)).not.toContain(SuperAdminGuard);
   });
 });
