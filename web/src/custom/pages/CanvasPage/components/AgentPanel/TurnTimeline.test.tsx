@@ -3,7 +3,7 @@ import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LastTurnLine, ProcessGroup, ThinkingBlock, ToolCallRow, TurnFooter } from './TurnTimeline';
-import type { ProcessItem, TimelineItem, TurnAccount } from '../../hooks/sessionTimeline';
+import type { ProcessItem, TimelineItem, TurnAccount } from '../../hooks/agent/sessionTimeline';
 
 let root: Root;
 let mountNode: HTMLDivElement;

@@ -212,7 +212,7 @@ const canvasDocMock = vi.hoisted(() => ({
   },
 }));
 
-vi.mock('../hooks/useCanvasDoc', () => ({
+vi.mock('../hooks/document/useCanvasDoc', () => ({
   useCanvasDoc: () => canvasDocMock.current,
 }));
 

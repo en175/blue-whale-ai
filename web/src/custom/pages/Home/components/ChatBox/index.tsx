@@ -3,7 +3,7 @@
 import { PANEL_REF_MEDIA_TYPES, VIDEO_MODE_LABEL } from '@/custom/enums';
 import { useState, useRef, useEffect, useCallback, useLayoutEffect, useMemo, useSyncExternalStore } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useDismissOnOutside } from '@/custom/pages/CanvasPage/hooks/useDismissOnOutside';
+import { useDismissOnOutside } from '@/custom/pages/CanvasPage/hooks/shared/useDismissOnOutside';
 import { createPortal } from 'react-dom';
 import { Plus, ChevronUp, ChevronDown, Music, BookOpen, BookText, X, Upload, FolderOpen } from 'lucide-react';
 import SkillModal from '../SkillModal';

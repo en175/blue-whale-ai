@@ -15,8 +15,8 @@ import type { ImageGenerationDockHost } from '../tools/image/imageGenerationDock
 import type { VideoGenerationDockHost } from '../tools/video/videoGenerationDock';
 import type { AudioGenerationDockHost, MusicGenerationDockHost } from '../tools/audio/audioMusicGenerationDock';
 import type { TextGenerationDockHost } from './textGenerationDock';
-import type { CanvasGenerationSubmissionHandles } from '../hooks/useCanvasGenerationSubmission';
-import { useGenerationDockBinding } from '../hooks/useGenerationDockBinding';
+import type { CanvasGenerationSubmissionHandles } from '../hooks/generation/useCanvasGenerationSubmission';
+import { useGenerationDockBinding } from '../hooks/generation/useGenerationDockBinding';
 import ImageGenerationDockPanel from '../tools/image/imageGenerationDockPanel';
 import VideoGenerationDockPanel from '../tools/video/videoGenerationDockPanel';
 import AudioGenerationDockPanel from '../tools/audio/audioGenerationDockPanel';

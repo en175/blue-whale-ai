@@ -152,7 +152,7 @@ export const canvasDocMock: {
   },
 };
 
-vi.mock('../hooks/useCanvasDoc', () => ({
+vi.mock('../hooks/document/useCanvasDoc', () => ({
   useCanvasDoc: () => canvasDocMock.current,
 }));
 

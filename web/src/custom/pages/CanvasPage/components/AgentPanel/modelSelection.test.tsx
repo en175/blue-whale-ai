@@ -34,7 +34,7 @@ const sessionState = vi.hoisted(() => ({
   refreshSessions: vi.fn(),
 }));
 
-vi.mock('../../hooks/useAgentSession', () => ({
+vi.mock('../../hooks/agent/useAgentSession', () => ({
   useAgentSession: (_projectId: string, agentModel?: string) => {
     handedToSession.values.push(agentModel);
     return sessionState;

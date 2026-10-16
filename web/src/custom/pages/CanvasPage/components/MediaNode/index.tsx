@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { Handle, Position, useStore, useUpdateNodeInternals, type NodeProps } from '@xyflow/react';
 import { Image, Video, AudioLines, ImageOff, Plus, Check, RefreshCw, ChevronDown, Clock, Film } from 'lucide-react';
-import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
+import { useDismissOnOutside } from '../../hooks/shared/useDismissOnOutside';
 import { isMediaExtractNodeId, type MediaExtractIdentity } from '../../media/mediaExtract';
 import { isAudioTrimNodeId } from '../../tools/audio/audioTrim';
 import { isAudioMixNodeId } from '../../tools/audio/audioMix';
@@ -28,7 +28,7 @@ import { mediaNodeFailHeadline } from './failHeadline';
 import { isCanvasToolGeneration, mediaNodeGenerationOverlay } from './generationOverlay';
 import { mediaContentBox, type MediaDims } from './mediaContentSize';
 import { HOVER_PREVIEW_DELAY_MS, videoHoverPreviewBlocked, videoHoverPreviewEligible } from './hoverPreview';
-import { isMultiNodeSelection } from '../../hooks/useSoloNodeSelected';
+import { isMultiNodeSelection } from '../../hooks/chrome/useSoloNodeSelected';
 import { nodeTitleSizing } from '../nodeTitleSizing';
 import CanvasContextMenu from '../CanvasContextMenu';
 import { remoteImageCrossOrigin, resolveMediaSrc } from '@/shared/utils/remoteImageCors';

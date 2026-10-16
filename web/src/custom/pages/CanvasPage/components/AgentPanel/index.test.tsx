@@ -33,7 +33,7 @@ const sessionMock = vi.hoisted(() => ({
   refreshSessions: vi.fn(),
 }));
 
-vi.mock('../../hooks/useAgentSession', () => ({
+vi.mock('../../hooks/agent/useAgentSession', () => ({
   useAgentSession: () => sessionMock,
 }));
 

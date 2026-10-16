@@ -2,7 +2,7 @@ import { type PickChannel as CanvasPickChannel, type VideoRefRole, type AssetsPi
 import type { ComponentProps, Dispatch, ReactNode, RefObject, SetStateAction } from 'react';
 import type { Node } from '@xyflow/react';
 import { createCanvasToolSessions } from '../../tool-runtime/canvasToolSessions';
-import type { CanvasHistoryApi } from '../../hooks/useCanvasHistory';
+import type { CanvasHistoryApi } from '../../hooks/document/useCanvasHistory';
 
 import type { VideoGenSeedParams } from '../BottomDialog';
 import type { MediaNodeData } from '../MediaNode';

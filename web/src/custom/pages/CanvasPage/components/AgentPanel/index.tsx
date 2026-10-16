@@ -15,7 +15,7 @@ import {
 import Empty from '@/custom/components/Empty';
 import styles from './index.module.css';
 import { fetchMySkills } from '@/custom/api/skills';
-import { useAgentSession } from '../../hooks/useAgentSession';
+import { useAgentSession } from '../../hooks/agent/useAgentSession';
 import {
   type SessionContentBlock,
   type GenerationCardBlock,
@@ -50,7 +50,7 @@ import {
   persistPanelWidth,
   readPersistedPanelWidth,
 } from './drawerWidth';
-import { showsTurnFooter } from '../../hooks/sessionTimeline';
+import { showsTurnFooter } from '../../hooks/agent/sessionTimeline';
 import { collectKnownAssets } from './assetMentions';
 import { Markdown } from './Markdown';
 import { LastTurnLine, TurnFooter } from './TurnTimeline';

@@ -6,7 +6,7 @@ import { ReactFlowProvider, useStoreApi } from '@xyflow/react';
 import AssetCardNode, { type AssetCardNodeData } from './index';
 import AssetCardToolbar from './Toolbar';
 import NodeFollowToolbar from '../NodeFollowToolbar';
-import { useAssetHoverBridge } from '../../hooks/useAssetHoverBridge';
+import { useAssetHoverBridge } from '../../hooks/shared/useAssetHoverBridge';
 import { computeFollowAnchorAbove } from '../../agent/followDialog';
 import styles from './index.module.css';
 

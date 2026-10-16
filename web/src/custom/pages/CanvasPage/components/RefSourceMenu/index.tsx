@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import { FolderOpen, MousePointerClick, Plus } from 'lucide-react';
-import { useDismissOnOutside } from '../../hooks/useDismissOnOutside';
+import { useDismissOnOutside } from '../../hooks/shared/useDismissOnOutside';
 import styles from './index.module.css';
 
 interface RefSourceMenuProps {
