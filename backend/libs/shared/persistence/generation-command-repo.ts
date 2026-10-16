@@ -323,7 +323,7 @@ export function createGenerationCommandRepo(
           is_delete: false,
           status: "queued",
         },
-        data: { cancel_requested_at: new Date() },
+        data: { cancel_requested_at: new Date(), next_action_at: new Date() },
       });
       if (updated.count !== 1) {
         const exists = await prisma.generation_jobs.findFirst({
@@ -684,16 +684,32 @@ export function createGenerationCommandRepo(
     async markFailedQueued(jobId, code, message, details) {
       const error: Record<string, unknown> = { code, message };
       if (details !== undefined) error.details = details;
-      const result = await prisma.generation_jobs.updateMany({
-        where: { id: BigInt(jobId), status: "queued" },
-        data: {
-          status: "failed",
-          error: error as Prisma.InputJsonValue,
-          next_action_at: null,
-          version: { increment: 1 },
-        },
+      return prisma.$transaction(async (tx) => {
+        const id = BigInt(jobId);
+        const result = await tx.generation_jobs.updateMany({
+          where: { id, status: "queued" },
+          data: {
+            status: "failed",
+            error: error as Prisma.InputJsonValue,
+            next_action_at: null,
+            version: { increment: 1 },
+          },
+        });
+        if (result.count !== 1) return false;
+        const job = await tx.generation_jobs.findUniqueOrThrow({
+          where: { id },
+          select: { user_id: true },
+        });
+        await tx.generation_outbox.create({
+          data: {
+            job_id: id,
+            user_id: job.user_id,
+            terminal_status: "failed",
+            reason: message,
+          },
+        });
+        return true;
       });
-      return result.count === 1;
     },
   };
 }
