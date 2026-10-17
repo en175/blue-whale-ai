@@ -4,6 +4,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import tempfile
+import time
 import unittest
 
 
@@ -90,6 +91,65 @@ class PonytailConfigHarness(unittest.TestCase):
 
 
 class PonytailHooksTest(PonytailConfigHarness):
+    def test_codex_compaction_preserves_live_mode_and_other_starts_use_default(self):
+        initial = self.run_hook('codex', 'SessionStart', source='startup')
+        self.assertIn('upstream: v5.3.2', initial)
+        for mode in ['lite', 'ultra', 'full', 'off']:
+            self.run_hook('codex', 'UserPromptSubmit', '$ponytail ' + mode)
+            output = self.run_hook('codex', 'SessionStart', source='compact')
+            if mode == 'off':
+                self.assertEqual(output, '')
+                self.assertEqual(self.run_hook('codex', 'SubagentStart'), '')
+            else:
+                self.assert_mode(output, mode)
+                self.assert_mode(self.run_hook('codex', 'SubagentStart'), mode)
+        for source in ['startup', 'resume', 'clear']:
+            self.run_hook('codex', 'UserPromptSubmit', '$ponytail lite')
+            self.assert_mode(self.run_hook('codex', 'SessionStart', source=source), 'full')
+        self.run_hook('claude', 'SessionStart')
+        self.run_hook('claude', 'UserPromptSubmit', '/ponytail lite')
+        legacy = self.run_hook('claude', 'SessionStart', source='compact')
+        self.assert_mode(legacy, 'full')
+        self.assertNotIn('upstream: v5.3.2', legacy)
+
+    def test_codex_output_is_complete_before_immediate_exit(self):
+        script = """const { writeHookOutput } = require(process.argv[1]);
+writeHookOutput('UserPromptSubmit', 'full', '完整正文'.repeat(100000));
+process.exit(0);"""
+        result = subprocess.run(['node', '-e', script,
+                                 str(self.root / '.claude/hooks/ponytail-runtime.js')],
+                                cwd=self.root, env=dict(self.env, PONYTAIL_CLIENT='codex'),
+                                capture_output=True, text=True, check=True, timeout=10)
+        self.assertEqual(self.context_output('codex', 'UserPromptSubmit', result.stdout),
+                         '完整正文' * 100000)
+
+    def test_codex_map_skips_external_symlinks_and_non_symbol_text(self):
+        lib = self.root / 'lib'
+        lib.mkdir()
+        outside = self.base / 'outside.js'
+        outside.write_text('export const OutsideOnly = 1;\n')
+        (lib / 'linked.js').symlink_to(outside)
+        (lib / 'helpers.js').write_text('export function reusedHelper() {}\n'
+                                      'export { value as "NotASymbol" };\n')
+        subprocess.run(['git', 'add', 'lib'], cwd=self.root, check=True)
+        output = self.run_hook('codex', 'SessionStart')
+        self.assertIn('reusedHelper', output)
+        self.assertNotIn('OutsideOnly', output)
+        self.assertNotIn('NotASymbol', output)
+        legacy = self.run_hook('claude', 'SessionStart')
+        self.assertIn('OutsideOnly', legacy)
+
+    def test_codex_slow_optional_map_cannot_delay_rules(self):
+        script = self.root / '.claude/hooks/ponytail-map.js'
+        script.write_text("Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 2500);\n"
+                          "module.exports = { buildMap: () => 'slow-map' };\n"
+                          "if (require.main === module) process.stdout.write('slow-map');\n")
+        started = time.monotonic()
+        output = self.run_hook('codex', 'SessionStart')
+        self.assertLess(time.monotonic() - started, 2.3)
+        self.assert_mode(output, 'full')
+        self.assertNotIn('slow-map', output)
+
     def test_codex_desktop_skill_reference_switches_reports_and_restores_current_mode(self):
         root = self.install_project('桌面 中文工作树')
         reference = '[$ponytail](' + str(root.resolve() / '.agents/skills/ponytail/SKILL.md') + ')'

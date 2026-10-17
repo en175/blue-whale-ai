@@ -37,7 +37,8 @@ function getPonytailInstructions(mode) {
   const effectiveMode = normalizeMode(mode) || DEFAULT_MODE;
   try {
     const file = path.join(projectDir, '.agents', 'skills', 'ponytail', 'SKILL.md');
-    return 'PONYTAIL MODE ACTIVE，level: ' + effectiveMode + '\n\n' +
+    return 'PONYTAIL MODE ACTIVE，level: ' + effectiveMode +
+      (isCodex ? '，upstream: v5.3.2' : '') + '\n\n' +
       filterSkillBodyForMode(fs.readFileSync(file, 'utf8'), effectiveMode);
   } catch (_) {
     return getFallbackInstructions(effectiveMode);

@@ -96,7 +96,7 @@ function writeHookOutput(event, mode, context = '') {
         additionalContext: context,
       };
     }
-    process.stdout.write(JSON.stringify(output));
+    fs.writeSync(1, JSON.stringify(output));
     return;
   }
   if (isQoder || isCodeBuddy) {
