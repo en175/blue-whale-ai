@@ -125,8 +125,12 @@ export function useCanvasNodeDeletion(host: CanvasNodeDeletionHost): CanvasNodeD
     if (removedEdges.length > 0) {
       setEdges(remainingEdges);
     }
-    if (Array.from(idSet).some(isAudioMixNodeId)) {
+    if (Array.from(idSet).some(isAudioMixNodeId)
+      || removedNodes.some((node) => node.data?.genStatus === 'failed' && node.data?.jobId != null)) {
+      textNodesRef.current = filter(textNodesRef.current);
       mediaNodesRef.current = filter(mediaNodesRef.current);
+      productNodesRef.current = filter(productNodesRef.current);
+      assetNodesRef.current = filter(assetNodesRef.current);
       edgesRef.current = remainingEdges;
       if (currentId) void flushCanvasSave(currentId).catch(() => {});
     }

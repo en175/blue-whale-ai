@@ -96,6 +96,10 @@ export const normalGenerationTask: GenerationTaskDefinition<NormalGenerationPayl
         },
       };
     }
+    const targetItem = record.items.find((item) => item.output_key === TARGET_OUTPUT_KEY);
+    if (targetItem && targetItem.state !== 'pending' && targetItem.state !== 'present') {
+      return { kind: 'none' };
+    }
     if (isJobInFlight(jobStatus)) {
       if (!targetExists) return { kind: 'restore-target', node: buildRecoveryTargetNode(record) };
       return { kind: 'resume-polling' };
