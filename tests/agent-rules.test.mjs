@@ -218,3 +218,23 @@ test("CBM exploration has one policy before worktree creation", () => {
   }
   assert.doesNotMatch(read('docs/agents/worktree-workflow.md'), /MCP 不可用或索引失败时，必须停止/);
 });
+
+test("Gitee lifecycle routes to one state authority without executable retired IDs", () => {
+  const root = read("CLAUDE.md");
+  const authority = read("docs/agents/gitee-workflow-agent.md");
+  const tracker = read("docs/agents/issue-tracker.md");
+  assert.match(root, /开工、恢复、返工、部署确认、提测、生产验证与收口.*gitee-workflow-agent\.md/);
+  assert.match(tracker, /\[Agent 工作流手册\]\(gitee-workflow-agent\.md\)/);
+  for (const path of ["docs/agents/issue-tracker.md", "docs/agents/integration-branch-workflow.md",
+    ".agents/skills/setup-matt-pocock-skills/issue-tracker-gitee.md"]) {
+    assert.ok(read(path).includes("gitee-workflow-agent.md"), path);
+    assert.doesNotMatch(read(path), /4501158|4336306|4336307|4336302|4445125/, path);
+  }
+  assert.match(authority, /状态池只证明 ID 有效，不证明具备流转条件/);
+  assert.match(authority, /规划发布和拆单不借 C 完成产品父单/);
+  assert.match(tracker, /状态更新不携带 `description`/);
+  assert.match(tracker, /open、progressing、closed、rejected 的全部分页/);
+  assert.doesNotMatch(tracker, /state == "closed"/);
+  assert.equal(read(".agents/skills/setup-matt-pocock-skills/issue-tracker-gitee.md"),
+    read(".claude/skills/setup-matt-pocock-skills/issue-tracker-gitee.md"));
+});
