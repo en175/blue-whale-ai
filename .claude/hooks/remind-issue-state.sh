@@ -20,7 +20,12 @@ if "tool_response" in data:
     for key in ("exit_code", "exitCode"):
         if key in response:
             raise SystemExit(0 if type(response[key]) is int and response[key] == 0 else 1)
-    raise SystemExit(0 if response.get("isError") is False else 1)
+    claude_success = (data.get("hook_event_name") == "PostToolUse" and
+                      data.get("tool_name") == "Bash" and
+                      response.get("interrupted") is False and
+                      isinstance(response.get("stdout"), str) and
+                      isinstance(response.get("stderr"), str))
+    raise SystemExit(0 if response.get("isError") is False or claude_success else 1)
 raise SystemExit(0 if data.get("client_type") == "kimi_code_cli" and
                  data.get("hook_event_name") == "PostToolUse" and "tool_output" in data else 1)
 ' 2>/dev/null; then
@@ -65,6 +70,8 @@ if tokens and posixpath.basename(tokens[0]) in {"bash", "sh", "zsh"}:
 if not tokens or posixpath.basename(tokens[0]) != "start-task-worktree.sh":
     raise SystemExit(0)
 args = tokens[1:]
+if "--help" in args or "-h" in args:
+    raise SystemExit(0)
 if "--issue" in args and args.index("--issue") + 1 < len(args):
     issue = args[args.index("--issue") + 1]
     if re.fullmatch(r"[A-Za-z0-9_-]+", issue):

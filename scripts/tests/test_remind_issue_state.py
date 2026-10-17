@@ -45,6 +45,25 @@ class RemindIssueStateTest(unittest.TestCase):
                 else:
                     self.assertIn('部署覆盖', context)
 
+    def test_claude_bash_lifecycle_payloads_distinguish_success(self):
+        payload = {'hook_event_name': 'PostToolUse', 'tool_name': 'Bash',
+                   'tool_input': {'command': 'scripts/start-task-worktree.sh --issue IKJIU7'},
+                   'tool_response': {'stdout': 'created', 'stderr': '', 'interrupted': False,
+                                     'isImage': False, 'noOutputExpected': False}}
+        result = self.run_hook(payload)
+        self.assertEqual(result.returncode, 0)
+        self.assertIn('工单状态提醒', result.stdout)
+        for response in ({'stdout': 'created', 'stderr': '', 'interrupted': True},
+                         {'stdout': 'created', 'stderr': ''},
+                         {'stdout': 'created', 'stderr': '', 'interrupted': False,
+                          'exit_code': 1}):
+            with self.subTest(response=response):
+                result = self.run_hook({**payload, 'tool_response': response})
+                self.assertEqual(result.stdout, '')
+        result = self.run_hook({**payload, 'hook_event_name': 'PostToolUseFailure',
+                                'error': 'Exit code 1', 'is_interrupt': False})
+        self.assertEqual(result.stdout, '')
+
     def test_kimi_client_receives_plain_text(self):
         result = self.run_hook({
             'tool_name': 'Bash', 'client_type': 'kimi_code_cli',
@@ -136,6 +155,14 @@ class RemindIssueStateTest(unittest.TestCase):
                 result = self.run_hook({'tool_name': 'Bash', 'tool_input': {
                     'command': command}, 'tool_response': {'exit_code': 0}})
                 self.assertEqual(result.returncode, 0)
+                self.assertEqual(result.stdout, '')
+
+    def test_entry_help_does_not_prove_worktree_creation(self):
+        for flag in ('--help', '-h'):
+            with self.subTest(flag=flag):
+                result = self.run_hook({'tool_name': 'Bash', 'tool_input': {
+                    'command': f'scripts/start-task-worktree.sh {flag} --issue IKJIU7'},
+                    'tool_response': {'exit_code': 0}})
                 self.assertEqual(result.stdout, '')
 
 

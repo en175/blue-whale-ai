@@ -14,11 +14,11 @@
 
 ## Hook 真实子进程边界
 
-`python3 -m unittest discover -s scripts/tests -p test_remind_issue_state.py` 的 11 项测试通过。测试通过 stdin 喂真实脚本并读取 stdout 和退出码，覆盖独立开工、PR 创建与合并、失败、未知、畸形输入、无工单、Kimi 文本及 Codex wrapper。
+`python3 -m unittest discover -s scripts/tests -p test_remind_issue_state.py` 的 13 项测试通过。测试通过 stdin 喂真实脚本并读取 stdout 和退出码，覆盖独立开工、PR 创建与合并、失败、未知、畸形输入、无工单、Kimi 文本及 Codex wrapper。
 
-新增行为均有失败到通过的记录。PR 创建与合并只提醒工程记录和保持业务状态；开工需实际成功证明。含引号的脚本与工单可识别，仅打印命令、复合命令、嵌套 shell、语法检查或版本查询均静默。实现只支持可确认执行的独立脚本或 shell 加脚本形态，其他形态由 Agent 按标准入口和手册核验，不扩大提醒的成功推断。
+新增行为均有失败到通过的记录。PR 创建与合并只提醒工程记录和保持业务状态；开工需实际成功证明。含引号的脚本与工单可识别，仅打印命令、复合命令、嵌套 shell、语法检查、版本查询或入口帮助均静默。实现只支持可确认执行的独立脚本或 shell 加脚本形态，其他形态由 Agent 按标准入口和手册核验，不扩大提醒的成功推断。
 
-`node --test tests/agent-rules.test.mjs` 的 15 项检查通过。该结果验证规则结构和路由，不能替代下面的行为演练或真实客户端验收。
+`node --test tests/agent-rules.test.mjs` 的 17 项检查通过。该结果验证规则结构和路由，不能替代下面的行为演练或真实客户端验收。
 
 ## 规则执行离线演练
 
@@ -40,4 +40,20 @@ Standards 和 Spec 分别独立审查固定起点以来的完整 diff。审查�
 
 CBM 项目为 `IKL2X8-implementation`，目录为任务区 `fix-ikl2x8`，初始索引就绪。Hook 图查询零命中，coverage 确认 .claude、scripts、docs 及相关测试被 fast 索引排除，已定向读取全部相关源码与文档补证，未据空图作不存在结论。
 
-真实客户端自动读取路径与实际事件载荷兼容为 NOT_RUN。除本工单合法开工认领及回读外，部署、验收、退役状态拒绝、未知写入和标签保留的真实 Gitee 写入验收为 NOT_RUN；受控演练与配置测试不能替代它们。未执行产品部署或业务验收，本工单保持开发中，仓库规则合并交付后再按实际影响和 C 条件判断收口。
+## 发布前真实客户端兼容
+
+本轮责任人为本任务执行 Agent。以下兼容核验属于发布前工程验证；未测端保留边界，不移入部署后验收。
+
+| 客户端或接缝 | 环境、证据与结果 | 缺失原因与下一步 |
+| --- | --- | --- |
+| Claude 规则读取 | PASS。Claude Code 2.1.283，真实只读会话 `a32e9b4d-2ae3-44c3-8dee-9f2c5997c0cc`。`claude -p` 使用 Read/Bash、dontAsk 和空 MCP 配置。实际 Read 工具 `call_e8e3c738ff9d4f338395ab5d` 读取 `docs/agents/gitee-workflow-agent.md`，结论为 PR 合并但未部署时保持开发中，不提测、不走 A | 代表性客户端已验；不据此宣称四端实机通过 |
+| Claude Hook stdin | PASS。真实会话 `3c10aaeb-3b36-4ec7-9928-9e2c6fcb8d06`，以单次 CLI 附加 settings 观察 `PostToolUse` 和 `PostToolUseFailure`，未改客户端全局配置。分别实际执行 `printf IKL2X8_POST_SUCCESS` 和 `false`，成功工具 ID `call_669aa724d2304b79ae2f9ef5`，失败工具 ID `call_a5d1b314824942a4b3cd3696` | 原始取证仅在本机 `/tmp/IKL2X8-claude-post-inputs.jsonl`；下面保存关键载荷形状及复现测试 |
+| 真实载荷受控回放 | PASS。将上述两次原始 stdin 的 command 替换为标准 worktree 入口，分别回放 `.claude/hooks/remind-issue-state.sh` 和 `.codex/hooks/run-claude-pretool.sh remind-issue-state.sh`。四次均退出 0；成功包含工单提醒，失败输出为空。回放没有实际创建 worktree 或写入 Gitee | 定向测试 `python3.12 -m unittest discover -s scripts/tests -p test_remind_issue_state.py` 保存同形回归，先失败后通过；中断、缺字段、显式非零退出继续静默 |
+| Codex 实机 | BLOCKED。codex-cli 0.146.0；`codex exec -s read-only --ephemeral --json` 在会话启动前报 catalog JSON 缺 `base_instructions`，位置 line 136 column 5 | 既有用户配置阻塞；未改全局配置。用户配置修复后由客户端维护者重跑只读读取验收 |
+| ZCode / Kimi 实机 | NOT_RUN。四端配置链静态检查已通过；Kimi 输出与 Codex wrapper 子进程契约已测 | 本轮未执行两端真实会话；由对应客户端维护者补验读取路由和事件兼容 |
+
+成功事件的关键真实形状为 `hook_event_name=PostToolUse`、`tool_name=Bash`、`tool_response={stdout: "IKL2X8_POST_SUCCESS", stderr: "", interrupted: false, isImage: false, noOutputExpected: false}`，没有 `exit_code` 或 `isError`。原实现因此错误静默，新增回归先失败再修复通过。兼容判断要求显式成功事件、Bash、字符串 stdout/stderr 和 interrupted 严格为 false；显式错误或非零退出优先拒绝。失败事件为 `PostToolUseFailure`，没有 tool_response，携带 `error="Exit code 1"`、`is_interrupt=false`，保持静默。
+
+除本工单合法开工认领及回读外，退役状态拒绝、未知写入和标签保留的真实 Gitee 写入演练为 NOT_RUN；相应受控演练不能当作真实写入证据。本轮不向真实工单制造无效状态或超时，真实标签合并及回读随获授权的发布动作核验。
+
+部署及业务验收属于部署后阶段，结果为 NOT_RUN，本任务没有产品部署。后续由规则维护者按实际影响和 C 条件判断收口；当前工单保持开发中。工程完整命令、交付 HEAD 与目标基线以最终 `verify-change-scope.mjs summary --stage pr` 和发布凭证为准。
