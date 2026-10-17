@@ -1,7 +1,8 @@
-import type { ReactNode, Ref } from 'react';
+import { useRef, type ReactNode, type Ref } from 'react';
 import { createPortal } from 'react-dom';
 import { useStore } from '@xyflow/react';
 import { computeFollowAnchorAbove } from '../../agent/followDialog';
+import { useOverlayWheelPassthrough } from '../Canvas/canvasWheelPassthrough';
 import layerStyles from '../NodeFollowToolbar/index.module.css';
 
 export interface FollowToolbarLayerProps {
@@ -28,6 +29,8 @@ export default function FollowToolbarLayer({
   const nodeWidth = useStore((state) => state.nodeLookup.get(nodeId)?.measured?.width);
   const transform = useStore((state) => state.transform);
   const containerWidth = useStore((state) => state.width);
+  const layerWheelRef = useRef<HTMLDivElement | null>(null);
+  useOverlayWheelPassthrough(layerWheelRef, { rendererScope: flowDom });
   if (!show || !flowDom || !position || nodeWidth == null || containerWidth <= 0) return null;
 
   const anchor = computeFollowAnchorAbove({
@@ -42,7 +45,11 @@ export default function FollowToolbarLayer({
 
   return createPortal(
     <div
-      ref={layerRef}
+      ref={(node: HTMLDivElement | null) => {
+        layerWheelRef.current = node;
+        if (typeof layerRef === 'function') layerRef(node);
+        else if (layerRef) layerRef.current = node;
+      }}
       className={layerStyles.toolbarLayer}
       data-canvas-chrome
       data-gen-panel-territory
