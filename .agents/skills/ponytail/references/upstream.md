@@ -1,6 +1,12 @@
 # Ponytail 固定来源
 
-本仓来源为 [Ponytail v5.1.0](https://github.com/DietrichGebert/ponytail/releases/tag/v5.1.0)，完整提交 `9cc65d03aa2da1db7121b912d03596409ee340b8`。导入时通过 Git tag 和精确提交归档交叉核验。更新必须重新固定版本并审查，不跟随 main。
+本仓共享正文与原有多端适配来自 [Ponytail v5.1.0](https://github.com/DietrichGebert/ponytail/releases/tag/v5.1.0)，完整提交 `9cc65d03aa2da1db7121b912d03596409ee340b8`。Codex 单独对齐 [v5.3.2](https://github.com/DietrichGebert/ponytail/releases/tag/v5.3.2)，完整提交 `16352ac229eb08a9598dcae48fe9f2b342567d86`。2026-10-17 已核对远端 main 与 v5.3.2 标签均指向该提交。更新固定版本并审查，不跟随 main。
+
+Codex 补入压缩上下文保档、退出前同步输出、概览路径与符号过滤、跳过符号链接，以及概览子进程的一秒超时。正文继续读取当前工作树的中文共享技能，成功加载时输出 `upstream: v5.3.2` 标记；缺正文时仍报告备用规则。新增行为仅由 Codex 路径启用，其他客户端保留原有行为与安装。
+
+v5.1.0 到 v5.3.2 的 Codex 相关上游差异均已核对：review、audit 正文、instructions 与 subagent 实现未变；debt 与 gain 的一次性语义已由本地正文覆盖，债务扫描使用遵守忽略规则的 rg。主技能新增 off 参数提示已由本地正文支持。help 的 Band 内容仅适用于 Claude，config 的 Qoder 目录支持和 Node 12 插件启动器不适用于本仓直接 Node 入口。保留中文、CBM、现有测试框架、注释禁令和桌面精确技能引用解析。
+
+同客户端、同工作树仍共享档位，没有会话 ID 隔离；上游 v5.3.2 也保留此限制。Codex 的 startup、resume、clear 使用默认值，compact 保留当前档位及关闭状态。CLI 与桌面真实 Hook 接收另行验收，配置链通过不代表实机通过。
 
 [MIT 许可证](../LICENSE.md)保留上游原文。六个共享技能均标明 MIT。
 

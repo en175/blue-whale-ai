@@ -1,6 +1,6 @@
 # Ponytail 安装与维护
 
-先拉取本任务交付的仓库版本，确认非交互进程能执行 `node --version`。这份说明适用于仓库固定的 v5.1.0，来源提交为 `9cc65d03aa2da1db7121b912d03596409ee340b8`。完整导入清单、补丁与 MIT 见[来源记录](../../.agents/skills/ponytail/references/upstream.md)。
+先拉取本任务交付的仓库版本，确认非交互进程能执行 `node --version`。Codex 已对齐 v5.3.2，来源提交为 `16352ac229eb08a9598dcae48fe9f2b342567d86`；共享中文正文与其他客户端继续保留 v5.1.0 适配。完整导入清单、补丁与 MIT 见[来源记录](../../.agents/skills/ponytail/references/upstream.md)。本次不升级 Codex 客户端，也不迁移其他客户端安装。
 
 ## 四端入口
 
@@ -41,7 +41,7 @@ PY
 python3 scripts/check-hook-contracts.py
 ```
 
-来源记录应为 v5.1.0 及上述完整提交。六行散列用于与同一交付 HEAD 的其他机器比较。契约检查核对仓库配置，不读取个人配置，也不证明当前客户端实际加载。再从客户端 Hook 列表核对来源是否与上表一致；ZCode 同时核对安装的市场源、插件版本和六技能软链目标。
+来源记录应区分 Codex v5.3.2 与原有 v5.1.0 基线，并保留两个完整提交。六行散列用于与同一交付 HEAD 的其他机器比较。契约检查核对仓库配置，不读取个人配置，也不证明当前客户端实际加载。再从客户端 Hook 列表核对来源是否与上表一致；ZCode 同时核对安装的市场源、插件版本和六技能软链目标。
 
 ## Codex 与 Claude Code
 
@@ -56,7 +56,7 @@ Codex 桌面端选择当前工作树的 Ponytail 技能后，追加 lite、full�
 
 2026-10-13，桌面技能发现与完整正文进入模型已直接回读确认，Hook 实际执行仍缺证据。人工输入末条为显式 full，裸引用恢复尚未实机验收。保存实际事件来源及 `hookSpecificOutput.additionalContext` 中的档位标记后，再判断 Hook 生命周期结果；详细记录见[验收记录](../projects/IKL54X/ponytail-acceptance.md)。
 
-新会话默认值按 `PONYTAIL_DEFAULT_MODE`、用户配置、full 顺序解析。用户配置定位规则由 `ponytail-config.js` 维护。`ponytail default <档位>` 只改变下次启动默认值；普通切档只改变当前客户端、当前工作树的档位。启动、resume、clear、compact 重新应用默认值。
+新会话默认值按 `PONYTAIL_DEFAULT_MODE`、用户配置、full 顺序解析。用户配置定位规则由 `ponytail-config.js` 维护。`ponytail default <档位>` 只改变下次启动默认值；普通切档只改变当前客户端、当前工作树的档位。Codex 的启动、resume、clear 重新应用默认值，compact 保留当前档位及关闭状态；其他客户端保留原有启动行为。
 
 ## 共享运行边界
 
@@ -74,7 +74,7 @@ Codex 桌面端选择当前工作树的 Ponytail 技能后，追加 lite、full�
 
 运行档位隔离，显式 `ponytail default <档位>` 则修改共享用户默认配置，会影响以后启动的其他客户端。Codex、Claude、ZCode 在启动及切档时交付正文，普通输入不重复交付；活动状态的裸命令报告档位。Kimi 在每次用户输入时交付当前正文，切档当轮只交付一次。
 
-Codex 的三类 Ponytail 处理器设置有限的 `additionalContextLimit=6000`，为完整中文正文和默认最多 2000 字符的辅助概览留空间。保持概览有界，不用零阈值无限注入。概览采用启发式名称提取，会遗漏动态定义和嵌套定义；结构探索继续使用 CBM 并核对覆盖。
+Codex 的三类 Ponytail 处理器设置有限的 `additionalContextLimit=6000`，为完整中文正文和默认最多 2000 字符的辅助概览留空间。保持概览有界，不用零阈值无限注入。Codex 输出在退出前同步写完；辅助概览在独立进程执行，超时一秒即省略，并过滤路径、符号名及符号链接文件。概览采用启发式名称提取，会遗漏动态定义和嵌套定义；结构探索继续使用 CBM 并核对覆盖。
 
 ## 状态栏
 
