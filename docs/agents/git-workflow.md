@@ -38,6 +38,16 @@
 - Hook 命中且现有授权覆盖操作时，Agent 自动改走标准入口并只纠偏重试一次；Gitee 调用失败按 [渠道规则](../../agent-rules/gitee-mcp-only.md) 核验执行结果后决定重试，不能套用 Git 网络重试。
 - PR 创建后停下来交给开发者审查，不自作主张合并。
 
+## PR 草稿条件与回读
+
+创建 PR 默认使用普通 PR，显式传 `draft=false`。仅在用户明确要求，或已确认规则、规格明确约定时选择草稿。Agent 核对原始要求或规则路径、规格条款，并将具体依据写入 PR 和工单；泛化发布授权不代表用户要求草稿。
+
+选择草稿时，发布入口同时传 `--draft-pr --draft-reason "<用户要求或已确认规则、规格的具体依据>"`。依据须为非空单行文本，入口将其写入发布标记 `draft_reason`。入口只校验依据的格式，实施 Agent 与审查人负责核对内容及来源。普通 PR 不传草稿参数，更新已有 PR 沿用快照状态，本参数不用于变更已有 PR 的草稿状态。
+
+普通与草稿使用同一工程验证门禁，草稿不能绕过发布前必验失败、跳过或缺环境。仅部署后验收为 `NOT_RUN` 时，在发布前必验通过且授权覆盖的情况下可创建普通 PR，未验项按 [测试策略](testing-strategy.md#验证阶段与交付结论) 保留。
+
+创建后通过 Gitee MCP 回读实际 `draft`、source、target 和 HEAD，核对发布标记及草稿依据，并在 PR 和工单分别报告工程交付与部署后验收结论。更新 PR 时同样核对实际状态与原有依据；不因未验项自行改成草稿。
+
 ## 禁直推 master（最高红线）
 
 - 禁止 `git push origin master`。全走 分支 → PR → merge。`hotfix/*` 无特权。
@@ -59,7 +69,7 @@
 - 只读代码任务在当前本地 release 工作树运行 `scripts/sync-release-line.sh --json`，并核对该目录的索引。纯非代码资料阅读不触发 Git 同步。
 - 写入任务，包括普通散文文档与 chore，从该目录运行 `scripts/start-task-worktree.sh --type <feature|fix|hotfix|docs|chore> (--issue <工单号>|--no-issue) --summary <6–15字中文简述>`。入口自行同步，并建立独立任务 worktree。`--type hotfix` 只决定分支命名，不授予生产 hotfix 权限。
 - 本地 release 的 dirty 文件留在原工作树，不进入任务起点。同步会覆盖 dirty 文件时入口停止。任务区记录 `target_branch` 和 `start_sha`；旧任务区缺记录时只能显式运行 `scripts/lib/task_metadata.py repair`，须有人类授权和可核对的目标、起点。
-- 完成后用 `scripts/commit-task-for-review.sh -m "<message>"` 形成可审查提交。发布前运行 PR 阶段验证，确认任务起点已进入远端目标 release，再用 `scripts/publish-review-package.sh --user-authorized --create-pr --target-branch <release/*>` 推送并建立 PR。草稿 PR 加 `--draft-pr`，创建 Gitee PR 时显式传同一 `draft` 值。
+- 完成后用 `scripts/commit-task-for-review.sh -m "<message>"` 形成可审查提交。发布前运行 PR 阶段验证，确认任务起点已进入远端目标 release，再用 `scripts/publish-review-package.sh --user-authorized --create-pr --target-branch <release/*>` 推送并建立 PR。草稿参数和依据见「PR 草稿条件与回读」，创建 Gitee PR 时显式传同一 `draft` 值。
 - 合并进目标 release 后，在任务区运行 `scripts/cleanup-task-worktree.sh`。入口校验远端目标已包含任务 HEAD，只删本地任务区与本地分支，远端任务源分支保留。
 - 旧 `scripts/commit-spec-on-master.sh` 已废止；`scripts/merge-task-to-local-master.sh` 不属于日常发布线流程。原本地 master 集成区和散文直写例外已由 [ADR-0115](../adr/0115-local-release-code-baseline.md) 替代。仅已忽略的根 `CLAUDE.local.md` 与 `.codex/config.toml` 保留本地个人配置窄例外。
 

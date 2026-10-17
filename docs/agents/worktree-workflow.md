@@ -48,7 +48,7 @@ scripts/sync-task-from-origin.sh sync --target-branch <release/*> --json
 
 ```bash
 scripts/publish-review-package.sh --user-authorized --create-pr --target-branch <release/*> --json
-# 经授权需要草稿 PR 时加 --draft-pr
+# 草稿参数及依据见 git-workflow.md「PR 草稿条件与回读」
 ```
 
 入口成功后，Agent 用 Gitee 创建 source/target 与发布标记一致的 PR，并显式传 `draft=true` 或 `draft=false`。Hook 比较标记中的 `draft`、source 和 target，也核对远端源 HEAD 与目标 SHA。提交变化时重新验证和发布。创建成功的 PostToolUse 才消费标记；失败或旧标记缺字段时不放行。用户授权修订已有 PR 时，运行 `--update-pr <编号> --pr-snapshot <临时JSON>`。快照记录 opened、source、target、head、conflict、changed_files 与 fetched_at。推送后回读 PR，运行 `scripts/verify-pr-update.sh`，成功后再 finalize 同步恢复点。

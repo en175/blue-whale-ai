@@ -12,6 +12,7 @@ PR_SNAPSHOT=""
 TARGET_BRANCH=""
 TARGET_BRANCH_EXPLICIT=0
 CREATE_DRAFT=0
+DRAFT_REASON=""
 AS_JSON=0
 PYTHON=()
 ALLOW_SCOPE_FILES=()
@@ -70,14 +71,15 @@ fail_status() {
 usage() {
   cat <<'EOF'
 用法：
-  scripts/publish-review-package.sh --user-authorized --create-pr [--target-branch release/<name>] [--draft-pr] [--json]
+  scripts/publish-review-package.sh --user-authorized --create-pr [--target-branch release/<name>] [--draft-pr --draft-reason <依据>] [--json]
   scripts/publish-review-package.sh --user-authorized --update-pr <PR编号> --pr-snapshot <JSON文件> [--allow-scope-file <路径>] [--json]
 
 --create-pr         首次推送并生成创建 PR 的短期发布标记
 --update-pr <IID>   安全更新已有 PR 的远端源分支，不生成创建标记
 --pr-snapshot FILE  Gitee MCP 新鲜快照；- 从标准输入读取，入口退出时清理临时文件
 --target-branch NAME 创建 PR 的目标分支；默认任务记录的 release/*
---draft-pr          创建草稿 PR；标记会绑定 draft=true，供 Gitee Hook 核对
+--draft-pr          创建草稿 PR，须同时传 --draft-reason
+--draft-reason TEXT 用户明确要求或已确认规则、规格的单行依据；写入发布标记
 --allow-scope-file  明确允许本轮审查修订新增到冻结范围的文件；可重复
 EOF
 }
@@ -96,6 +98,11 @@ while [ "$#" -gt 0 ]; do
     --draft-pr)
       CREATE_DRAFT=1
       shift
+      ;;
+    --draft-reason)
+      [ "$#" -ge 2 ] || fail_status 2 DRAFT_REASON_REQUIRED "--draft-reason 缺少草稿依据。"
+      DRAFT_REASON="$2"
+      shift 2
       ;;
     --update-pr)
       [ "$#" -ge 2 ] || fail_status 2 INVALID_PR_IID "--update-pr 缺少 PR 编号。"
@@ -138,6 +145,17 @@ done
 [ "$MODE_COUNT" = 1 ] || fail_status 2 INVALID_MODE "--create-pr 与 --update-pr 必须且只能选择一个。"
 if [ "$MODE" = update ] && [ "$CREATE_DRAFT" = 1 ]; then
   fail_status 2 INVALID_ARGUMENT "--draft-pr 仅用于首次创建 PR。"
+fi
+if [ "$CREATE_DRAFT" = 1 ]; then
+  case "$DRAFT_REASON" in
+    *[![:space:]]*) ;;
+    *) fail_status 2 DRAFT_REASON_REQUIRED "草稿须提供用户明确要求或已确认规则、规格的具体依据。" ;;
+  esac
+  case "$DRAFT_REASON" in
+    *$'\n'*|*$'\r'*) fail_status 2 DRAFT_REASON_REQUIRED "草稿依据须为单行文本。" ;;
+  esac
+elif [ -n "$DRAFT_REASON" ]; then
+  fail_status 2 INVALID_ARGUMENT "--draft-reason 须与 --draft-pr 一起使用。"
 fi
 if [ "$MODE" = update ]; then
   case "$PR_IID" in
@@ -321,6 +339,7 @@ target=$TARGET_BRANCH
 head=$head_sha
 target_sha=$upstream_sha
 draft=$draft_marker
+draft_reason=$DRAFT_REASON
 created_at=$(date +%s)
 EOF
   emit_status PUSHED_CREATE_PR branch "$branch" head "$head_sha"

@@ -333,10 +333,68 @@ class PublishReviewPackageTest(unittest.TestCase):
         self.assertEqual(f"refs/heads/{BRANCH}", self.git("config", f"branch.{BRANCH}.merge"))
 
     def test_create_mode_can_bind_an_explicit_draft_marker(self) -> None:
-        result = self.invoke("--user-authorized", "--create-pr", "--draft-pr", "--json")
+        result = self.invoke(
+            "--user-authorized", "--create-pr", "--draft-pr",
+            "--draft-reason", "用户明确要求先创建草稿", "--json",
+        )
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("draft=true", self.publish_marker().read_text(encoding="utf-8"))
+        self.assertIn("draft_reason=用户明确要求先创建草稿", self.publish_marker().read_text(encoding="utf-8"))
+
+    def test_draft_requires_a_single_line_nonempty_basis_before_push(self) -> None:
+        for reason in (None, "", " \t", "用户要求\ndraft=false", "用户要求\r其他字段"):
+            with self.subTest(reason=reason):
+                args = ["--user-authorized", "--create-pr", "--draft-pr", "--json"]
+                if reason is not None:
+                    args.extend(["--draft-reason", reason])
+                result = self.invoke(*args)
+                self.assertEqual(result.returncode, 2)
+                self.assertEqual(self.response(result)["status"], "DRAFT_REASON_REQUIRED")
+                self.assertFalse(self.publish_marker().exists())
+                self.assertEqual("", self.git("ls-remote", "--heads", "origin", f"refs/heads/{BRANCH}"))
+
+    def test_post_deployment_not_run_does_not_select_draft(self) -> None:
+        report = "工程交付 PASS；部署后业务验收 NOT_RUN，原因：尚未部署，责任：业务验收人"
+        self.commit_followup(report)
+
+        result = self.invoke("--user-authorized", "--create-pr", "--json")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("draft=false", self.publish_marker().read_text(encoding="utf-8"))
+        self.assertEqual(report, self.git("show", f"origin/{BRANCH}:task.txt"))
+
+    def test_release_prerequisites_block_ordinary_and_draft_before_push(self) -> None:
+        fake_node = self.fake_bin / "node"
+        for outcome in ("FAIL", "SKIPPED", "BLOCKED"):
+            for gate, status in (("ensure", "VERIFICATION_FAILED"), ("check", "VERIFICATION_REQUIRED")):
+                for draft in (False, True):
+                    with self.subTest(outcome=outcome, gate=gate, draft=draft):
+                        fake_node.write_text(
+                            "#!/bin/sh\n"
+                            'case "$1" in\n'
+                            "  */scripts/verify-change-scope.mjs)\n"
+                            f'    if [ "$2" = {gate} ]; then printf \'{outcome}\\n\'; exit 1; fi\n'
+                            "    exit 0 ;;\n"
+                            "esac\n"
+                            'exec "$REAL_NODE" "$@"\n',
+                            encoding="utf-8",
+                        )
+                        args = ["--user-authorized", "--create-pr", "--json"]
+                        if draft:
+                            args.extend(["--draft-pr", "--draft-reason", "已确认规格明确要求草稿"])
+                        result = self.invoke(*args)
+                        self.assertEqual(result.returncode, 11, result.stderr)
+                        self.assertEqual(self.response(result)["status"], status)
+                        self.assertIn(outcome, self.response(result)["detail"])
+                        self.assertFalse(self.publish_marker().exists())
+                        self.assertEqual("", self.git("ls-remote", "--heads", "origin", f"refs/heads/{BRANCH}"))
+
+    def test_draft_reason_requires_draft_creation_mode(self) -> None:
+        result = self.invoke("--user-authorized", "--create-pr", "--draft-reason", "用户要求", "--json")
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(self.response(result)["status"], "INVALID_ARGUMENT")
+        self.assertFalse(self.publish_marker().exists())
 
     def test_create_pr_hook_rejects_source_commit_after_marker(self) -> None:
         created = self.invoke("--user-authorized", "--create-pr", "--json")

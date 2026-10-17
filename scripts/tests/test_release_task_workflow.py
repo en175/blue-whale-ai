@@ -88,20 +88,23 @@ class ReleaseTaskWorkflowTest(unittest.TestCase):
             plan = json.loads(command("node", task / "scripts/verify-change-scope.mjs", "plan", "--stage", "pr", "--json", cwd=task).stdout)
             self.assertEqual(plan["classification"]["tier"], "docs")
             blocked = command(BASH, task / "scripts/publish-review-package.sh", "--user-authorized",
-                              "--create-pr", "--target-branch", line, "--draft-pr", "--json", cwd=task, check=False)
+                              "--create-pr", "--target-branch", line, "--draft-pr",
+                              "--draft-reason", "已确认规格要求演练草稿发布", "--json", cwd=task, check=False)
             self.assertEqual(blocked.returncode, 12, blocked.stderr)
             self.assertEqual(json.loads(blocked.stdout)["status"], "TASK_BASE_NOT_SHARED")
             self.assertFalse(command("git", "-C", task, "ls-remote", "--heads", "origin", f"refs/heads/{task_branch}", cwd=root).stdout.strip())
 
             command("git", "-C", release, "push", "origin", line, cwd=root)
             published = command(BASH, task / "scripts/publish-review-package.sh", "--user-authorized",
-                                "--create-pr", "--target-branch", line, "--draft-pr", "--json", cwd=task)
+                                "--create-pr", "--target-branch", line, "--draft-pr",
+                                "--draft-reason", "已确认规格要求演练草稿发布", "--json", cwd=task)
             self.assertEqual(json.loads(published.stdout.strip().splitlines()[-1])["status"], "PUSHED_CREATE_PR")
             common = Path(command("git", "-C", task, "rev-parse", "--git-common-dir", cwd=root).stdout.strip())
             if not common.is_absolute():
                 common = (task / common).resolve()
             marker = common / ("agent-release-review-package-" + task_branch.replace("/", "%"))
             self.assertIn("draft=true", marker.read_text(encoding="utf-8"))
+            self.assertIn("draft_reason=已确认规格要求演练草稿发布", marker.read_text(encoding="utf-8"))
             task_head = command("git", "-C", task, "rev-parse", "HEAD", cwd=root).stdout.strip()
             receipt = json.loads((common / "blue-whale/verification" / f"{task_head}.json").read_text(encoding="utf-8"))
             self.assertEqual("passed", receipt["status"])
