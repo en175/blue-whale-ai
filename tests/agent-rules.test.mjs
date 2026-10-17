@@ -147,6 +147,33 @@ test("testing strategy requests the readable verification receipt summary", () =
   assert.match(read("docs/agents/testing-strategy.md"), /verify-change-scope\.mjs summary/);
 });
 
+test("verification separates release prerequisites, engineering delivery and post-deployment acceptance", () => {
+  const strategy = read("docs/agents/testing-strategy.md");
+  for (const field of ["适用环境", "所需证据", "执行责任", "推进条件"]) {
+    assert.ok(strategy.includes(field), field);
+  }
+  for (const phase of ["发布前工程必验", "任务工程交付", "部署后验收"]) {
+    assert.ok(strategy.includes(`| ${phase} |`), phase);
+  }
+  assert.match(strategy, /免业务测试.*工程检查/);
+  assert.match(strategy, /工程交付完成不代表.*部署.*业务验收/);
+  assert.match(strategy, /业务验收.*NOT_RUN/);
+  assert.match(strategy, /环境不足.*不得.*改列.*部署后/);
+});
+
+test("ordinary PRs preserve post-deployment NOT_RUN while drafts require a recorded basis", () => {
+  const workflow = read("docs/agents/git-workflow.md");
+  assert.match(workflow, /默认.*普通 PR.*draft=false/);
+  assert.match(workflow, /用户明确要求.*已确认规则.*规格/);
+  assert.match(workflow, /--draft-reason/);
+  assert.match(workflow, /仅部署后验收.*NOT_RUN.*普通 PR/);
+  assert.match(workflow, /回读.*draft.*依据/);
+  assert.match(workflow, /草稿.*不能绕过.*发布前/);
+  const review = read("docs/agents/commit-and-review.md");
+  assert.match(review, /阶段.*环境.*证据.*责任.*结果.*缺失原因/);
+  assert.match(review, /PR 和工单.*NOT_RUN/);
+});
+
 test("pr skill keeps its template scaffolding in Chinese while guidance stays upstream English", () => {
   const skill = read(".claude/skills/pr/SKILL.md");
   const authority = read(".agents/skills/pr/SKILL.md");

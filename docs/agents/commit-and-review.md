@@ -57,7 +57,7 @@ Agent 完成子 issue 后，通过 `scripts/commit-task-for-review.sh -m "<messa
 
 ```bash
 scripts/publish-review-package.sh --user-authorized --create-pr --target-branch <release/*>
-scripts/publish-review-package.sh --user-authorized --create-pr --target-branch <release/*> --draft-pr
+scripts/publish-review-package.sh --user-authorized --create-pr --target-branch <release/*> --draft-pr --draft-reason "<明确草稿依据>"
 scripts/publish-review-package.sh --user-authorized --update-pr <PR编号> --pr-snapshot <推送前临时JSON>
 ```
 
@@ -88,6 +88,8 @@ PR 合并用 **merge**，**禁用 squash / rebase**。
 ## PR 模板
 
 开 PR 前必须先获得用户发布审查包授权。PR 正文的唯一权威是 [pr 技能](../../.agents/skills/pr/SKILL.md)，写正文前读取该技能。
+
+创建或更新 PR 前，按 [测试策略的验证阶段](testing-strategy.md#验证阶段与交付结论) 在验证证据中逐项记录阶段、环境及版本、证据、执行责任、实际结果与缺失原因。PR 和工单中的部署后未验项保留 `NOT_RUN`；工程交付完成与部署、业务验收分别给出结论。草稿选择、具体依据及实际状态回读按 [Git 工作流](git-workflow.md#pr-草稿条件与回读) 执行。
 
 ---
 
