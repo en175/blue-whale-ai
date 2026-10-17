@@ -19,9 +19,10 @@ export function wheelTargetScrollsWithin(target: Element, boundary: Element): bo
   return false;
 }
 
-export function forwardWheelToRenderer(event: WheelEvent): boolean {
+export function forwardWheelToRenderer(event: WheelEvent, rendererScope?: Element | null): boolean {
   const target = event.target;
-  const renderer = target instanceof Element ? findFlowRenderer(target) : null;
+  const renderer = (target instanceof Element ? findFlowRenderer(target) : null)
+    ?? rendererScope?.querySelector<HTMLElement>('.react-flow__renderer') ?? null;
   if (!renderer) return false;
   renderer.dispatchEvent(
     new WheelEvent('wheel', {
@@ -44,9 +45,10 @@ export function forwardWheelToRenderer(event: WheelEvent): boolean {
 
 export function useOverlayWheelPassthrough(
   ref: RefObject<HTMLElement | null>,
-  options?: { ignoreInsideReactFlow?: boolean },
+  options?: { ignoreInsideReactFlow?: boolean; rendererScope?: Element | null },
 ) {
   const ignoreInsideReactFlow = options?.ignoreInsideReactFlow ?? false;
+  const rendererScope = options?.rendererScope;
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
@@ -58,7 +60,7 @@ export function useOverlayWheelPassthrough(
         if (event.ctrlKey || event.metaKey) event.preventDefault();
         return;
       }
-      if (forwardWheelToRenderer(event)) {
+      if (forwardWheelToRenderer(event, rendererScope)) {
         event.preventDefault();
         return;
       }

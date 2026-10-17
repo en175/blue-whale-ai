@@ -13,6 +13,7 @@ import {
   type GroupFrameDragResult,
   type PositionRecord,
 } from '../../graph/canvasGroups';
+import { useOverlayWheelPassthrough } from '../Canvas/canvasWheelPassthrough';
 import styles from './index.module.css';
 
 function isPassthroughOverlayTarget(target: EventTarget | null): boolean {
@@ -163,11 +164,14 @@ export default function GroupOverlay({
   const clickSuppressRef = useRef(false);
   const contentClickSuppressRef = useRef(false);
   const lastContentPressRef = useRef({ id: '', at: 0 });
+  const uiLayerElRef = useRef<HTMLDivElement | null>(null);
   const uiLayerRef = useCallback((el: HTMLDivElement | null) => {
+    uiLayerElRef.current = el;
     paneRef.current = el
       ? el.closest('.react-flow')?.querySelector<HTMLElement>('.react-flow__pane') ?? null
       : null;
   }, []);
+  useOverlayWheelPassthrough(uiLayerElRef);
   const dragStateRef = useRef<{
     groupId: string;
     startScreen: { x: number; y: number };
