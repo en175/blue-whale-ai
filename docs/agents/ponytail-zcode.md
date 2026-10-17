@@ -2,7 +2,7 @@
 
 在 ZCode 中添加当前工作树的 `.zcode/plugins` 本地市场，安装并启用 `blue-whale-ponytail`。本仓插件版本为 `1.0.0`，规则使用共享的 Ponytail v5.1.0，固定来源提交为 `9cc65d03aa2da1db7121b912d03596409ee340b8`。共享来源、MIT 许可证和档位契约见 [Ponytail 维护说明](ponytail.md)。
 
-截至 2026-10-12 查阅的 [ZCode Hook 官方文档](https://zcode.z.ai/cn/docs/hooks)，项目 `.zcode/config.json` 中的 Hook 会被忽略，日志记录 `config_project_hooks_ignored`。本仓保留该文件中的 Ponytail 条目用于历史配置及协议回归；当前支持入口是插件，不能用项目配置链测试证明客户端已经加载。
+ZCode 3.15.3 会执行项目 `.zcode/config.json` 中的 Hook。本仓保留的 Ponytail 历史条目已设 `enabled: false`，只用于协议回归；实际入口是插件，避免插件与项目配置双重注入。配置链测试不能证明客户端实际加载。
 
 ## 安装
 
@@ -53,4 +53,4 @@ python3 scripts/check-hook-contracts.py
 | 配置链集成 | 从真实历史项目配置及插件标准配置执行处理器，验证默认值、切档、关闭、恢复、非法参数、一次性任务、项目及工作树隔离。不能证明 GUI 安装、信任或模型实际上下文。 |
 | 客户端实机 | 成员安装启用插件及项目技能后，取得客户端版本、Hook 来源、上下文和技能发现证据。此项单独验收。 |
 
-本轮在 macOS 执行 Node/Python 配置链测试。只读应用元数据确认已安装 ZCode 桌面端 3.14.5、build 3.14.5.7961，PATH 上未找到 `zcode` CLI。安装探针不能证明插件启用、技能导入或上下文注入；这些实机项目及其他系统仍未验收，详见[整包验收记录](../projects/IKL54X/ponytail-acceptance.md)。出现 `config_project_hooks_ignored` 时使用插件入口；出现 `hook.run.failed` 时核对 Node PATH、工作树启用设置及共享脚本是否存在，stdout 中的备用约束或脚本 exit 0 都不能替代真实正文验收。
+本轮在 macOS 执行 Node/Python 配置链测试。只读应用元数据确认已安装 ZCode 桌面端 3.15.3、build 3.15.3.8237。安装探针不能证明插件启用、技能导入或上下文注入；这些实机项目及其他系统仍未验收，详见[整包验收记录](../projects/IKL54X/ponytail-acceptance.md)。出现 `hook.run.failed` 时核对 Node PATH、工作树启用设置及共享脚本是否存在，stdout 中的备用约束或脚本 exit 0 都不能替代真实正文验收。
