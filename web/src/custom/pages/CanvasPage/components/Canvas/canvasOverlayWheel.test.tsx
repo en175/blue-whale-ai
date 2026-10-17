@@ -20,6 +20,10 @@ function transform() {
   return container.querySelector<HTMLElement>('.react-flow__viewport')!.style.transform;
 }
 
+function viewportScale() {
+  return Number(/scale\(([^)]+)\)/.exec(transform())![1]);
+}
+
 async function wheel(target: EventTarget, init: WheelEventInit = {}) {
   const event = new WheelEvent('wheel', { bubbles: true, cancelable: true, ...init });
   await act(async () => { target.dispatchEvent(event); });
@@ -147,5 +151,30 @@ describe('画布浮层滚轮平移（IKKNT7：@添加到对话与组操作不再
     expect(onMenu.defaultPrevented).toBe(true);
     await click(groupDownloadButton());
     expect(props.onDownloadGroup).toHaveBeenCalled();
+  });
+});
+
+describe('画布浮层修饰键滚轮缩放（IKMS0A）', () => {
+  it('@添加到对话按钮上的 ctrl+向上滚轮缩放画布且拦截默认行为', async () => {
+    await vi.waitFor(() => expect(addToChatButton()).toBeTruthy());
+    const onButton = await wheel(addToChatButton(), { deltaY: -100, ctrlKey: true });
+    await vi.waitFor(() => expect(viewportScale()).toBeGreaterThan(1));
+    expect(onButton.defaultPrevented).toBe(true);
+  });
+
+  it('组操作菜单按钮上的 meta+向上滚轮缩放画布且拦截默认行为', async () => {
+    vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36');
+    await act(async () => {
+      root.render(createElement(Stage, null, createElement(FlowCanvas, props)));
+    });
+    await vi.waitFor(() => expect(groupBadge()).toBeTruthy());
+    const before = viewportScale();
+    await click(groupBadge());
+    await act(async () => {
+      document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Meta', code: 'MetaLeft', bubbles: true, cancelable: true }));
+    });
+    const onMenu = await wheel(groupDownloadButton(), { deltaY: -100, metaKey: true });
+    await vi.waitFor(() => expect(viewportScale()).toBeGreaterThan(before));
+    expect(onMenu.defaultPrevented).toBe(true);
   });
 });
