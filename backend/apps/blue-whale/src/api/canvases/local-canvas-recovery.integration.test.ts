@@ -185,6 +185,91 @@ describe.skipIf(!process.env.IKNCL3_DATABASE_URL)("本地恢复画布公开 API"
     expect(await prisma.client.cost_reservations.count()).toBe(beforeReservations);
   });
 
+  it("角色库原身份恢复后保留全文、关联资产并可幂等重读", async () => {
+    const materialId = `asset-recovery-${sourceId}`;
+    const asset = await prisma.client.assets.create({ data: { user_id: 983003n, project_id: BigInt(sourceId), type: "image", url: `https://assets.invalid/material-${sourceId}.png`, material_id: materialId } });
+    await prisma.client.material_assets.create({ data: { material_id: materialId, user_id: 983003n, material_group_id: `group-recovery-${sourceId}`, status: "Active" } });
+    const nodes = [{ id: "role-card", type: "assetNode", position: { x: 10, y: 20 }, data: { kind: "custom", initialRefs: [{ id: "role-reference", src: asset.url, type: "image", assetId: materialId }] } }];
+    const body = { ...payload, nodes: JSON.stringify(nodes) };
+    const id = "04e0b9cc-04dd-45ad-930b-3c0000000015";
+    const beforeJobs = await prisma.client.generation_jobs.count();
+    const beforeReservations = await prisma.client.cost_reservations.count();
+    const response = await request("PUT", id, body);
+    expect(response.status).toBe(200);
+    const complete = await response.json();
+    expect(complete.data.stage).toBe("complete");
+    const snapshot = await (await fetch(`${base}/api/projects/${complete.data.targetProjectId}/snapshot`)).json();
+    expect(JSON.parse(snapshot.data.canvas.nodes)).toEqual(nodes);
+    expect(snapshot.data.assets[asset.id.toString()].access_url).toBe(asset.url);
+    await app.close();
+    await start();
+    expect((await (await request("GET", id)).json()).data).toEqual(complete.data);
+    expect((await (await request("PUT", id, body)).json()).data).toEqual(complete.data);
+    const numericBody = { ...body, nodes: JSON.stringify([{ ...nodes[0], data: { ...nodes[0].data, initialRefs: [{ ...nodes[0].data.initialRefs[0], assetId: asset.id.toString() }] } }]) };
+    expect((await request("PUT", id, numericBody)).status).toBe(409);
+    expect(await prisma.client.generation_jobs.count()).toBe(beforeJobs);
+    expect(await prisma.client.cost_reservations.count()).toBe(beforeReservations);
+  });
+
+  it("角色库未知、他人、失效或变更映射在恢复与回读时明确缺项", async () => {
+    const materialId = `asset-20261019-${sourceId}-A_1`;
+    const asset = await prisma.client.assets.create({ data: { user_id: 983003n, project_id: BigInt(sourceId), type: "image", url: `https://assets.invalid/material-state-${sourceId}.png`, material_id: materialId } });
+    const material = { material_id: materialId, user_id: 983003n, material_group_id: `group-state-${sourceId}`, status: "Active" };
+    await prisma.client.material_assets.create({ data: material });
+    const nodes = [{ id: "role-state", type: "assetNode", data: { initialRefs: [{ id: "role-state-ref", src: asset.url, type: "image", assetId: materialId }] } }];
+    const body = { ...payload, nodes: JSON.stringify(nodes) };
+    const id = "04e0b9cc-04dd-45ad-930b-3c0000000016";
+    const first = await request("PUT", id, body);
+    expect(first.status).toBe(200);
+    const complete = await first.json();
+    const before = await (await fetch(`${base}/api/projects`)).json();
+    const beforeJobs = await prisma.client.generation_jobs.count();
+    const beforeReservations = await prisma.client.cost_reservations.count();
+    const cases = [
+      async () => { await prisma.client.material_assets.update({ where: { material_id: materialId }, data: { user_id: 983004n } }); },
+      async () => { await prisma.client.material_assets.update({ where: { material_id: materialId }, data: { status: "Processing" } }); },
+      async () => { await prisma.client.material_assets.update({ where: { material_id: materialId }, data: { status: "Failed" } }); },
+      async () => { await prisma.client.material_assets.delete({ where: { material_id: materialId } }); },
+      async () => { await prisma.client.assets.update({ where: { id: asset.id }, data: { user_id: 983004n } }); },
+      async () => { await prisma.client.assets.update({ where: { id: asset.id }, data: { is_delete: true } }); },
+      async () => { await prisma.client.assets.update({ where: { id: asset.id }, data: { status: "disabled" } }); },
+      async () => { await prisma.client.assets.update({ where: { id: asset.id }, data: { material_id: null } }); },
+      async () => { await prisma.client.assets.update({ where: { id: asset.id }, data: { url: `https://foreign.invalid/private-${sourceId}.png` } }); },
+      async () => { await prisma.client.assets.update({ where: { id: asset.id }, data: { type: "video" } }); },
+    ];
+    for (const mutate of cases) {
+      await mutate();
+      try {
+        for (const response of [await request("GET", id), await request("PUT", id, body), await request("PUT", "04e0b9cc-04dd-45ad-930b-3c0000000017", body)]) {
+          expect(response.status).toBe(422);
+          const error = await response.json();
+          expect(error.data.reason).toBe("local_recovery_assets_unavailable");
+          expect(error.data.missing).toEqual([{ path: "nodes.0.data.initialRefs.0", assetId: materialId }]);
+          expect(JSON.stringify(error)).not.toContain("https://");
+        }
+      } finally {
+        await prisma.client.assets.update({ where: { id: asset.id }, data: { user_id: 983003n, is_delete: false, status: "normal", material_id: materialId, url: asset.url, type: "image" } });
+        await prisma.client.material_assets.upsert({ where: { material_id: materialId }, create: material, update: { user_id: 983003n, status: "Active" } });
+      }
+      expect((await (await request("GET", id)).json()).data).toEqual(complete.data);
+    }
+    const unknown = { ...body, nodes: JSON.stringify([{ ...nodes[0], data: { initialRefs: [{ ...nodes[0].data.initialRefs[0], assetId: "asset-unknown-recovery" }] } }]) };
+    expect((await request("PUT", "04e0b9cc-04dd-45ad-930b-3c0000000017", unknown)).status).toBe(422);
+    await prisma.client.assets.update({ where: { id: asset.id }, data: { material_id: null } });
+    const replacement = await prisma.client.assets.create({ data: { user_id: 983003n, type: "image", url: asset.url, material_id: materialId } });
+    try {
+      expect((await request("GET", id)).status).toBe(422);
+      expect((await request("PUT", id, body)).status).toBe(422);
+    } finally {
+      await prisma.client.assets.update({ where: { id: replacement.id }, data: { material_id: null } });
+      await prisma.client.assets.update({ where: { id: asset.id }, data: { material_id: materialId } });
+    }
+    expect((await request("GET", "04e0b9cc-04dd-45ad-930b-3c0000000017")).status).toBe(404);
+    expect((await (await fetch(`${base}/api/projects`)).json()).data).toHaveLength(before.data.length);
+    expect(await prisma.client.generation_jobs.count()).toBe(beforeJobs);
+    expect(await prisma.client.cost_reservations.count()).toBe(beforeReservations);
+  });
+
   it("素材缺失时列出缺项且不创建部分恢复项目", async () => {
     const before = await (await fetch(`${base}/api/projects`)).json();
     const response = await request("PUT", "04e0b9cc-04dd-45ad-930b-3c0000000002", {
