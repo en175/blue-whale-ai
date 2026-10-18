@@ -39,8 +39,8 @@ export function useCanvasGroupActions(host: CanvasGroupActionsHost) {
     showToast,
   } = host;
 
-  const handleCreateGroup = (selectedNodes: Node[]) => {
-    const members = selectedNodes.filter((n) => !(n.data as { emptyShell?: boolean } | undefined)?.emptyShell);
+  const handleCreateGroup = (selectedNodes: Node[], canvasNodes: Node[]) => {
+    const members = selectedNodes.filter((n) => n.type !== 'groupFrame' && !(n.data as { emptyShell?: boolean } | undefined)?.emptyShell);
     if (members.length < MIN_GROUP_MEMBERS) return;
     if (selectionHasUngroupableCards(members)) {
       showToast('warn', '风格卡、角色卡、物体卡、环境卡、商品卡无法成组');
@@ -53,7 +53,7 @@ export function useCanvasGroupActions(host: CanvasGroupActionsHost) {
     const box = groupFrameBBox(members);
     if (!box) return;
     const memberIds = new Set(members.map((n) => n.id));
-    const all = graph.allNodes();
+    const all = canvasNodes.filter((node) => node.type !== 'groupFrame');
     const group: CanvasGroup = { id: newNodeId('group'), box, excludedIds: [] };
     const before = groupsRef.current;
     const after = isolateNewGroupMembers(before, all, group, memberIds);

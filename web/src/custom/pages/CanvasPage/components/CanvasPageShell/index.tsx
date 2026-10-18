@@ -167,6 +167,7 @@ interface CanvasPageShellProps {
 
   groupActions: {
     groups: FlowProps['groups'];
+    handleNodesMeasured: FlowProps['onNodesMeasured'];
     handleCreateGroup: FlowProps['onCreateGroup'];
     handleUngroup: FlowProps['onUngroupGroup'];
     handleDeleteGroup: FlowProps['onDeleteGroup'];
@@ -412,6 +413,7 @@ export default function CanvasPageShell(props: CanvasPageShellProps) {
           onCopySelected={shellTop.handleCopySelectedNodes}
           onPasteClipboard={shellTop.handlePasteClipboard}
           groups={groupActions.groups}
+          onNodesMeasured={groupActions.handleNodesMeasured}
           onCreateGroup={groupActions.handleCreateGroup}
           onUngroupGroup={groupActions.handleUngroup}
           onDeleteGroup={groupActions.handleDeleteGroup}

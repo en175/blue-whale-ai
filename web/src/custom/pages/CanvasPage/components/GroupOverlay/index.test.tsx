@@ -65,6 +65,19 @@ afterEach(async () => {
 });
 
 describe('GroupOverlay 捕获拦截的覆盖层放行', () => {
+  it('同一旧组部分成员选中时显示成组入口，只提交选中的内容节点（IKI6C1）', async () => {
+    const nodes: Node[] = [0, 1, 2, 3].map(i => ({
+      id: `n${i}`, type: 'textNode', position: { x: i * 300, y: 100 },
+      measured: { width: 200, height: 120 }, data: {}, selected: i < 2,
+    }));
+    const onCreateGroup = vi.fn();
+    await mountOverlay({ nodes, groups: [{ id: 'A', box: { x: -48, y: 52, w: 1196, h: 216 }, excludedIds: [] }], onCreateGroup });
+    const button = [...container.querySelectorAll('button')].find(b => b.textContent === '成组');
+    expect(button).toBeDefined();
+    await act(async () => { button!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(onCreateGroup.mock.calls[0][0].map((n: Node) => n.id)).toEqual(['n0', 'n1']);
+  });
+
   it('按下目标是扩图扩展框（data-outpaint-frame 子树）：放行，不再拦死传播', async () => {
     await mountOverlay();
     const frame = document.createElement('div');

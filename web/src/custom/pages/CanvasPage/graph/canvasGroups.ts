@@ -223,11 +223,20 @@ export function isolateNewGroupMembers(
       .filter((n) => !memberIds.has(n.id) && nodeInsideGroupBox(n, group.box))
       .map((n) => n.id),
   };
-  const others = existing.map((h) => {
-    const extra = nodes
-      .filter((n) => memberIds.has(n.id) && nodeInsideGroupBox(n, h.box) && !h.excludedIds.includes(n.id))
-      .map((n) => n.id);
-    return extra.length === 0 ? h : { ...h, excludedIds: [...h.excludedIds, ...extra] };
+  const others = existing.flatMap((previous) => {
+    const before = exclusiveMembersInGroup(nodes, previous, existing);
+    if (!before.some((node) => memberIds.has(node.id))) return [previous];
+    const remaining = before.filter((node) => !memberIds.has(node.id));
+    if (remaining.length < MIN_GROUP_MEMBERS) return [];
+    const box = groupFrameBBox(remaining)!;
+    const remainingIds = new Set(remaining.map((node) => node.id));
+    return [{
+      ...previous,
+      box,
+      excludedIds: nodes
+        .filter((node) => !remainingIds.has(node.id) && nodeInsideGroupBox(node, box))
+        .map((node) => node.id),
+    }];
   });
   return [...others, created];
 }

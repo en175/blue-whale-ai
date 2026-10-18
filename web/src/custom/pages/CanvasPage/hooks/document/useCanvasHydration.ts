@@ -1,16 +1,18 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import type { Dispatch, RefObject, SetStateAction } from 'react';
 import type { Edge, Node, Viewport } from '@xyflow/react';
 import type { CanvasDoc } from '@/custom/api/canvas';
 import type { SnapshotAsset } from '@/custom/api/projects';
-import type { CanvasGroup } from '../../graph/canvasGroups';
+import { exclusiveMembersInGroup, type CanvasGroup } from '../../graph/canvasGroups';
 import type { GenerationRuntime } from '../../generation/runtime';
+import type { CanvasGraph } from './useCanvasGraph';
 
 export interface CanvasHydrationHost {
   currentId: string;
   doc: CanvasDoc | null;
   snapshotAssets: Record<string, SnapshotAsset>;
   canvasLoadFailed: boolean;
+  graph: CanvasGraph;
   recoverFrameInterpolationRef: RefObject<(nodeId: string, savedJobId?: unknown) => void>;
   attachCallbacks: (node: Node) => Node;
   resolveNodeAssets: (node: Node, assets: Record<string, SnapshotAsset>, fromHistory?: boolean) => Node;
@@ -41,12 +43,13 @@ export interface CanvasHydrationHost {
   setSaveStatus: Dispatch<SetStateAction<'idle' | 'saving' | 'saved' | 'error'>>;
 }
 
-export function useCanvasHydration(host: CanvasHydrationHost): void {
+export function useCanvasHydration(host: CanvasHydrationHost) {
   const {
     currentId,
     doc,
     snapshotAssets,
     canvasLoadFailed,
+    graph,
     recoverFrameInterpolationRef,
     attachCallbacks,
     resolveNodeAssets,
@@ -77,6 +80,31 @@ export function useCanvasHydration(host: CanvasHydrationHost): void {
     setSaveStatus,
   } = host;
 
+  const groupCleanupRef = useRef<{ projectId: string; nodes: Node[]; groups: CanvasGroup[] } | null>(null);
+  const handleNodesMeasured = (measuredNodes: Node[]) => {
+    const pending = groupCleanupRef.current;
+    if (!pending || pending.projectId !== currentId || hydratedProjectRef.current !== pending.projectId) return;
+    const measuredById = new Map(measuredNodes.map((node) => [node.id, node]));
+    const currentById = new Map(graph.allNodes().map((node) => [node.id, node]));
+    const surviving = pending.nodes.filter((node) => currentById.has(node.id));
+    if (!surviving.every((node) => {
+      const measured = measuredById.get(node.id);
+      const current = currentById.get(node.id)!;
+      return measured?.measured?.width != null && measured.measured.height != null
+        && measured.position.x === current.position.x && measured.position.y === current.position.y;
+    })) return;
+    const restored = surviving.map((node) => ({ ...node, measured: measuredById.get(node.id)!.measured }));
+    const deleted = pending.nodes.filter((node) => !currentById.has(node.id));
+    const emptyIds = new Set(pending.groups.filter((group) => !deleted.some((node) => !group.excludedIds.includes(node.id)
+      && node.position.x <= group.box.x + group.box.w && node.position.y <= group.box.y + group.box.h)
+      && exclusiveMembersInGroup(restored, group, pending.groups).length === 0).map((group) => group.id));
+    groupCleanupRef.current = null;
+    setGroups((previous) => {
+      const next = previous.filter((group) => !emptyIds.has(group.id));
+      return next.length === previous.length ? previous : next;
+    });
+  };
+
   useEffect(() => {
     if (!doc) {
       setTextNodes([]);
@@ -89,6 +117,7 @@ export function useCanvasHydration(host: CanvasHydrationHost): void {
       lastSavedRef.current = '';
       hydratedDocRef.current = null;
       hydratedProjectRef.current = null;
+      groupCleanupRef.current = null;
       confirmedNonEmptyRef.current = false;
       emptyClearConflictRef.current = false;
       emptyOverwriteRejectedRef.current = false;
@@ -147,7 +176,12 @@ export function useCanvasHydration(host: CanvasHydrationHost): void {
     setMediaNodes(m);
     setProductNodes(p);
     setAssetNodes(a);
-    setGroups(hydratedGroups);
+    const hydratedAll = [...t, ...m, ...p, ...a];
+    const cleanedEmptyCanvasGroups = !canvasLoadFailed && hydratedAll.length === 0 && hydratedGroups.length > 0;
+    setGroups(cleanedEmptyCanvasGroups ? [] : hydratedGroups);
+    groupCleanupRef.current = !canvasLoadFailed && hydratedAll.length > 0 && hydratedGroups.length > 0
+      ? { projectId: currentId, nodes: hydratedAll, groups: hydratedGroups }
+      : null;
     if (import.meta.env.DEV && hydratedGroups.length > 0) {
       console.info(`[canvas] 水合成组：${hydratedGroups.length} 个组`);
     }
@@ -165,11 +199,10 @@ export function useCanvasHydration(host: CanvasHydrationHost): void {
     setEdges(hydratedEdges);
     versionRef.current = doc.version;
     setViewport(doc.viewport);
-    const hydratedAll = [...t, ...m, ...p, ...a];
     const upgradedTextNodes = contentNodes.some(
       (node) => node.type === 'textNode' && typeof (node.data as Record<string, unknown> | undefined)?.html === 'string',
     );
-    lastSavedRef.current = upgradedTextNodes
+    lastSavedRef.current = cleanedEmptyCanvasGroups || upgradedTextNodes
       ? ''
       : JSON.stringify(doc.viewport) +
         serializeNodes([...hydratedAll, ...hydratedGroups.map((g) => groupToNode(g))]) +
@@ -194,4 +227,6 @@ export function useCanvasHydration(host: CanvasHydrationHost): void {
     if (currentId && !canvasLoadFailed) void generationRuntimeRef.current?.recover(currentId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [doc, snapshotAssets]);
+
+  return { handleNodesMeasured };
 }

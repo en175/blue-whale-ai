@@ -113,20 +113,18 @@ export default function GroupOverlay({
     [groups, nodes, frozenDragMembers],
   );
 
-  const selectedNodes = useMemo(() => nodes.filter((n) => n.selected), [nodes]);
+  const selectedNodes = useMemo(() => nodes.filter((n) => n.selected && n.type !== 'groupFrame'), [nodes]);
   const selectedIds = selectedNodes.map((n) => n.id);
-  const allInOneGroup =
-    selectedIds.length >= MIN_GROUP_MEMBERS &&
-    groups.some(
-      (g) =>
-        !selectedIds.some((id) => g.excludedIds.includes(id)) &&
-        selectedNodes.every((n) => nodeInsideGroupBox(n, g.box)),
-    );
+  const selectedGroupFrame = selectedIds.length >= MIN_GROUP_MEMBERS
+    ? frames.find((group) => !selectedIds.some((id) => group.excludedIds.includes(id))
+      && selectedNodes.every((node) => nodeInsideGroupBox(node, group.box)))
+    : undefined;
+  const allInOneGroup = !!selectedGroupFrame;
   const selectionBox = useMemo(
     () => (selectedNodes.length >= MIN_GROUP_MEMBERS ? memberBBox(selectedNodes) : null),
     [selectedNodes],
   );
-  const showCreateBtn = !!selectionBox && !allInOneGroup && !isDraggingNode;
+  const showCreateBtn = !!selectionBox && selectedGroupFrame?.count !== selectedIds.length && !isDraggingNode;
   const showSelectionDownload = !!selectionBox && !allInOneGroup && !isDraggingNode;
   const createBtnPt = selectionBox
     ? flowToScreenPosition({ x: selectionBox.x + selectionBox.w / 2, y: selectionBox.y })
@@ -634,7 +632,7 @@ export default function GroupOverlay({
         })}
 
         {}
-        {showSelectionDownload && createBtnPt && (
+        {(showCreateBtn || showSelectionDownload) && createBtnPt && (
           <div className={styles.selectionBar} style={{ left: createBtnPt.x, top: createBtnPt.y }}>
             {showCreateBtn && (
               <button
@@ -649,17 +647,19 @@ export default function GroupOverlay({
                 <span>成组</span>
               </button>
             )}
-            <button
-              className={styles.toolBtn}
-              onClick={(e) => {
-                e.stopPropagation();
-                onDownloadNodes(selectedNodes.map((n) => n.id));
-              }}
-              title="下载选中全部素材"
-            >
-              <Download size={12} strokeWidth={2} />
-              <span>下载</span>
-            </button>
+            {showSelectionDownload && (
+              <button
+                className={styles.toolBtn}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDownloadNodes(selectedNodes.map((node) => node.id));
+                }}
+                title="下载选中全部素材"
+              >
+                <Download size={12} strokeWidth={2} />
+                <span>下载</span>
+              </button>
+            )}
           </div>
         )}
 
