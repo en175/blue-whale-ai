@@ -2,7 +2,7 @@
 
 一个父任务（规格或需求）拆成多张工单并行实施时使用：每张工单一个独立子任务 worktree 与分支，合入同一**集成分支**，最终以**单个 PR** 交付。`implement-spec` 技能是本工作流的主要使用场景；任何采用同样分支形态的多工单工作流都按本文执行。
 
-授权红线、分支命名、发布入口与 PR 更新事务等通用规则见 [git-workflow.md](git-workflow.md)；worktree 元数据、通用同步与清理见 [worktree-workflow.md](worktree-workflow.md)；工单状态机见 [issue-tracker.md](issue-tracker.md)；验证分层见 [testing-strategy.md](testing-strategy.md)。本文只承载本工作流特有的规则，不重复上述文件的通用含义。
+授权红线、分支命名、发布入口与 PR 更新事务等通用规则见 [git-workflow.md](git-workflow.md)；worktree 元数据、通用同步与清理见 [worktree-workflow.md](worktree-workflow.md)；MCP 操作见 [issue-tracker.md](issue-tracker.md)，状态权威见 [gitee-workflow-agent.md](gitee-workflow-agent.md)；验证分层见 [testing-strategy.md](testing-strategy.md)。本文只承载本工作流特有的规则，不重复上述文件的通用含义。
 
 ## 与上游 implement-spec 技能的执行映射
 
@@ -12,9 +12,25 @@
 | --- | --- |
 | 第 3 步：首次合并后开 draft PR | 集成分支全程保持本地；全部工单集成、整包评审与修订完成后，按本文「同步、评审与发布」一次性创建**非 draft** PR（[ADR-0116](../adr/0116-implement-spec-integration-workflow.md)） |
 | 第 4 步：implementer 完成前自行把集成分支 tip 合入自己分支 | implementer 不碰集成分支；合回只由 merger 按本文「merger 合回」受控执行 |
-| 第 8 步：mark draft ready / 按 issue tracker 关闭工单 | 本仓不建 draft PR；工单流转按 [issue-tracker.md](issue-tracker.md) 状态机。合入本地集成分支不关闭工单，PR 合入目标 release 才进入完成态 |
+| 第 8 步：mark draft ready / 按 issue tracker 关闭工单 | 本仓按发布授权创建非 draft PR；Resolve 记录工程验证与交付，保持业务状态。工程解锁按下节，业务流转按状态权威；PR 合入 release 仍只证明入线 |
 
 调用 implement-spec 技能授权实现与本地集成，不授权发布；推送、建 PR、合并仍按 git-workflow.md「发布授权」节单独获得明确授权。
+
+## 工程依赖与任务图
+
+接手整包先按 issue-tracker.md 覆盖全部粗状态分页建立父子任务图；接手子票核对自身、父要求与直接前置。声明沿用「前置工单」，兼容旧 `Blocked by`，逐项记录编号、标题、链接和解锁要求。
+
+| 前置要求 | 解锁证明 |
+| --- | --- |
+| 同包工程依赖 | 前置本票工程验证通过，成果经受控合回进入集成分支，后续任务实际基线包含所需成果 |
+| 外部必须先独立入 release | 目标 release 已包含所需提交；同一契约章节的基础设施继续按 git-workflow.md 先独立入线，不能改称同包依赖 |
+| 验收或环境前置 | 声明要求的实际验收结论或环境就绪证据有效且覆盖本次范围 |
+
+仅以全部声明前置满足判定 frontier，无关兄弟尚未完成不阻塞。前置要求不清时先澄清，不把粗状态 closed 或业务终态当作通用解锁条件。同包成果解锁后仍记录工程交付，业务验收默认随父。
+
+子任务证据区分自身 diff 与固定继承依赖。合回、同步或修订改变 HEAD、基线、范围或输入时，按 testing-strategy.md 重新核对和验证；只有绑定有效才复用证据。整包审查及必验行为覆盖父规格当前完整范围。
+
+依赖变化、交付、提测、生产收口和恢复时刷新相关证据，日常编码复用有效记录。父子部署、定向返工、同包恢复及新增范围的业务判断统一读状态权威，不按工程任务图自动推进状态。
 
 ## 开工
 
@@ -24,7 +40,7 @@
 scripts/start-task-worktree.sh --type <类型> --issue <父工单号> --summary <6–15字中文简述>
 ```
 
-进入返回的 worktree，用 `python3 scripts/lib/task_metadata.py read --json` 核对记录的 `target_branch` 与 `start_sha`，后续同步、验证、发布、清理全程使用该记录。核对目录 CBM 项目后，按 issue-tracker.md 对父工单做起始流转，建 worktree 不代替该 API 调用。
+进入返回的 worktree，用 `python3 scripts/lib/task_metadata.py read --json` 核对记录的 `target_branch` 与 `start_sha`，后续同步、验证、发布、清理全程使用该记录。核对目录 CBM 项目后，按状态权威判定开工或恢复，再按 issue-tracker.md 认领并回读父工单，建 worktree 不代替该 API 调用。
 
 **子任务 worktree**同样从当前本地 release 工作树建立，必须带 `--integration-worktree` 指向集成 worktree 的绝对路径：
 
@@ -32,7 +48,7 @@ scripts/start-task-worktree.sh --type <类型> --issue <父工单号> --summary 
 scripts/start-task-worktree.sh --type <类型> --issue <子工单号> --summary <6–15字中文简述> --integration-worktree <集成worktree绝对路径>
 ```
 
-入口从集成分支记录**固定继承提交**，子任务在该提交之上开工。进入子 worktree 后核对元数据与 CBM 项目，对子工单做起始流转，并备好该工单工具链所需依赖。
+入口从集成分支记录**固定继承提交**，子任务在该提交之上开工。进入子 worktree 后核对元数据与 CBM 项目，按状态权威与认领流程处理子工单，并备好该工单工具链所需依赖。
 
 子任务开工后若需要集成分支的新内容，在子分支尚无自有提交前执行 `git merge --ff-only <集成分支>`；已有自有提交时不自行 rebase，留待 merger 合回时受控处理。
 
@@ -87,7 +103,7 @@ HEAD 或目标变化使既有证据失效，须重跑受影响的评审与验证
 scripts/publish-review-package.sh --user-authorized --create-pr --target-branch <记录的release> --json
 ```
 
-随后创建 source/target 与发布标记一致、显式 `draft=false` 的 Gitee PR，回读确认非 draft 状态、描述、工单链接、source、target、HEAD、冲突状态与 diff；按 git-workflow.md 保存新鲜快照并运行 `scripts/verify-pr-update.sh --update-pr <PR编号> --pr-snapshot <快照JSON> --json` 核验（新建 PR 同样适用）。若同步事务仍未 finalize，核验通过后运行 `scripts/sync-task-from-origin.sh finalize --json`——它记录发布前 rebase 之后清理子任务所需的谱系证据。随后按 issue-tracker.md 打标签并交给开发者评审；合并 PR 须单独授权。
+随后创建 source/target 与发布标记一致、显式 `draft=false` 的 Gitee PR，回读确认非 draft 状态、描述、工单链接、source、target、HEAD、冲突状态与 diff；按 git-workflow.md 保存新鲜快照并运行 `scripts/verify-pr-update.sh --update-pr <PR编号> --pr-snapshot <快照JSON> --json` 核验（新建 PR 同样适用）。若同步事务仍未 finalize，核验通过后运行 `scripts/sync-task-from-origin.sh finalize --json`——它记录发布前 rebase 之后清理子任务所需的谱系证据。随后按 issue-tracker.md 合并保留标签、记录工程进度并交给开发者评审；合并 PR 须单独授权。
 
 已存在 PR 时不建第二个：按 git-workflow.md「已有 PR 审查修订」的更新事务执行。源分支若含历史子任务合回留下的 merge commit，按下方 linearize 程序处理；改写后的 HEAD 须重新评审与验证，旧 HEAD 的结论不沿用。若已有 PR 是 draft 且可用工具无法变更 draft 状态，报告剩余人工动作并保持交接挂起，不声称 PR 已可评审。
 
@@ -114,3 +130,5 @@ python3 scripts/cleanup-implement-spec-child.py --pr-snapshot - --json
 PR 已合并后也使用同一入口。入口从远端目标 release 确认快照中的 PR 源 HEAD 已合入，再检查子任务提交或保留的同步、线性化证明；不要求源分支或集成 worktree 仍存在。子任务 HEAD 若等于同步证明的原源 HEAD，可直接进入该证明的引用、文件树和远端回读校验。删除前复核远端目标 release 未变化。仅出现在后续 release 提交中的子任务改动，不能作为该 PR 的清理依据。
 
 集成 worktree 保留到 PR 合入目标 release 并核验之后（供评审期间的修订使用），再按通用入口 `scripts/cleanup-task-worktree.sh` 清理。
+
+清理前保留工单、提交、验证与 PR 指针，供后续验收或返工读取。代码承载证明与工作树清理不表示业务验收或工单完成。

@@ -9,7 +9,8 @@
 | 产品技术选型、运行时例外、Python 工具处置 | `agent-rules/product-runtime.md` |
 | Git 提交、分支、PR、发布、worktree；当前发布线开工、换期、遗留分支清点 | `docs/agents/git-workflow.md` |
 | 多工单单 PR、集成分支、并行子任务合回 | `docs/agents/integration-branch-workflow.md` |
-| 任何 Gitee MCP 调用；带工单开工、收口、返工、PR 创建/合并 | `docs/agents/issue-tracker.md` |
+| 任何 Gitee MCP 调用、规格发布与拆单 | `docs/agents/issue-tracker.md` |
+| 工单开工、恢复、返工、部署确认、提测、生产验证与收口 | `docs/agents/gitee-workflow-agent.md` |
 | 测试验证：任务收口、提交审查、创建/更新 PR、合并前 | `docs/agents/testing-strategy.md` |
 | Blue-Whale 账号密码登录：浏览器自动化、本地服务确认、测试站直连 | `agent-rules/app-login.md` |
 | 前端产品实现：`web/` 页面、组件、API 客户端、TanStack Query | `agent-rules/frontend-web.md` + `.agents/skills/frontend-delivery/SKILL.md`；缺陷读 `references/bugfix.md`，新服务端状态读写读 `references/request.md` |
@@ -25,7 +26,7 @@
 5. Agent 按文档主动调用标准入口；Hook 只纠偏或阻断，不返回 ASK，不自动同步、选择策略或推进任务状态。
 6. 同一契约章节的基础设施工单先合入目标 release，功能工单再开工；跨进程字段先在契约文档确定。
 7. 产品采用 TypeScript、Next.js Web、NestJS API 与 Node.js LTS；已批准的两个 Java 服务和专用计算边界见技术栈规则。工程工具不受产品语言禁令，无关 Python 存量不阻塞功能任务。
-8. 收口与发布前按测试策略取得当前有效凭证；带工单任务主动按 issue-tracker 状态机流转。
+8. 收口与发布前按测试策略取得当前有效凭证；带工单任务主动按 Agent 工作流手册核对事件与验收证据后流转。
 9. Agent 在编程实施过程中禁止新增普通代码注释；仅保留必要的工具指令和许可证声明。编程或审查前读取 [注释规则](agent-rules/code-comments.md)。
 
 ## Gitee ID 兜底常量
