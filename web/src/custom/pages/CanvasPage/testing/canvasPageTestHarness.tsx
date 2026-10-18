@@ -1,4 +1,4 @@
-import { act, createElement } from 'react';
+import { act, createElement, type ComponentProps } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
@@ -15,12 +15,27 @@ vi.mock('../components/AgentPanel', () => ({
 }));
 
 export const flowProps: { current: Record<string, any> } = { current: {} };
-vi.mock('../components/Canvas', () => ({
-  default: (props: Record<string, any>) => {
-    flowProps.current = props;
-    return createElement('div', { 'data-testid': 'flow-canvas' });
-  },
-}));
+export const realCanvasMode = { current: false };
+type CanvasModule = typeof import('../components/Canvas');
+type CanvasProps = ComponentProps<CanvasModule['default']>;
+vi.mock('../components/Canvas', async () => {
+  if (realCanvasMode.current) {
+    const actual = await vi.importActual<CanvasModule>('../components/Canvas');
+    const RealCanvas = actual.default;
+    return {
+      default: (props: CanvasProps) => {
+        flowProps.current = props;
+        return createElement(RealCanvas, props);
+      },
+    };
+  }
+  return {
+    default: (props: CanvasProps) => {
+      flowProps.current = props;
+      return createElement('div', { 'data-testid': 'flow-canvas' });
+    },
+  };
+});
 
 vi.mock('../components/CanvasToolbar', () => ({
   default: () => createElement('div', { 'data-testid': 'canvas-toolbar' }),

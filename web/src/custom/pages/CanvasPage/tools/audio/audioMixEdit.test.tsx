@@ -36,7 +36,7 @@ vi.mock('../../components/AgentPanel/index', () => ({
   default: () => createElement('div', { 'data-testid': 'agent-panel-stub' }),
 }));
 
-type FlowProps = { mediaNodes: Node[]; edges: Array<{ source: string; target: string; data?: Record<string, unknown> }>; onDeleteNode?: (ids: string[]) => void; onViewportChange?: (viewport: { x: number; y: number; zoom: number }) => void };
+type FlowProps = { mediaNodes: Node[]; edges: Array<{ source: string; target: string; data?: Record<string, unknown> }>; onDeleteNode?: (ids: string[]) => void; onViewportChange?: (viewport: { x: number; y: number; zoom: number }) => void; onNodeDragStop?: (node: Node, nodes: Node[]) => void };
 const flowProps: { current: FlowProps } = { current: { mediaNodes: [], edges: [] } };
 vi.mock('../../components/Canvas/index', () => ({
   default: (props: FlowProps) => {
@@ -436,7 +436,8 @@ describe('IKI68W 画布双音频混合', () => {
     await enterMix();
     await click('audio-mix-add');
     await click('audio-mix-candidate-a2');
-    await act(async () => { flowProps.current.onViewportChange?.({ x: 1, y: 0, zoom: 1 }); });
+    const movedA1 = { ...flowProps.current.mediaNodes.find((n) => n.id === 'a1')!, position: { x: 460, y: 0 } };
+    await act(async () => { flowProps.current.onNodeDragStop?.(movedA1, [movedA1]); });
     apiMocks.saveCanvasDoc.mockClear();
     apiMocks.saveCanvasDoc.mockImplementationOnce(() => new Promise((resolve) => { resolveSwitchSave = resolve; }));
     await click('switch-p2');

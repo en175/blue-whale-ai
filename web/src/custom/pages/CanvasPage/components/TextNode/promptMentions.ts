@@ -177,6 +177,21 @@ function mountInlineHtml(html: string, chips: ChipQueueItem[], materials: Array<
   return fragment;
 }
 
+const renderedSignatures = new WeakMap<HTMLElement, string>();
+
+function promptMentionsSignature(
+  markdown: string,
+  mentions: PromptMention[],
+  materials: Array<PromptMaterial & { url: string }>,
+  mediaMentions: MediaMention[],
+  mediaRefs: MediaRef[],
+  isValid: (nodeId: string) => boolean,
+): string {
+  const nodeIds = [...new Set(mediaMentions.map((mention) => mention.nodeId))].sort();
+  const validity = nodeIds.map((nodeId) => `${nodeId}:${isValid(nodeId) ? 1 : 0}`);
+  return JSON.stringify([markdown, mentions, materials, mediaMentions, mediaRefs, validity]);
+}
+
 export function renderPromptMentions(
   editor: HTMLElement,
   markdown: string,
@@ -186,6 +201,8 @@ export function renderPromptMentions(
   mediaRefs: MediaRef[] = [],
   isValid: (nodeId: string) => boolean = () => false,
 ) {
+  const signature = promptMentionsSignature(markdown, mentions, materials, mediaMentions, mediaRefs, isValid);
+  if (renderedSignatures.get(editor) === signature) return;
   editor.replaceChildren();
   const promptRanges = new Set(mentions.map(m => `${m.start}-${m.end}`));
   const mirrorsByRange = new Map<string, MediaMention[]>();
@@ -282,6 +299,7 @@ export function renderPromptMentions(
     paragraph.append(mountInlineHtml(inlineHtml(block.lines.join('\n')), chips, materials, mediaParts));
     editor.append(paragraph);
   }
+  renderedSignatures.set(editor, signature);
 }
 
 function readChipIdentity(chip: HTMLElement): MediaChipIdentity {

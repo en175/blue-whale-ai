@@ -233,3 +233,46 @@ describe('media 标签：编号与失效派生（IKFM3Q 契约 §2/§3）', () =
     expect(second.dataset.mediaLabel).toBe('图片2');
   });
 });
+
+describe('语义未变时引用渲染不重建 DOM（IKNB6X）', () => {
+  const videoMention: MediaMention = { start: 0, end: 3, nodeId: 'media-v1', assetId: '9002' };
+  const videoRef = (url = 'https://example.com/v.mp4'): MediaRef => ({ nodeId: 'media-v1', assetId: '9002', mediaType: 'video', name: '视频1', url });
+
+  it('数组与校验函数换新引用但语义相同：复用已加载的视频元素', () => {
+    const editor = mount();
+    renderPromptMentions(editor, '视频1', [], [], [videoMention], [videoRef()], allValid);
+    const video = editor.querySelector('video');
+    expect(video).not.toBeNull();
+    renderPromptMentions(editor, '视频1', [], [], [{ ...videoMention }], [videoRef()], () => true);
+    expect(editor.querySelector('video')).toBe(video);
+    expect(editor.querySelector<HTMLElement>('[data-media-node="media-v1"]')?.dataset.mediaLabel).toBe('视频1');
+  });
+
+  it('引用失效时按原规则更新标签并重建缩略图', () => {
+    const editor = mount();
+    renderPromptMentions(editor, '视频1', [], [], [videoMention], [videoRef()], allValid);
+    const video = editor.querySelector('video');
+    renderPromptMentions(editor, '视频1', [], [], [videoMention], [videoRef()], () => false);
+    const chip = editor.querySelector<HTMLElement>('[data-media-node="media-v1"]')!;
+    expect(chip.dataset.mediaInvalid).toBe('1');
+    expect(chip.dataset.mediaLabel).toBe('已失效：视频1');
+    expect(editor.querySelector('video')).not.toBe(video);
+  });
+
+  it('来源地址变化时重建缩略图', () => {
+    const editor = mount();
+    renderPromptMentions(editor, '视频1', [], [], [videoMention], [videoRef()], allValid);
+    const video = editor.querySelector('video');
+    renderPromptMentions(editor, '视频1', [], [], [videoMention], [videoRef('https://example.com/v2.mp4')], allValid);
+    const next = editor.querySelector('video');
+    expect(next).not.toBe(video);
+    expect(next?.getAttribute('src')).toBe('https://example.com/v2.mp4');
+  });
+
+  it('正文变化时重建正文', () => {
+    const editor = mount();
+    renderPromptMentions(editor, '视频1', [], [], [videoMention], [videoRef()], allValid);
+    renderPromptMentions(editor, '视频1 与新增正文', [], [], [videoMention], [videoRef()], allValid);
+    expect(editor.textContent).toContain('视频1 与新增正文');
+  });
+});

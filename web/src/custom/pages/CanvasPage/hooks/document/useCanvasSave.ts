@@ -227,12 +227,13 @@ export function useCanvasSave(host: CanvasSaveHost) {
       if (activeProjectRef.current !== projectId) return false;
       if (hydratedProjectRef.current === null) return false;
       if (blockInvalidDraft(textNodesRef.current.map(n => n.id))) return false;
+      let persisted = false;
       for (;;) {
         const contentNodes = [...textNodesRef.current, ...mediaNodesRef.current, ...productNodesRef.current, ...assetNodesRef.current];
         const nodes = [...contentNodes, ...groupsRef.current.map((g) => groupToNode(g))];
         if (emptyClearConflictRef.current || emptyOverwriteRejectedRef.current || recoverySaveConflictRef.current) return false;
         const viewport = viewportRef.current;
-        const signature = JSON.stringify(viewport) + serializeNodes(nodes) + serializeEdges(edgesRef.current);
+        const signature = serializeNodes(nodes) + serializeEdges(edgesRef.current);
         if (signature === lastSavedRef.current && retainedRecoverySaveRef.current?.projectId !== projectId) break;
         const confirmEmpty = shouldConfirmEmptyClear(nodes);
         const plan = planRecoverySave(
@@ -257,6 +258,7 @@ export function useCanvasSave(host: CanvasSaveHost) {
             return false;
           }
           versionRef.current = saved.version;
+          persisted = true;
           if (!settleSavedCanvas(plan, signature, () => { pendingNodeIdsRef.current.clear(); })) continue;
         } catch (error) {
           if (activeProjectRef.current !== projectId) {
@@ -293,6 +295,7 @@ export function useCanvasSave(host: CanvasSaveHost) {
         }
         break;
       }
+      if (!persisted) return true;
       setSaveBlocked(false);
       setSaveStatus('saved');
       setSavedAt(new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }));
@@ -359,7 +362,7 @@ export function useCanvasSave(host: CanvasSaveHost) {
       if (textNodesRef.current.some(node => draftErrorsRef.current.has(node.id))) return;
       const contentNodes = graph.allNodes();
       const nodes = [...contentNodes, ...groups.map((g) => groupToNode(g))];
-      const sig = JSON.stringify(viewport) + serializeNodes(nodes) + serializeEdges(edges);
+      const sig = serializeNodes(nodes) + serializeEdges(edges);
       if (sig === lastSavedRef.current) return;
       if (emptyClearConflictRef.current || emptyOverwriteRejectedRef.current || recoverySaveConflictRef.current) return;
       if (import.meta.env.DEV) {
@@ -452,7 +455,7 @@ export function useCanvasSave(host: CanvasSaveHost) {
     }, 800);
     return () => window.clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [textNodes, mediaNodes, productNodes, assetNodes, edges, groups, viewport, currentId, doc, refetch, applying, saveEpoch, rollbackPendingNodes, showToast, graph]);
+  }, [textNodes, mediaNodes, productNodes, assetNodes, edges, groups, currentId, doc, refetch, applying, saveEpoch, rollbackPendingNodes, showToast, graph]);
 
   if (blockedByPendingCanvasReviewRef) {
     blockedByPendingCanvasReviewRef.current = blockedByPendingCanvasReview;

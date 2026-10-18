@@ -208,8 +208,7 @@ export function useCanvasHydration(host: CanvasHydrationHost) {
     );
     lastSavedRef.current = cleanedEmptyCanvasGroups || upgradedTextNodes
       ? ''
-      : JSON.stringify(doc.viewport) +
-        serializeNodes([...hydratedAll, ...hydratedGroups.map((g) => groupToNode(g))]) +
+      : serializeNodes([...hydratedAll, ...hydratedGroups.map((g) => groupToNode(g))]) +
         serializeEdges(hydratedEdges);
     m
       .filter(
