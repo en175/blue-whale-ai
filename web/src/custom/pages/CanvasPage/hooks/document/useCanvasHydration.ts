@@ -38,6 +38,7 @@ export interface CanvasHydrationHost {
   setProductNodes: Dispatch<SetStateAction<Node[]>>;
   setAssetNodes: Dispatch<SetStateAction<Node[]>>;
   setEdges: Dispatch<SetStateAction<Edge[]>>;
+  groupsRef: RefObject<CanvasGroup[]>;
   setGroups: Dispatch<SetStateAction<CanvasGroup[]>>;
   setViewport: Dispatch<SetStateAction<Viewport>>;
   setSaveStatus: Dispatch<SetStateAction<'idle' | 'saving' | 'saved' | 'error'>>;
@@ -75,29 +76,32 @@ export function useCanvasHydration(host: CanvasHydrationHost) {
     setProductNodes,
     setAssetNodes,
     setEdges,
+    groupsRef,
     setGroups,
     setViewport,
     setSaveStatus,
   } = host;
 
-  const groupCleanupRef = useRef<{ projectId: string; nodes: Node[]; groups: CanvasGroup[] } | null>(null);
+  const groupCleanupRef = useRef<{ projectId: string; nodes: Node[]; groupIds: Set<string> } | null>(null);
   const handleNodesMeasured = (measuredNodes: Node[]) => {
     const pending = groupCleanupRef.current;
     if (!pending || pending.projectId !== currentId || hydratedProjectRef.current !== pending.projectId) return;
     const measuredById = new Map(measuredNodes.map((node) => [node.id, node]));
-    const currentById = new Map(graph.allNodes().map((node) => [node.id, node]));
-    const surviving = pending.nodes.filter((node) => currentById.has(node.id));
-    if (!surviving.every((node) => {
+    const currentNodes = graph.allNodes();
+    if (!currentNodes.every((node) => {
       const measured = measuredById.get(node.id);
-      const current = currentById.get(node.id)!;
-      return measured?.measured?.width != null && measured.measured.height != null
-        && measured.position.x === current.position.x && measured.position.y === current.position.y;
+      return measured?.measured?.width != null && measured.measured.height != null;
     })) return;
-    const restored = surviving.map((node) => ({ ...node, measured: measuredById.get(node.id)!.measured }));
+    const currentById = new Map(currentNodes.map((node) => [node.id, node]));
+    const restored = currentNodes.map((node) => ({ ...node, measured: measuredById.get(node.id)!.measured }));
     const deleted = pending.nodes.filter((node) => !currentById.has(node.id));
-    const emptyIds = new Set(pending.groups.filter((group) => !deleted.some((node) => !group.excludedIds.includes(node.id)
-      && node.position.x <= group.box.x + group.box.w && node.position.y <= group.box.y + group.box.h)
-      && exclusiveMembersInGroup(restored, group, pending.groups).length === 0).map((group) => group.id));
+    const liveGroups = groupsRef.current;
+    const emptyIds = new Set(liveGroups.filter((group) => {
+      if (!pending.groupIds.has(group.id)) return false;
+      if (deleted.some((node) => !group.excludedIds.includes(node.id)
+        && node.position.x <= group.box.x + group.box.w && node.position.y <= group.box.y + group.box.h)) return false;
+      return exclusiveMembersInGroup(restored, group, liveGroups).length === 0;
+    }).map((group) => group.id));
     groupCleanupRef.current = null;
     setGroups((previous) => {
       const next = previous.filter((group) => !emptyIds.has(group.id));
@@ -180,7 +184,7 @@ export function useCanvasHydration(host: CanvasHydrationHost) {
     const cleanedEmptyCanvasGroups = !canvasLoadFailed && hydratedAll.length === 0 && hydratedGroups.length > 0;
     setGroups(cleanedEmptyCanvasGroups ? [] : hydratedGroups);
     groupCleanupRef.current = !canvasLoadFailed && hydratedAll.length > 0 && hydratedGroups.length > 0
-      ? { projectId: currentId, nodes: hydratedAll, groups: hydratedGroups }
+      ? { projectId: currentId, nodes: hydratedAll, groupIds: new Set(hydratedGroups.map((group) => group.id)) }
       : null;
     if (import.meta.env.DEV && hydratedGroups.length > 0) {
       console.info(`[canvas] 水合成组：${hydratedGroups.length} 个组`);

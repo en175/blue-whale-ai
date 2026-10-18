@@ -896,6 +896,7 @@ export default function CanvasPage() {
     setProductNodes,
     setAssetNodes,
     setEdges,
+    groupsRef,
     setGroups,
     setViewport,
     setSaveStatus,

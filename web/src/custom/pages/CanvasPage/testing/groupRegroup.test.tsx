@@ -170,7 +170,7 @@ describe('IKI6C1 历史空组清理', () => {
     expect(apiMocks.saveCanvasDoc).not.toHaveBeenCalled();
   });
 
-  it('延迟测量时删除历史单节点组的成员，清理后撤销仍恢复原组归属', async () => {
+  it('延迟测量时删除历史单节点组的成员，清理后撤销恢复被删节点且保留单节点组', async () => {
     const cards = [card('1', 0), card('2', 300)];
     const singleton = { id: 'single', box: { x: -48, y: -48, w: 116, h: 116 }, excludedIds: [] };
     const empty = { id: 'empty', box: { x: -48, y: -48, w: 600, h: 216 }, excludedIds: ['1', '2'] };
@@ -200,6 +200,19 @@ describe('IKI6C1 历史空组清理', () => {
     await act(async () => { flowProps.current.onNodesMeasured(measured); });
     expect(groups()).toEqual([old]);
     if (action === 'drag') expect(members(groups()[0])).toEqual(['2']);
+  });
+
+  it('延迟测量窗口内把节点拖进历史空框后，恢复清理保留该组', async () => {
+    const cards = [card('1', 0)];
+    const empty = { id: 'empty', box: { x: 500, y: 0, w: 400, h: 400 }, excludedIds: [] };
+    seed(cards, [empty]);
+    await renderPage();
+    const measured = nodes().map(n => ({ ...n, measured: { width: 200, height: 120 } }));
+    const moved = { ...measured[0], position: { x: 700, y: 100 } };
+    await act(async () => { flowProps.current.onNodeDragStop(moved, [moved]); });
+    const measuredAfterDrag = nodes().map(n => ({ ...n, measured: { width: 200, height: 120 } }));
+    await act(async () => { flowProps.current.onNodesMeasured(measuredAfterDrag); });
+    expect(groups()).toEqual([empty]);
   });
 
   it('仅含历史空框的文档完成恢复后清理并保存空文档', async () => {
