@@ -1,5 +1,15 @@
 import { NewApiError } from "@lib/core";
-import { promptPlanSnapshotSchema, type RecoveryErrorEnvelope } from "@lib/contracts";
+import {
+  DomainError,
+  ERROR_TASK_TYPE_PARAM_CONSTRAINT,
+  checkGenerationParamLimit,
+  errorCodeToNumeric,
+  hasModeConstraint,
+  normalizeVideoMode,
+  promptPlanSnapshotSchema,
+  toGenerationParamCheckInput,
+  type RecoveryErrorEnvelope,
+} from "@lib/contracts";
 import type { Prisma, PrismaClient } from "@prisma/client";
 
 import { transactionWithUniqueRetry } from "./conversation-repo.js";
@@ -16,6 +26,8 @@ import {
 import { assertPureJobInput } from "./job-input-purity.js";
 import { withBillingCompensation, type JobBilling, type JobBillingSource } from "./job-billing.js";
 import { createModelCapabilityRepo, serializePricingRule } from "./model-capability-repo.js";
+import { createAssetOwnershipOps } from "./asset-ownership-repo.js";
+import { checkReferenceLimits } from "../generation-runtime/reference-limits.js";
 import { freezePlacementAnchor } from "./generation-job-placement-anchor.js";
 import {
   readCreateIdempotency,
@@ -487,6 +499,41 @@ export function createGenerationCommandRepo(
             ? failedSlots.length
             : readInputCount(original.input);
 
+        const input = (original.input ?? {}) as Record<string, unknown>;
+        const capability = original.type === "video" || billing
+          ? (await createModelCapabilityRepo(prisma).listEnabledByType(original.type))
+              .find((model) => model.model_id === input.model_id)
+          : undefined;
+        if (original.type === "video") {
+          const mode = normalizeVideoMode(input.video_mode ?? input.video_task_type);
+          const params = toGenerationParamCheckInput(input);
+          const references = (input.references ?? input.reference_materials ?? []) as Array<{
+            role?: string; type: "image" | "video" | "audio"; duration?: number;
+          }>;
+          const localReferences = Array.isArray(input.reference_asset_ids)
+            ? await createAssetOwnershipOps(prisma).resolveInputAssets(input.reference_asset_ids.map(String), userId, projectId)
+            : [];
+          const ordinaryReferences = [
+            ...references.filter((reference) => reference.role === undefined || reference.role === "reference"),
+            ...localReferences.flatMap<(typeof references)[number]>((asset) => asset.type === "image" || asset.type === "video" || asset.type === "audio"
+              ? [{ type: asset.type, ...(asset.duration !== null ? { duration: asset.duration } : {}) }]
+              : []),
+          ];
+          if (
+            !capability || !mode || !params || params.duration === undefined ||
+            typeof input.omni_reference_task_type_allowed !== "boolean" ||
+            input.omni_reference_task_type_allowed !== capability.features.omni_reference_task_type ||
+            !hasModeConstraint(capability.features.task_types, mode) ||
+            checkGenerationParamLimit({ ...capability, task_types: capability.features.task_types }, { ...params, mode }) ||
+            checkReferenceLimits(capability.features, ordinaryReferences, "video", mode)
+          ) {
+            throw new DomainError(
+              errorCodeToNumeric(ERROR_TASK_TYPE_PARAM_CONSTRAINT),
+              "原视频任务的模式或参数已不满足当前模型要求，请重新编辑，确认视频模式和时长后重新报价提交",
+            );
+          }
+        }
+
         if (guardInput) {
           const reason = await guardInput(
             (original.input ?? {}) as Record<string, unknown>,
@@ -546,9 +593,6 @@ export function createGenerationCommandRepo(
         const retryModelId = String(retryInput.input.model_id ?? "");
         let ruleSnapshot: string | undefined;
         if (billing) {
-          const capability = (
-            await createModelCapabilityRepo(prisma).listEnabledByType(original.type)
-          ).find((m) => m.model_id === retryModelId);
           ruleSnapshot = serializePricingRule(capability);
         }
         chargeContext = {
