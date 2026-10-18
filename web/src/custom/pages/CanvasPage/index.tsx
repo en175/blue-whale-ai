@@ -1407,7 +1407,6 @@ export default function CanvasPage() {
     textAttachmentsOf,
     draftModelOf,
     videoRefUnsupportedByModel,
-    patchMediaNode,
     updateGenerateRef,
   });
   const { firePendingGen, firePendingVideoDraft } = useCanvasHomeHandoff({

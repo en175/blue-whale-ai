@@ -1,5 +1,6 @@
 import { createGenerationJob, retryGenerationJob, cancelGenerationJob, type CreateJobPayload } from '@/custom/api/jobs';
 import type { GenerationRecoveryRecord } from '@/custom/api/canvasRecovery';
+import { isTaskTypeParamConstraintCode } from '@/custom/utils/video-reference-hints';
 import { isAudioMixNodeId } from '../tools/audio/audioMix';
 import { isAudioSpeedNodeId } from '../tools/audio/audioSpeed';
 import { isAudioTrimNodeId } from '../tools/audio/audioTrim';
@@ -106,7 +107,15 @@ export const normalGenerationTask: GenerationTaskDefinition<NormalGenerationPayl
     }
     if (jobStatus === 'failed' && record.is_current) {
       if (target == null) return { kind: 'restore-target', node: buildRecoveryTargetNode(record) };
-      if (isRecoveryTargetSettled(target, record)) return { kind: 'none' };
+      const storedCode = (record.job?.stored_error as { code?: number | string } | null)?.code;
+      const hasSavedParamConstraint = record.task_type === 'video' && target.data.genStatus === 'failed'
+        && String(target.data.jobId) === record.job_id
+        && isTaskTypeParamConstraintCode(target.data.errorCode as number | string | undefined);
+      if (hasSavedParamConstraint
+        && (storedCode === 'provider_failed' || storedCode === 1011 || isTaskTypeParamConstraintCode(storedCode))) {
+        return { kind: 'none' };
+      }
+      if (!hasSavedParamConstraint && isRecoveryTargetSettled(target, record)) return { kind: 'none' };
       host.patchNode(record.target_node_id, {
         jobId: record.job_id,
         generationRecovery: { protocolVersion: 1, submissionId: record.submission_id, outputKey: TARGET_OUTPUT_KEY },

@@ -726,7 +726,6 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
     data.genStatus === 'failed'
     && data.mediaType === 'video'
     && isTaskTypeParamConstraintCode(data.errorCode)
-    && data.draftRatio !== 'adaptive'
     && data.onFixFollowVideo != null;
 
   const contentBox = mediaContentBox({
@@ -853,7 +852,7 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
 
           {showFixFollowVideo && (
             <button className={styles.genBtn} onClick={() => data.onFixFollowVideo?.(id)}>
-              改为跟随视频并重试
+              重新编辑
             </button>
           )}
         </div>
@@ -1266,7 +1265,7 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
             )}
             {showFixFollowVideo && (
               <button className={styles.regenCancel} onClick={() => data.onFixFollowVideo?.(id)}>
-                改为跟随视频并重试
+                重新编辑
               </button>
             )}
           </div>

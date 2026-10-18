@@ -37,16 +37,18 @@ export interface CanvasUpdateGenerateHost {
   showToast: (type: 'success' | 'error' | 'warn', msg: string) => void;
   flushCanvasSave: (projectId: string) => Promise<boolean>;
   startGenerationJob: CanvasGenerationSubmissionHandles['startGenerationJob'];
-  generationDock: { submitted: (kind: 'image' | 'video' | 'audio', nodeId: string) => void };
+  generationDock: {
+    submitted: (kind: 'image' | 'video' | 'audio', nodeId: string) => void;
+    open: (kind: 'video', input: { nodeId: string }) => void;
+  };
   textAttachmentsOf: (nodeId: string) => ImageTextAttachment[];
   draftModelOf: (nodeId: string | null | undefined, kind: 'video' | 'image') => { features?: VideoModeFeatures | null } | undefined;
   videoRefUnsupportedByModel: (modelId: string, refs: VideoMediaRefs) => string | null;
-  patchMediaNode: (nodeId: string, patch: Record<string, unknown>) => void;
   updateGenerateRef: RefObject<(nodeId: string) => void>;
 }
 
 export interface CanvasUpdateGenerateHandles {
-  handleUpdateGenerate: (nodeId: string, opts?: { ratioOverride?: string }) => Promise<void>;
+  handleUpdateGenerate: (nodeId: string) => Promise<void>;
   handleFixFollowVideo: (nodeId: string) => void;
 }
 
@@ -71,11 +73,10 @@ export function useCanvasUpdateGenerate(host: CanvasUpdateGenerateHost): CanvasU
     textAttachmentsOf,
     draftModelOf,
     videoRefUnsupportedByModel,
-    patchMediaNode,
     updateGenerateRef,
   } = host;
 
-  const handleUpdateGenerate = async (nodeId: string, opts?: { ratioOverride?: string }) => {
+  const handleUpdateGenerate = async (nodeId: string) => {
     if (applyingRef.current) return;
     if (saveBlocked || saveStatus === 'error') {
       showToast('warn', '保存失败，请重试');
@@ -158,7 +159,7 @@ export function useCanvasUpdateGenerate(host: CanvasUpdateGenerateHost): CanvasU
       return;
     }
     if (mediaType === 'video') {
-      const aspectRatio = opts?.ratioOverride ?? (typeof data.draftRatio === 'string' ? data.draftRatio : '');
+      const aspectRatio = typeof data.draftRatio === 'string' ? data.draftRatio : '';
       const resolution = typeof data.draftSize === 'string' ? data.draftSize : '';
       const duration = typeof data.draftDuration === 'number' ? data.draftDuration : Number(data.draftDuration);
       const syncError = videoTextIndexSendError(
@@ -303,8 +304,7 @@ export function useCanvasUpdateGenerate(host: CanvasUpdateGenerateHost): CanvasU
     const data = (node.data ?? {}) as Record<string, unknown>;
     if (data.genStatus !== 'failed' || data.mediaType !== 'video') return;
     if (!isTaskTypeParamConstraintCode(data.errorCode as number | string | undefined)) return;
-    patchMediaNode(nodeId, { draftRatio: 'adaptive' });
-    void handleUpdateGenerate(nodeId, { ratioOverride: 'adaptive' });
+    generationDock.open('video', { nodeId });
   };
 
   updateGenerateRef.current = (nodeId) => {

@@ -364,7 +364,7 @@ describe('MediaNode failed overlay', () => {
 });
 
 describe('MediaNode 一键修复按钮（IKJ79D：按码识别，零文案匹配）', () => {
-  it('视频失败卡收到比例约束码（数值 1060）→ 显示「改为跟随视频并重试」并派发回调', async () => {
+  it('视频失败卡收到比例约束码（数值 1060）→ 显示「重新编辑」并派发回调', async () => {
     const onFixFollowVideo = vi.fn();
     await renderNode('video', {
       id: 'media-gen-31',
@@ -374,7 +374,7 @@ describe('MediaNode 一键修复按钮（IKJ79D：按码识别，零文案匹配
       data: { errorCode: 1060, onFixFollowVideo },
     });
     const fix = [...mountNode.querySelectorAll('button')].find(
-      (b) => b.textContent?.trim() === '改为跟随视频并重试',
+      (b) => b.textContent?.trim() === '重新编辑',
     );
     expect(fix).toBeTruthy();
     await act(async () => fix!.click());
@@ -387,7 +387,7 @@ describe('MediaNode 一键修复按钮（IKJ79D：按码识别，零文案匹配
       selected: false,
       data: { errorCode: 'task_type_param_constraint', onFixFollowVideo: vi.fn() },
     });
-    expect(labels()).toContain('改为跟随视频并重试');
+    expect(labels()).toContain('重新编辑');
   });
 
   it('其他错误码（如 quota_exhausted=1001）→ 不显示一键修复，只有重试', async () => {
@@ -397,7 +397,7 @@ describe('MediaNode 一键修复按钮（IKJ79D：按码识别，零文案匹配
       selected: false,
       data: { errorCode: 1001, onFixFollowVideo: vi.fn() },
     });
-    expect(labels()).not.toContain('改为跟随视频并重试');
+    expect(labels()).not.toContain('重新编辑');
     expect(labels()).toContain('重试');
   });
 
@@ -407,7 +407,7 @@ describe('MediaNode 一键修复按钮（IKJ79D：按码识别，零文案匹配
       selected: false,
       data: { errorCode: 1060, onFixFollowVideo: vi.fn() },
     });
-    expect(labels()).not.toContain('改为跟随视频并重试');
+    expect(labels()).not.toContain('重新编辑');
   });
 
   it('有旧素材的失败成品卡（fail-overlay 分支）同样按码显示一键修复', async () => {
@@ -418,7 +418,7 @@ describe('MediaNode 一键修复按钮（IKJ79D：按码识别，零文案匹配
     });
     const overlay = mountNode.querySelector('[data-testid="fail-overlay"]');
     expect(overlay).toBeTruthy();
-    expect(overlay!.textContent).toContain('改为跟随视频并重试');
+    expect(overlay!.textContent).toContain('重新编辑');
   });
 
   it('IKJFGQ 字符串码 + 手选比例（16:9）→ 修复钮显示（数值码撞号重排后字符串锚点仍工作）', async () => {
@@ -427,26 +427,26 @@ describe('MediaNode 一键修复按钮（IKJ79D：按码识别，零文案匹配
       selected: false,
       data: { errorCode: 'task_type_param_constraint', draftRatio: '16:9', onFixFollowVideo: vi.fn() },
     });
-    expect(labels()).toContain('改为跟随视频并重试');
+    expect(labels()).toContain('重新编辑');
   });
 
-  it('IKJFGQ 比例已 adaptive + 数值码 1060 → 不显示修复钮，降级普通重试', async () => {
+  it('IKJFGQ 比例已 adaptive + 数值码 1060 → 仍显示重新编辑入口', async () => {
     await renderNode('video', {
       genStatus: 'failed',
       selected: false,
       data: { errorCode: 1060, draftRatio: 'adaptive', onFixFollowVideo: vi.fn() },
     });
-    expect(labels()).not.toContain('改为跟随视频并重试');
+    expect(labels()).toContain('重新编辑');
     expect(labels()).toContain('重试');
   });
 
-  it('IKJFGQ 比例已 adaptive + 字符串码 → 同样降级普通重试', async () => {
+  it('IKJFGQ 比例已 adaptive + 字符串码 → 仍显示重新编辑入口', async () => {
     await renderNode('video', {
       genStatus: 'failed',
       selected: false,
       data: { errorCode: 'task_type_param_constraint', draftRatio: 'adaptive', onFixFollowVideo: vi.fn() },
     });
-    expect(labels()).not.toContain('改为跟随视频并重试');
+    expect(labels()).toContain('重新编辑');
     expect(labels()).toContain('重试');
   });
 });
