@@ -15,12 +15,24 @@ vi.mock('../components/AgentPanel', () => ({
 }));
 
 export const flowProps: { current: Record<string, any> } = { current: {} };
-vi.mock('../components/Canvas', () => ({
-  default: (props: Record<string, any>) => {
-    flowProps.current = props;
-    return createElement('div', { 'data-testid': 'flow-canvas' });
-  },
-}));
+export const realCanvasMode = { current: false };
+vi.mock('../components/Canvas', async () => {
+  if (realCanvasMode.current) {
+    const actual = await vi.importActual<{ default: (props: Record<string, any>) => unknown }>('../components/Canvas');
+    return {
+      default: (props: Record<string, any>) => {
+        flowProps.current = props;
+        return createElement(actual.default as any, props);
+      },
+    };
+  }
+  return {
+    default: (props: Record<string, any>) => {
+      flowProps.current = props;
+      return createElement('div', { 'data-testid': 'flow-canvas' });
+    },
+  };
+});
 
 vi.mock('../components/CanvasToolbar', () => ({
   default: () => createElement('div', { 'data-testid': 'canvas-toolbar' }),
