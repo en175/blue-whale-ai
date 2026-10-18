@@ -576,5 +576,104 @@ describe('IKNBU9 已软删结果卡的显式删除与保存', () => {
     ]);
     expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(1);
     expect(mediaNodes().map(node => node.id).sort()).toEqual([SOURCE, segmentCard(2)].sort());
+
+    await act(async () => { await vi.waitFor(() => expect(document.body.textContent).toContain('已保存'), { timeout: 3000 }); });
+    expect(document.body.textContent).not.toContain('保存失败，请重试');
+
+    const { savedNodes, savedEdges, savedPage } = savedSceneAfterRemove(scene.page.records[0]!);
+    for (let refresh = 0; refresh < 3; refresh += 1) {
+      await unmountPage();
+      apiMocks.fetchJobStatus.mockClear();
+      recoveryApi.fetch.mockClear();
+      recoveryApi.put.mockClear();
+      recoveryApi.page.current = structuredClone(savedPage);
+      seedScene({ nodes: savedNodes, edges: savedEdges });
+      await renderPage();
+      await settleRecovery();
+      expect(recoveryApi.put).not.toHaveBeenCalled();
+      expectSurvivorsIntact();
+    }
+  });
+
+  it('IKNCLD 等待恢复期间继续编辑：补保存载荷含最新改名与唯一 remove，不重放旧载荷也不重复提交', async () => {
+    putWithRemovedReceipt();
+    const release = delayRecovery();
+    const scene = persistedScene();
+    seedScene(scene);
+    recoveryApi.page.current = structuredClone(scene.page);
+    apiMocks.fetchJobStatus.mockResolvedValue(structuredClone(scene.detail));
+    apiMocks.saveCanvasDoc.mockRejectedValueOnce(
+      new ApiError(428, 'recovery protocol required', '', { reason: 'recovery_protocol_required' }),
+    );
+
+    await renderPage();
+    await act(async () => { await vi.waitFor(() => expect(recoveryApi.fetch).toHaveBeenCalled()); });
+    await act(async () => { flowProps.current.onDeleteNode([segmentCard(1)]); });
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 900)); });
+    expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(1);
+    expect(recoveryApi.put).not.toHaveBeenCalled();
+
+    await act(async () => {
+      const survivor = mediaNodes().find(node => node.id === segmentCard(2))!;
+      (survivor.data as { onTitleChange: (id: string, name: string) => void })
+        .onTitleChange(segmentCard(2), '第 2 段 · 用户改名');
+    });
+    expect(mediaNodes().find(node => node.id === segmentCard(2))!.data.fileName).toBe('第 2 段 · 用户改名');
+
+    await act(async () => { release(releasePage(scene)); });
+    await act(async () => { await vi.waitFor(() => expect(recoveryApi.put).toHaveBeenCalled(), { timeout: 600 }); });
+    expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(1);
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 1000)); });
+
+    expect(recoveryApi.put).toHaveBeenCalledTimes(1);
+    const [projectId, payload, , recovery] = recoveryApi.put.mock.calls[0]!;
+    expect(projectId).toBe('p1');
+    expect(recovery.recoveryChanges).toEqual([
+      { recoveryItemId: `gcr:${SUB}:segment:1`, expectedRevision: 1, action: 'remove' },
+    ]);
+    const savedNodes = payload.nodes as Array<{ id: string; data: { fileName?: string } }>;
+    expect(savedNodes.map(node => node.id).sort()).toEqual(persistedNodes());
+    expect(savedNodes.find(node => node.id === segmentCard(2))!.data.fileName).toBe('第 2 段 · 用户改名');
+    expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(1);
+  });
+
+  it('IKNCLD 卸载后迟到恢复响应：只对本项目补一次 remove 补存，不误写他项、不留未处理拒绝', async () => {
+    putWithRemovedReceipt();
+    const release = delayRecovery();
+    const scene = persistedScene();
+    seedScene(scene);
+    recoveryApi.page.current = structuredClone(scene.page);
+    apiMocks.fetchJobStatus.mockResolvedValue(structuredClone(scene.detail));
+    apiMocks.saveCanvasDoc.mockRejectedValueOnce(
+      new ApiError(428, 'recovery protocol required', '', { reason: 'recovery_protocol_required' }),
+    );
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => { unhandled.push(reason); };
+    process.on('unhandledRejection', onUnhandled);
+
+    try {
+      await renderPage();
+      await act(async () => { await vi.waitFor(() => expect(recoveryApi.fetch).toHaveBeenCalled()); });
+      await act(async () => { flowProps.current.onDeleteNode([segmentCard(1)]); });
+      await act(async () => { await new Promise(resolve => setTimeout(resolve, 900)); });
+      expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(1);
+      expect(recoveryApi.put).not.toHaveBeenCalled();
+
+      await unmountPage();
+      await act(async () => { release(releasePage(scene)); });
+      await act(async () => { await new Promise(resolve => setTimeout(resolve, 100)); });
+
+      expect(recoveryApi.put.mock.calls.length).toBeLessThanOrEqual(1);
+      for (const call of recoveryApi.put.mock.calls) {
+        expect(call[0]).toBe('p1');
+        expect(call[3].recoveryChanges).toEqual([
+          { recoveryItemId: `gcr:${SUB}:segment:1`, expectedRevision: 1, action: 'remove' },
+        ]);
+      }
+      expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(1);
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+    }
   });
 });

@@ -559,6 +559,23 @@ describe('生成任务运行时：recover', () => {
     expect(status.calls).toHaveLength(1);
   });
 
+  it('扫描在飞时同加载重复 recover：返回同一 Promise，随首次扫描一起收敛且只发一次页请求', async () => {
+    const { runtime, page } = setup();
+    let releaseFirst!: (page: GenerationRecoveryPage) => void;
+    page.mockImplementation(() => new Promise((resolve) => { releaseFirst = resolve; }));
+    const first = runtime.recover('p1');
+    const second = runtime.recover('p1');
+    expect(second).toBe(first);
+    let secondSettled = false;
+    void second.then(() => { secondSettled = true; });
+    await flushMicrotasks();
+    expect(page).toHaveBeenCalledTimes(1);
+    expect(secondSettled).toBe(false);
+    releaseFirst({ protocol_version: 1, canvas_version: 1, records: [], next_cursor: null });
+    await Promise.all([first, second]);
+    expect(secondSettled).toBe(true);
+  });
+
   it('进行中但卡不在（受理回执丢失）：按恢复种子补卡一次，不重复建卡', async () => {
     const { fake, runtime, page } = setup();
     page.mockImplementation(async () => ({
