@@ -98,7 +98,7 @@ export function createPolling(ctx: RuntimeContext) {
         } while (record == null && cursor != null);
       }
       const outputs = record?.items.filter((item) => item.output_key !== TARGET_OUTPUT_KEY
-        && item.state !== 'removed' && item.state !== 'transferred') ?? [];
+        && item.state !== 'removed' && item.state !== 'transferred' && item.asset_deleted !== true) ?? [];
       if (outputs.length === 0) {
         host.patchNode(nodeId, { genStatus: undefined, progress: 100 });
         return;

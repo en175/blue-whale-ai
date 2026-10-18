@@ -175,6 +175,41 @@ describe('多结果家族：成功判定与恢复规划', () => {
     ]);
   });
 
+  it('planRecovery：present 且画布已有匹配标记不再回填；明确软删项不进入投影，全删即不动作', () => {
+    const segmentId = (index: number) => `generation-result:${SUBMISSION}:segment:${index}`;
+    const succeeded = {
+      job_id: 'sj1', type: 'video_scene_split', status: 'succeeded', progress: 100,
+      output_asset_ids: ['11', '12'], stored_error: null, created_at: '2026-10-01T00:00:00Z',
+    };
+    const targetItem = { recovery_item_id: `gcr:${SUBMISSION}:$target`, output_key: '$target', node_id: 'ph-1',
+      state: 'present' as const, revision: 2, node_binding_revision: 1, asset_id: null, slot_id: null };
+    const outputItem = (index: number, assetId: string, assetDeleted: boolean | null = null) => ({
+      recovery_item_id: `gcr:${SUBMISSION}:segment:${index}`, output_key: `segment:${index}`,
+      node_id: segmentId(index), state: 'present' as const, revision: 1, node_binding_revision: 1,
+      asset_id: assetId, asset_deleted: assetDeleted, slot_id: null,
+    });
+    const host = (nodes: Record<string, Record<string, unknown>>): GenerationRuntimeHost => ({
+      findNode: (id: string) => (id in nodes
+        ? { id, type: 'mediaNode', position: { x: 0, y: 0 }, data: nodes[id]! } : null),
+    } as unknown as GenerationRuntimeHost);
+    const marker = (index: number) => ({ generationRecovery: {
+      protocolVersion: 1, submissionId: SUBMISSION, outputKey: `segment:${index}` } });
+
+    expect(sceneSplitTask.planRecovery!(record({ job: succeeded, items: [targetItem, outputItem(1, '11')] }),
+      host({ 'ph-1': {}, [segmentId(1)]: marker(1) }))).toEqual({ kind: 'none' });
+
+    expect(sceneSplitTask.planRecovery!(record({ job: succeeded, items: [targetItem, outputItem(1, '8127', true)] }),
+      host({ 'ph-1': {} }))).toEqual({ kind: 'none' });
+
+    const mixed = sceneSplitTask.planRecovery!(record({ job: succeeded,
+      items: [targetItem, outputItem(1, '8127', true), outputItem(2, '12')] }), host({ 'ph-1': {} }));
+    expect(mixed).toMatchObject({ kind: 'apply-outputs' });
+    if (mixed.kind !== 'apply-outputs') return;
+    expect(mixed.projection.outputs).toEqual([
+      { outputKey: 'segment:2', nodeId: segmentId(2), assetId: '12', url: '', mediaType: 'video' },
+    ]);
+  });
+
   it('planRecovery：失败且卡缺失补失败卡（恢复卡无业务参数，重试提示重新编辑）', () => {
     const plan = sceneSplitTask.planRecovery!(record({
       job: { job_id: 'sj1', type: 'video_scene_split', status: 'failed', progress: 0, output_asset_ids: [], stored_error: { code: 1, msg: '切分失败' }, created_at: '2026-10-01T00:00:00Z' },
@@ -256,6 +291,7 @@ interface FakeHost {
   edges: Array<{ source: string; target: string }>;
   inserts: RuntimeNodeView[];
   removes: string[];
+  toasts: string[];
   saves: number;
 }
 
@@ -264,6 +300,7 @@ function createFakeHost(): FakeHost {
   const edges: Array<{ source: string; target: string }> = [];
   const inserts: RuntimeNodeView[] = [];
   const removes: string[] = [];
+  const toasts: string[] = [];
   const counters = { saves: 0 };
   const loadEpoch = {};
   const host: GenerationRuntimeHost = {
@@ -289,13 +326,13 @@ function createFakeHost(): FakeHost {
     applyTerminal: () => 'terminal',
     settleCancelled: () => {},
     saveCanvas: async () => { counters.saves += 1; return true; },
-    toast: () => {},
+    toast: (kind, message) => { toasts.push(`${kind}:${message}`); },
     openRechargeForCreditsError: () => false,
     addAuthResume: () => {},
     rememberAsset: () => {},
     fetchRecoveryPage: async () => ({ protocol_version: 1, canvas_version: null, records: [], next_cursor: null }),
   };
-  return { host, nodes, edges, inserts, removes, get saves() { return counters.saves; } };
+  return { host, nodes, edges, inserts, removes, toasts, get saves() { return counters.saves; } };
 }
 
 const flushMicrotasks = async (rounds = 16) => {
@@ -660,5 +697,80 @@ describe('多结果家族：运行时集成', () => {
     expect(voice!.position).toEqual({ x: 958, y: 0 });
     expect(music!.position).toEqual({ x: 958, y: 300 });
     expect(fake.removes).toContain('vs-1');
+  });
+
+  it('明确软删的段：恢复零警告、零建卡、零差分，任务卡保持不动', async () => {
+    const fake = createFakeHost();
+    const targetCard: RuntimeNodeView = {
+      id: 'ph-1', type: 'mediaNode', position: { x: 958, y: 0 },
+      data: { fileName: '用户任务卡', mediaType: 'video', sceneSplit: { sourceAssetId: '5', lastInput: {} } },
+    };
+    fake.nodes.set(targetCard.id, targetCard);
+    const page = oneSegmentPage();
+    const record = page.records[0]!;
+    record.items[1]!.asset_id = '8127';
+    record.items[1]!.asset_deleted = true;
+    const runtime = setupRuntime(fake, [oneSegmentDetail()], page);
+    await runtime.recover('p1');
+    await flushMicrotasks(20);
+    expect(fake.toasts).toEqual([]);
+    expect(fake.inserts).toHaveLength(0);
+    expect(fake.removes).toHaveLength(0);
+    expect(fake.nodes.get('ph-1')).toEqual(targetCard);
+    expect(runtime.composeSaveFields()).toBeNull();
+  });
+
+  it('轮询收敛遇明确软删：清掉进行中态、零警告、不建卡也不复活素材', async () => {
+    const fake = createFakeHost();
+    fake.nodes.set('ph-1', { id: 'ph-1', type: 'mediaNode', position: { x: 958, y: 0 },
+      data: { genStatus: 'generating', jobId: 'sj1', mediaType: 'video', fileName: '用户任务卡',
+        sceneSplit: { sourceAssetId: '5', lastInput: {} },
+        generationRecovery: { protocolVersion: 1, submissionId: SUBMISSION, outputKey: '$target' } } });
+    const page = oneSegmentPage();
+    const record = page.records[0]!;
+    record.items[1]!.asset_id = '8127';
+    record.items[1]!.asset_deleted = true;
+    const detail = { job_id: 'sj1', status: 'succeeded', progress: 100, asset: null, output_assets: [], result: null };
+    const runtime = setupRuntime(fake, [detail], page);
+    runtime.resumeFromHydration('ph-1', 'sj1', fake.nodes.get('ph-1')!.data);
+    await flushMicrotasks(30);
+    expect(fake.toasts).toEqual([]);
+    expect(fake.inserts).toHaveLength(0);
+    expect(fake.nodes.get('ph-1')).toMatchObject({ data: {
+      fileName: '用户任务卡', progress: 100, sceneSplit: { sourceAssetId: '5' },
+    } });
+    expect(fake.nodes.get('ph-1')!.data.genStatus).toBeUndefined();
+    expect(runtime.composeSaveFields()).toBeNull();
+  });
+
+  it('部分段明确软删：只按存活可信产物落卡，不弹整批不可用警告也不复活已删段', async () => {
+    const fake = createFakeHost();
+    fake.nodes.set('ph-1', { id: 'ph-1', type: 'mediaNode', position: { x: 958, y: 0 },
+      data: { sceneSplit: { sourceAssetId: '5', lastInput: {} } } });
+    const page = twoSegmentPage();
+    const record = page.records[0]!;
+    record.items[1]!.asset_id = '8127';
+    record.items[1]!.asset_deleted = true;
+    const detail = {
+      job_id: 'sj1', status: 'succeeded', progress: 100, asset: null,
+      output_assets: [{ id: 'a2', url: 'http://t/2.mp4', type: 'video' }],
+      result: { duration: 30, segments: [
+        { segment_index: 1, start_time: 0, end_time: 15, segment_asset_id: '8127' },
+        { segment_index: 2, start_time: 15, end_time: 30, segment_asset_id: 'a2' },
+      ] },
+    };
+    const runtime = setupRuntime(fake, [detail], page);
+    await runtime.recover('p1');
+    await flushMicrotasks(20);
+    expect(fake.toasts).toEqual([]);
+    expect(fake.nodes.get(`generation-result:${SUBMISSION}:segment:2`)).toMatchObject({
+      data: { assetId: 'a2', src: 'http://t/2.mp4' },
+    });
+    expect(fake.nodes.has(`generation-result:${SUBMISSION}:segment:1`)).toBe(false);
+    expect(fake.removes).toContain('ph-1');
+    expect(runtime.composeSaveFields()!.recoveryChanges.map(change => `${change.action}:${change.recoveryItemId}`).sort()).toEqual([
+      `apply:gcr:${SUBMISSION}:segment:2`,
+      `replaceTarget:gcr:${SUBMISSION}:$target`,
+    ]);
   });
 });

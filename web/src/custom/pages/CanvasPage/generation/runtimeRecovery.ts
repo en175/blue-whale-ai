@@ -48,6 +48,7 @@ export function createRecovery(ctx: RuntimeContext, polling: { poll: (execution:
       || (nodeBindings.get(record.target_node_id) ?? 0)
         > (targetItem?.node_binding_revision ?? record.binding_revision);
     for (const item of record.items) {
+      if (item.asset_deleted === true) continue;
       setLedger({
         recoveryItemId: item.recovery_item_id,
         submissionId: record.submission_id,
