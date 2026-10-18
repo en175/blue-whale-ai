@@ -22,6 +22,16 @@ const RETRY_PRICING = {
   basePrice: { kind: "const", value: 13000 },
 };
 
+const RETRY_VIDEO_INPUT = {
+  prompt: "whale",
+  model_id: "seedance-2.0-pro",
+  video_mode: "text2video",
+  omni_reference_task_type_allowed: false,
+  resolution: "720p",
+  aspect_ratio: "16:9",
+  duration: 5,
+};
+
 function capabilityDelegate(rows: unknown[]) {
   return { findMany: vi.fn().mockResolvedValue(rows) };
 }
@@ -36,15 +46,15 @@ function capabilityRow(overrides: Record<string, unknown> = {}) {
     model_label: "Seedance 2.0 Pro",
     icon: null,
     sort_order: 0,
-    supported_sizes: [],
-    supported_aspect_ratios: [],
-    supported_formats: [],
-    supported_durations: null,
-    default_size: "1k",
+    supported_sizes: [{ id: "720p", label: "720p", api_value: "720p" }],
+    supported_aspect_ratios: ["16:9"],
+    supported_formats: ["mp4"],
+    supported_durations: { min: 4, max: 12, step: 1 },
+    default_size: "720p",
     default_format: null,
-    default_aspect_ratio: "1:1",
-    default_duration: null,
-    features: {},
+    default_aspect_ratio: "16:9",
+    default_duration: 5,
+    features: { reference_image: true, image_reference_max: 10, task_types: { text2video: {}, image_reference: {} } },
     channel: null,
     request_mapping: null,
     is_default: false,
@@ -272,7 +282,7 @@ describe("generation command repo retry", () => {
           type: "video",
           source: "scene_card",
           status: "failed",
-          input: {},
+          input: RETRY_VIDEO_INPUT,
         }),
         create: vi.fn().mockResolvedValue({
           id: 301n,
@@ -321,6 +331,7 @@ describe("generation command repo retry", () => {
       generation_job_logs: { create: vi.fn().mockResolvedValue({}) },
     };
     const prisma = {
+      generation_model_capability: capabilityDelegate([capabilityRow()]),
       $transaction: vi.fn(
         async (callback: (client: typeof tx) => Promise<unknown>) =>
           callback(tx),
@@ -378,7 +389,7 @@ describe("generation command repo retry", () => {
           type: "video",
           source: "scene_card",
           status: "failed",
-          input: { prompt: "whale", model_id: "seedance-2.0-pro" },
+          input: RETRY_VIDEO_INPUT,
         }),
         create: vi.fn().mockResolvedValue({
           id: 301n,
@@ -437,7 +448,7 @@ describe("generation command repo retry", () => {
         jobId: 301,
         taskType: "video",
         modelId: "seedance-2.0-pro",
-        input: { prompt: "whale", model_id: "seedance-2.0-pro" },
+        input: RETRY_VIDEO_INPUT,
         ruleSnapshot: JSON.stringify(RETRY_PRICING),
       }),
     );
@@ -454,7 +465,7 @@ describe("generation command repo retry", () => {
           type: "video",
           source: "scene_card",
           status: "failed",
-          input: { prompt: "whale", model_id: "seedance-2.0-pro" },
+          input: RETRY_VIDEO_INPUT,
         }),
         create: vi.fn().mockResolvedValue({
           id: 301n,
@@ -741,7 +752,7 @@ describe("generation command repo retry", () => {
       type: "video",
       source: "scene_card",
       status: "failed",
-      input: {},
+      input: RETRY_VIDEO_INPUT,
     };
     const firstTx = {
       generation_jobs: {
@@ -807,6 +818,7 @@ describe("generation command repo retry", () => {
     };
     let attempt = 0;
     const prisma = {
+      generation_model_capability: capabilityDelegate([capabilityRow()]),
       $transaction: vi.fn(
         async (callback: (client: never) => Promise<unknown>) => {
           attempt += 1;
@@ -875,6 +887,7 @@ describe("generation command repo retry", () => {
         generation_job_logs: { create: vi.fn().mockResolvedValue({}) },
       };
       const prisma = {
+        generation_model_capability: capabilityDelegate([capabilityRow()]),
         $transaction: vi.fn(
           async (callback: (client: typeof tx) => Promise<unknown>) =>
             callback(tx),
@@ -890,7 +903,7 @@ describe("generation command repo retry", () => {
       type: "video",
       source: "scene_card",
       status: "failed",
-      input: { references: [{ material_id: "asset-abc" }], expected_output_count: 1 },
+      input: { ...RETRY_VIDEO_INPUT, video_mode: "image_reference", references: [{ material_id: "asset-abc", role: "reference", type: "image" }], expected_output_count: 1 },
       strategy_version: "seedance-2.0-v1",
     };
 
@@ -1004,21 +1017,21 @@ describe("generation command repo retry", () => {
 });
 
 describe("retryJob 计费快照（IKL406：重试的 charge 必须带 rule_snapshot）", () => {
-  function retryHarness(capabilityRows: unknown[]) {
+  function retryHarness(capabilityRows: unknown[], type: "video" | "image" = "video") {
     const tx = {
       generation_jobs: {
         findFirst: vi.fn().mockResolvedValue({
           id: 300n,
           project_id: 55n,
           user_id: 9n,
-          type: "video",
+          type,
           source: "scene_card",
           status: "failed",
-          input: { prompt: "whale", model_id: "seedance-2.0-pro" },
+          input: type === "video" ? RETRY_VIDEO_INPUT : { prompt: "whale", model_id: "image-model", size: "1024x1024", aspect_ratio: "1:1" },
         }),
         create: vi.fn().mockResolvedValue({
           id: 301n,
-          type: "video",
+          type,
           source: "scene_card",
           status: "queued",
           progress: 0,
@@ -1053,7 +1066,7 @@ describe("retryJob 计费快照（IKL406：重试的 charge 必须带 rule_snaps
     const repo = createGenerationCommandRepo(prisma as never);
     const charge = vi.fn(async (_ctx: BillingChargeContext) => {});
     const release = vi.fn(async () => {});
-    return { repo, charge, release, billing: { charge, release } };
+    return { repo, charge, release, createJob: tx.generation_jobs.create, billing: { charge, release } };
   }
 
   it("★ charge 收到的 rule_snapshot 与能力行 pricing 的 JSON.stringify 逐字相同", async () => {
@@ -1077,8 +1090,20 @@ describe("retryJob 计费快照（IKL406：重试的 charge 必须带 rule_snaps
     expect(release).not.toHaveBeenCalled();
   });
 
-  it("★ 查不到能力行 → 不带 rule_snapshot（与创建路径同口径：交给 billing 拒单）", async () => {
-    const { repo, charge, billing } = retryHarness([]);
+  it("视频模型已无可用能力时，在建任务和扣款之前返回参数修正结果", async () => {
+    const { repo, charge, release, createJob, billing } = retryHarness([]);
+
+    await expect(repo.retryJob(
+      "300", "55", "9", "retry-501", "hash-501", undefined, undefined, billing,
+    )).rejects.toMatchObject({ code: 1060 });
+
+    expect(createJob).not.toHaveBeenCalled();
+    expect(charge).not.toHaveBeenCalled();
+    expect(release).not.toHaveBeenCalled();
+  });
+
+  it("图片重试查不到能力行时，仍由计费侧处理缺失定价", async () => {
+    const { repo, charge, billing } = retryHarness([], "image");
 
     await repo.retryJob(
       "300",
