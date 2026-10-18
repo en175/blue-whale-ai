@@ -174,12 +174,16 @@ describe('IKNBH7 慢保存与重试期间文本视频引用稳定', () => {
     expectChipStable(loadedChip, watch);
 
     let resolveFirst!: (value: ReturnType<typeof savedReceipt>) => void;
-    apiMocks.saveCanvasDoc.mockImplementationOnce(() => new Promise((resolve) => { resolveFirst = resolve; }));
+    let requestStartedAt = 0;
+    apiMocks.saveCanvasDoc.mockImplementationOnce(() => {
+      requestStartedAt = Date.now();
+      return new Promise((resolve) => { resolveFirst = resolve; });
+    });
 
     const editAt = Date.now();
     await dragMediaNodeTo(380);
     await waitForSaveCalls(1);
-    expect(Date.now() - editAt).toBeGreaterThanOrEqual(800);
+    expect(requestStartedAt - editAt).toBeGreaterThanOrEqual(800);
     expect(payloadOf(0).nodes.map((node) => node.id).sort()).toEqual([TEXT_ID, VIDEO_NODE_ID].sort());
     expect(payloadOf(0).nodes.find((node) => node.id === VIDEO_NODE_ID)!.position.x).toBe(380);
     expect(payloadOf(0).edges).toHaveLength(1);
@@ -196,11 +200,13 @@ describe('IKNBH7 慢保存与重试期间文本视频引用稳定', () => {
     expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(1);
     expectChipStable(loadedChip, watch);
 
-    const elapsed = Date.now() - editAt;
-    if (elapsed < SLOW_SAVE_MS) await sleep(SLOW_SAVE_MS - elapsed);
+    const inFlight = Date.now() - requestStartedAt;
+    if (inFlight < SLOW_SAVE_MS) await sleep(SLOW_SAVE_MS - inFlight);
     expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(1);
     expectChipStable(loadedChip, watch);
 
+    const answeredAt = Date.now();
+    expect(answeredAt - requestStartedAt).toBeGreaterThanOrEqual(SLOW_SAVE_MS);
     await act(async () => { resolveFirst(savedReceipt(4)); });
     await waitForSaveCalls(2);
     expect(payloadOf(1).nodes.find((node) => node.id === VIDEO_NODE_ID)!.position.x).toBe(440);
@@ -220,19 +226,26 @@ describe('IKNBH7 慢保存与重试期间文本视频引用稳定', () => {
     const watch = watchChipReloads();
 
     let rejectFirst!: (error: unknown) => void;
-    apiMocks.saveCanvasDoc.mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectFirst = reject; }));
+    let requestStartedAt = 0;
+    apiMocks.saveCanvasDoc.mockImplementationOnce(() => {
+      requestStartedAt = Date.now();
+      return new Promise((_resolve, reject) => { rejectFirst = reject; });
+    });
 
     const editAt = Date.now();
     await dragMediaNodeTo(390);
     await waitForSaveCalls(1);
+    expect(requestStartedAt - editAt).toBeGreaterThanOrEqual(800);
 
     await sleep(1200);
     expectChipStable(loadedChip, watch);
 
-    const elapsed = Date.now() - editAt;
-    if (elapsed < SLOW_SAVE_MS) await sleep(SLOW_SAVE_MS - elapsed);
+    const inFlight = Date.now() - requestStartedAt;
+    if (inFlight < SLOW_SAVE_MS) await sleep(SLOW_SAVE_MS - inFlight);
     expectChipStable(loadedChip, watch);
 
+    const answeredAt = Date.now();
+    expect(answeredAt - requestStartedAt).toBeGreaterThanOrEqual(SLOW_SAVE_MS);
     await act(async () => { rejectFirst(new ApiError(500, '服务器开小差')); });
     await vi.waitFor(() => expect(document.body.textContent).toContain('保存失败，请重试'), { timeout: 3000 });
     expectChipStable(loadedChip, watch);
