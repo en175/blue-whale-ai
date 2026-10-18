@@ -13,23 +13,28 @@ export function createRecovery(ctx: RuntimeContext, polling: { poll: (execution:
   const { fanOutOutputs } = polling;
 
   let scanningEpoch: object | null = null;
-  const recover = async (projectId: string): Promise<void> => {
+  let scanning: Promise<void> | null = null;
+  const recover = (projectId: string): Promise<void> => {
     const loadEpoch = host.getLoadEpoch();
-    if (scanningEpoch === loadEpoch) return;
+    if (scanningEpoch === loadEpoch) return scanning ?? Promise.resolve();
     scanningEpoch = loadEpoch;
-    try {
-      let cursor: string | null = null;
-      do {
-        const page = await host.fetchRecoveryPage(projectId, { cursor });
-        if (host.getProjectId() !== projectId || host.getLoadEpoch() !== loadEpoch) return;
-        for (const record of page.records) reconcileRecord(record);
-        cursor = page.next_cursor;
-      } while (cursor != null);
-    } catch (e) {
-      console.warn('[generation-runtime] 恢复扫描失败（下轮水合重试）:', e);
-    } finally {
-      if (scanningEpoch === loadEpoch) scanningEpoch = null;
-    }
+    const run = (async () => {
+      try {
+        let cursor: string | null = null;
+        do {
+          const page = await host.fetchRecoveryPage(projectId, { cursor });
+          if (host.getProjectId() !== projectId || host.getLoadEpoch() !== loadEpoch) return;
+          for (const record of page.records) reconcileRecord(record);
+          cursor = page.next_cursor;
+        } while (cursor != null);
+      } catch (e) {
+        console.warn('[generation-runtime] 恢复扫描失败（下轮水合重试）:', e);
+      } finally {
+        if (scanningEpoch === loadEpoch) scanningEpoch = null;
+      }
+    })();
+    scanning = run;
+    return run;
   };
 
   const resumeFromRecord = (record: GenerationRecoveryRecord, def?: GenerationTaskDefinition) => {

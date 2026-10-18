@@ -222,7 +222,20 @@ export function useCanvasSave(host: CanvasSaveHost) {
     return false;
   };
 
-  const flushCanvasSave = (projectId: string): Promise<boolean> => {
+  const retrySaveAfterRecovery = (projectId: string): void => {
+    const runtime = generationRuntimeRef.current;
+    if (runtime == null) return;
+    void runtime.recover(projectId).then(() => {
+      if (activeProjectRef.current !== projectId) return;
+      if (runtime.composeSaveFields() == null) return;
+      void flushCanvasSave(projectId, { recoveryRetry: false }).catch(() => {});
+    });
+  };
+
+  const flushCanvasSave = (
+    projectId: string,
+    options: { recoveryRetry?: boolean } = {},
+  ): Promise<boolean> => {
     const runFlush = async (): Promise<boolean> => {
       if (activeProjectRef.current !== projectId) return false;
       if (hydratedProjectRef.current === null) return false;
@@ -280,7 +293,7 @@ export function useCanvasSave(host: CanvasSaveHost) {
             throw error;
           }
           if (!recoveryFields && readRecoveryErrorReason(error) === 'recovery_protocol_required') {
-            void generationRuntimeRef.current?.recover(projectId);
+            if (options.recoveryRetry !== false) retrySaveAfterRecovery(projectId);
           }
           const aligned = adoptCanvasConflictVersion(error);
           if (aligned && confirmEmpty) {
@@ -420,7 +433,7 @@ export function useCanvasSave(host: CanvasSaveHost) {
               return;
             }
             if (!recoveryFields && readRecoveryErrorReason(e) === 'recovery_protocol_required') {
-              void generationRuntimeRef.current?.recover(currentId);
+              retrySaveAfterRecovery(currentId);
               setSaveBlocked(true);
               setSaveStatus('error');
               showToast('warn', '画布包含任务恢复保护内容，正在同步状态，请稍后重试保存');

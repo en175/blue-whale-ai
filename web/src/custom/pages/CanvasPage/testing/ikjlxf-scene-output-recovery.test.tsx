@@ -5,6 +5,7 @@ import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GenerationRecoveryRecord } from '@/custom/api/canvasRecovery';
 import type { JobDetail } from '@/custom/api/jobs';
+import { ApiError } from '@/shared/api/http';
 import { apiMocks, canvasDocMock, flowProps, mediaNodes, renderPage, unmountPage } from './canvasPageTestHarness';
 import { sceneSplitTask } from '../generation/multiOutputTasks';
 
@@ -545,6 +546,35 @@ describe('IKNBU9 已软删结果卡的显式删除与保存', () => {
     await act(async () => { await new Promise(resolve => setTimeout(resolve, 1000)); });
 
     expect(recoveryApi.put).not.toHaveBeenCalled();
+    expect(mediaNodes().map(node => node.id).sort()).toEqual([SOURCE, segmentCard(2)].sort());
+  });
+
+  it('IKNCLD 恢复响应晚于自动保存：普通保存被拒后，迟到响应自动补保存并携带 remove', async () => {
+    putWithRemovedReceipt();
+    const release = delayRecovery();
+    const scene = persistedScene();
+    seedScene(scene);
+    recoveryApi.page.current = structuredClone(scene.page);
+    apiMocks.fetchJobStatus.mockResolvedValue(structuredClone(scene.detail));
+    apiMocks.saveCanvasDoc.mockRejectedValueOnce(
+      new ApiError(428, 'recovery protocol required', '', { reason: 'recovery_protocol_required' }),
+    );
+
+    await renderPage();
+    await act(async () => { await vi.waitFor(() => expect(recoveryApi.fetch).toHaveBeenCalled()); });
+    await act(async () => { flowProps.current.onDeleteNode([segmentCard(1)]); });
+
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 900)); });
+    expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(1);
+    expect(recoveryApi.put).not.toHaveBeenCalled();
+
+    await act(async () => { release(releasePage(scene)); });
+    await act(async () => { await vi.waitFor(() => expect(recoveryApi.put).toHaveBeenCalled(), { timeout: 3000 }); });
+
+    expect(recoveryApi.put.mock.calls[0]![3].recoveryChanges).toEqual([
+      { recoveryItemId: `gcr:${SUB}:segment:1`, expectedRevision: 1, action: 'remove' },
+    ]);
+    expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(1);
     expect(mediaNodes().map(node => node.id).sort()).toEqual([SOURCE, segmentCard(2)].sort());
   });
 });
