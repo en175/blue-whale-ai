@@ -10,6 +10,7 @@ import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient.VideoSubmit
 import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient.VideoTaskObservation;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.sun.net.httpserver.HttpServer;
 import okhttp3.OkHttpClient;
 import org.junit.jupiter.api.AfterEach;
@@ -263,6 +264,93 @@ class NewApiVideoClientEndpointTest {
         VideoTaskObservation constraint = client.poll("t", "task-constraint");
         assertThat(constraint.status()).isEqualTo("failed");
         assertThat(constraint.error().code()).isEqualTo("task_type_param_constraint");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"InvalidParameter.TaskTypeConstraint", "InvalidParameter.TaskTypeMismatch"})
+    @DisplayName("IKNB96: 网关任务内层上游错误映射参数约束，保留任务层状态与用量")
+    void pollNestedProviderTaskTypeErrorKeepsGatewayTask(String upstreamCode) throws Exception {
+        server.createContext("/v1/video/generations/task-nested-error", exchange -> {
+            byte[] resp = ("""
+                    {"data":{"task_id":"task-nested-error","status":"FAILURE",
+                    "fail_reason":"The task does not meet the duration requirements.",
+                    "quota":120,"usage":{"total_tokens":345},"created_at":1790647200,
+                    "data":{"id":"provider-task","status":"SUCCESS","result_url":"https://provider/ignored.mp4",
+                    "error":{"code":"%s","message":"Please check the video mode and duration."}}}}
+                    """).formatted(upstreamCode).getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, resp.length);
+            try (OutputStream out = exchange.getResponseBody()) {
+                out.write(resp);
+            }
+        });
+
+        VideoTaskObservation observation =
+                new NewApiVideoClient(new UpstreamBaseUrl(baseUrl)).poll("t", "task-nested-error");
+
+        assertThat(observation.status()).isEqualTo("failed");
+        assertThat(observation.error().code()).isEqualTo("task_type_param_constraint");
+        assertThat(observation.error().message()).isEqualTo("Please check the video mode and duration.");
+        assertThat(observation.quota()).isEqualTo(120);
+        assertThat(observation.totalTokens()).isEqualTo(345L);
+        assertThat(observation.upstreamCreatedAtMs()).isEqualTo(1_790_647_200_000L);
+        assertThat(observation.url()).isNull();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"SUCCESS", "PROCESSING"})
+    @DisplayName("IKNB96: 内层供应商失败不覆盖网关成功或处理中状态与结果")
+    void pollNestedErrorDoesNotReplaceGatewayStatusAndResult(String status) throws Exception {
+        server.createContext("/v1/video/generations/task-gateway-status", exchange -> {
+            byte[] resp = ("""
+                    {"data":{"task_id":"task-gateway-status","status":"%s",
+                    "result_url":"https://gateway/result.mp4","quota":120,
+                    "data":{"id":"provider-task","status":"FAILURE","result_url":"https://provider/ignored.mp4",
+                    "error":{"code":"InvalidParameter.TaskTypeConstraint","message":"rejected"}}}}
+                    """).formatted(status).getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, resp.length);
+            try (OutputStream out = exchange.getResponseBody()) {
+                out.write(resp);
+            }
+        });
+
+        VideoTaskObservation observation =
+                new NewApiVideoClient(new UpstreamBaseUrl(baseUrl)).poll("t", "task-gateway-status");
+
+        boolean succeeded = "SUCCESS".equals(status);
+        assertThat(observation.status()).isEqualTo(succeeded ? "succeeded" : "processing");
+        assertThat(observation.url()).isEqualTo(succeeded ? "https://gateway/result.mp4" : null);
+        assertThat(observation.error()).isNull();
+        assertThat(observation.quota()).isEqualTo(120);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"task", "provider", "top"})
+    @DisplayName("IKNB96: 结构化错误按任务层、供应商层、信封顶层顺序选取")
+    void pollStructuredErrorPrecedence(String layer) throws Exception {
+        ObjectNode envelope = JSON.createObjectNode();
+        envelope.putObject("error").put("code", "top_error").put("message", "top message");
+        ObjectNode task = envelope.putObject("data");
+        task.put("task_id", "task-error-priority").put("status", "FAILURE");
+        if (!"top".equals(layer)) {
+            task.putObject("data").putObject("error")
+                    .put("code", "provider_error").put("message", "provider message");
+        }
+        if ("task".equals(layer)) {
+            task.putObject("error").put("code", "task_error").put("message", "task message");
+        }
+        server.createContext("/v1/video/generations/task-error-priority", exchange -> {
+            byte[] resp = envelope.toString().getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, resp.length);
+            try (OutputStream out = exchange.getResponseBody()) {
+                out.write(resp);
+            }
+        });
+
+        VideoTaskObservation observation =
+                new NewApiVideoClient(new UpstreamBaseUrl(baseUrl)).poll("t", "task-error-priority");
+
+        assertThat(observation.error().code()).isEqualTo(layer + "_error");
+        assertThat(observation.error().message()).isEqualTo(layer + " message");
     }
 
     @Test

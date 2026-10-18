@@ -292,6 +292,9 @@ public class NewApiVideoClient {
             }
 
             JsonNode rawError = data.has("error") && data.get("error").isObject() ? data.get("error") : null;
+            if (rawError == null && data.path("data").path("error").isObject()) {
+                rawError = data.get("data").get("error");
+            }
             if (rawError == null && parsed.has("error") && parsed.get("error").isObject()) {
                 rawError = parsed.get("error");
             }
