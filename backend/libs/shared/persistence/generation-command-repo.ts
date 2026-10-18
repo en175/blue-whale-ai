@@ -1,5 +1,16 @@
 import { NewApiError } from "@lib/core";
-import { promptPlanSnapshotSchema, type RecoveryErrorEnvelope } from "@lib/contracts";
+import {
+  DomainError,
+  ERROR_TASK_TYPE_PARAM_CONSTRAINT,
+  checkGenerationParamLimit,
+  errorCodeToNumeric,
+  hasModeConstraint,
+  normalizeVideoMode,
+  promptPlanSnapshotSchema,
+  toGenerationParamCheckInput,
+  type RecoveryErrorEnvelope,
+  type VideoMode,
+} from "@lib/contracts";
 import type { Prisma, PrismaClient } from "@prisma/client";
 
 import { transactionWithUniqueRetry } from "./conversation-repo.js";
@@ -16,6 +27,8 @@ import {
 import { assertPureJobInput } from "./job-input-purity.js";
 import { withBillingCompensation, type JobBilling, type JobBillingSource } from "./job-billing.js";
 import { createModelCapabilityRepo, serializePricingRule } from "./model-capability-repo.js";
+import { createAssetOwnershipOps } from "./asset-ownership-repo.js";
+import { checkReferenceLimits } from "../generation-runtime/reference-limits.js";
 import { freezePlacementAnchor } from "./generation-job-placement-anchor.js";
 import {
   readCreateIdempotency,
@@ -487,6 +500,58 @@ export function createGenerationCommandRepo(
             ? failedSlots.length
             : readInputCount(original.input);
 
+        const input = (original.input ?? {}) as Record<string, unknown>;
+        const sceneParameters = original.source === "scene_card" &&
+          typeof input.parameters === "object" && input.parameters !== null && !Array.isArray(input.parameters)
+          ? input.parameters : null;
+        const retryParameters: Record<string, unknown> = sceneParameters ? { ...sceneParameters, ...input } : input;
+        const capability = original.type === "video" || billing
+          ? (await createModelCapabilityRepo(prisma).listEnabledByType(original.type))
+              .find((model) => model.model_id === retryParameters.model_id)
+          : undefined;
+        if (original.type === "video") {
+          const params = toGenerationParamCheckInput(retryParameters);
+          const references = (input.references ?? input.reference_materials ?? []) as Array<{
+            role?: string; type: "image" | "video" | "audio"; duration?: number;
+          }>;
+          const localReferences = Array.isArray(input.reference_asset_ids)
+            ? await createAssetOwnershipOps(prisma).resolveInputAssets(input.reference_asset_ids.map(String), userId, projectId)
+            : [];
+          const ordinaryReferences = [
+            ...references.filter((reference) => reference.role === undefined || reference.role === "reference"),
+            ...localReferences.flatMap<(typeof references)[number]>((asset) => asset.type === "image" || asset.type === "video" || asset.type === "audio"
+              ? [{ type: asset.type, ...(asset.duration !== null ? { duration: asset.duration } : {}) }]
+              : []),
+          ];
+          let legacySceneMode: VideoMode | null = null;
+          if (sceneParameters &&
+            input.video_mode === undefined && input.video_task_type === undefined &&
+            input.omni_reference_task_type_allowed === undefined &&
+            ordinaryReferences.every((reference) => reference.type === "image")) {
+            if (input.reference_mode === "first_and_last_frame" && input.first_frame_asset_id && input.last_frame_asset_id && ordinaryReferences.length === 0) {
+              legacySceneMode = "first_last_frame";
+            } else if (input.reference_mode === "first_frame" && input.first_frame_asset_id && !input.last_frame_asset_id && ordinaryReferences.length === 0) {
+              legacySceneMode = "first_frame";
+            } else if (input.reference_mode === "text_to_video" && !input.first_frame_asset_id && !input.last_frame_asset_id) {
+              legacySceneMode = ordinaryReferences.length > 0 ? "image_reference" : "text2video";
+            }
+          }
+          const mode = normalizeVideoMode(input.video_mode ?? input.video_task_type) ?? legacySceneMode;
+          if (
+            !capability || !mode || !params || params.duration === undefined ||
+            (!legacySceneMode && (typeof input.omni_reference_task_type_allowed !== "boolean" ||
+              input.omni_reference_task_type_allowed !== capability.features.omni_reference_task_type)) ||
+            !hasModeConstraint(capability.features.task_types, mode) ||
+            checkGenerationParamLimit({ ...capability, task_types: capability.features.task_types }, { ...params, mode }) ||
+            checkReferenceLimits(capability.features, ordinaryReferences, "video", mode)
+          ) {
+            throw new DomainError(
+              errorCodeToNumeric(ERROR_TASK_TYPE_PARAM_CONSTRAINT),
+              "原视频任务的模式或参数已不满足当前模型要求，请重新编辑，确认视频模式和时长后重新报价提交",
+            );
+          }
+        }
+
         if (guardInput) {
           const reason = await guardInput(
             (original.input ?? {}) as Record<string, unknown>,
@@ -543,19 +608,16 @@ export function createGenerationCommandRepo(
                 ? "generate_audio"
                 : "generate_image",
         };
-        const retryModelId = String(retryInput.input.model_id ?? "");
+        const retryModelId = String(retryParameters.model_id ?? "");
         let ruleSnapshot: string | undefined;
         if (billing) {
-          const capability = (
-            await createModelCapabilityRepo(prisma).listEnabledByType(original.type)
-          ).find((m) => m.model_id === retryModelId);
           ruleSnapshot = serializePricingRule(capability);
         }
         chargeContext = {
           commandId: retryInput.actionIdentity,
           modelId: retryModelId,
           taskType: original.type,
-          input: retryInput.input,
+          input: retryParameters,
           ...(ruleSnapshot !== undefined ? { ruleSnapshot } : {}),
         };
         if (billing) {

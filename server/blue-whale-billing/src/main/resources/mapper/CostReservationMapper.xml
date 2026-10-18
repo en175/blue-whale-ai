@@ -20,7 +20,7 @@
   <update id="markRefunded">
     UPDATE billing_cost_reservations
     SET status = 'refunded',
-        release_note = #{releaseNote},
+        release_note = LEFT(#{releaseNote}, 255),
         version = version + 1
     WHERE generation_job_id = #{jobId}
   </update>

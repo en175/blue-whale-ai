@@ -1017,7 +1017,7 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
             <>
               <span className={styles.configLabel}>时长</span>
               <div className={styles.durationRange}>
-                <span>{selectedMode === 'edit' ? '跟随原视频' : '自动，由模型选择'}</span>
+                <span>{selectedMode === 'edit' ? '跟随原视频时长' : '自动，由模型选择'}</span>
               </div>
             </>
           ) : durationRange && (
@@ -1272,7 +1272,7 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
             <span className={styles.barDivider}>|</span>
             <span>{currentSizeLabel}</span>
             <span className={styles.barDivider}>|</span>
-            <span>{duration === -1 ? (selectedMode === 'edit' && durationLocked ? '跟随原视频' : '自动') : `${duration}s`}</span>
+            <span>{duration === -1 ? (selectedMode === 'edit' && durationLocked ? '跟随原视频时长' : '自动') : `${duration}s`}</span>
           </button>
         </div>
 

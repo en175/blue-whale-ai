@@ -6,28 +6,35 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Node } from '@xyflow/react';
 import CanvasPage from '../index';
+import { clickSelectOption } from './radixSelect';
+import type { QuoteJobPayload } from '@/custom/api/generationQuote';
+import type { GenerationRecoveryRecord } from '@/custom/api/canvasRecovery';
+import type { JobDetail } from '@/custom/api/jobs';
+import { ApiError } from '@/shared/api/http';
 
 
 vi.mock('@/custom/api/generationQuote', async (importActual) => ({
   ...(await importActual<typeof import('@/custom/api/generationQuote')>()),
-  generationQuoteOptions: vi.fn(() => ({
-    queryKey: ['generation-quote', 'mock'],
+  generationQuoteOptions: vi.fn((_projectId: string, payload: QuoteJobPayload) => ({
+    queryKey: ['generation-quote', payload],
     staleTime: Infinity,
-    queryFn: async () => ({ credits: null, quote_revision: null }),
+    queryFn: async () => ({ credits: payload.parameters.mode === 'edit' ? 320 : 160, quote_revision: 'current-quote' }),
   })),
 }));
+
+const recoveryMock = vi.hoisted(() => ({ records: [] as GenerationRecoveryRecord[] }));
 
 vi.mock('@/custom/api/canvasRecovery', async (importActual) => ({
   ...(await importActual<typeof import('@/custom/api/canvasRecovery')>()),
   generationRecoveryPageOptions: vi.fn(() => ({
     queryKey: ['generation-recovery', 'mock'],
     staleTime: Infinity,
-    queryFn: async () => ({ records: [], next_cursor: null, protocol_version: 1, canvas_version: null }),
+    queryFn: async () => ({ records: recoveryMock.records, next_cursor: null, protocol_version: 1, canvas_version: null }),
   })),
   fetchGenerationRecoveryPage: vi.fn(async () => ({
     protocol_version: 1,
     canvas_version: null,
-    records: [],
+    records: recoveryMock.records,
     next_cursor: null,
   })),
 }));
@@ -63,9 +70,9 @@ const apiMocks = vi.hoisted(() => ({
   fetchMe: vi.fn(async () => null),
   fetchCredits: vi.fn(async () => ({})),
   toSessionUser: vi.fn(() => null),
-  saveCanvasDoc: vi.fn(async () => ({ id: 11, project_id: 1, version: 4, viewport: '{}', nodes: '[]' })),
+  saveCanvasDoc: vi.fn(async (_projectId: string, _payload: { nodes: Node[]; edges: unknown[] }) => ({ id: 11, project_id: 1, version: 4, viewport: '{}', nodes: '[]' })),
   createGenerationJob: vi.fn(async (_projectId: string, _body: Record<string, unknown>, _key: string) => ({ generation_job_id: 'j8', cursor: 1 })),
-  fetchJobStatus: vi.fn(async () => ({
+  fetchJobStatus: vi.fn(async (): Promise<JobDetail> => ({
     job_id: 'j9',
     status: 'succeeded',
     progress: 100,
@@ -88,7 +95,16 @@ const apiMocks = vi.hoisted(() => ({
       default_format: null,
       default_aspect_ratio: 'adaptive',
       default_duration: 5,
-      features: { video_reference: true },
+      features: {
+        video_reference: true, video_reference_max: 3,
+        reference_image: true, image_reference_max: 10,
+        first_frame: true, last_frame: true, first_last_frame: true,
+        task_types: {
+          text2video: {}, omni: {}, image_reference: {}, first_frame: {}, first_last_frame: {},
+          edit: { allowed_ratios: ['adaptive'], allowed_durations: [-1] },
+          extend: { allowed_ratios: ['adaptive'], allow_auto_duration: true },
+        },
+      },
       version: 1,
       digest: '',
     },
@@ -99,6 +115,14 @@ vi.mock('@/custom/api/projects', () => ({
   touchProjectLastOpened: vi.fn(async () => undefined),
   pinProject: vi.fn(async () => undefined),
   fetchProjects: apiMocks.fetchProjects,
+  fetchProjectSnapshot: vi.fn(async () => {
+    const doc = canvasDocMock.current.doc as { version: number; viewport: unknown; nodes: Node[]; edges: unknown[] };
+    return {
+      canvas: { version: doc.version, viewport: JSON.stringify(doc.viewport), nodes: JSON.stringify(doc.nodes), edges: JSON.stringify(doc.edges) },
+      assets: canvasDocMock.current.assets,
+      generation_jobs: [{ job_id: 'j1', status: 'failed', error: { code: 1011, reason: 'provider_failed', message: '生成服务响应异常' } }],
+    };
+  }),
   createProject: vi.fn(),
   renameProject: vi.fn(),
   deleteProject: vi.fn(),
@@ -161,9 +185,6 @@ const canvasDocMock = vi.hoisted(() => ({
   },
 }));
 
-vi.mock('../hooks/document/useCanvasDoc', () => ({
-  useCanvasDoc: () => canvasDocMock.current,
-}));
 
 function seedFixDoc(errorCode: number | string) {
   canvasDocMock.current = {
@@ -183,7 +204,7 @@ function seedFixDoc(errorCode: number | string) {
             genStatus: 'failed',
             draft: true,
             jobId: 'j1',
-            errorText: '提示词包含修改、替换或延长原视频的意图，输出比例将自动跟随参考视频，请将比例切换为「自动」后重试',
+            errorText: '视频模式、比例或时长不符合要求，请重新编辑并确认视频模式、比例和时长后再提交',
             errorCode,
             prompt: '把背景替换成海边沙滩',
             draftModelId: 'm-video',
@@ -202,9 +223,13 @@ function seedFixDoc(errorCode: number | string) {
             src: 'http://img/ref1.mp4',
             mediaType: 'video',
             fileName: '竖屏参考视频.mp4',
-            assetId: 'a77',
-            duration: 9,
+            assetId: '8046',
+            duration: 11,
           },
+        },
+        {
+          id: 'ref3', type: 'mediaNode', position: { x: -360, y: 640 },
+          data: { src: 'http://img/ref3.png', mediaType: 'image', fileName: '人物图.png', assetId: '8044' },
         },
         {
           id: 'ref2',
@@ -214,18 +239,20 @@ function seedFixDoc(errorCode: number | string) {
             src: 'http://img/ref2.png',
             mediaType: 'image',
             fileName: '商品图.png',
-            assetId: 'a78',
+            assetId: '8045',
           },
         },
       ],
       edges: [
         { id: 'e1', source: 'ref1', target: 'v1', data: { refRole: 'reference' } },
         { id: 'e2', source: 'ref2', target: 'v1', data: { refRole: 'reference' } },
+        { id: 'e3', source: 'ref3', target: 'v1', data: { refRole: 'reference' } },
       ],
     },
     assets: {
-      a77: { asset_id: 77, type: 'video', access_url: 'http://img/ref1.mp4', width: 720, height: 1280 },
-      a78: { asset_id: 78, type: 'image', access_url: 'http://img/ref2.png', width: 800, height: 800 },
+      8046: { asset_id: 8046, type: 'video', access_url: 'http://img/ref1.mp4', width: 720, height: 1280 },
+      8044: { asset_id: 8044, type: 'image', access_url: 'http://img/ref3.png', width: 800, height: 800 },
+      8045: { asset_id: 8045, type: 'image', access_url: 'http://img/ref2.png', width: 800, height: 800 },
     },
     refetch: () => Promise.resolve([]),
     acceptDoc: vi.fn(),
@@ -266,6 +293,11 @@ beforeEach(() => {
   localStorage.clear();
   sessionStorage.clear();
   seedFixDoc(1060);
+  recoveryMock.records = [];
+  apiMocks.fetchJobStatus.mockReset().mockResolvedValue({
+    job_id: 'j9', status: 'succeeded', progress: 100,
+    asset: { id: 'a9', url: 'http://img/out.mp4', type: 'video', width: 720, height: 1280 },
+  });
 });
 
 afterEach(async () => {
@@ -274,42 +306,35 @@ afterEach(async () => {
   vi.clearAllMocks();
 });
 
-describe('IKJ79D 一键修复：按码识别 + 仅改比例重交', () => {
-  it('数值码 1060 → 点按钮走 create 新任务：比例=adaptive，提示词/分辨率/时长/带音频/参考原样', async () => {
+describe('IKNB99 参数错误重新编辑与主动提交', () => {
+  it('IKNB99 参数错误打开原卡编辑面板，不改比例或自动创建任务', async () => {
     await renderPage();
+    const original = JSON.parse(JSON.stringify(nodeOf('v1')));
+    const originalEdges = JSON.parse(JSON.stringify(flowProps.current.edges));
 
     await clickFixFollow('v1');
 
-    expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1);
+    expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();
     expect(apiMocks.retryGenerationJob).not.toHaveBeenCalled();
-    const payload = apiMocks.createGenerationJob.mock.calls[0][1] as Record<string, unknown>;
-    expect(payload.type).toBe('video');
-    expect(payload.target_node_id).toBe('v1');
-    expect(payload.parameters).toMatchObject({
-      prompt: '把背景替换成海边沙滩',
-      model_id: 'm-video',
-      aspect_ratio: 'adaptive',
-      resolution: '1080p',
-      duration: 5,
-      generate_audio: false,
+    await vi.waitFor(() => expect(container.textContent).toContain('全能参考'));
+    expect(nodeOf('v1').position).toEqual(original.position);
+    expect(nodeOf('v1').data).toMatchObject({
+      genStatus: 'failed', jobId: 'j1', prompt: '把背景替换成海边沙滩',
+      draftRatio: '9:16', draftDuration: 5, draftMode: 'omni',
     });
-    expect(payload.references).toEqual([
-      { role: 'reference', type: 'video', asset_id: 'a77', duration: 9 },
-      { role: 'reference', type: 'image', asset_id: 'a78' },
-    ]);
-    await vi.waitFor(() => expect(nodeOf('v1').data.src).toBe('http://img/out.mp4'));
-    expect(flowProps.current.mediaNodes).toHaveLength(3);
+    expect(flowProps.current.edges).toEqual(originalEdges);
+    expect(flowProps.current.mediaNodes).toHaveLength(4);
   });
 
-  it('worker 归类信封（字符串 task_type_param_constraint）同码同动作', async () => {
+  it('worker 字符串参数错误码同样打开编辑面板', async () => {
     seedFixDoc('task_type_param_constraint');
     await renderPage();
 
     await clickFixFollow('v1');
 
-    expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1);
-    const payload = apiMocks.createGenerationJob.mock.calls[0][1] as Record<string, unknown>;
-    expect((payload.parameters as Record<string, unknown>).aspect_ratio).toBe('adaptive');
+    expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(container.textContent).toContain('全能参考'));
+    expect(nodeOf('v1').data.draftRatio).toBe('9:16');
   });
 
   it('其他错误码（如 quota_exhausted=1001）→ 不识别不重交', async () => {
@@ -322,12 +347,87 @@ describe('IKJ79D 一键修复：按码识别 + 仅改比例重交', () => {
     expect(apiMocks.retryGenerationJob).not.toHaveBeenCalled();
   });
 
-  it('修复后卡上比例同步改 Auto：draftRatio 落 adaptive，重开面板即显示修复后比例', async () => {
+  it.each<[string, number | string, string, string?, boolean?]>([
+    ['provider_failed', 1060, '请重新编辑视频模式、比例和时长'],
+    ['task_type_param_constraint', 1060, '请重新编辑视频模式、比例和时长'],
+    ['content_rejected', 'content_rejected', '新的服务端错误'],
+    ['permission_denied', 'permission_denied', '新的服务端错误'],
+    ['model_unavailable', 'model_unavailable', '新的服务端错误'],
+    ['provider_failed', 'provider_failed', '新的服务端错误', 'new-job'],
+    ['provider_failed', 1060, '请重新编辑视频模式、比例和时长', 'j1', false],
+  ])('旧任务重试被拒后保存重载，服务端 %s 按错误含义恢复', async (serverCode, expectedCode, expectedText, serverJobId = 'j1', withBindingMarker = true) => {
+    seedFixDoc('provider_failed');
+    const node = (canvasDocMock.current.doc as { nodes: Node[] }).nodes[0];
+    node.data.draftRatio = 'adaptive';
+    if (withBindingMarker) {
+      node.data.generationRecovery = { protocolVersion: 1, submissionId: 'old-submission', outputKey: '$target' };
+    }
+    apiMocks.retryGenerationJob.mockRejectedValueOnce(new ApiError(400, '请重新编辑视频模式、比例和时长', 1060, null));
     await renderPage();
-
+    await act(async () => {
+      (nodeOf('v1').data.onRetryJob as (id: string) => void)('v1');
+    });
+    await vi.waitFor(() => expect(nodeOf('v1').data.errorCode).toBe(1060));
+    expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(apiMocks.saveCanvasDoc).toHaveBeenCalled(), { timeout: 3000 });
+    const saved = apiMocks.saveCanvasDoc.mock.calls.at(-1)![1];
+    const savedNodes = JSON.parse(JSON.stringify(saved.nodes)) as Node[];
+    expect(savedNodes.find((item) => item.id === 'v1')!.data.errorCode).toBe(1060);
+    await act(async () => root.unmount());
+    container.remove();
+    canvasDocMock.current.doc = { ...(canvasDocMock.current.doc as object), nodes: savedNodes, edges: saved.edges, version: 4 };
+    recoveryMock.records = [{
+      submission_id: 'old-submission', target_node_id: 'v1', job_id: serverJobId, task_type: 'video',
+      binding_revision: 1, is_current: true,
+      job: { job_id: serverJobId, type: 'video', status: 'failed', progress: 0, output_asset_ids: [],
+        stored_error: { code: serverCode, message: '新的服务端错误' }, created_at: '2026-09-29T00:00:00Z' },
+      recovery_seed: null, previous_target_snapshot: null,
+      items: [{ recovery_item_id: 'old-item', output_key: '$target', node_id: 'v1', state: 'present',
+        revision: 1, node_binding_revision: 1, asset_id: null, slot_id: null }],
+    }];
+    apiMocks.fetchJobStatus.mockResolvedValueOnce({
+      job_id: serverJobId, status: 'failed', progress: 0, asset: null,
+      error: { code: serverCode, msg: '新的服务端错误' },
+    });
+    await renderPage();
+    await vi.waitFor(() => expect(nodeOf('v1').data.errorCode).toBe(expectedCode));
     await clickFixFollow('v1');
+    if (expectedCode === 1060) {
+      await vi.waitFor(() => expect(container.textContent).toContain('全能参考'));
+    } else {
+      expect(container.querySelector('[data-testid="video-send"]')).toBeNull();
+    }
+    expect(nodeOf('v1').data.errorText).toBe(expectedText);
+    expect(nodeOf('v1').data.jobId).toBe(serverJobId);
+    expect(flowProps.current.edges).toEqual(saved.edges);
+    expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();
+  });
 
-    await vi.waitFor(() => expect(nodeOf('v1').data.draftRatio).toBe('adaptive'));
-    await vi.waitFor(() => expect(nodeOf('v1').data.src).toBe('http://img/out.mp4'));
+  it('用户确认视频编辑和跟随原视频时长，看到新报价后主动发送', async () => {
+    await renderPage();
+    await clickFixFollow('v1');
+    await vi.waitFor(() => expect(container.textContent).toContain('本次预计消耗 160 积分'));
+    expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();
+    await act(async () => {
+      [...container.querySelectorAll('button')].find((button) => button.textContent === '全能参考')!.click();
+    });
+    await clickSelectOption('视频编辑');
+    await vi.waitFor(() => expect(container.textContent).toContain('跟随原视频时长'));
+    await vi.waitFor(() => expect(container.textContent).toContain('本次预计消耗 320 积分'));
+    expect(nodeOf('v1').data).toMatchObject({ draftMode: 'edit', draftDuration: -1, draftRatio: 'adaptive' });
+    expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="video-send"]')!.click(); });
+    await vi.waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
+    const payload = apiMocks.createGenerationJob.mock.calls[0][1];
+    expect(payload).toMatchObject({
+      type: 'video', target_node_id: 'v1',
+      parameters: { mode: 'edit', duration: -1, aspect_ratio: 'adaptive', prompt: '把背景替换成海边沙滩' },
+      references: [
+        { type: 'video', asset_id: '8046', duration: 11, role: 'reference' },
+        { type: 'image', asset_id: '8045', role: 'reference' },
+        { type: 'image', asset_id: '8044', role: 'reference' },
+      ],
+    });
+    expect(apiMocks.retryGenerationJob).not.toHaveBeenCalled();
   });
 });

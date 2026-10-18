@@ -21,7 +21,20 @@ import { AssetService } from "@lib/shared/assets/assets.service.js";
 import { AssetStorageService } from "@lib/shared/assets/storage.service.js";
 import { IdentityService } from "@lib/shared/identity/identity.service.js";
 import { AllExceptionsFilter } from "@lib/infra/filters/all-exceptions.filter.js";
+import { createSceneCardGenerationRepo } from "@lib/shared/persistence/scene-card-generation-repo.js";
+import { capabilityDigestFromModelCapability } from "@lib/shared/persistence/capability-digest.js";
+import type { ProviderPromptAsset } from "@lib/contracts";
 
+const { charge, queueSend } = vi.hoisted(() => ({
+  charge: vi.fn(async () => ({ chargedCredits: 1, catalogVersion: 1, duplicated: false })),
+  queueSend: vi.fn(async () => ({})),
+}));
+
+vi.mock("@lib/infra/mq/rocketmq-producer.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@lib/infra/mq/rocketmq-producer.js")>(),
+  loadRocketMqConfig: () => ({}),
+  getStartedRocketMqProducer: async () => ({ send: queueSend }),
+}));
 
 
 vi.mock("@lib/shared/billing/billing-client.js", async (importOriginal) => {
@@ -29,7 +42,7 @@ vi.mock("@lib/shared/billing/billing-client.js", async (importOriginal) => {
   return {
     ...actual,
     sharedBillingClient: () => ({
-      charge: async () => ({ chargedCredits: 1, catalogVersion: 1, duplicated: false }),
+      charge,
       quote: async () => ({ credits: BigInt(1), catalogVersion: 1 }),
       queryBalance: async () => ({ availableCredits: 0, expiring: [] }),
       listTransactions: async () => ({ items: [], total: 0 }),
@@ -47,6 +60,12 @@ describe.skipIf(!process.env.IKDMQV_DATABASE_URL)("Generation failure retry publ
   const IMAGE_MODEL = "ikdmqv-image-model";
   const VIDEO_MODEL = "ikdmqv-video-model";
   const AUDIO_MODEL = "ikdmqv-audio-model";
+  const VIDEO_FEATURES = {
+    reference_image: true, image_reference_max: 10, first_frame: true, last_frame: true, first_last_frame: true,
+    task_types: { text2video: {}, image_reference: {}, first_frame: {}, first_last_frame: {} },
+  };
+  const VIDEO_25_MODEL = "iknb97-configured-video";
+  const VIDEO_20_MODEL = "iknb97-ordinary-video";
   let app: Awaited<ReturnType<typeof NestFactory.create>>;
   let base = "";
   const previousDatabase = process.env.DATABASE_URL;
@@ -85,12 +104,35 @@ describe.skipIf(!process.env.IKDMQV_DATABASE_URL)("Generation failure retry publ
         default_aspect_ratio: "16:9",
         default_duration: 5,
         supported_durations: { min: 4, max: 12, step: 1 },
-        features: { reference_image: true, image_reference_max: 10, first_frame: true, last_frame: true, first_last_frame: true },
+        features: VIDEO_FEATURES,
 
         channel: "seedream-video",
       },
-      update: { features: { reference_image: true, image_reference_max: 10, first_frame: true, last_frame: true, first_last_frame: true } },
+      update: { features: VIDEO_FEATURES },
     });
+    for (const modelId of [VIDEO_25_MODEL, VIDEO_20_MODEL, "doubao-seedance-2-5-260628", "iknb97-no-video-reference"]) {
+      const features = {
+        ...VIDEO_FEATURES, video_reference: modelId !== "iknb97-no-video-reference", video_reference_max: 3, max_reference_duration_sec: 30,
+        omni_reference_task_type: modelId !== VIDEO_20_MODEL,
+        task_types: {
+          ...VIDEO_FEATURES.task_types, omni: {},
+          edit: modelId === VIDEO_20_MODEL
+            ? { allowed_ratios: ["adaptive", "16:9"] }
+            : { allowed_ratios: ["adaptive"], allowed_durations: [-1] },
+        },
+      };
+      const data = {
+        provider_id: "ikdmqv-test", model_id: modelId, capability_type: "video", model_label: modelId,
+        supported_sizes: [{ id: "480p", label: "480p", api_value: "480p" }],
+        supported_aspect_ratios: ["adaptive", "16:9"], supported_formats: ["mp4"],
+        default_size: "480p", default_aspect_ratio: "adaptive", default_duration: 5,
+        supported_durations: { min: 4, max: 30, step: 1 }, features, channel: "seedream-video",
+      };
+      await prisma.client.generation_model_capability.upsert({
+        where: { provider_id_model_id: { provider_id: data.provider_id, model_id: modelId } },
+        create: data, update: data,
+      });
+    }
     await prisma.client.generation_model_capability.upsert({
       where: { provider_id_model_id: { provider_id: "ikdmqv-test", model_id: AUDIO_MODEL } },
       create: {
@@ -225,6 +267,214 @@ describe.skipIf(!process.env.IKDMQV_DATABASE_URL)("Generation failure retry publ
     });
     await prisma.client.generation_jobs.update({ where: { id: BigInt(jobId) }, data: { status: "failed" } });
   }
+
+  it.each([
+    { label: "纯文", mode: "text_to_video", refs: [], code: 200 },
+    { label: "图片参考", mode: "text_to_video", refs: [{ type: "image", role: "reference" }], code: 200 },
+    { label: "首尾帧", mode: "first_and_last_frame", refs: [{ type: "image", role: "first_frame" }, { type: "image", role: "last_frame" }], code: 200 },
+    { label: "缺少明确模式的视频参考", mode: "text_to_video", refs: [{ type: "video", role: "reference" }], code: 1060 },
+  ] as const)("场景卡真实创建的嵌套$label快照公开重试返回$code并保留原输入", async ({ mode, refs, code }) => {
+    const projectId = (await projects.create("987654", "IKNB97 scene card retry")).id;
+    const scene = await prisma.client.scene_cards.create({ data: {
+      project_id: BigInt(projectId), title: "场景", content_markdown: "画一只蓝鲸",
+    } });
+    const capability = await prisma.client.generation_model_capability.findUniqueOrThrow({
+      where: { provider_id_model_id: { provider_id: "ikdmqv-test", model_id: VIDEO_25_MODEL } },
+    });
+    const parameters = {
+      capability_type: "video" as const, model_id: VIDEO_25_MODEL, provider_id: "ikdmqv-test",
+      size: "480p", aspect_ratio: "16:9", format: "mp4", duration: 5, count: 1,
+    };
+    const snapshot = {
+      schema_version: 1 as const, capability_type: "video" as const,
+      model_id: VIDEO_25_MODEL, provider_id: "ikdmqv-test", row_version: capability.version,
+      digest: capabilityDigestFromModelCapability(capability),
+    };
+    const referenceAssets: ProviderPromptAsset[] = [];
+    if (refs.length > 0) {
+      const previewJob = await prisma.client.generation_jobs.create({ data: {
+        project_id: BigInt(projectId), user_id: BigInt(987654), type: "image", source: "storyboard_preview", status: "succeeded", input: {},
+      } });
+      await prisma.client.storyboard_previews.create({ data: {
+        scene_card_id: scene.id, project_id: BigInt(projectId), first_generation_job_id: previewJob.id,
+        command_id: `preview-${scene.id}`, summary_status: "success", capability_snapshot_version: snapshot,
+      } });
+      for (const [index, reference] of refs.entries()) {
+        const assetId = await createAsset(projectId, reference.type, `https://example.com/scene-${index}`);
+        const slot = await prisma.client.generation_output_slots.create({ data: {
+          project_id: BigInt(projectId), generation_job_id: previewJob.id, slot_index: index, status: "succeeded", asset_id: BigInt(assetId),
+        } });
+        referenceAssets.push({ type: "storyboard_frame", slot_id: slot.id.toString(), role: reference.role });
+      }
+    }
+    await prisma.client.scene_card_generation_presets.create({ data: {
+      scene_card_id: scene.id, project_id: BigInt(projectId), parameters,
+      reference_mode: mode, reference_assets: referenceAssets, capability_snapshot_version: snapshot,
+    } });
+    const created = await createSceneCardGenerationRepo(prisma.client).regenerateSceneCard({
+      userId: "987654", projectId, sceneCardId: scene.id.toString(), idempotencyKey: `scene-${scene.id}`,
+      requestHash: `scene-${scene.id}`, base_scene_card_version: 1, base_preset_version: 1,
+      parameters, reference_mode: mode, reference_assets: referenceAssets, capability_snapshot_version: snapshot,
+    });
+    expect(created.kind).toBe("applied");
+    if (created.kind !== "applied") throw new Error("场景卡生成未接纳");
+    const jobId = created.generation_job_id;
+    const original = (await readJob(jobId))!.input;
+    expect(original.model_id).toBeUndefined();
+    expect(original.parameters).toEqual(parameters);
+    await failJob(jobId);
+    charge.mockClear();
+    queueSend.mockClear();
+    const retried = await retryJob(projectId, jobId);
+    expect(retried.code).toBe(code);
+    if (code === 200) {
+      expect((await readJob(retried.data.generation_job_id))!.input).toEqual(original);
+      expect(charge).toHaveBeenCalledWith(expect.objectContaining({
+        modelId: VIDEO_25_MODEL, taskType: "video",
+        specs: expect.objectContaining({ duration: "5", size: "480p", aspect_ratio: "16:9" }),
+      }));
+      expect(queueSend).toHaveBeenCalledTimes(1);
+    } else {
+      expect(retried.msg).toContain("重新编辑");
+      expect(charge).not.toHaveBeenCalled();
+      expect(queueSend).not.toHaveBeenCalled();
+    }
+    expect((await readJob(jobId))!.input).toEqual(original);
+  });
+
+  it("旧视频缺少明确模式时，重复和并发重试要求重新编辑且保留画布，不新增任务、扣款或派发", async () => {
+    const projectId = (await projects.create("987654", "IKNB97 legacy retry")).id;
+    const imageA = await createAsset(projectId, "image", "https://example.com/8045.png");
+    const imageB = await createAsset(projectId, "image", "https://example.com/8044.png");
+    const video = await createAsset(projectId, "video", "https://example.com/8046.mp4");
+    const nodes = [imageA, imageB, video].map((assetId, index) => ({
+      id: `ref-${index}`, type: "mediaNode", position: { x: 100, y: index * 100 },
+      data: { assetId, mediaType: index === 2 ? "video" : "image", src: `https://example.com/${assetId}` },
+    }));
+    const draft = { id: "media-draft-1790668577137-4", type: "mediaNode", position: { x: 420, y: 160 },
+      data: { mediaType: "video", prompt: "保留人物，更换背景并加入手提袋", draft: true, genStatus: "failed" } };
+    const edges = nodes.map((node) => ({ id: `e-${node.id}`, source: node.id, target: draft.id }));
+    expect((await saveCanvas(projectId, [...nodes, draft], edges, "missing")).status).toBe(200);
+    const input = {
+      target_node_id: draft.id, prompt: draft.data.prompt, model_id: "doubao-seedance-2-5-260628",
+      duration: 5, aspect_ratio: "adaptive", resolution: "480p", expected_output_count: 1,
+      references: [
+        { asset_id: imageA, role: "reference", type: "image" },
+        { asset_id: imageB, role: "reference", type: "image" },
+        { asset_id: video, role: "reference", type: "video", duration: 11 },
+      ],
+    };
+    const original = await prisma.client.generation_jobs.create({ data: {
+      project_id: BigInt(projectId), user_id: BigInt(987654), type: "video", source: "bottom_dock",
+      status: "failed", input,
+    } });
+    const before = await getCanvas(projectId);
+    charge.mockClear();
+    queueSend.mockClear();
+    const rejected = await Promise.all([
+      retryJob(projectId, original.id.toString()),
+      retryJob(projectId, original.id.toString()),
+    ]);
+    rejected.push(await retryJob(projectId, original.id.toString()));
+    for (const response of rejected) {
+      expect(response).toMatchObject({ code: 1060, data: null });
+      expect(response.msg).toContain("重新编辑");
+    }
+    const jobs = await (await fetch(`${base}/api/jobs?projectId=${projectId}`)).json();
+    expect(jobs.data.total).toBe(1);
+    expect(charge).not.toHaveBeenCalled();
+    expect(queueSend).not.toHaveBeenCalled();
+    const after = await getCanvas(projectId);
+    expect(after.nodes).toBe(before.nodes);
+    expect(after.edges).toBe(before.edges);
+    expect((await readJob(original.id.toString()))!.input).toEqual(input);
+  });
+
+  it.each([
+    { label: "当前能力不再支持视频参考", patch: { model_id: "iknb97-no-video-reference" } },
+    { label: "没有冻结上游任务类型能力", patch: { omni_reference_task_type_allowed: undefined } },
+    { label: "冻结能力与当前能力不一致", patch: { omni_reference_task_type_allowed: false } },
+    { label: "编辑模式仍保留固定时长", patch: { video_mode: "edit", duration: 5 } },
+    { label: "编辑模式比例不合法", patch: { video_mode: "edit", duration: -1, aspect_ratio: "16:9" } },
+    { label: "当前能力没有开放模式", patch: { video_mode: "extend" } },
+    { label: "时长超出当前范围", patch: { duration: 31 } },
+  ])("$label 时在任务与外部调用之前返回重新编辑提示", async ({ patch }) => {
+    const projectId = (await projects.create("987654", "IKNB97 unsafe video")).id;
+    const video = await createAsset(projectId, "video", "https://example.com/unsafe.mp4");
+    const input = {
+      model_id: VIDEO_25_MODEL, prompt: "保留人物", video_mode: "omni", duration: 5,
+      aspect_ratio: "adaptive", resolution: "480p", omni_reference_task_type_allowed: true,
+      references: [{ asset_id: video, role: "reference", type: "video", duration: 11 }], ...patch,
+    };
+    const original = await prisma.client.generation_jobs.create({ data: {
+      project_id: BigInt(projectId), user_id: BigInt(987654), type: "video", source: "bottom_dock", status: "failed", input,
+    } });
+    charge.mockClear();
+    queueSend.mockClear();
+    const rejected = await retryJob(projectId, original.id.toString());
+    expect(rejected).toMatchObject({ code: 1060, data: null });
+    expect(rejected.msg).toContain("重新编辑");
+    expect((await (await fetch(`${base}/api/jobs?projectId=${projectId}`)).json()).data.total).toBe(1);
+    expect(charge).not.toHaveBeenCalled();
+    expect(queueSend).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { mode: "omni", model: "iknb97-configured-video", duration: 5, ratio: "adaptive", taskTypeAllowed: true },
+    { mode: "edit", model: "iknb97-configured-video", duration: -1, ratio: "adaptive", taskTypeAllowed: true },
+    { mode: "edit", model: "iknb97-ordinary-video", duration: 5, ratio: "16:9", taskTypeAllowed: false },
+    { mode: "first_last_frame", model: "iknb97-configured-video", duration: 5, ratio: "16:9", taskTypeAllowed: true },
+  ])("明确合法的 $mode / $model 继续沿用冻结快照及 duration=$duration", async ({ mode, model, duration, ratio, taskTypeAllowed }) => {
+    const projectId = (await projects.create("987654", `IKNB97 ${mode} compatibility`)).id;
+    const video = await createAsset(projectId, "video", "https://example.com/reference.mp4");
+    const first = await createAsset(projectId, "image", "https://example.com/first.png");
+    const last = await createAsset(projectId, "image", "https://example.com/last.png");
+    const input = {
+      model_id: model, prompt: "更换背景并加入手提袋", video_mode: mode,
+      duration, aspect_ratio: ratio, resolution: "480p", expected_output_count: 1,
+      omni_reference_task_type_allowed: taskTypeAllowed,
+      references: mode === "first_last_frame"
+        ? [{ asset_id: first, role: "first_frame", type: "image" }, { asset_id: last, role: "last_frame", type: "image" }]
+        : [{ asset_id: video, role: "reference", type: "video", duration: 11 }],
+    };
+    const original = await prisma.client.generation_jobs.create({ data: {
+      project_id: BigInt(projectId), user_id: BigInt(987654), type: "video", source: "bottom_dock", status: "failed", input,
+    } });
+    const retried = await retryJob(projectId, original.id.toString());
+    expect(retried.code).toBe(200);
+    expect((await readJob(retried.data.generation_job_id))!.input).toEqual(input);
+    expect((await readJob(original.id.toString()))!.input).toEqual(input);
+  });
+
+  it.each([
+    { model: "iknb97-configured-video", mode: "edit", duration: -1, ratio: "adaptive", allowed: true },
+    { model: "iknb97-ordinary-video", mode: "edit", duration: 5, ratio: "16:9", allowed: false },
+    { model: "iknb97-configured-video", mode: "omni", duration: 5, ratio: "adaptive", allowed: true },
+  ])("重新报价提交的 $model / $mode 冻结明确模式和时长，再次失败仍可合法重试", async ({ model, mode, duration, ratio, allowed }) => {
+    const projectId = (await projects.create("987654", "IKNB97 confirmed video")).id;
+    const video = await createAsset(projectId, "video", "https://example.com/confirmed.mp4");
+    await prisma.client.assets.update({ where: { id: BigInt(video) }, data: { duration_ms: 11000 } });
+    const body = {
+      type: "video", expected_output_count: 1,
+      parameters: { model_id: model, prompt: "保留人物，更换背景并加入手提袋", mode, duration, aspect_ratio: ratio, resolution: "480p" },
+      references: [{ asset_id: video, role: "reference", type: "video" }],
+    };
+    const quoted = await (await fetch(`${base}/api/projects/${projectId}/generation-jobs/quote`, {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
+    })).json();
+    expect(quoted.code).toBe(200);
+    expect(quoted.data.credits).toBe(1);
+    const created = await createJob(projectId, { ...body, expected_credits: quoted.data.credits, quote_revision: quoted.data.quote_revision });
+    expect(created.code).toBe(200);
+    const jobId = created.data.generation_job_id;
+    const frozen = (await readJob(jobId))!.input;
+    expect(frozen).toMatchObject({ video_mode: mode, duration, omni_reference_task_type_allowed: allowed });
+    await failJob(jobId);
+    const retried = await retryJob(projectId, jobId);
+    expect(retried.code).toBe(200);
+    expect((await readJob(retried.data.generation_job_id))!.input).toEqual(frozen);
+    expect((await readJob(jobId))!.input).toEqual(frozen);
+  });
 
   it("直接重试沿用失败任务冻结快照：来源正文变化不替换原输入，历史任务不被改写；修改后新生成按现行规则冻结新输入", async () => {
     const projectId = (await projects.create("987654", "IKDMQV retry snapshot")).id;
