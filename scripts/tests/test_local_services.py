@@ -113,6 +113,34 @@ class LocalServicesTest(unittest.TestCase):
         self.assertIn('[MQ topic 路由] FAIL 超时', result.stdout)
         self.assertLess(time.monotonic() - started, 6)
 
+    def check_slow_config_read(self, read_number, stage):
+        self.mq_backend()
+        original_lsof = self.bin / 'lsof-original'
+        shutil.copy2(self.bin / 'lsof', original_lsof)
+        counter = self.directory / 'config-reads'
+        shim = self.directory / 'slow-lsof.py'
+        shim.write_text('import pathlib, subprocess, sys, time\n'
+                        f'result = subprocess.run([{str(original_lsof)!r}, *sys.argv[1:]], capture_output=True, text=True)\n'
+                        "if 'cwd' in sys.argv:\n"
+                        f'    counter = pathlib.Path({str(counter)!r})\n'
+                        '    count = int(counter.read_text()) + 1 if counter.exists() else 1\n'
+                        '    counter.write_text(str(count))\n'
+                        f'    if count == {read_number}: time.sleep(2.5)\n'
+                        "print(result.stdout, end='')\n")
+        self.command('lsof', f'exec "{sys.executable}" "{shim}" "$@"')
+        started = time.monotonic()
+        result = self.run_check('--media', '--timeout-ms', '2000')
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn(f'[MQ {stage}] FAIL 超时', result.stdout)
+        self.assertNotIn('MQ 连接可用', result.stdout)
+        self.assertLess(time.monotonic() - started, 6)
+
+    def test_initial_configuration_read_obeys_total_timeout(self):
+        self.check_slow_config_read(1, '配置')
+
+    def test_final_configuration_read_cannot_pass_after_deadline(self):
+        self.check_slow_config_read(2, '配置复核')
+
     def test_process_configuration_change_invalidates_result(self):
         port = self.mq_backend()
         real_ps = shutil.which('ps')
@@ -226,6 +254,28 @@ class LocalServicesTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('超时', result.stdout)
         self.assertFalse(list(self.directory.glob('bw-mq-*/*.lock')))
+
+    def test_inherited_ssh_forwards_are_rejected_before_connecting(self):
+        real_ssh = shutil.which('ssh')
+        module = ROOT / '.agents/skills/start-local-services/scripts/mq-tunnel.mjs'
+        self.env['TMPDIR'] = str(self.directory)
+        for directive in ['LocalForward 19001 127.0.0.1:8081',
+                          'RemoteForward 19002 127.0.0.1:8081', 'DynamicForward 19003']:
+            with self.subTest(directive=directive):
+                config = self.directory / 'ssh-config'
+                config.write_text(f'Host *\n  HostName 127.0.0.1\n  {directive}\n')
+                attempts = self.directory / directive.split()[0]
+                self.command('ssh', f'if [ "$1" = "-G" ]; then exec "{real_ssh}" -F "{config}" "$@"; '
+                                    f'else echo "$*" >> "{attempts}"; exit 1; fi')
+                result = subprocess.run(['node', '--input-type=module', '-e',
+                                         "import {pathToFileURL} from 'node:url'; "
+                                         "const {ensureTunnel} = await import(pathToFileURL(process.argv[1])); "
+                                         "await ensureTunnel('isolated-test', "
+                                         "{local:'127.0.0.1:18081',remote:'127.0.0.1:8081'},console.log);",
+                                         str(module)], env=self.env, capture_output=True, text=True, timeout=10)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn('额外转发', result.stdout + result.stderr)
+                self.assertFalse(attempts.exists(), result.stdout + result.stderr)
 
     def test_remote_port_conflict_is_not_adopted(self):
         args, initial = self.remote_mq()

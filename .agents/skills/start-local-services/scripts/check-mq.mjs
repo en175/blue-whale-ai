@@ -35,8 +35,19 @@ for (let i = 0; i < args.length; i += 2) {
   }
 }
 
+const expiresAt = performance.now() + options.timeout;
+function remainingTime() {
+  const remaining = Math.ceil(expiresAt - performance.now());
+  if (remaining <= 0) {
+    abort.abort();
+    fail('超时；核对本阶段端点、MQ 权限和 SSH 转发后重新运行体检。');
+  }
+  return remaining;
+}
+
 function command(name, args) {
-  const result = spawnSync(name, args, { encoding: 'utf8', timeout: 3000 });
+  const result = spawnSync(name, args, { encoding: 'utf8', timeout: Math.min(3000, remainingTime()) });
+  remainingTime();
   if (result.status !== 0) fail('无法读取后端进程；重新运行体检确认 3100 的 PID 和权限。');
   return result.stdout.trim();
 }
@@ -156,6 +167,7 @@ async function main() {
   const after = processConfig(options.pid);
   if (before.backend !== after.backend || before.launch !== after.launch ||
       JSON.stringify(config) !== JSON.stringify(loadRocketMqConfig(after.env))) fail('检查期间后端配置变化；重新运行体检。');
+  remainingTime();
   log('PASS MQ 连接可用；未发送业务消息。任务入队、消费及产物仍需受控任务验收。');
 }
 
@@ -175,14 +187,15 @@ process.once('uncaughtException', error => {
 
 try {
   await Promise.race([
-    main(),
     new Promise((_, reject) => {
       deadline = setTimeout(() => {
         abort.abort();
         reject(new MqCheckError('超时；核对本阶段端点、MQ 权限和 SSH 转发后重新运行体检。'));
       }, options.timeout);
     }),
+    main(),
   ]);
+  remainingTime();
   clearTimeout(deadline);
   process.exit(0);
 } catch (error) {

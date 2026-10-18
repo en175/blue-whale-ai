@@ -34,6 +34,9 @@ export async function ensureTunnel(target, forward, log, signal) {
   if (!effective.ok || !/^hostname /m.test(effective.stdout)) {
     throw new MqCheckError('无法解析 SSH 实际配置；核对 SSH 别名后重新执行。');
   }
+  if (/^(?:local|remote|dynamic)forward\s/m.test(effective.stdout)) {
+    throw new MqCheckError('SSH 配置含额外转发；请使用不含 LocalForward、RemoteForward 或 DynamicForward 的专用 SSH 别名后重试。');
+  }
   const hash = createHash('sha256').update(JSON.stringify({ target, config: effective.stdout, ...forward })).digest('hex').slice(0, 20);
   const control = join(directory, hash);
   const lock = join(directory, `${forward.local.replaceAll(':', '-')}.lock`);
