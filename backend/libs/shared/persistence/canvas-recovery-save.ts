@@ -22,8 +22,9 @@ import { RecoveryContractError } from "./generation-canvas-recovery-repo.js";
 import {
   isMultiResultOutputKey,
   outputNodeIdForKey,
-  parseAssetIds,
   projectVirtualOutputs,
+  trustedAssetIdOf,
+  type ProjectableJob,
   type VirtualOutputItem,
   type VirtualOutputProjection,
 } from "./canvas-recovery-multi-output.js";
@@ -269,8 +270,8 @@ export async function saveCanvasWithRecovery(
     const changes: CanvasRecoveryReceiptChange[] = [];
 
 
-    const projectionCache = new Map<string, { projection: VirtualOutputProjection; job: { output_asset_ids: unknown } | null }>();
-    const projectionOf = async (submissionRow: NonNullable<ItemState["submissionRow"]>): Promise<{ projection: VirtualOutputProjection; job: { output_asset_ids: unknown } | null }> => {
+    const projectionCache = new Map<string, { projection: VirtualOutputProjection; job: ProjectableJob | null }>();
+    const projectionOf = async (submissionRow: NonNullable<ItemState["submissionRow"]>): Promise<{ projection: VirtualOutputProjection; job: ProjectableJob | null }> => {
       const cached = projectionCache.get(submissionRow.submission_id);
       if (cached) return cached;
       const job = await tx.generation_jobs.findUnique({
@@ -304,11 +305,12 @@ export async function saveCanvasWithRecovery(
     const trustedAssetOf = async (item: ItemState): Promise<string | null> => {
       const { projection, job } = await projectionOf(item.submissionRow);
       projectionOrThrow(projection);
-      if (item.outputKey === PRIMARY_OUTPUT_KEY) {
-        const assets = parseAssetIds(job?.output_asset_ids);
-        return assets !== null && assets.length === 1 ? assets[0]! : null;
-      }
-      return projection.items.find(candidate => candidate.outputKey === item.outputKey)?.assetId ?? null;
+      return trustedAssetIdOf(projection, job, item.outputKey);
+    };
+
+    const persistedAssetOf = async (item: ItemState): Promise<bigint | null> => {
+      const assetId = await trustedAssetOf(item);
+      return assetId === null ? null : BigInt(assetId);
     };
 
 
@@ -335,6 +337,8 @@ export async function saveCanvasWithRecovery(
 
       slotId: string | null;
 
+      assetId: bigint | null;
+
       createOwner: boolean;
     }
     const planned: PlannedWrite[] = [];
@@ -360,6 +364,7 @@ export async function saveCanvasWithRecovery(
         outputRowId: item.outputRowId,
         nodeId: item.nodeId,
         slotId: null,
+        assetId: null,
         createOwner: false,
       });
       switch (change.action) {
@@ -399,9 +404,11 @@ export async function saveCanvasWithRecovery(
           }
 
           let slotId: string | null = null;
+          let assetId: bigint | null = null;
           if (item.outputRowId === null && item.outputKey !== TARGET_OUTPUT_KEY) {
             const virtual = await assertVirtualKeyProjected(item);
             slotId = virtual?.slotId ?? null;
+            assetId = await persistedAssetOf(item);
             if (isMultiResultOutputKey(item.outputKey) && owner !== undefined && !owned) {
               throw new RecoveryContractError(
                 recoveryError(422, "结果节点已被其他提交占用", RECOVERY_REASONS.documentMismatch),
@@ -409,11 +416,12 @@ export async function saveCanvasWithRecovery(
             }
           }
 
-          if (item.state === "present") planned.push({ ...plan("present"), nextRevision: item.revision, slotId });
-          else {
+          if (item.state === "present") {
+            planned.push({ ...plan("present"), nextRevision: item.revision, slotId, assetId });
+          } else {
             const write = plan("present");
             planned.push({
-              ...write, slotId,
+              ...write, slotId, assetId,
 
               createOwner: item.outputRowId === null && isMultiResultOutputKey(item.outputKey),
             });
@@ -463,7 +471,7 @@ export async function saveCanvasWithRecovery(
                   recoveryError(422, "结果节点已被其他提交占用", RECOVERY_REASONS.documentMismatch),
                 );
               }
-              planned.push({ ...plan("removed"), createOwner: true });
+              planned.push({ ...plan("removed"), createOwner: true, assetId: await persistedAssetOf(item) });
               break;
             }
           }
@@ -738,6 +746,7 @@ export async function saveCanvasWithRecovery(
             node_id: write.nodeId,
             state: write.nextState,
             revision: Math.max(1, write.nextRevision),
+            ...(write.assetId !== null ? { asset_id: write.assetId } : {}),
             ...(write.slotId !== null ? { slot_id: BigInt(write.slotId) } : {}),
           },
         });

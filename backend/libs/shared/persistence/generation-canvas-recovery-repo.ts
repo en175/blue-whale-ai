@@ -14,7 +14,7 @@ import { Prisma } from "@prisma/client";
 import type { PrismaClient } from "@prisma/client";
 
 import type { CreatedJob } from "./generation-command-repo.js";
-import { projectVirtualOutputs } from "./canvas-recovery-multi-output.js";
+import { projectVirtualOutputs, trustedAssetIdOf, type VirtualOutputProjection } from "./canvas-recovery-multi-output.js";
 
 export class RecoveryContractError extends Error {
   constructor(readonly envelope: RecoveryErrorEnvelope) {
@@ -285,6 +285,7 @@ export interface RecoveryItemView {
   revision: number;
   node_binding_revision: number;
   asset_id: string | null;
+  asset_deleted: boolean | null;
   slot_id: string | null;
 }
 
@@ -355,9 +356,27 @@ async function toRecoveryRecord(
     revision: Number(submission.target_revision),
     node_binding_revision: ownerRevisions.get(submission.target_node_id) ?? 0,
     asset_id: null,
+    asset_deleted: null,
     slot_id: null,
   }];
+  let projected: Extract<VirtualOutputProjection, { kind: "ok" }> | null | undefined;
+  const okProjection = async () => {
+    if (projected === undefined) {
+      const computed = await projectVirtualOutputs(tx, {
+        submissionId: submission.submission_id,
+        targetNodeId: submission.target_node_id,
+        job,
+      });
+      projected = computed.kind === "invalid" ? null : computed;
+    }
+    return projected;
+  };
   for (const output of outputs) {
+    let assetId = output.asset_id !== null ? output.asset_id.toString() : null;
+    if (assetId === null) {
+      const projection = await okProjection();
+      assetId = projection === null ? null : trustedAssetIdOf(projection, job, output.output_key);
+    }
     items.push({
       recovery_item_id: recoveryItemId(submission.submission_id, output.output_key),
       output_key: output.output_key,
@@ -365,7 +384,8 @@ async function toRecoveryRecord(
       state: output.state as RecoveryItemView["state"],
       revision: Number(output.revision),
       node_binding_revision: ownerRevisions.get(output.node_id) ?? 0,
-      asset_id: output.asset_id !== null ? output.asset_id.toString() : null,
+      asset_id: assetId,
+      asset_deleted: null,
       slot_id: output.slot_id !== null ? output.slot_id.toString() : null,
     });
   }
@@ -379,6 +399,7 @@ async function toRecoveryRecord(
         revision: 0,
         node_binding_revision: 0,
         asset_id: virtual.assetId,
+        asset_deleted: null,
         slot_id: virtual.slotId,
       });
     }
@@ -395,6 +416,31 @@ async function toRecoveryRecord(
     previous_target_snapshot: (submission.previous_target_snapshot ?? null) as Record<string, unknown> | null,
     items,
   };
+}
+
+async function attachAssetDeleted(
+  tx: Prisma.TransactionClient,
+  records: RecoveryRecordView[],
+  ownerBySubmissionId: Map<string, bigint>,
+): Promise<void> {
+  const assetIds = [...new Set(records
+    .flatMap(record => record.items)
+    .filter(item => item.asset_id !== null)
+    .map(item => BigInt(item.asset_id!)))];
+  const rows = assetIds.length === 0 ? [] : await tx.assets.findMany({
+    where: { id: { in: assetIds } },
+    select: { id: true, user_id: true, is_delete: true },
+  });
+  const deletedByOwnerAndId = new Map(rows.map(row => [`${row.user_id}:${row.id}`, row.is_delete]));
+  for (const record of records) {
+    const owner = ownerBySubmissionId.get(record.submission_id);
+    for (const item of record.items) {
+      const deleted = item.asset_id !== null && owner !== undefined
+        ? deletedByOwnerAndId.get(`${owner}:${item.asset_id}`)
+        : undefined;
+      item.asset_deleted = deleted ?? null;
+    }
+  }
 }
 
 export async function listCanvasRecoveryPage(
@@ -453,6 +499,7 @@ export async function listCanvasRecoveryPage(
     }
     const visible = records
       .filter(record => record.is_current || record.items.some(item => item.state !== "pending" && item.node_binding_revision > 0 && item.output_key !== TARGET_OUTPUT_KEY));
+    await attachAssetDeleted(tx, visible, new Map(page.map(row => [row.submission_id, row.user_id])));
     const lastScanned = page[page.length - 1]!.id;
     const nextCursor = hasMore ? encodeRecoveryCursor({ v: CANVAS_RECOVERY_PROTOCOL_VERSION, projectId, maxId, lastId: Number(lastScanned) }) : null;
     return { records: visible, nextCursor, canvasVersion: canvasRows?.version ?? null };
@@ -513,6 +560,7 @@ export async function resolveCanvasRecoveryItems(
       record.items = record.items.filter(item => wanted.has(item.recovery_item_id));
       resolved.push(record);
     }
+    await attachAssetDeleted(tx, resolved, new Map(submissions.map(row => [row.submission_id, row.user_id])));
     return resolved;
   });
 }
