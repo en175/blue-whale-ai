@@ -197,6 +197,55 @@ describe('IKL1PD：失败抠图卡删除后的恢复与保存', () => {
     runtime.reset();
   });
 
+  describe.each(['image_cutout', 'image', 'video', 'audio'])('%s 输出不可用', (taskType) => {
+    it.each([
+      ['removed', false], ['replaced', false], ['transferred', false],
+      ['removed', true], ['replaced', true], ['transferred', true],
+    ] as const)('目标为 %s、详情请求失败=%s 时不补旧卡或生成 restore', async (state, requestFails) => {
+      const record = failedRecord(state, taskType);
+      record.job = { ...record.job!, status: 'succeeded', output_asset_ids: ['12'] };
+      record.previous_target_snapshot = failedCard();
+      record.items.push({ recovery_item_id: `gcr:${SUBMISSION_ID}:primary`, output_key: 'primary', node_id: 'cutout-output',
+        state: 'pending', revision: 0, node_binding_revision: 0, asset_id: '12', slot_id: null });
+      const { host, runtime, savedFields, fetchJobStatus } = setup(record);
+      if (requestFails) fetchJobStatus.mockRejectedValue(new Error('任务详情暂时不可用'));
+      else fetchJobStatus.mockResolvedValue({ job_id: '301', status: 'succeeded', progress: 100, asset: null });
+      await runtime.recover(PROJECT_ID);
+      await flush();
+      expect.soft(host.findNode(NODE_ID)).toBeNull();
+      expect.soft(runtime.composeSaveFields()).toBeNull();
+      expect(savedFields).toEqual([]);
+      expect(runtime.statusOf(NODE_ID)).toBeNull();
+      expect(fetchJobStatus).toHaveBeenCalledTimes(1);
+      const mediaType = taskType === 'video' || taskType === 'audio' ? taskType : 'image';
+      fetchJobStatus.mockResolvedValue({ job_id: '301', status: 'succeeded', progress: 100,
+        asset: { id: '12', url: 'https://assets.example/result', type: mediaType } });
+      await runtime.recover(PROJECT_ID);
+      await flush();
+      expect(host.findNode(NODE_ID)).toBeNull();
+      expect(host.findNode('cutout-output')?.data).toMatchObject({ assetId: '12', mediaType });
+      expect(runtime.composeSaveFields()?.recoveryChanges).toEqual([
+        { recoveryItemId: `gcr:${SUBMISSION_ID}:primary`, expectedRevision: 0, action: 'apply' },
+      ]);
+      runtime.reset();
+    });
+  });
+
+  it.each(['pending', 'present', null] as const)('输出不可用、目标状态为 %s 时仍保留原有兜底卡', async (state) => {
+    const record = failedRecord(state ?? 'pending');
+    record.job = { ...record.job!, status: 'succeeded', output_asset_ids: ['12'] };
+    if (state == null) record.items = [];
+    record.items.push({ recovery_item_id: `gcr:${SUBMISSION_ID}:primary`, output_key: 'primary', node_id: 'cutout-output',
+      state: 'pending', revision: 0, node_binding_revision: 0, asset_id: '12', slot_id: null });
+    const { host, runtime, fetchJobStatus } = setup(record);
+    fetchJobStatus.mockResolvedValue({ job_id: '301', status: 'succeeded', progress: 100, asset: null });
+    await runtime.recover(PROJECT_ID);
+    await flush();
+    expect(host.findNode(NODE_ID)?.data).toMatchObject({ jobId: '301', progress: 100 });
+    expect(runtime.statusOf(NODE_ID)).toBeNull();
+    runtime.reset();
+  });
+
   it.each(['removed', 'replaced', 'transferred'] as const)('目标为 %s 时仍应用同一记录的其他待处理输出', async (state) => {
     const record = failedRecord(state);
     record.job = { ...record.job!, status: 'succeeded', output_asset_ids: ['12'] };

@@ -127,6 +127,12 @@ export function createPolling(ctx: RuntimeContext) {
       if (views.length !== outputs.length) {
         for (const item of outputs) unavailableOutputItems.add(item.recovery_item_id);
         if (host.findNode(nodeId) == null) {
+          const targetItem = record?.items.find((item) => item.output_key === TARGET_OUTPUT_KEY);
+          if (targetItem && targetItem.state !== 'pending' && targetItem.state !== 'present') {
+            active.delete(nodeId);
+            host.clearActiveJob(nodeId);
+            return;
+          }
           const seed = record?.recovery_seed?.target;
           const snapshot = record?.previous_target_snapshot as Partial<RuntimeNodeView> | null;
           const plan = record && execution.def?.planRecovery?.(record, host);
