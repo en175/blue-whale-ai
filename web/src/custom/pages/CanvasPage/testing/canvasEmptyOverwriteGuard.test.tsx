@@ -54,6 +54,19 @@ async function addTextNodeViaPaneMenu() {
   });
 }
 
+async function failAddedNodeSaveThenEmptySave() {
+  apiMocks.saveCanvasDoc.mockRejectedValueOnce(new ApiError(500, '服务器开小差'));
+  await addTextNodeViaPaneMenu();
+  await vi.waitFor(() => expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(1), { timeout: 3000 });
+  apiMocks.saveCanvasDoc.mockRejectedValueOnce(rejected422());
+  await vi.waitFor(() => {
+    const call = apiMocks.saveCanvasDoc.mock.calls.at(-1)!;
+    expect(call[1].nodes).toHaveLength(0);
+    expect(call[1].confirmEmpty).toBeFalsy();
+    expect(document.body.textContent).toContain(REJECTED_422_TOAST);
+  }, { timeout: 3000 });
+}
+
 function seedDoc(nodes: Array<{ id: string; type: string; position: { x: number; y: number }; data: Record<string, unknown> }>, loadFailed = false) {
   canvasDocMock.current = {
     doc: {
@@ -204,21 +217,11 @@ function rejected422() {
 }
 
 describe('IKILUG 画布保存 422 刷新复核提示', () => {
-  it('a. 水合为空画布 → 防抖自动保存的空文档（不带 confirmEmpty）收 422 → 提示刷新复核', async () => {
+  it('a. 空水合新增保存失败回滚 → 防抖自动保存的空文档（不带 confirmEmpty）收 422 → 提示刷新复核', async () => {
     seedDoc([]);
     await renderPage();
-    apiMocks.saveCanvasDoc.mockRejectedValueOnce(rejected422());
 
-    await act(async () => {
-      flowProps.current.onViewportChange?.({ x: 120, y: 0, zoom: 1 });
-    });
-
-    await vi.waitFor(() => {
-      const call = apiMocks.saveCanvasDoc.mock.calls.at(-1)!;
-      expect(call[1].nodes).toHaveLength(0);
-      expect(call[1].confirmEmpty).toBeFalsy();
-      expect(document.body.textContent).toContain(REJECTED_422_TOAST);
-    }, { timeout: 3000 });
+    await failAddedNodeSaveThenEmptySave();
   });
 
   it('b. 项目切换前强制保存收 422 → 刷新复核提示，中止导航停留当前项目', async () => {
@@ -226,9 +229,7 @@ describe('IKILUG 画布保存 422 刷新复核提示', () => {
     await renderPage();
     apiMocks.saveCanvasDoc.mockRejectedValue(rejected422());
 
-    await act(async () => {
-      flowProps.current.onViewportChange?.({ x: 120, y: 0, zoom: 1 });
-    });
+    await addTextNodeViaPaneMenu();
     const exitBtn = [...document.querySelectorAll('button')].find((b) => b.textContent?.includes('返回首页'));
     expect(exitBtn).toBeTruthy();
     await act(async () => { exitBtn!.click(); });
@@ -247,9 +248,7 @@ describe('IKILUG 画布保存 422 刷新复核提示', () => {
     seedDoc([]);
     await renderPage();
     apiMocks.saveCanvasDoc.mockRejectedValueOnce(new ApiError(500, '服务器开小差'));
-    await act(async () => {
-      flowProps.current.onViewportChange?.({ x: 120, y: 0, zoom: 1 });
-    });
+    await addTextNodeViaPaneMenu();
     const findRetry = () => [...document.querySelectorAll('button')].find((b) => b.textContent === '重试保存');
     await vi.waitFor(() => {
       expect(findRetry()).toBeTruthy();
@@ -269,15 +268,13 @@ describe('IKILUG 画布保存 422 刷新复核提示', () => {
     seedDoc([]);
     await renderPage();
     apiMocks.saveCanvasDoc.mockRejectedValue(rejected422());
-    await act(async () => {
-      flowProps.current.onViewportChange?.({ x: 120, y: 0, zoom: 1 });
-    });
+    await addTextNodeViaPaneMenu();
     await vi.waitFor(() => {
       expect(apiMocks.saveCanvasDoc).toHaveBeenCalled();
       expect(document.body.textContent).toContain(REJECTED_422_TOAST);
     }, { timeout: 3000 });
 
-    expect(flowProps.current.textNodes).toHaveLength(0);
+    expect(flowProps.current.textNodes).toHaveLength(1);
     const retryBtn = [...document.querySelectorAll('button')].find((b) => b.textContent === '重试保存');
     expect(retryBtn).toBeTruthy();
     expect(document.body.textContent).not.toContain('已保存');
@@ -285,25 +282,18 @@ describe('IKILUG 画布保存 422 刷新复核提示', () => {
 });
 
 describe('IKILTB 422 阻断后项目切换提示刷新复核', () => {
-  it('e. 防抖空保存收 422 后点「返回首页」：刷新复核提示（非笼统重试），未再发 PUT，中止导航', async () => {
+  it('e. 新增保存失败回滚后的防抖空保存收 422 后点「返回首页」：刷新复核提示（非笼统重试），未再发 PUT，中止导航', async () => {
     seedDoc([]);
     await renderPage();
-    apiMocks.saveCanvasDoc.mockRejectedValueOnce(rejected422());
 
-    await act(async () => {
-      flowProps.current.onViewportChange?.({ x: 120, y: 0, zoom: 1 });
-    });
-    await vi.waitFor(() => {
-      expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(1);
-      expect(document.body.textContent).toContain(REJECTED_422_TOAST);
-    }, { timeout: 3000 });
+    await failAddedNodeSaveThenEmptySave();
 
     const exitBtn = [...document.querySelectorAll('button')].find((b) => b.textContent?.includes('返回首页'));
     expect(exitBtn).toBeTruthy();
     await act(async () => { exitBtn!.click(); });
     await act(async () => {});
 
-    expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(1);
+    expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(2);
     await vi.waitFor(() => expect(document.body.textContent).toContain(REJECTED_422_TOAST), { timeout: 3000 });
     expect(locationRef!.search).toContain('project=p1');
   });
@@ -384,13 +374,7 @@ describe('IKIMQK 空基线新增保存成功后允许再次明确清空', () => 
     await renderPage();
     apiMocks.saveCanvasDoc.mockRejectedValue(rejected422());
 
-    await act(async () => {
-      flowProps.current.onViewportChange?.({ x: 120, y: 0, zoom: 1 });
-    });
-    await vi.waitFor(() => {
-      expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(1);
-      expect(document.body.textContent).toContain(REJECTED_422_TOAST);
-    }, { timeout: 3000 });
+    await failAddedNodeSaveThenEmptySave();
 
     await addTextNodeViaPaneMenu();
     await deleteNodes([flowProps.current.textNodes[0]!.id as string]);
@@ -400,7 +384,7 @@ describe('IKIMQK 空基线新增保存成功后允许再次明确清空', () => 
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 1100));
     });
-    expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(1);
+    expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -474,57 +458,43 @@ describe('IKIN23 冲突后整文档待复核阻断陈旧保存', () => {
     expect(locationRef!.search).toContain('project=p1');
   });
 
-  it('d. 422 拒后新增保持非空：防抖自动保存与手动重试均不发旧整文档', async () => {
+  it('d. 新增回滚 → 空保存 422 拒后新增保持非空：防抖自动保存与手动重试均不发旧整文档', async () => {
     seedDoc([]);
     await renderPage();
-    apiMocks.saveCanvasDoc.mockRejectedValueOnce(rejected422());
-    await act(async () => {
-      flowProps.current.onViewportChange?.({ x: 120, y: 0, zoom: 1 });
-    });
-    await vi.waitFor(() => {
-      expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(1);
-      expect(document.body.textContent).toContain(REJECTED_422_TOAST);
-    }, { timeout: 3000 });
+    await failAddedNodeSaveThenEmptySave();
 
     await addTextNodeViaPaneMenu();
     expect(flowProps.current.textNodes).toHaveLength(1);
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 1100));
     });
-    expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(1);
+    expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(2);
 
     const retryBtn = [...document.querySelectorAll('button')].find((b) => b.textContent === '重试保存');
     expect(retryBtn).toBeTruthy();
     await act(async () => { retryBtn!.click(); });
     await act(async () => {});
-    expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(1);
+    expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(2);
     await vi.waitFor(() => expect(document.body.textContent).toContain(REJECTED_422_TOAST), { timeout: 3000 });
   });
 
   it('e. 422 拒后新增保持非空：返回首页中止并提示刷新复核', async () => {
     seedDoc([]);
     await renderPage();
-    apiMocks.saveCanvasDoc.mockRejectedValueOnce(rejected422());
-    await act(async () => {
-      flowProps.current.onViewportChange?.({ x: 120, y: 0, zoom: 1 });
-    });
-    await vi.waitFor(() => {
-      expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(1);
-      expect(document.body.textContent).toContain(REJECTED_422_TOAST);
-    }, { timeout: 3000 });
+    await failAddedNodeSaveThenEmptySave();
 
     await addTextNodeViaPaneMenu();
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 1100));
     });
-    expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(1);
+    expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(2);
 
     const exitBtn = [...document.querySelectorAll('button')].find((b) => b.textContent?.includes('返回首页'));
     expect(exitBtn).toBeTruthy();
     await act(async () => { exitBtn!.click(); });
     await act(async () => {});
 
-    expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(1);
+    expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(2);
     await vi.waitFor(() => expect(document.body.textContent).toContain(REJECTED_422_TOAST), { timeout: 3000 });
     expect(locationRef!.search).toContain('project=p1');
   });
@@ -656,13 +626,7 @@ describe('IKIN8A 待复核期间同页 Project 导航门禁', () => {
   it('c. 422 空覆盖待复核期间：同页路由切换同样被中止，新增节点保留并提示刷新复核', async () => {
     seedDoc([]);
     await renderPage();
-    apiMocks.saveCanvasDoc.mockRejectedValueOnce(rejected422());
-    await act(async () => {
-      flowProps.current.onViewportChange?.({ x: 120, y: 0, zoom: 1 });
-    });
-    await vi.waitFor(() => {
-      expect(document.body.textContent).toContain(REJECTED_422_TOAST);
-    }, { timeout: 3000 });
+    await failAddedNodeSaveThenEmptySave();
     await addTextNodeViaPaneMenu();
     expect(flowProps.current.textNodes).toHaveLength(1);
 
@@ -670,7 +634,7 @@ describe('IKIN8A 待复核期间同页 Project 导航门禁', () => {
 
     expect(locationRef!.search).toContain('project=p1');
     expect(flowProps.current.textNodes).toHaveLength(1);
-    expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(1);
+    expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(2);
     await vi.waitFor(() => expect(document.body.textContent).toContain(REJECTED_422_TOAST), { timeout: 3000 });
   }, 10000);
 
@@ -716,4 +680,26 @@ describe('IKIN8A 待复核期间同页 Project 导航门禁', () => {
     expect(locationRef!.search).toContain('panel=agent');
     expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(1);
   }, 10000);
+});
+
+describe('IKNB6X 仅浏览不落盘', () => {
+  it('连续 3 轮平移缩放不发起画布保存', async () => {
+    seedDoc([T1]);
+    await renderPage();
+
+    for (const viewport of [
+      { x: 120, y: 80, zoom: 1.4 },
+      { x: 240, y: 160, zoom: 0.8 },
+      { x: 360, y: 40, zoom: 2 },
+    ]) {
+      await act(async () => {
+        flowProps.current.onViewportChange?.(viewport);
+      });
+    }
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 1200));
+    });
+    expect(apiMocks.saveCanvasDoc).not.toHaveBeenCalled();
+  });
 });

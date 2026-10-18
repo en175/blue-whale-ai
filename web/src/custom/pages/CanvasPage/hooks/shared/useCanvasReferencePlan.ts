@@ -57,7 +57,7 @@ export function useCanvasReferencePlan(input: {
       const localMode = normalizeVideoMode((input.mediaNodesRef.current.find((n) => n.id === targetNodeId)?.data as Record<string, unknown> | undefined)?.draftMode);
       if (serverMode && serverMode !== localMode) input.patchMediaNode(targetNodeId, { draftMode: serverMode });
       input.versionRef.current = saved.version;
-      input.lastSavedRef.current = JSON.stringify(JSON.parse(saved.viewport ?? 'null')) + serializeNodes(savedNodes) + serializeEdges(next);
+      input.lastSavedRef.current = serializeNodes(savedNodes) + serializeEdges(next);
       input.setSaveStatus('saved');
       input.setSaveEpoch((value) => value + 1);
     } catch (error) {

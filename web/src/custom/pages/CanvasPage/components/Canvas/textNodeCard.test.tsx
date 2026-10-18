@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 import { act, createElement, type ComponentProps } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import type { Edge, Node, Viewport } from '@xyflow/react';
+import type { MediaMention, MediaRef } from '@lib/contracts/text-node-media';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import FlowCanvas from './index';
 
@@ -65,7 +67,11 @@ async function finishGesture() {
 }
 
 async function renderText(
-  overrides: { text?: string; html?: string; title?: string; toolMode?: 'drag' | 'select'; selected?: boolean; zoom?: number } = {},
+  overrides: {
+    text?: string; html?: string; title?: string; toolMode?: 'drag' | 'select'; selected?: boolean; zoom?: number;
+    viewport?: Viewport; mediaRefs?: MediaRef[]; mediaMentions?: MediaMention[]; mediaNodes?: Node[]; edges?: Edge[];
+    showEdges?: boolean;
+  } = {},
 ): Promise<TextCallbacks> {
   const callbacks: TextCallbacks = {
     onDraftError: vi.fn(),
@@ -80,14 +86,24 @@ async function renderText(
   const next: ComponentProps<typeof FlowCanvas> = {
     ...props,
     toolMode,
-    viewport: { x: 0, y: 0, zoom: overrides.zoom ?? 1 },
+    viewport: overrides.viewport ?? { x: 0, y: 0, zoom: overrides.zoom ?? 1 },
     textNodes: [{
       id: TEXT_ID,
       type: 'textNode',
       position: { x: 50, y: 60 },
       selected: overrides.selected ?? false,
-      data: { ...(overrides.text !== undefined ? { text: overrides.text } : { html: overrides.html ?? '' }), ...(overrides.title !== undefined ? { title: overrides.title } : {}), toolMode, ...callbacks },
+      data: {
+        ...(overrides.text !== undefined ? { text: overrides.text } : { html: overrides.html ?? '' }),
+        ...(overrides.title !== undefined ? { title: overrides.title } : {}),
+        ...(overrides.mediaRefs !== undefined ? { mediaRefs: overrides.mediaRefs } : {}),
+        ...(overrides.mediaMentions !== undefined ? { mediaMentions: overrides.mediaMentions } : {}),
+        toolMode,
+        ...callbacks,
+      },
     }],
+    ...(overrides.mediaNodes !== undefined ? { mediaNodes: overrides.mediaNodes } : {}),
+    ...(overrides.edges !== undefined ? { edges: overrides.edges } : {}),
+    ...(overrides.showEdges !== undefined ? { showEdges: overrides.showEdges } : {}),
   };
   await act(async () => { root.render(createElement(FlowCanvas, next)); });
   return callbacks;
@@ -464,4 +480,69 @@ it('reports invalid text to the canvas and clears the error after correction', a
   });
   expect(callbacks.onDraftError).toHaveBeenLastCalledWith(TEXT_ID, '');
   expect(callbacks.onTextChange).toHaveBeenLastCalledWith(TEXT_ID, '修正正文');
+});
+
+describe('Canvas 文本节点视频引用缩略图稳定（IKNB6X）', () => {
+  const VIDEO_NODE_ID = 'media-v1';
+  const mediaNode = (x: number): Node => ({
+    id: VIDEO_NODE_ID, type: 'mediaNode', position: { x, y: 0 },
+    data: { mediaType: 'video', src: 'https://example.com/v.mp4', fileName: '视频1', toolMode: 'select' },
+  });
+  const mirrorEdge = (): Edge => ({ id: 'e-v1', source: VIDEO_NODE_ID, target: TEXT_ID, type: 'custom', data: { textIndex: true } });
+  const refs = (url = 'https://example.com/v.mp4'): MediaRef[] => [
+    { nodeId: VIDEO_NODE_ID, assetId: '9002', mediaType: 'video', name: '视频1', url },
+  ];
+  const mentions = (): MediaMention[] => [{ start: 0, end: 3, nodeId: VIDEO_NODE_ID, assetId: '9002' }];
+
+  async function renderVideoRef(over: { viewport?: Viewport; url?: string; nodeX?: number; valid?: boolean } = {}) {
+    await renderText({
+      text: '视频1',
+      showEdges: true,
+      mediaRefs: refs(over.url),
+      mediaMentions: mentions(),
+      mediaNodes: [mediaNode(over.nodeX ?? 300)],
+      edges: over.valid === false ? [] : [mirrorEdge()],
+      ...(over.viewport !== undefined ? { viewport: over.viewport } : {}),
+    });
+  }
+
+  it('仅视口变化与无关节点移动时复用同一视频元素', async () => {
+    await renderVideoRef();
+    const video = editor().querySelector('video');
+    expect(video).not.toBeNull();
+    await renderVideoRef({ viewport: { x: 160, y: 90, zoom: 1.4 } });
+    expect(editor().querySelector('video')).toBe(video);
+    await renderVideoRef({ nodeX: 640 });
+    expect(editor().querySelector('video')).toBe(video);
+    expect(editor().querySelector<HTMLElement>('[data-media-node="media-v1"]')?.dataset.mediaLabel).toBe('视频1');
+  });
+
+  it('来源替换重建缩略图，引用失效标记已失效', async () => {
+    await renderVideoRef();
+    const video = editor().querySelector('video');
+    await renderVideoRef({ url: 'https://example.com/v2.mp4' });
+    const next = editor().querySelector('video');
+    expect(next).not.toBe(video);
+    expect(next?.getAttribute('src')).toBe('https://example.com/v2.mp4');
+    await renderVideoRef({ url: 'https://example.com/v2.mp4', valid: false });
+    const chip = editor().querySelector<HTMLElement>('[data-media-node="media-v1"]')!;
+    expect(chip.dataset.mediaInvalid).toBe('1');
+    expect(chip.dataset.mediaLabel).toBe('已失效：视频1');
+  });
+
+  it('真实滚轮平移画布 3 轮后视频缩略图仍是同一元素', async () => {
+    await renderVideoRef();
+    const viewportTransform = () =>
+      container.querySelector<HTMLElement>('.react-flow__viewport')!.style.transform;
+    const video = editor().querySelector('video');
+    expect(video).not.toBeNull();
+    for (let round = 0; round < 3; round += 1) {
+      const before = viewportTransform();
+      await act(async () => {
+        editor().dispatchEvent(new WheelEvent('wheel', { deltaY: 120, bubbles: true, cancelable: true }));
+      });
+      expect(viewportTransform()).not.toBe(before);
+      expect(editor().querySelector('video')).toBe(video);
+    }
+  });
 });
