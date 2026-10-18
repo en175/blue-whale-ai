@@ -771,7 +771,7 @@ describe('多结果家族：运行时集成', () => {
     expect(runtime.composeSaveFields()).toBeNull();
   });
 
-  it('部分段明确软删：只按存活可信产物落卡，不弹整批不可用警告也不复活已删段', async () => {
+  it('部分段明确软删：只按存活可信产物落卡，保留原卡不转换目标，差分不声明已删段', async () => {
     const fake = createFakeHost();
     fake.nodes.set('ph-1', { id: 'ph-1', type: 'mediaNode', position: { x: 958, y: 0 },
       data: { sceneSplit: { sourceAssetId: '5', lastInput: {} } } });
@@ -795,10 +795,11 @@ describe('多结果家族：运行时集成', () => {
       data: { assetId: 'a2', src: 'http://t/2.mp4' },
     });
     expect(fake.nodes.has(`generation-result:${SUBMISSION}:segment:1`)).toBe(false);
-    expect(fake.removes).toContain('ph-1');
-    expect(runtime.composeSaveFields()!.recoveryChanges.map(change => `${change.action}:${change.recoveryItemId}`).sort()).toEqual([
-      `apply:gcr:${SUBMISSION}:segment:2`,
-      `replaceTarget:gcr:${SUBMISSION}:$target`,
+    expect(fake.removes).not.toContain('ph-1');
+    expect(fake.nodes.get('ph-1')).toMatchObject({ data: { progress: 100, sceneSplit: { sourceAssetId: '5' } } });
+    expect(fake.nodes.get('ph-1')!.data.genStatus).toBeUndefined();
+    expect(runtime.composeSaveFields()!.recoveryChanges).toEqual([
+      { recoveryItemId: `gcr:${SUBMISSION}:segment:2`, expectedRevision: 0, action: 'apply' },
     ]);
   });
 });

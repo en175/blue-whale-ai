@@ -1117,6 +1117,81 @@ describe.skipIf(!databaseUrl)("多结果任务逐项恢复与删除（IKJJQY）"
     ]);
   });
 
+  it("★ 21. 部分软删：转换遗漏已删段 → 422 零写入；只声明存活段可原子保存并稳定回读", async () => {
+    await prisma.assets.createMany({
+      data: [
+        { id: 8615n, user_id: BigInt(USER_ID), type: "video", url: "https://example.test/8615.mp4" },
+        { id: 8616n, user_id: BigInt(USER_ID), type: "video", url: "https://example.test/8616.mp4", is_delete: true, deleted_at: new Date() },
+      ],
+    });
+    const created = await acceptJob({
+      submissionId: UUID_A, node: "scene-node-iknbks", revision: 0,
+      type: "video_scene_split",
+      input: { source_asset_id: "8166", target_node_id: "scene-node-iknbks", granularity: "standard" },
+    });
+    if (!("generation_job_id" in created)) throw new Error("受理失败");
+    await succeedSceneSplitJob(created.generation_job_id, [
+      { index: 1, assetId: "8615" },
+      { index: 2, assetId: "8616" },
+    ]);
+    const readItems = async () => (await listCanvasRecoveryPage(prisma, PROJECT_ID, 50, null))
+      .records.find(item => item.submission_id === UUID_A)!.items
+      .map(item => [item.output_key, item.asset_id, item.asset_deleted, item.state, item.revision]);
+    expect(await readItems()).toEqual([
+      [TARGET_OUTPUT_KEY, null, null, "pending", 1],
+      ["segment:1", "8615", false, "pending", 0],
+      ["segment:2", "8616", true, "pending", 0],
+    ]);
+
+    const source = { id: "source-8166", type: "mediaNode", position: { x: 100, y: 200 }, data: { assetId: "8166" } };
+    const placeholder = {
+      id: "scene-node-iknbks", type: "mediaNode", position: { x: 958, y: 0 },
+      data: { fileName: "场景切分 · 标准", mediaType: "video" },
+    };
+    const survivor = markerNode(multiResultNodeId(UUID_A, "segment:1"), UUID_A, "segment:1", "8615");
+
+    await expectRejection(save({
+      commandId: UUID_B, version: null, nodes: [source, survivor],
+      changes: [
+        { id: recoveryItemId(UUID_A, TARGET_OUTPUT_KEY), rev: 1, action: "replaceTarget" },
+        { id: recoveryItemId(UUID_A, "segment:1"), rev: 0, action: "apply" },
+      ],
+    }), 422, RECOVERY_REASONS.documentMismatch);
+    expect(await prisma.generation_canvas_outputs.count({})).toBe(0);
+    expect(await prisma.canvas.count({ where: { project_id: BigInt(PROJECT_ID) } })).toBe(0);
+    expect(await readItems()).toEqual([
+      [TARGET_OUTPUT_KEY, null, null, "pending", 1],
+      ["segment:1", "8615", false, "pending", 0],
+      ["segment:2", "8616", true, "pending", 0],
+    ]);
+
+    const nodes = [source, placeholder, survivor];
+    const saved = await save({
+      commandId: UUID_D, version: null, nodes,
+      changes: [{ id: recoveryItemId(UUID_A, "segment:1"), rev: 0, action: "apply" }],
+    });
+    expect(saved.recoveryReceipt.changes).toEqual([
+      expect.objectContaining({ recoveryItemId: recoveryItemId(UUID_A, "segment:1"), state: "present", revision: 1 }),
+    ]);
+    expect((await outputsOfSubmission(UUID_A)).map(row => [row.output_key, row.asset_id?.toString() ?? null, row.state]))
+      .toEqual([["segment:1", "8615", "present"]]);
+    expect((await prisma.assets.findUnique({ where: { id: 8616n } }))!.is_delete).toBe(true);
+
+    for (let refresh = 0; refresh < 3; refresh += 1) {
+      expect(await readItems()).toEqual([
+        [TARGET_OUTPUT_KEY, null, null, "pending", 1],
+        ["segment:1", "8615", false, "present", 1],
+      ]);
+      expect((await outputsOfSubmission(UUID_A)).map(row => [row.output_key, row.state]))
+        .toEqual([["segment:1", "present"]]);
+      const document = await createCanvasRepo(prisma).getByProject(PROJECT_ID);
+      expect(JSON.parse(document.nodes ?? "null")).toEqual(JSON.parse(JSON.stringify(nodes)));
+      expect(document.version).toBe(saved.version);
+      const resolved = await resolveCanvasRecoveryItems(prisma, PROJECT_ID, [recoveryItemId(UUID_A, "segment:2")]);
+      expect(resolved[0]!.items).toEqual([]);
+    }
+  });
+
   it("★ 13. 伪造输出键 remove → 422（键必须在投影集内）", async () => {
     const created = await acceptJob({
       submissionId: UUID_A, node: "scene-node-9", revision: 0,

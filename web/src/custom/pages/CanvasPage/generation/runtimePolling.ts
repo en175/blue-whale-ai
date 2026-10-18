@@ -97,8 +97,10 @@ export function createPolling(ctx: RuntimeContext) {
           cursor = page.next_cursor;
         } while (record == null && cursor != null);
       }
-      const outputs = record?.items.filter((item) => item.output_key !== TARGET_OUTPUT_KEY
-        && item.state !== 'removed' && item.state !== 'transferred' && item.asset_deleted !== true) ?? [];
+      const outputItems = record?.items.filter((item) => item.output_key !== TARGET_OUTPUT_KEY
+        && item.state !== 'removed' && item.state !== 'transferred') ?? [];
+      const hasSoftDeleted = outputItems.some((item) => item.asset_deleted === true);
+      const outputs = outputItems.filter((item) => item.asset_deleted !== true);
       if (outputs.length === 0) {
         host.patchNode(nodeId, { genStatus: undefined, progress: 100 });
         return;
@@ -177,7 +179,7 @@ export function createPolling(ctx: RuntimeContext) {
         };
       const cardByNodeId = new Map(plan.nodes.map((card) => [card.id, card]));
       const reusesTarget = outputs.some((item) => item.node_id === nodeId);
-      if (!reusesTarget) {
+      if (!reusesTarget && !hasSoftDeleted) {
         host.markLocallyRemoved(nodeId);
         host.removeMediaNode(nodeId);
       }
@@ -222,7 +224,11 @@ export function createPolling(ctx: RuntimeContext) {
       for (const edge of plan.edges) {
         host.addEdge(edge.source, edge.target, undefined, edge.origin != null ? { origin: edge.origin } : undefined);
       }
-      intents.set(submissionId, { kind: 'convert' });
+      if (hasSoftDeleted) {
+        host.patchNode(nodeId, { genStatus: undefined, progress: 100 });
+      } else {
+        intents.set(submissionId, { kind: 'convert' });
+      }
       const fanOutProject = host.getProjectId() ?? execution.projectId;
       if (fanOutProject) void host.saveCanvas(fanOutProject).catch(() => {});
     } catch (e) {
