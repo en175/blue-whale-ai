@@ -228,13 +228,13 @@ export function useCanvasSave(host: CanvasSaveHost) {
     void runtime.recover(projectId).then(() => {
       if (activeProjectRef.current !== projectId) return;
       if (runtime.composeSaveFields() == null) return;
-      void flushCanvasSave(projectId, { recoveryRetry: false }).catch(() => {});
+      void flushCanvasSave(projectId, { suppressRecoveryRetry: true }).catch(() => {});
     });
   };
 
   const flushCanvasSave = (
     projectId: string,
-    options: { recoveryRetry?: boolean } = {},
+    options: { suppressRecoveryRetry?: boolean } = {},
   ): Promise<boolean> => {
     const runFlush = async (): Promise<boolean> => {
       if (activeProjectRef.current !== projectId) return false;
@@ -293,7 +293,7 @@ export function useCanvasSave(host: CanvasSaveHost) {
             throw error;
           }
           if (!recoveryFields && readRecoveryErrorReason(error) === 'recovery_protocol_required') {
-            if (options.recoveryRetry !== false) retrySaveAfterRecovery(projectId);
+            if (!options.suppressRecoveryRetry) retrySaveAfterRecovery(projectId);
           }
           const aligned = adoptCanvasConflictVersion(error);
           if (aligned && confirmEmpty) {

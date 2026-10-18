@@ -13,10 +13,10 @@ export function createRecovery(ctx: RuntimeContext, polling: { poll: (execution:
   const { fanOutOutputs } = polling;
 
   let scanningEpoch: object | null = null;
-  let scanning: Promise<void> | null = null;
+  let scanningRun: Promise<void> | null = null;
   const recover = (projectId: string): Promise<void> => {
     const loadEpoch = host.getLoadEpoch();
-    if (scanningEpoch === loadEpoch) return scanning ?? Promise.resolve();
+    if (scanningEpoch === loadEpoch) return scanningRun ?? Promise.resolve();
     scanningEpoch = loadEpoch;
     const run = (async () => {
       try {
@@ -33,7 +33,7 @@ export function createRecovery(ctx: RuntimeContext, polling: { poll: (execution:
         if (scanningEpoch === loadEpoch) scanningEpoch = null;
       }
     })();
-    scanning = run;
+    scanningRun = run;
     return run;
   };
 
