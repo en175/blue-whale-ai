@@ -68,6 +68,15 @@ function assetReferences(nodes: unknown): AssetReference[] {
       if (id !== undefined && (!/^[1-9][0-9]{0,18}$/.test(String(id)) || BigInt(String(id)) > 9223372036854775807n)) reject(400, "local_recovery_invalid_payload", "素材身份格式无效");
       result.push({ path, ...(id === undefined ? {} : { assetId: String(id) }), ...(typeof url === "string" && url.length > 0 ? { url } : {}), ...(typeof entry.mediaType === "string" ? { mediaType: entry.mediaType } : {}) });
     }
+    if (typeof entry.srcH264 === "string" && entry.srcH264.length > 0) {
+      result.push({ path: `${path}.srcH264`, url: entry.srcH264, mediaType: "video" });
+    }
+    for (const key of ["sourceAssetId", "source_asset_id", "mask_asset_id"]) {
+      const assetId = entry[key];
+      if (assetId === undefined) continue;
+      if ((typeof assetId !== "string" && typeof assetId !== "number") || !/^[1-9][0-9]{0,18}$/.test(String(assetId)) || BigInt(String(assetId)) > 9223372036854775807n) reject(400, "local_recovery_invalid_payload", "素材身份格式无效");
+      result.push({ path: `${path}.${key}`, assetId: String(assetId) });
+    }
     for (const [key, child] of Object.entries(entry)) visit(child, `${path}.${key}`, depth + 1);
   }
   visit(nodes, "nodes", 0);

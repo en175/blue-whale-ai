@@ -10,6 +10,10 @@
 
 素材必须是当前账号拥有、normal 且未删除的 assets。支持同账号跨项目引用，保存前及查询完成时重新检查；采用既有 project_asset 关联。临时 blob/data 地址必须由调用方先上传并替换。缺失、失效、身份或 URL 不一致返回 422、`reason=local_recovery_assets_unavailable` 和请求内缺项路径，不返回他人素材详情。
 
+素材提取覆盖持久节点内的 `assetId` / `asset_id` / `assetID` 与 `src` / `url`，包括商品图库、参考图库、音色、文本媒体索引及混合媒体绑定。相同对象的这组三种素材身份、两种主地址别名必须一致。`srcH264` 是独立的视频备用引用，按自己的 URL 授权，可与主视频属于不同合法资产；不以扩展名识别素材，资产登记 URL 中的查询参数原样保留。
+
+工具的 `sourceAssetId`、`lastInput` / `lastParams` 中的 `source_asset_id`，以及图片擦除的 `mask_asset_id`，分别作为独立素材校验。覆盖图片增强、扩图、裁切、抠图、擦除，视频增强、音视频分离、场景切分、智能抠像、去字幕，音频裁切、变速、人声分离及音视频合成；合成配置内绑定视频的 `assetId` / `src` 同样校验。来源和遮罩不能借结果素材通过校验，也不要求与结果素材身份相同。所有通过的资产去重后建立目标关联，并在恢复操作回读时逐项重查。任一项失效都返回 422 缺项，不保存部分目标或返回 complete。正文 `text` / `html` 中的普通链接属于编辑内容，不提取为媒体引用。
+
 恢复请求只能包含独立内容或未提交草稿。jobId、submissionId、generationRecovery、frameInterpolation 等可执行字段及进行中状态会被拒绝。任务来源说明可放在 `localRecoveryProvenance: { sourceProjectId, sourceNodeId, sourceJobId? }`；该对象只承载来源说明，不进入旧任务执行字段。预览来源 promptSource 及其受保护绑定不能直接跨项目冒充；调用方须转换为普通文本与合法 mediaMentions/mediaRefs，保留正文、索引和来源说明。服务端不会静默删字段或猜补配置。
 
 ## 阶段与结果

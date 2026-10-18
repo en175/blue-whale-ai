@@ -92,6 +92,99 @@ describe.skipIf(!process.env.IKNCL3_DATABASE_URL)("本地恢复画布公开 API"
     expect(JSON.parse(source.data.nodes)[0].data.text).toBe("原画布不改");
   });
 
+  it("拒绝失效备用视频且不创建目标或触发任务计费", async () => {
+    const before = await (await fetch(`${base}/api/projects`)).json();
+    const jobs = await prisma.client.generation_jobs.count();
+    const reservations = await prisma.client.cost_reservations.count();
+    const asset = await prisma.client.assets.create({ data: { user_id: 983003n, project_id: BigInt(sourceId), type: "video", url: `https://assets.invalid/main-${sourceId}.mp4` } });
+    const response = await request("PUT", "04e0b9cc-04dd-45ad-930b-3c0000000012", {
+      ...payload, nodes: JSON.stringify([{ id: "video-fallback", type: "mediaNode", data: { assetId: asset.id.toString(), mediaType: "video", src: asset.url, srcH264: "blob:expired-fallback" } }]),
+    });
+    expect(response.status).toBe(422);
+    expect((await response.json()).data).toEqual({ reason: "local_recovery_assets_unavailable", missing: [{ path: "nodes.0.data.srcH264" }] });
+    expect((await (await fetch(`${base}/api/projects`)).json()).data).toHaveLength(before.data.length);
+    expect(await prisma.client.generation_jobs.count()).toBe(jobs);
+    expect(await prisma.client.cost_reservations.count()).toBe(reservations);
+  });
+
+  it("逐项拒绝工具来源与遮罩缺项且不创建部分目标", async () => {
+    const before = await (await fetch(`${base}/api/projects`)).json();
+    const variants = [
+      { videoEnhance: { sourceAssetId: "999999999", lastParams: { resolution: "4k" } } },
+      { mediaExtract: { lastInput: { source_asset_id: "999999999", output_format: "mp3" } } },
+      { imageErase: { lastInput: { mask_asset_id: "999999999" } } },
+      { audioVideoMux: { sourceAssetId: "999999999", sourceNodeId: "audio-source", reserveAudio: true, sync: "none" } },
+    ];
+    for (const variant of variants) {
+      const response = await request("PUT", "04e0b9cc-04dd-45ad-930b-3c0000000013", {
+        ...payload, nodes: JSON.stringify([{ id: "tool-draft", type: "mediaNode", data: { draft: true, genStatus: "draft", ...variant } }]),
+      });
+      expect(response.status).toBe(422);
+      const error = await response.json();
+      expect(error.data.reason).toBe("local_recovery_assets_unavailable");
+      expect(error.data.missing).toEqual([expect.objectContaining({ assetId: "999999999" })]);
+    }
+    expect((await request("GET", "04e0b9cc-04dd-45ad-930b-3c0000000013")).status).toBe(404);
+    expect((await (await fetch(`${base}/api/projects`)).json()).data).toHaveLength(before.data.length);
+  });
+
+  it("保留合法备用视频、各工具来源和正文链接，关联后重读并逐项复核权限", async () => {
+    const assets = await Promise.all(["image", "video", "audio", "image", "video"].map((type, i) => prisma.client.assets.create({ data: {
+      user_id: 983003n, project_id: BigInt(sourceId), type, url: `https://assets.invalid/control-${sourceId}-${i}?download=1&token=fixture`,
+    } })));
+    const [image, video, audio, mask, fallback] = assets;
+    const tools = [
+      { imageEnhance: { sourceAssetId: image.id.toString(), lastParams: { source_asset_id: image.id.toString(), scale: 2 } } },
+      { imageOutpaint: { sourceAssetId: image.id.toString(), lastParams: { source_asset_id: image.id.toString() } } },
+      { imageCrop: { sourceAssetId: image.id.toString() } },
+      { imageCutout: { sourceAssetId: image.id.toString(), lastInput: { source_asset_id: image.id.toString() } } },
+      { imageErase: { sourceAssetId: image.id.toString(), lastInput: { source_asset_id: image.id.toString(), mask_asset_id: mask.id.toString() } } },
+      { videoEnhance: { sourceAssetId: video.id.toString(), lastParams: { resolution: "4k" } } },
+      { mediaExtract: { sourceAssetId: video.id.toString(), lastInput: { source_asset_id: video.id.toString(), output_format: "mp3" } } },
+      { sceneSplit: { sourceAssetId: video.id.toString(), lastInput: { source_asset_id: video.id.toString(), granularity: "coarse" } } },
+      { smartMatting: { sourceAssetId: video.id.toString(), lastInput: { source_asset_id: video.id.toString() } } },
+      { videoSubtitleErase: { sourceAssetId: video.id.toString(), lastInput: { source_asset_id: video.id.toString() } } },
+      { audioTrim: { sourceAssetId: audio.id.toString(), lastInput: { source_asset_id: audio.id.toString(), output_format: "mp3" } } },
+      { audioSpeed: { sourceAssetId: audio.id.toString(), lastInput: { source_asset_id: audio.id.toString(), speed: 1.2 } } },
+      { vocalSplit: { sourceAssetId: audio.id.toString(), lastInput: { source_asset_id: audio.id.toString(), scene: "vocal", output_format: "mp3" } } },
+      { audioVideoMux: { sourceAssetId: audio.id.toString(), sourceNodeId: "source-audio", reserveAudio: true, sync: "none", video: { assetId: video.id.toString(), src: video.url, name: "绑定视频" } } },
+    ];
+    const nodes = [
+      { id: "control-video", type: "mediaNode", data: { assetId: video.id.toString(), src: video.url, srcH264: fallback.url, mediaType: "video" } },
+      ...tools.map((tool, i) => ({ id: `tool-${i}`, type: "mediaNode", data: { draft: true, genStatus: "draft", ...tool } })),
+      { id: "control-text", type: "textNode", data: { text: "参考 https://example.com/help?assetId=999999999", html: '<a href="https://example.com/help">普通链接</a>' } },
+      { id: "control-product", type: "productNode", data: { images: [{ id: "gallery-image", src: image.url, assetId: image.id.toString(), enabled: true }] } },
+      { id: "control-reference", type: "assetNode", data: { initialRefs: [{ id: "gallery-video", src: video.url, assetId: video.id.toString(), type: "video" }], voice: { name: "音色", src: audio.url } } },
+    ];
+    const body = { ...payload, nodes: JSON.stringify(nodes) };
+    const id = "04e0b9cc-04dd-45ad-930b-3c0000000014";
+    const beforeJobs = await prisma.client.generation_jobs.count();
+    const beforeReservations = await prisma.client.cost_reservations.count();
+    const response = await request("PUT", id, body);
+    expect(response.status).toBe(200);
+    const complete = await response.json();
+    expect(complete.data.stage).toBe("complete");
+    const snapshot = await (await fetch(`${base}/api/projects/${complete.data.targetProjectId}/snapshot`)).json();
+    expect(JSON.parse(snapshot.data.canvas.nodes)).toEqual(nodes);
+    for (const asset of assets) expect(snapshot.data.assets[asset.id.toString()].access_url).toBe(asset.url);
+    for (const asset of assets) {
+      await prisma.client.assets.update({ where: { id: asset.id }, data: { user_id: 983004n } });
+      try {
+        const revoked = await request("GET", id);
+        expect(revoked.status).toBe(422);
+        const error = await revoked.json();
+        expect(error.data.reason).toBe("local_recovery_assets_unavailable");
+        expect(JSON.stringify(error)).not.toContain(asset.url);
+        expect((await request("PUT", id, body)).status).toBe(422);
+      } finally {
+        await prisma.client.assets.update({ where: { id: asset.id }, data: { user_id: 983003n } });
+      }
+    }
+    expect((await (await request("GET", id)).json()).data.stage).toBe("complete");
+    expect(await prisma.client.generation_jobs.count()).toBe(beforeJobs);
+    expect(await prisma.client.cost_reservations.count()).toBe(beforeReservations);
+  });
+
   it("素材缺失时列出缺项且不创建部分恢复项目", async () => {
     const before = await (await fetch(`${base}/api/projects`)).json();
     const response = await request("PUT", "04e0b9cc-04dd-45ad-930b-3c0000000002", {
