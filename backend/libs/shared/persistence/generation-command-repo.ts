@@ -9,6 +9,7 @@ import {
   promptPlanSnapshotSchema,
   toGenerationParamCheckInput,
   type RecoveryErrorEnvelope,
+  type VideoMode,
 } from "@lib/contracts";
 import type { Prisma, PrismaClient } from "@prisma/client";
 
@@ -500,13 +501,16 @@ export function createGenerationCommandRepo(
             : readInputCount(original.input);
 
         const input = (original.input ?? {}) as Record<string, unknown>;
+        const sceneParameters = original.source === "scene_card" &&
+          typeof input.parameters === "object" && input.parameters !== null && !Array.isArray(input.parameters)
+          ? input.parameters : null;
+        const retryParameters: Record<string, unknown> = sceneParameters ? { ...sceneParameters, ...input } : input;
         const capability = original.type === "video" || billing
           ? (await createModelCapabilityRepo(prisma).listEnabledByType(original.type))
-              .find((model) => model.model_id === input.model_id)
+              .find((model) => model.model_id === retryParameters.model_id)
           : undefined;
         if (original.type === "video") {
-          const mode = normalizeVideoMode(input.video_mode ?? input.video_task_type);
-          const params = toGenerationParamCheckInput(input);
+          const params = toGenerationParamCheckInput(retryParameters);
           const references = (input.references ?? input.reference_materials ?? []) as Array<{
             role?: string; type: "image" | "video" | "audio"; duration?: number;
           }>;
@@ -519,10 +523,24 @@ export function createGenerationCommandRepo(
               ? [{ type: asset.type, ...(asset.duration !== null ? { duration: asset.duration } : {}) }]
               : []),
           ];
+          let legacySceneMode: VideoMode | null = null;
+          if (sceneParameters &&
+            input.video_mode === undefined && input.video_task_type === undefined &&
+            input.omni_reference_task_type_allowed === undefined &&
+            ordinaryReferences.every((reference) => reference.type === "image")) {
+            if (input.reference_mode === "first_and_last_frame" && input.first_frame_asset_id && input.last_frame_asset_id && ordinaryReferences.length === 0) {
+              legacySceneMode = "first_last_frame";
+            } else if (input.reference_mode === "first_frame" && input.first_frame_asset_id && !input.last_frame_asset_id && ordinaryReferences.length === 0) {
+              legacySceneMode = "first_frame";
+            } else if (input.reference_mode === "text_to_video" && !input.first_frame_asset_id && !input.last_frame_asset_id) {
+              legacySceneMode = ordinaryReferences.length > 0 ? "image_reference" : "text2video";
+            }
+          }
+          const mode = normalizeVideoMode(input.video_mode ?? input.video_task_type) ?? legacySceneMode;
           if (
             !capability || !mode || !params || params.duration === undefined ||
-            typeof input.omni_reference_task_type_allowed !== "boolean" ||
-            input.omni_reference_task_type_allowed !== capability.features.omni_reference_task_type ||
+            (!legacySceneMode && (typeof input.omni_reference_task_type_allowed !== "boolean" ||
+              input.omni_reference_task_type_allowed !== capability.features.omni_reference_task_type)) ||
             !hasModeConstraint(capability.features.task_types, mode) ||
             checkGenerationParamLimit({ ...capability, task_types: capability.features.task_types }, { ...params, mode }) ||
             checkReferenceLimits(capability.features, ordinaryReferences, "video", mode)
@@ -590,7 +608,7 @@ export function createGenerationCommandRepo(
                 ? "generate_audio"
                 : "generate_image",
         };
-        const retryModelId = String(retryInput.input.model_id ?? "");
+        const retryModelId = String(retryParameters.model_id ?? "");
         let ruleSnapshot: string | undefined;
         if (billing) {
           ruleSnapshot = serializePricingRule(capability);
@@ -599,7 +617,7 @@ export function createGenerationCommandRepo(
           commandId: retryInput.actionIdentity,
           modelId: retryModelId,
           taskType: original.type,
-          input: retryInput.input,
+          input: retryParameters,
           ...(ruleSnapshot !== undefined ? { ruleSnapshot } : {}),
         };
         if (billing) {
