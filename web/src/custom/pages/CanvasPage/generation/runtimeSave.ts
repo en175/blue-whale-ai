@@ -3,7 +3,7 @@ import type { LedgerEntry } from './types';
 import { TARGET_OUTPUT_KEY, type RuntimeContext } from './runtimeState';
 
 export function createSave(ctx: RuntimeContext) {
-  const { host, ledger, reconciledSubmissions, unavailableOutputItems, intents, newId, readMarker, setLedger } = ctx;
+  const { host, ledger, reconciledSubmissions, unavailableOutputItems, intents, newId, readMarker, setLedger, removedOutputs } = ctx;
 
   const composeSaveFields = (): { commandId: string; recoveryChanges: RecoveryChange[] } | null => {
     const changes: RecoveryChange[] = [];
@@ -53,6 +53,7 @@ export function createSave(ctx: RuntimeContext) {
         revision: change.revision,
         ...(change.nodeBindingRevision > 0 ? { nodeBindingRevision: change.nodeBindingRevision } : {}),
       });
+      removedOutputs.delete(entry.nodeId);
       if (entry.outputKey === TARGET_OUTPUT_KEY && (change.state === 'present' || change.state === 'replaced')) {
         intents.delete(entry.submissionId);
       }

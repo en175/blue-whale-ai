@@ -253,6 +253,80 @@ describe('IKJLXF 可信产物恢复', () => {
     expect(kit.runtime.composeSaveFields()).toBeNull();
   });
 
+  const persistedRecord = (): GenerationRecoveryRecord => {
+    const record = sourceRecord();
+    record.items = [
+      { ...record.items[0]!, state: 'replaced', revision: 1 },
+      { ...record.items[1]!, state: 'present', revision: 1, node_binding_revision: 1, asset_deleted: true },
+      { ...record.items[2]!, state: 'present', revision: 1, node_binding_revision: 1, asset_deleted: false },
+    ];
+    return record;
+  };
+  const segmentCardNode = (key: 'segment:1' | 'segment:2', assetId: string): RuntimeNodeView => ({
+    id: resultNode(key), type: 'mediaNode', position: { x: 0, y: 0 },
+    data: {
+      assetId, src: `https://example.test/${assetId}.mp4`,
+      generationRecovery: { protocolVersion: 1, submissionId: SUBMISSION, outputKey: key },
+    },
+  });
+
+  it('IKNCKQ 恢复响应前运行时删除已持久化软删段卡：响应到达后仍生成该结果 remove', async () => {
+    const kit = setup(persistedRecord(), fullDetail(), [
+      segmentCardNode('segment:1', '950171'), segmentCardNode('segment:2', '950172'),
+    ]);
+    expect(kit.runtime.remove(resultNode('segment:1'))).toBe(true);
+    await kit.recover();
+    await kit.recover();
+    expect(kit.runtime.composeSaveFields()?.recoveryChanges).toEqual([
+      { recoveryItemId: itemId('segment:1'), expectedRevision: 1, action: 'remove' },
+    ]);
+  });
+
+  it('IKNCKQ 恢复响应前同笔再删一张软删段卡：两项 remove 同时生成', async () => {
+    const record = persistedRecord();
+    record.items[2]!.asset_deleted = true;
+    const kit = setup(record, fullDetail(), [
+      segmentCardNode('segment:1', '950171'), segmentCardNode('segment:2', '950172'),
+    ]);
+    expect(kit.runtime.remove(resultNode('segment:1'))).toBe(true);
+    expect(kit.runtime.remove(resultNode('segment:2'))).toBe(true);
+    await kit.recover();
+    expect(kit.runtime.composeSaveFields()?.recoveryChanges).toEqual([
+      { recoveryItemId: itemId('segment:1'), expectedRevision: 1, action: 'remove' },
+      { recoveryItemId: itemId('segment:2'), expectedRevision: 1, action: 'remove' },
+    ]);
+  });
+
+  it('IKNCKQ 对照：先完成恢复再删除软删段卡，仍生成 remove', async () => {
+    const kit = setup(persistedRecord(), fullDetail(), [
+      segmentCardNode('segment:1', '950171'), segmentCardNode('segment:2', '950172'),
+    ]);
+    await kit.recover();
+    expect(kit.runtime.remove(resultNode('segment:1'))).toBe(true);
+    expect(kit.runtime.composeSaveFields()?.recoveryChanges).toEqual([
+      { recoveryItemId: itemId('segment:1'), expectedRevision: 1, action: 'remove' },
+    ]);
+  });
+
+  it('IKNCKQ 加载前就缺失的软删结果未显式删除：不生成 remove', async () => {
+    const kit = setup(persistedRecord(), fullDetail(), [segmentCardNode('segment:2', '950172')]);
+    await kit.recover();
+    expect(kit.runtime.composeSaveFields()).toBeNull();
+  });
+
+  it.each(['marker', 'asset'] as const)('IKNCKQ %s 身份与恢复项不符的卡先删：不自动声明 remove', async mismatch => {
+    const card = segmentCardNode('segment:1', '950171');
+    if (mismatch === 'marker') {
+      card.data.generationRecovery = { protocolVersion: 1, submissionId: 'other-submission', outputKey: 'segment:1' };
+    } else {
+      card.data.assetId = '999999';
+    }
+    const kit = setup(persistedRecord(), fullDetail(), [card]);
+    expect(kit.runtime.remove(resultNode('segment:1'))).toBe(true);
+    await kit.recover();
+    expect(kit.runtime.composeSaveFields()).toBeNull();
+  });
+
   it('用户再次恢复时全量产物已可用，正常转换不受先前缺产物抑制影响', async () => {
     const detail = deletedOutputDetail();
     const kit = setup(sourceRecord(), detail);

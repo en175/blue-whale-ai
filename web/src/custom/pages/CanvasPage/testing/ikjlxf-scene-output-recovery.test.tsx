@@ -74,6 +74,28 @@ const settleRecovery = async () => {
 const edgePairs = () => (flowProps.current.edges as Array<{ source: string; target: string }>)
   .map(edge => ({ source: edge.source, target: edge.target }));
 const nodeSnapshots = () => mediaNodes().map(node => ({ id: node.id, position: node.position, data: node.data }));
+const putWithRemovedReceipt = () => {
+  recoveryApi.put.mockImplementation(async (_project: string, _payload: unknown, _version: number, recovery: {
+    commandId: string; recoveryChanges: Array<{ recoveryItemId: string; action: string }>;
+  }) => ({
+    project_id: 'p1', version: 4, recoveryReceipt: { commandId: recovery.commandId, replayed: false,
+      changes: recovery.recoveryChanges.map(change => ({ recoveryItemId: change.recoveryItemId,
+        revision: 2, nodeBindingRevision: 1, state: change.action === 'remove' ? 'removed' : 'present' })),
+    },
+  }));
+};
+const savedSceneAfterRemove = (record: GenerationRecoveryRecord) => {
+  const savedNodes = JSON.parse(JSON.stringify(mediaNodes().map(node => ({
+    id: node.id, type: node.type ?? 'mediaNode', position: node.position, data: node.data,
+  }))));
+  const savedEdges = edgePairs().map((edge, index) => ({ id: `saved-edge-${index}`, ...edge }));
+  const savedPage = { records: [{ ...structuredClone(record), items: [
+    structuredClone(record.items[0]!),
+    { ...structuredClone(record.items[1]!), state: 'removed' as const, revision: 2 },
+    structuredClone(record.items[2]!),
+  ] }] };
+  return { savedNodes, savedEdges, savedPage };
+};
 const expectSceneCardsIntact = (scene: RecoveryScene) => {
   const actual = nodeSnapshots();
   expect(actual).toHaveLength(scene.nodes.length);
@@ -399,14 +421,7 @@ describe('IKNBU9 已软删结果卡的显式删除与保存', () => {
   };
 
   it('页面删除入口删掉软删段卡：同笔保存携带 remove，刷新重开不复活也不动存活结果', async () => {
-    recoveryApi.put.mockImplementation(async (_project: string, _payload: unknown, _version: number, recovery: {
-      commandId: string; recoveryChanges: Array<{ recoveryItemId: string; action: string }>;
-    }) => ({
-      project_id: 'p1', version: 4, recoveryReceipt: { commandId: recovery.commandId, replayed: false,
-        changes: recovery.recoveryChanges.map(change => ({ recoveryItemId: change.recoveryItemId,
-          revision: 2, nodeBindingRevision: 1, state: change.action === 'remove' ? 'removed' : 'present' })),
-      },
-    }));
+    putWithRemovedReceipt();
     const scene = persistedScene();
     seedScene(scene);
     recoveryApi.page.current = structuredClone(scene.page);
@@ -428,16 +443,7 @@ describe('IKNBU9 已软删结果卡的显式删除与保存', () => {
     expect(document.body.textContent).not.toContain('recovery_protocol_required');
     expectSurvivorsIntact();
 
-    const savedNodes = JSON.parse(JSON.stringify(mediaNodes().map(node => ({
-      id: node.id, type: node.type ?? 'mediaNode', position: node.position, data: node.data,
-    }))));
-    const savedEdges = edgePairs().map((edge, index) => ({ id: `saved-edge-${index}`, ...edge }));
-    const record = scene.page.records[0]!;
-    const savedPage = { records: [{ ...structuredClone(record), items: [
-      structuredClone(record.items[0]!),
-      { ...structuredClone(record.items[1]!), state: 'removed' as const, revision: 2 },
-      structuredClone(record.items[2]!),
-    ] }] };
+    const { savedNodes, savedEdges, savedPage } = savedSceneAfterRemove(scene.page.records[0]!);
 
     for (let refresh = 0; refresh < 3; refresh += 1) {
       await unmountPage();
@@ -455,14 +461,7 @@ describe('IKNBU9 已软删结果卡的显式删除与保存', () => {
   });
 
   it('同笔再删一张存活段卡：两项 remove 同时提交，软删段不被自动声明删除', async () => {
-    recoveryApi.put.mockImplementation(async (_project: string, _payload: unknown, _version: number, recovery: {
-      commandId: string; recoveryChanges: Array<{ recoveryItemId: string; action: string }>;
-    }) => ({
-      project_id: 'p1', version: 4, recoveryReceipt: { commandId: recovery.commandId, replayed: false,
-        changes: recovery.recoveryChanges.map(change => ({ recoveryItemId: change.recoveryItemId,
-          revision: 2, nodeBindingRevision: 1, state: change.action === 'remove' ? 'removed' : 'present' })),
-      },
-    }));
+    putWithRemovedReceipt();
     const scene = persistedScene();
     seedScene(scene);
     recoveryApi.page.current = structuredClone(scene.page);
@@ -479,5 +478,73 @@ describe('IKNBU9 已软删结果卡的显式删除与保存', () => {
     expect(recoveryApi.put.mock.calls[0]![3].recoveryChanges.map((change: { action: string }) => change.action))
       .toEqual(['remove', 'remove']);
     expect(mediaNodes().map(node => node.id)).toEqual([SOURCE]);
+  });
+
+  const delayRecovery = () => {
+    let release: (page: unknown) => void = () => {};
+    const pending = new Promise((resolve) => { release = resolve; });
+    recoveryApi.fetch.mockImplementation(() => pending);
+    return (page: unknown) => release(page);
+  };
+  const releasePage = (scene: RecoveryScene) => ({
+    protocol_version: 1, canvas_version: 3, next_cursor: null, ...structuredClone(scene.page),
+  });
+
+  it('IKNCKQ 恢复响应未返回时页面删除软删段卡：迟到响应后同笔携带 remove，不回落普通保存', async () => {
+    putWithRemovedReceipt();
+    const release = delayRecovery();
+    const scene = persistedScene();
+    seedScene(scene);
+    recoveryApi.page.current = structuredClone(scene.page);
+    apiMocks.fetchJobStatus.mockResolvedValue(structuredClone(scene.detail));
+
+    await renderPage();
+    await act(async () => { await vi.waitFor(() => expect(recoveryApi.fetch).toHaveBeenCalled()); });
+    await act(async () => { flowProps.current.onDeleteNode([segmentCard(1)]); });
+    expect(mediaNodes().map(node => node.id).sort()).toEqual([SOURCE, segmentCard(2)].sort());
+    expect(recoveryApi.put).not.toHaveBeenCalled();
+
+    await act(async () => { release(releasePage(scene)); });
+    await act(async () => { await vi.waitFor(() => expect(recoveryApi.put).toHaveBeenCalled(), { timeout: 3000 }); });
+
+    expect(recoveryApi.put.mock.calls[0]![3].recoveryChanges).toEqual([
+      { recoveryItemId: `gcr:${SUB}:segment:1`, expectedRevision: 1, action: 'remove' },
+    ]);
+    expect(apiMocks.saveCanvasDoc).not.toHaveBeenCalled();
+    expectSurvivorsIntact();
+
+    const { savedNodes, savedEdges, savedPage } = savedSceneAfterRemove(scene.page.records[0]!);
+
+    for (let refresh = 0; refresh < 3; refresh += 1) {
+      await unmountPage();
+      apiMocks.fetchJobStatus.mockClear();
+      recoveryApi.fetch.mockClear();
+      recoveryApi.put.mockClear();
+      recoveryApi.page.current = structuredClone(savedPage);
+      seedScene({ nodes: savedNodes, edges: savedEdges });
+      await renderPage();
+      await settleRecovery();
+      expect(recoveryApi.put).not.toHaveBeenCalled();
+      expectSurvivorsIntact();
+    }
+  });
+
+  it('IKNCKQ 卡片加载前已缺失且无显式删除：迟到响应不生成 remove，也不删卡或复活', async () => {
+    putWithRemovedReceipt();
+    const release = delayRecovery();
+    const scene = persistedScene();
+    seedScene({ nodes: scene.nodes.filter(node => node.id !== segmentCard(1)), edges: [
+      { id: 'edge-source-2', source: SOURCE, target: segmentCard(2) },
+    ] });
+    recoveryApi.page.current = structuredClone(scene.page);
+    apiMocks.fetchJobStatus.mockResolvedValue(structuredClone(scene.detail));
+
+    await renderPage();
+    await act(async () => { await vi.waitFor(() => expect(recoveryApi.fetch).toHaveBeenCalled()); });
+    await act(async () => { release(releasePage(scene)); });
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 1000)); });
+
+    expect(recoveryApi.put).not.toHaveBeenCalled();
+    expect(mediaNodes().map(node => node.id).sort()).toEqual([SOURCE, segmentCard(2)].sort());
   });
 });

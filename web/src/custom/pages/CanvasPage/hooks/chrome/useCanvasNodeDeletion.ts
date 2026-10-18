@@ -96,6 +96,7 @@ export function useCanvasNodeDeletion(host: CanvasNodeDeletionHost): CanvasNodeD
     removedNodes.forEach((n) => {
       const src = (n.data as Record<string, unknown> | undefined)?.src;
       if (typeof src === 'string' && src.startsWith('blob:')) URL.revokeObjectURL(src);
+      generationRuntimeRef.current?.noteRemovedOutput(n.id, n.data as Record<string, unknown> | undefined);
     });
     const undoableNodes = removedNodes.filter((n) => {
       const src = (n.data as Record<string, unknown> | undefined)?.src;

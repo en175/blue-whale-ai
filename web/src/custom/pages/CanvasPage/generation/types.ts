@@ -29,14 +29,24 @@ export interface GenerationRecoveryMarker {
   outputKey: string;
 }
 
+export function isRecoveryOutputIdentity(
+  record: GenerationRecoveryRecord,
+  item: GenerationRecoveryItem,
+  marker: GenerationRecoveryMarker | null,
+  assetId: string | null,
+): boolean {
+  return marker != null && marker.submissionId === record.submission_id && marker.outputKey === item.output_key
+    && (item.asset_id == null || assetId === item.asset_id);
+}
+
 export function isRecoveryOutputOnCanvas(
   record: GenerationRecoveryRecord,
   item: GenerationRecoveryItem,
   node: RuntimeNodeView | null,
 ): boolean {
-  const marker = readMarker(node?.data);
-  return marker != null && marker.submissionId === record.submission_id && marker.outputKey === item.output_key
-    && (item.asset_id == null || String(node?.data.assetId) === item.asset_id);
+  return isRecoveryOutputIdentity(
+    record, item, readMarker(node?.data), node?.data.assetId == null ? null : String(node.data.assetId),
+  );
 }
 
 export function readMarker(data: Record<string, unknown> | undefined): GenerationRecoveryMarker | null {
@@ -203,6 +213,7 @@ export interface GenerationRuntime {
   retry(nodeId: string, options?: SubmitOptions): boolean;
   cancel(nodeId: string): boolean;
   remove(nodeId: string): boolean;
+  noteRemovedOutput(nodeId: string, nodeData: Record<string, unknown> | undefined): void;
   recover(projectId: string): Promise<void>;
   resumeFromHydration(
     nodeId: string, jobId: string, nodeData?: Record<string, unknown>,

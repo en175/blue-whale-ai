@@ -1,14 +1,14 @@
 import type { GenerationRecoveryRecord } from '@/custom/api/canvasRecovery';
 import type { JobDetail } from '@/custom/api/jobs';
 import {
-  isJobInFlight, isRecoveryOutputOnCanvas, type GenerationTaskDefinition, type RecoveryRecordFacts,
+  isJobInFlight, isRecoveryOutputIdentity, isRecoveryOutputOnCanvas, type GenerationTaskDefinition, type RecoveryRecordFacts,
 } from './types';
 import { TARGET_OUTPUT_KEY, type ActiveExecution, type RuntimeContext } from './runtimeState';
 
 export function createRecovery(ctx: RuntimeContext, polling: { poll: (execution: ActiveExecution, jobId: string) => void; fanOutOutputs: (execution: ActiveExecution, submissionId: string, jobId: string, knownDetail?: JobDetail, knownRecord?: GenerationRecoveryRecord) => Promise<void> }) {
   const {
     host, doResolveItems, active, ledger, reconciledSubmissions, nodeBindings, boundJobIds,
-    nextRound, readMarker, defForNode, defForRecord, owns, clearTimer, setLedger,
+    nextRound, readMarker, defForNode, defForRecord, owns, clearTimer, setLedger, removedOutputs,
   } = ctx;
   const { fanOutOutputs } = polling;
 
@@ -51,8 +51,13 @@ export function createRecovery(ctx: RuntimeContext, polling: { poll: (execution:
         > (targetItem?.node_binding_revision ?? record.binding_revision);
     const appliedOnCanvas = (item: GenerationRecoveryRecord['items'][number]): boolean =>
       isRecoveryOutputOnCanvas(record, item, host.findNode(item.node_id));
+    const explicitlyRemoved = (item: GenerationRecoveryRecord['items'][number]): boolean => {
+      const removed = removedOutputs.get(item.node_id);
+      return removed != null && isRecoveryOutputIdentity(record, item, removed.marker, removed.assetId);
+    };
     for (const item of record.items) {
-      if (item.asset_deleted === true && !(item.state === 'present' && appliedOnCanvas(item))) continue;
+      if (item.asset_deleted === true
+        && !(item.state === 'present' && (appliedOnCanvas(item) || explicitlyRemoved(item)))) continue;
       setLedger({
         recoveryItemId: item.recovery_item_id,
         submissionId: record.submission_id,
