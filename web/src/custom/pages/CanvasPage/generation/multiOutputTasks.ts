@@ -13,7 +13,7 @@ import {
 } from '../tools/audio/vocalSplit';
 import type { VocalSplitTrackType } from '@lib/contracts/vocal-split';
 import { mediaContentBox } from '../components/MediaNode/mediaContentSize';
-import { isJobInFlight, readMarker } from './types';
+import { isJobInFlight, isRecoveryOutputOnCanvas } from './types';
 import type {
   CreateJobOutcome, FanoutCardPlan, FanoutContext, GenerationRuntimeHost,
   GenerationTaskDefinition, RecoveryCardPlan, TaskSubmissionInput,
@@ -165,12 +165,8 @@ function multiResultPlanRecovery(
 ): RecoveryCardPlan {
   const targetExists = host.findNode(record.target_node_id) != null;
   const jobStatus = record.job?.status;
-  const appliedOnCanvas = (item: GenerationRecoveryRecord['items'][number]) => {
-    const node = host.findNode(item.node_id);
-    const marker = readMarker(node?.data);
-    if (marker == null || marker.submissionId !== record.submission_id || marker.outputKey !== item.output_key) return false;
-    return item.asset_id == null || String(node?.data.assetId) === item.asset_id;
-  };
+  const appliedOnCanvas = (item: GenerationRecoveryRecord['items'][number]) =>
+    isRecoveryOutputOnCanvas(record, item, host.findNode(item.node_id));
   const pendingOutputs = record.items.filter(
     (item) => item.output_key !== TARGET_OUTPUT_KEY
       && item.asset_deleted !== true

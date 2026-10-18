@@ -1,6 +1,8 @@
 import type { GenerationRecoveryRecord } from '@/custom/api/canvasRecovery';
 import type { JobDetail } from '@/custom/api/jobs';
-import { isJobInFlight, type GenerationTaskDefinition, type RecoveryRecordFacts } from './types';
+import {
+  isJobInFlight, isRecoveryOutputOnCanvas, type GenerationTaskDefinition, type RecoveryRecordFacts,
+} from './types';
 import { TARGET_OUTPUT_KEY, type ActiveExecution, type RuntimeContext } from './runtimeState';
 
 export function createRecovery(ctx: RuntimeContext, polling: { poll: (execution: ActiveExecution, jobId: string) => void; fanOutOutputs: (execution: ActiveExecution, submissionId: string, jobId: string, knownDetail?: JobDetail, knownRecord?: GenerationRecoveryRecord) => Promise<void> }) {
@@ -47,8 +49,10 @@ export function createRecovery(ctx: RuntimeContext, polling: { poll: (execution:
           || (claiming.submissionId != null && claiming.submissionId !== record.submission_id)))))
       || (nodeBindings.get(record.target_node_id) ?? 0)
         > (targetItem?.node_binding_revision ?? record.binding_revision);
+    const appliedOnCanvas = (item: GenerationRecoveryRecord['items'][number]): boolean =>
+      isRecoveryOutputOnCanvas(record, item, host.findNode(item.node_id));
     for (const item of record.items) {
-      if (item.asset_deleted === true) continue;
+      if (item.asset_deleted === true && !(item.state === 'present' && appliedOnCanvas(item))) continue;
       setLedger({
         recoveryItemId: item.recovery_item_id,
         submissionId: record.submission_id,

@@ -29,6 +29,16 @@ export interface GenerationRecoveryMarker {
   outputKey: string;
 }
 
+export function isRecoveryOutputOnCanvas(
+  record: GenerationRecoveryRecord,
+  item: GenerationRecoveryItem,
+  node: RuntimeNodeView | null,
+): boolean {
+  const marker = readMarker(node?.data);
+  return marker != null && marker.submissionId === record.submission_id && marker.outputKey === item.output_key
+    && (item.asset_id == null || String(node?.data.assetId) === item.asset_id);
+}
+
 export function readMarker(data: Record<string, unknown> | undefined): GenerationRecoveryMarker | null {
   const marker = data?.generationRecovery;
   if (marker == null || typeof marker !== 'object') return null;

@@ -326,3 +326,158 @@ describe('IKNBKS 部分软删的恢复与保存接线', () => {
     }
   });
 });
+
+describe('IKNBU9 已软删结果卡的显式删除与保存', () => {
+  const SUB = '7c2d1e4b-0000-4000-8000-000000004419';
+  const SOURCE = 'source-9017';
+  const segmentCard = (index: number) => `generation-result:${SUB}:segment:${index}`;
+  const persistedScene = (): RecoveryScene => ({
+    page: { records: [{
+      submission_id: SUB, target_node_id: 'scene-deleted-target', job_id: '4400', task_type: 'video_scene_split',
+      binding_revision: 1, is_current: true,
+      job: { job_id: '4400', type: 'video_scene_split', status: 'succeeded', progress: 100,
+        output_asset_ids: ['9018', '9017'], stored_error: null, created_at: '2026-10-18T12:00:00.000Z' },
+      recovery_seed: {
+        target: { role: 'result-placeholder', x: 400, y: 120, width: 640, height: 480, name: '场景切分 · 标准' },
+        sources: [{ node_id: SOURCE, x: 60, y: 120, width: 320, height: 180, name: '源视频' }],
+      },
+      previous_target_snapshot: null,
+      items: [
+        { recovery_item_id: `gcr:${SUB}:$target`, output_key: '$target', node_id: 'scene-deleted-target',
+          state: 'replaced', revision: 1, node_binding_revision: 1, asset_id: null, asset_deleted: null, slot_id: null },
+        { recovery_item_id: `gcr:${SUB}:segment:1`, output_key: 'segment:1', node_id: segmentCard(1),
+          state: 'present', revision: 1, node_binding_revision: 1, asset_id: '9018', asset_deleted: true, slot_id: null },
+        { recovery_item_id: `gcr:${SUB}:segment:2`, output_key: 'segment:2', node_id: segmentCard(2),
+          state: 'present', revision: 1, node_binding_revision: 1, asset_id: '9017', asset_deleted: false, slot_id: null },
+      ],
+    }] },
+    detail: {
+      job_id: '4400', status: 'succeeded', progress: 100, asset: null,
+      output_assets: [
+        { id: '9018', url: 'https://example.test/9018.mp4', type: 'video' },
+        { id: '9017', url: 'https://example.test/9017.mp4', type: 'video' },
+      ],
+      result: { duration: 30, segments: [
+        { segment_index: 1, start_time: 0, end_time: 15, segment_asset_id: '9018' },
+        { segment_index: 2, start_time: 15, end_time: 30, segment_asset_id: '9017' },
+      ] },
+    },
+    nodes: [
+      { id: SOURCE, type: 'mediaNode', position: { x: 60, y: 120 }, data: {
+        assetId: '9016', src: 'https://example.test/9016.mp4', mediaType: 'video', fileName: '源视频', width: 320, height: 180 } },
+      { id: segmentCard(1), type: 'mediaNode', position: { x: 780, y: 120 }, data: {
+        assetId: '9018', src: 'https://example.test/9018.mp4', mediaType: 'video', fileName: '第 1 段 00:00-00:15',
+        width: 640, height: 480, generationRecovery: { protocolVersion: 1, submissionId: SUB, outputKey: 'segment:1' } } },
+      { id: segmentCard(2), type: 'mediaNode', position: { x: 1460, y: 120 }, data: {
+        assetId: '9017', src: 'https://example.test/9017.mp4', mediaType: 'video', fileName: '第 2 段 00:15-00:30',
+        width: 640, height: 480, generationRecovery: { protocolVersion: 1, submissionId: SUB, outputKey: 'segment:2' } } },
+    ],
+    edges: [
+      { id: 'edge-source-1', source: SOURCE, target: segmentCard(1) },
+      { id: 'edge-source-2', source: SOURCE, target: segmentCard(2) },
+    ],
+  });
+  const edgeKeys = () => edgePairs().map(edge => `${edge.source}->${edge.target}`).sort();
+  const persistedNodes = () => [SOURCE, segmentCard(2)].sort();
+  const expectSurvivorsIntact = () => {
+    const nodes = mediaNodes();
+    expect(nodes.map(node => node.id).sort()).toEqual(persistedNodes());
+    const byId = new Map(nodes.map(node => [node.id, node]));
+    expect(byId.get(SOURCE)).toMatchObject({
+      position: { x: 60, y: 120 },
+      data: { assetId: '9016', fileName: '源视频', width: 320, height: 180, mediaType: 'video' },
+    });
+    expect(byId.get(segmentCard(2))).toMatchObject({
+      position: { x: 1460, y: 120 },
+      data: {
+        assetId: '9017', src: 'https://example.test/9017.mp4', fileName: '第 2 段 00:15-00:30',
+        width: 640, height: 480, mediaType: 'video',
+        generationRecovery: { protocolVersion: 1, submissionId: SUB, outputKey: 'segment:2' },
+      },
+    });
+    expect(edgeKeys()).toEqual([`${SOURCE}->${segmentCard(2)}`]);
+  };
+
+  it('页面删除入口删掉软删段卡：同笔保存携带 remove，刷新重开不复活也不动存活结果', async () => {
+    recoveryApi.put.mockImplementation(async (_project: string, _payload: unknown, _version: number, recovery: {
+      commandId: string; recoveryChanges: Array<{ recoveryItemId: string; action: string }>;
+    }) => ({
+      project_id: 'p1', version: 4, recoveryReceipt: { commandId: recovery.commandId, replayed: false,
+        changes: recovery.recoveryChanges.map(change => ({ recoveryItemId: change.recoveryItemId,
+          revision: 2, nodeBindingRevision: 1, state: change.action === 'remove' ? 'removed' : 'present' })),
+      },
+    }));
+    const scene = persistedScene();
+    seedScene(scene);
+    recoveryApi.page.current = structuredClone(scene.page);
+    apiMocks.fetchJobStatus.mockResolvedValue(structuredClone(scene.detail));
+
+    await renderPage();
+    await settleRecovery();
+    expect(document.body.textContent).not.toContain(UNAVAILABLE);
+    expect(recoveryApi.put).not.toHaveBeenCalled();
+    expect(mediaNodes().map(node => node.id).sort()).toEqual([SOURCE, segmentCard(1), segmentCard(2)].sort());
+
+    await act(async () => { flowProps.current.onDeleteNode([segmentCard(1)]); });
+    await act(async () => { await vi.waitFor(() => expect(recoveryApi.put).toHaveBeenCalled(), { timeout: 3000 }); });
+
+    expect(recoveryApi.put.mock.calls[0]![3].recoveryChanges).toEqual([
+      { recoveryItemId: `gcr:${SUB}:segment:1`, expectedRevision: 1, action: 'remove' },
+    ]);
+    expect(recoveryApi.put.mock.calls[0]![1].nodes.map((node: { id: string }) => node.id).sort()).toEqual(persistedNodes());
+    expect(document.body.textContent).not.toContain('recovery_protocol_required');
+    expectSurvivorsIntact();
+
+    const savedNodes = JSON.parse(JSON.stringify(mediaNodes().map(node => ({
+      id: node.id, type: node.type ?? 'mediaNode', position: node.position, data: node.data,
+    }))));
+    const savedEdges = edgePairs().map((edge, index) => ({ id: `saved-edge-${index}`, ...edge }));
+    const record = scene.page.records[0]!;
+    const savedPage = { records: [{ ...structuredClone(record), items: [
+      structuredClone(record.items[0]!),
+      { ...structuredClone(record.items[1]!), state: 'removed' as const, revision: 2 },
+      structuredClone(record.items[2]!),
+    ] }] };
+
+    for (let refresh = 0; refresh < 3; refresh += 1) {
+      await unmountPage();
+      apiMocks.fetchJobStatus.mockClear();
+      recoveryApi.fetch.mockClear();
+      recoveryApi.put.mockClear();
+      recoveryApi.page.current = structuredClone(savedPage);
+      seedScene({ nodes: savedNodes, edges: savedEdges });
+      await renderPage();
+      await settleRecovery();
+      expect(document.body.textContent).not.toContain(UNAVAILABLE);
+      expect(recoveryApi.put).not.toHaveBeenCalled();
+      expectSurvivorsIntact();
+    }
+  });
+
+  it('同笔再删一张存活段卡：两项 remove 同时提交，软删段不被自动声明删除', async () => {
+    recoveryApi.put.mockImplementation(async (_project: string, _payload: unknown, _version: number, recovery: {
+      commandId: string; recoveryChanges: Array<{ recoveryItemId: string; action: string }>;
+    }) => ({
+      project_id: 'p1', version: 4, recoveryReceipt: { commandId: recovery.commandId, replayed: false,
+        changes: recovery.recoveryChanges.map(change => ({ recoveryItemId: change.recoveryItemId,
+          revision: 2, nodeBindingRevision: 1, state: change.action === 'remove' ? 'removed' : 'present' })),
+      },
+    }));
+    const scene = persistedScene();
+    seedScene(scene);
+    recoveryApi.page.current = structuredClone(scene.page);
+    apiMocks.fetchJobStatus.mockResolvedValue(structuredClone(scene.detail));
+
+    await renderPage();
+    await settleRecovery();
+    expect(recoveryApi.put).not.toHaveBeenCalled();
+    expect(mediaNodes().map(node => node.id).sort()).toEqual([SOURCE, segmentCard(1), segmentCard(2)].sort());
+
+    await act(async () => { flowProps.current.onDeleteNode([segmentCard(1), segmentCard(2)]); });
+    await act(async () => { await vi.waitFor(() => expect(recoveryApi.put).toHaveBeenCalled(), { timeout: 3000 }); });
+
+    expect(recoveryApi.put.mock.calls[0]![3].recoveryChanges.map((change: { action: string }) => change.action))
+      .toEqual(['remove', 'remove']);
+    expect(mediaNodes().map(node => node.id)).toEqual([SOURCE]);
+  });
+});

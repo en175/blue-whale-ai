@@ -1192,6 +1192,127 @@ describe.skipIf(!databaseUrl)("多结果任务逐项恢复与删除（IKJJQY）"
     }
   });
 
+  async function persistSceneWithSoftDeletedSegment(args: {
+    submissionId: string;
+    targetNode: string;
+    sourceAssetId: string;
+    assetIds: string[];
+    applyCommandId: string;
+  }) {
+    await prisma.assets.createMany({
+      data: args.assetIds.map((id, index) => ({
+        id: BigInt(id), user_id: BigInt(USER_ID), type: "video", url: `https://example.test/${id}.mp4`,
+        ...(index === 1 ? { is_delete: true, deleted_at: new Date() } : {}),
+      })),
+    });
+    const created = await acceptJob({
+      submissionId: args.submissionId, node: args.targetNode, revision: 0,
+      type: "video_scene_split",
+      input: { source_asset_id: args.sourceAssetId, target_node_id: args.targetNode, granularity: "standard" },
+    });
+    if (!("generation_job_id" in created)) throw new Error("受理失败");
+    await succeedSceneSplitJob(created.generation_job_id,
+      args.assetIds.map((assetId, index) => ({ index: index + 1, assetId })));
+    const segmentNode = (order: number) => markerNode(
+      multiResultNodeId(args.submissionId, `segment:${order}`), args.submissionId,
+      `segment:${order}`, args.assetIds[order - 1]!,
+    );
+    const source = { id: "source-iknbu9", type: "mediaNode", position: { x: 10, y: 20 }, data: { assetId: args.sourceAssetId } };
+    const record = (await listCanvasRecoveryPage(prisma, PROJECT_ID, 50, null))
+      .records.find(item => item.submission_id === args.submissionId)!;
+    const applied = await save({
+      commandId: args.applyCommandId, version: null,
+      nodes: [source, ...[1, 2, 3, 4].map(segmentNode)],
+      changes: [
+        { id: recoveryItemId(args.submissionId, TARGET_OUTPUT_KEY), rev: 1, action: "replaceTarget" },
+        ...record.items.filter(item => item.output_key !== TARGET_OUTPUT_KEY)
+          .map(item => ({ id: item.recovery_item_id, rev: item.revision, action: "apply" })),
+      ],
+    });
+    const items = (await listCanvasRecoveryPage(prisma, PROJECT_ID, 50, null))
+      .records.find(item => item.submission_id === args.submissionId)!.items;
+    return { source, segmentNode, applied, items };
+  }
+
+  it("★ 22. 已持久化的软删段卡：显式 remove 单独提交即可原子保存，其余结果与素材删除事实不变（IKNBU9）", async () => {
+    const ASSETS = ["9315", "9316", "9317", "9318"];
+    const { source, segmentNode, applied, items } = await persistSceneWithSoftDeletedSegment({
+      submissionId: UUID_A, targetNode: "scene-node-iknbu9", sourceAssetId: "9016",
+      assetIds: ASSETS, applyCommandId: UUID_D,
+    });
+    expect(items.map(item => [item.output_key, item.state, item.revision, item.asset_deleted])).toEqual([
+      [TARGET_OUTPUT_KEY, "replaced", 2, null],
+      ["segment:1", "present", 1, false],
+      ["segment:2", "present", 1, true],
+      ["segment:3", "present", 1, false],
+      ["segment:4", "present", 1, false],
+    ]);
+
+    const nodes = [source, segmentNode(1), segmentNode(3), segmentNode(4)];
+    const saved = await save({
+      commandId: UUID_E, version: applied.version, nodes,
+      changes: [{ id: recoveryItemId(UUID_A, "segment:2"), rev: 1, action: "remove" }],
+    });
+    expect(saved.recoveryReceipt.changes).toEqual([
+      expect.objectContaining({ recoveryItemId: recoveryItemId(UUID_A, "segment:2"), state: "removed", revision: 2 }),
+    ]);
+
+    const document = await createCanvasRepo(prisma).getByProject(PROJECT_ID);
+    expect(JSON.parse(document.nodes ?? "null")).toEqual(JSON.parse(JSON.stringify(nodes)));
+    expect(document.version).toBe(saved.version);
+
+    for (let refresh = 0; refresh < 3; refresh += 1) {
+      const readItems = (await listCanvasRecoveryPage(prisma, PROJECT_ID, 50, null))
+        .records.find(item => item.submission_id === UUID_A)!.items;
+      expect(readItems.map(item => [item.output_key, item.state, item.revision, item.asset_deleted])).toEqual([
+        [TARGET_OUTPUT_KEY, "replaced", 2, null],
+        ["segment:1", "present", 1, false],
+        ["segment:2", "removed", 2, true],
+        ["segment:3", "present", 1, false],
+        ["segment:4", "present", 1, false],
+      ]);
+      expect((await outputsOfSubmission(UUID_A)).map(row => [row.output_key, row.state, row.revision]))
+        .toEqual([["segment:1", "present", 1], ["segment:2", "removed", 2], ["segment:3", "present", 1], ["segment:4", "present", 1]]);
+      expect((await prisma.assets.findUnique({ where: { id: BigInt(ASSETS[1]!) } }))!.is_delete).toBe(true);
+    }
+  });
+
+  it("★ 23. 同笔再删一张存活段卡：两项 remove 原子提交，软删段不被自动声明删除（IKNBU9）", async () => {
+    const ASSETS = ["9415", "9416", "9417", "9418"];
+    const { source, segmentNode, applied, items } = await persistSceneWithSoftDeletedSegment({
+      submissionId: UUID_B, targetNode: "scene-node-iknbu9-pair", sourceAssetId: "9017",
+      assetIds: ASSETS, applyCommandId: UUID_C,
+    });
+    expect(items.find(item => item.output_key === "segment:2")).toMatchObject({ state: "present", revision: 1, asset_deleted: true });
+
+    const nodes = [source, segmentNode(1), segmentNode(4)];
+    const saved = await save({
+      commandId: UUID_F, version: applied.version, nodes,
+      changes: [
+        { id: recoveryItemId(UUID_B, "segment:2"), rev: 1, action: "remove" },
+        { id: recoveryItemId(UUID_B, "segment:3"), rev: 1, action: "remove" },
+      ],
+    });
+    const receiptByKey = new Map(saved.recoveryReceipt.changes.map(change => [
+      change.recoveryItemId.slice("gcr:".length + 37), change,
+    ]));
+    expect([...receiptByKey.keys()].sort()).toEqual(["segment:2", "segment:3"]);
+    expect(receiptByKey.get("segment:2")).toMatchObject({ state: "removed", revision: 2 });
+    expect(receiptByKey.get("segment:3")).toMatchObject({ state: "removed", revision: 2 });
+
+    const document = await createCanvasRepo(prisma).getByProject(PROJECT_ID);
+    expect(JSON.parse(document.nodes ?? "null").map((node: { id: string }) => node.id)).toEqual(nodes.map(node => node.id));
+    const readItems = (await listCanvasRecoveryPage(prisma, PROJECT_ID, 50, null))
+      .records.find(item => item.submission_id === UUID_B)!.items;
+    expect(readItems.map(item => [item.output_key, item.state, item.revision])).toEqual([
+      [TARGET_OUTPUT_KEY, "replaced", 2],
+      ["segment:1", "present", 1],
+      ["segment:2", "removed", 2],
+      ["segment:3", "removed", 2],
+      ["segment:4", "present", 1],
+    ]);
+  });
+
   it("★ 13. 伪造输出键 remove → 422（键必须在投影集内）", async () => {
     const created = await acceptJob({
       submissionId: UUID_A, node: "scene-node-9", revision: 0,
