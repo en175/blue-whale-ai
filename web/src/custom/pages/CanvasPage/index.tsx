@@ -865,7 +865,8 @@ export default function CanvasPage() {
     placeFileOnCanvas,
     handleAddTextNode,
   });
-  useCanvasHydration({
+  const { handleNodesMeasured } = useCanvasHydration({
+    graph,
     currentId,
     doc,
     snapshotAssets,
@@ -895,6 +896,7 @@ export default function CanvasPage() {
     setProductNodes,
     setAssetNodes,
     setEdges,
+    groupsRef,
     setGroups,
     setViewport,
     setSaveStatus,
@@ -1509,7 +1511,7 @@ export default function CanvasPage() {
         openAssetsPicker, setVideoAssetPickRole, setVideoAssetPickKind,
       }}
       groupActions={{
-        groups, handleCreateGroup, handleUngroup, handleDeleteGroup, handleDownloadGroupNodes,
+        groups, handleNodesMeasured, handleCreateGroup, handleUngroup, handleDeleteGroup, handleDownloadGroupNodes,
         handleGroupFrameDragStop, handleBringGroupToFront, handleConnectGroupToTarget,
         handleConnectGroupDrop, handleConnectSourceToGroup,
       }}

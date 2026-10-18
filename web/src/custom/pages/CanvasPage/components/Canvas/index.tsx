@@ -96,7 +96,8 @@ interface FlowCanvasProps {
   onPasteClipboard?: () => void;
   selectManyRequest?: { ids: string[]; ts: number } | null;
   groups?: CanvasGroup[];
-  onCreateGroup?: (nodes: Node[]) => void;
+  onCreateGroup?: (nodes: Node[], canvasNodes: Node[]) => void;
+  onNodesMeasured?: (nodes: Node[]) => void;
   onUngroupGroup?: (groupId: string) => void;
   onDeleteGroup?: (groupId: string) => void;
   onDownloadGroup?: (nodeIds: string[]) => void;
@@ -122,7 +123,7 @@ interface FlowCanvasProps {
   onUpdateGenerate?: (nodeId: string) => void;
 }
 
-function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNodes, productNodes, assetNodes, showEdges, edges, onEdgesChange, onConnect, onConnectStart, onConnectEnd, isValidConnection, viewport, onViewportChange, onViewportLive, onNodeDragStop, onDeleteNode, onNodeClick, onPaneClick, onSelectionChange, registerSpawnPosition, hideZoomControl, productPickResult, assetPickResult, selectRequest, selectManyRequest, onDuplicateSelected, onCopySelected, onPasteClipboard, groups, onCreateGroup, onUngroupGroup, onDeleteGroup, onDownloadGroup, onGroupFrameDragStop, onBringGroupToFront, onConnectGroupToTarget, onConnectGroupDrop, onConnectSourceToGroup, onPaneContextMenu, refPickActive, outpaintFrame, refPickMarkedIds, refPickBlockedIds, snapAlignmentEnabled, cropFrame, followToolbarLayer, onAnchoredOverlayDragHideChange, onUpdateGenerate }: FlowCanvasProps) {
+function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNodes, productNodes, assetNodes, showEdges, edges, onEdgesChange, onConnect, onConnectStart, onConnectEnd, isValidConnection, viewport, onViewportChange, onViewportLive, onNodeDragStop, onDeleteNode, onNodeClick, onPaneClick, onSelectionChange, registerSpawnPosition, hideZoomControl, productPickResult, assetPickResult, selectRequest, selectManyRequest, onDuplicateSelected, onCopySelected, onPasteClipboard, groups, onCreateGroup, onNodesMeasured, onUngroupGroup, onDeleteGroup, onDownloadGroup, onGroupFrameDragStop, onBringGroupToFront, onConnectGroupToTarget, onConnectGroupDrop, onConnectSourceToGroup, onPaneContextMenu, refPickActive, outpaintFrame, refPickMarkedIds, refPickBlockedIds, snapAlignmentEnabled, cropFrame, followToolbarLayer, onAnchoredOverlayDragHideChange, onUpdateGenerate }: FlowCanvasProps) {
   const { isPanning: isDrag, onMouseDownCapture, onClickCapture } = useCanvasPan(toolMode);
   const nodesRef = useRef<Node[]>([]);
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
@@ -229,7 +230,15 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
     [],
   );
   const edgeTypes: EdgeTypes = useMemo(() => ({ custom: CustomEdge }), []);
-  const { setCenter, setViewport, screenToFlowPosition } = useReactFlow();
+  const { setCenter, setViewport, screenToFlowPosition, getNodes } = useReactFlow();
+  const onNodesMeasuredRef = useRef(onNodesMeasured);
+  onNodesMeasuredRef.current = onNodesMeasured;
+  useEffect(() => {
+    const contentNodes = getNodes().filter((node) => node.type !== 'groupFrame');
+    if (contentNodes.length > 0 && contentNodes.every((node) => node.measured?.width != null && node.measured.height != null)) {
+      onNodesMeasuredRef.current?.(contentNodes);
+    }
+  }, [nodes, getNodes]);
   const onViewportChangeRef = useRef(onViewportChange);
   onViewportChangeRef.current = onViewportChange;
   const onViewportLiveRef = useRef(onViewportLive);
@@ -724,7 +733,7 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
           e.preventDefault();
           e.stopPropagation();
           const selected = nodesRef.current.filter((n) => n.selected);
-          if (selected.length >= MIN_GROUP_MEMBERS) onCreateGroupRef.current?.(selected);
+          if (selected.length >= MIN_GROUP_MEMBERS) onCreateGroupRef.current?.(selected, getNodes());
           return;
         }
         if (key === 'a' && !isEditableKeyboardTarget(e.target)) {
@@ -871,7 +880,7 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
           <GroupOverlay
             nodes={nodes}
             groups={groups}
-            onCreateGroup={onCreateGroup ?? (() => {})}
+            onCreateGroup={(selected) => onCreateGroup?.(selected, getNodes())}
             onUngroup={onUngroupGroup ?? (() => {})}
             onDeleteGroup={onDeleteGroup ?? (() => {})}
             onDownloadNodes={onDownloadGroup ?? (() => {})}
@@ -910,7 +919,7 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
   );
 }
 
-export default function FlowCanvas({ showMiniMap, toolMode, extraNodes, textNodes, mediaNodes, productNodes, assetNodes, showEdges, edges, onEdgesChange, onConnect, onConnectStart, onConnectEnd, isValidConnection, viewport, onViewportChange, onViewportLive, onNodeDragStop, onDeleteNode, onNodeClick, onPaneClick, onSelectionChange, registerSpawnPosition, hideZoomControl, productPickResult, assetPickResult, selectRequest, selectManyRequest, onDuplicateSelected, onCopySelected, onPasteClipboard, groups, onCreateGroup, onUngroupGroup, onDeleteGroup, onDownloadGroup, onGroupFrameDragStop, onBringGroupToFront, onConnectGroupToTarget, onConnectGroupDrop, onConnectSourceToGroup, onPaneContextMenu, refPickActive, outpaintFrame, refPickMarkedIds, refPickBlockedIds, snapAlignmentEnabled, cropFrame, followToolbarLayer, onAnchoredOverlayDragHideChange, onUpdateGenerate }: FlowCanvasProps) {
+export default function FlowCanvas({ showMiniMap, toolMode, extraNodes, textNodes, mediaNodes, productNodes, assetNodes, showEdges, edges, onEdgesChange, onConnect, onConnectStart, onConnectEnd, isValidConnection, viewport, onViewportChange, onViewportLive, onNodeDragStop, onDeleteNode, onNodeClick, onPaneClick, onSelectionChange, registerSpawnPosition, hideZoomControl, productPickResult, assetPickResult, selectRequest, selectManyRequest, onDuplicateSelected, onCopySelected, onPasteClipboard, groups, onCreateGroup, onNodesMeasured, onUngroupGroup, onDeleteGroup, onDownloadGroup, onGroupFrameDragStop, onBringGroupToFront, onConnectGroupToTarget, onConnectGroupDrop, onConnectSourceToGroup, onPaneContextMenu, refPickActive, outpaintFrame, refPickMarkedIds, refPickBlockedIds, snapAlignmentEnabled, cropFrame, followToolbarLayer, onAnchoredOverlayDragHideChange, onUpdateGenerate }: FlowCanvasProps) {
   return (
     <ReactFlowProvider>
       <FlowCanvasInner
@@ -947,6 +956,7 @@ export default function FlowCanvas({ showMiniMap, toolMode, extraNodes, textNode
         onPasteClipboard={onPasteClipboard}
         groups={groups}
         onCreateGroup={onCreateGroup}
+        onNodesMeasured={onNodesMeasured}
         onUngroupGroup={onUngroupGroup}
         onDeleteGroup={onDeleteGroup}
         onDownloadGroup={onDownloadGroup}
