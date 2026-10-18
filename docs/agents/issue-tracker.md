@@ -40,6 +40,25 @@ Gitee 的两类标识符是脱节的，这是最易踩的陷阱：
 - **program_id**（项目 ID）：疑似变更时用 `list_programs` 查（按 `name`/`search` 命中 Blue-Whale-AI 项目）。根 issue 创建**必传**且非 0。不传（=0）会使工单游离于企业「项目管理」之外，同一 hook 会拦截。
 - **label 数字 ID**：`list_enterprise_labels` 查；`label_ids` 传逗号分隔的数字 ID（非名称）。标签长度 2–20、非特殊字符。
 
+## 父子工单类型映射
+
+提出拆分方案前，通过 MCP 读取父单实际 `issue_type.id`，按下表确定子单参数。这是本仓唯一的父子类型映射，创建、规格拆单和 wayfinder 共用。
+
+| 父单实际类型 | 子单 `issue_type_id` | 子单 `category` |
+| --- | --- | --- |
+| 缺陷 `1292682` | 缺陷 `1292682` | `bug` |
+| 需求 `1292681` | 任务 `1292680` | `task` |
+| 任务 `1292680` | 任务 `1292680` | `task` |
+
+发布前按顺序完成类型判定：
+
+1. 父单详情必须明确返回本表内的实际 `issue_type.id`，才可选子单类型。标题、正文、标签、粗状态和自然语言中的"任务"均不构成类型证据。
+2. 字段缺失或 ID 不在表中时，通过 MCP 补查父单详情和类型枚举。枚举只证明哪些类型可用，不能证明父单属于哪一种。
+3. 补查后仍无明确父单类型 ID，报告阻塞并停止发布。已有发布授权也不改变这一前置，不发送试探创建请求，不根据正文套用默认值。
+4. 类型明确后，按同表同时设置 `issue_type_id` 和 `category`。创建所需数字 ID 按 MCP schema 传数字，不传数字字符串；列表工具要求字符串的筛选字段仍按其 schema 传值。类型枚举和创建参数的 `category` 分别核对，不能将需求枚举中的 `feature` 直接当作创建参数。
+
+用户仍需确认拆分粒度、真实依赖和发布内容。已确认并授权发布后，直接按映射创建、补标签、回读并交付链接；选择已知映射不再请求"类型例外"，不重复开展无关源码研究或加载仍有效的材料。确需改变业务分类、父单类型或交付范围时，才请用户决定。不得为适配子单修改、关闭或重建父单，不能将一次平台报错泛化为所有父子项必须使用相同类型 ID。创建结果未知时按渠道规则先查询，不重放创建。
+
 ## 操作约定
 
 - **工单正文**：本仓新建工单默认采用 [to-tickets](../../.agents/skills/to-tickets/SKILL.md) 的中文模板和发布前检查，包含 `unslop` 改写及信息核对，无需用户再次点名技能。正文格式以该技能为唯一权威。
@@ -49,8 +68,8 @@ Gitee 的两类标识符是脱节的，这是最易踩的陷阱：
   - **未点名** → 创建人即负责人（`assignee_id`=创建人 id），`collaborator_ids` 可空。
   - 点名负责人**且另有协作者** → 创建人也必须并入 `collaborator_ids`（Gitee 支持多协作者）。
 - **创建后核验**：用 `get_enterprise_issue_detail(new_ident)` 核对 `description` 非空、`project_id` 和 `program_id` 均与请求值一致、`assignee`/`collaborators` 与「创建归属标注」判定一致；子 issue 还要核对 `parent_id` 与父项 `id` 一致。再用 `list_enterprise_issues(project_id=<请求的仓库 ID>, search=new_ident)` 反查，确认目标仓库可见。字段不符或反查不到时，先修正并再次核验，全部通过后才交付。错名参数（如把描述传到 `body`）会被静默忽略，已踩坑建成空描述工单（IK5THP）；PR / Release 创建后也须回读关键字段。查询/回读一律用 get/list 类工具，**禁止为「确认结果」重放 create 类调用**——Gitee 对同名 PR 去重才未产生第二张（!964 实证），属侥幸不构成保证。
-- **创建子 issue（交 Agent）**：先 `get_enterprise_issue_detail(parent_ident)` 读父项，子项继承 `parent_id`/`project_id`/`program_id`，但 `issue_type_id` **一律用「任务」(1292680)**。子工单一律任务型，不继承父需求型（2026-08-25 定规）。**标题命名：`【<前端|后端>】<任务标题>`**（例：`【后端】画布视频节点提取音频（media_extract）`），`前端|后端` 标明改动归属端。跨端改动拆成前端/后端两个子任务，不建「子需求」。create 后 `update_enterprise_issue` 补 `ready-for-agent` label_ids，再按「创建后核验」检查父子关系、归属和仓库可见性；查不到则不交 Agent。
-  - **子任务，不是子需求**（2026-08-25 定规）：技术侧在产品建的需求工单下记录自己的工作时，只能建**任务**（`issue_type_id=1292680`），绝不能建「需求」型子项。父需求的业务验收归对应测试或产品负责；Agent 记录自己的工程交付，按状态权威核对父提测与逐票收口授权。
+- **创建子 issue（交 Agent）**：先 `get_enterprise_issue_detail(parent_ident)` 读父项，子项使用 `parent_id=父项.id`，继承 `project_id`/`program_id`，按[父子工单类型映射](#父子工单类型映射)选择 `issue_type_id` 和 `category`。**标题命名：`【<前端|后端>】<任务标题>`**（例：`【后端】画布视频节点提取音频（media_extract）`），`前端|后端` 标明改动归属端。跨端改动拆成前端/后端两个子项。create 后 `update_enterprise_issue` 补 `ready-for-agent` label_ids，再按「创建后核验」检查实际类型、父子关系、归属和仓库可见性；查不到则不交 Agent。
+  - 产品需求下的工程交付不建子需求，实际类型按同一映射选择。父需求的业务验收归对应测试或产品负责；Agent 记录自己的工程交付，按状态权威核对父提测与逐票收口授权。
   - **父工单正文的标题前缀（如「改造/维护/优化/修复」）不覆盖本条**：若父项要求分类前缀，仍以「端」为标题前缀（`【前端】/【后端】`），分类写进 body；不要为了迁就父项格式把 `issue_type` 改成需求型。
 - **读取**：`get_enterprise_issue_detail` 取详情；`list_enterprise_issue_comments(enterprise_id, issue_id)` 取评论。
 - **列出**：`list_enterprise_issues`，`state` 过滤（open/closed/rejected/progressing），`label_ids` 过滤（数字 ID）。粗状态仅用于检索分组，不用于业务阶段、完成或依赖解锁判断。
@@ -87,7 +106,7 @@ PR 创建成功后，保留业务状态，记录 PR 链接与验证证据，补 
 
 `to-spec`、`to-tickets`、`implement-spec` 的通用完成指令在本仓按下列职责执行，技能原文保持不变。
 
-- 产品规格的新父单为需求型，子单均为任务型。既有单先读实际类型与归属，沿用正确类型。发布规格和拆单属于规划交付，新单保留类型初始态，不走免业务测试路线结束产品父单。
+- 新功能规格的新父单为需求型，新缺陷规格的新父单为缺陷型；既有单保持已核对的实际类型与归属。子单按[父子工单类型映射](#父子工单类型映射)创建。发布规格和拆单属于规划交付，新单保留类型初始态，不走免业务测试路线结束产品父单。
 - 父规格的测试决策写整体用户行为、验收环境、验收负责人、默认随父验收安排和生产复验要求。
 - 子单在现有「验收标准」中写自身工程验证条件、对应父规格交付行为、业务验收归属。默认随父验收；独立验收例外明确范围与真实入口条件。
 - 「前置工单」写编号、标题、链接与解锁要求，兼容旧 `Blocked by`。同包工程、外部必须先入 release、验收或环境前置按 [集成分支工作流](integration-branch-workflow.md#工程依赖与任务图) 判断。
@@ -114,7 +133,7 @@ PR 创建成功后，保留业务状态，记录 PR 链接与验证证据，补 
 
 - **标签命名（Gitee 不支持冒号）**：`/wayfinder` 文本写 `wayfinder:map` / `wayfinder:<type>`（GitHub 习惯），Gitee 实测不支持冒号，本仓用连字符——map 标签 `wayfinder-map`；type 标签 `wayfinder-<type>` ∈ `wayfinder-research` / `wayfinder-prototype` / `wayfinder-grilling` / `wayfinder-task`。先在 Gitee「标签管理」建齐 5 个。
 - **Map**：`create_enterprise_issue(title=<map 名>, project_id=<仓库 id>, program_id=<项目 id>)`，紧跟 `update_enterprise_issue(label_ids=<wayfinder-map 数字 id>)`（labels 静默忽略）。body 填 Destination / Notes / Decisions-so-far / Not yet specified / Out of scope（模板见 `/wayfinder` SKILL.md）。
-- **Child ticket**：`create_enterprise_issue(parent_id=<map issue id>, project_id=<继承 map>, program_id=<继承 map>, issue_type_id=<任务 1292680>)`，紧跟 `update_enterprise_issue(label_ids=<对应 type 标签数字 id>)`。`<type>` ∈ research / prototype / grilling / task。继承流程见上「创建子 issue」。
+- **Child ticket**：`create_enterprise_issue(parent_id=<map issue id>, project_id=<继承 map>, program_id=<继承 map>, issue_type_id=<按父子工单类型映射>, category=<同表对应值>)`，紧跟 `update_enterprise_issue(label_ids=<对应 type 标签数字 id>)`。`<type>` ∈ research / prototype / grilling / task，仅表示 wayfinder 标签分类，不决定工作项实际类型。继承流程见上「创建子 issue」。
 - **Blocking**：Gitee MCP 没有原生阻塞关系；`create_enterprise_issue` 的 `link_issue_id` 只建立弱关联，创建时可传，update 没有对应参数。依赖写入正文“前置工单”章节，每项包含标题、编号和链接；兼容旧工单的 `Blocked by` 章节或 `Blocked by:` 行。逐项按 [工程依赖与任务图](integration-branch-workflow.md#工程依赖与任务图) 核对成果及解锁要求，不能以粗状态 `closed` 作为统一解锁条件；`link_issue_id=<blocker ident>` 可作为辅助关联。
 - **Frontier query**：按父查子，查询方法见“操作约定·查子工单”。排除归属未明确交接及任一声明前置未满足的子工单；兼容上述新旧依赖声明，按创建顺序取首个。
 - **Claim**：`update_enterprise_issue(issue_id=<ticket>, assignee_id=<自己 user id>)`。user id 用 `get_user_info` 查。开放未分配 = 未认领。**实质工作前先 claim**，避并发抢同一 ticket。
