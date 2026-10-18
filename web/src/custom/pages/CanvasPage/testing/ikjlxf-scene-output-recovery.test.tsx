@@ -193,4 +193,38 @@ describe('IKNB9B 服务端恢复事实驱动的刷新行为', () => {
       expectDeletedFactSettled();
     }
   });
+
+  it('任务 3416 与 3260 同页：连续三次挂载都不弹不可用警告，四张段卡与原任务卡原样保留', async () => {
+    const merged = {
+      page: { records: [
+        ...structuredClone(facts.scene3416.page.records),
+        ...structuredClone(facts.scene3260.page.records),
+      ] },
+      detail: structuredClone(facts.scene3416.detail),
+      nodes: [...structuredClone(facts.scene3416.nodes), ...structuredClone(facts.scene3260.nodes)],
+      edges: [...structuredClone(facts.scene3416.edges), ...structuredClone(facts.scene3260.edges)],
+    };
+    const expectCombinedSettled = () => {
+      expect(document.body.textContent).not.toContain(UNAVAILABLE);
+      expect(apiMocks.fetchJobStatus).not.toHaveBeenCalled();
+      expect(recoveryApi.put).not.toHaveBeenCalled();
+      expectSceneCardsIntact(merged);
+      const deletedSubmission = facts.scene3260.page.records[0]!.submission_id;
+      expect(mediaNodes().some(node => node.id.includes(deletedSubmission))).toBe(false);
+      expect(mediaNodes()[merged.nodes.length - 1]!.id).toBe('review5-scene-target');
+      expect(mediaNodes()[merged.nodes.length - 1]!.data.assetId).toBeUndefined();
+    };
+    recoveryApi.page.current = structuredClone(merged.page);
+    apiMocks.fetchJobStatus.mockResolvedValue(structuredClone(merged.detail));
+    seedScene(merged);
+    for (let refresh = 0; refresh < 3; refresh += 1) {
+      await renderPage();
+      await settleRecovery();
+      expectCombinedSettled();
+      await unmountPage();
+      apiMocks.fetchJobStatus.mockClear();
+      recoveryApi.fetch.mockClear();
+      recoveryApi.put.mockClear();
+    }
+  });
 });

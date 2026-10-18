@@ -166,8 +166,10 @@ function multiResultPlanRecovery(
   const targetExists = host.findNode(record.target_node_id) != null;
   const jobStatus = record.job?.status;
   const appliedOnCanvas = (item: GenerationRecoveryRecord['items'][number]) => {
-    const marker = readMarker(host.findNode(item.node_id)?.data);
-    return marker != null && marker.submissionId === record.submission_id && marker.outputKey === item.output_key;
+    const node = host.findNode(item.node_id);
+    const marker = readMarker(node?.data);
+    if (marker == null || marker.submissionId !== record.submission_id || marker.outputKey !== item.output_key) return false;
+    return item.asset_id == null || String(node?.data.assetId) === item.asset_id;
   };
   const pendingOutputs = record.items.filter(
     (item) => item.output_key !== TARGET_OUTPUT_KEY

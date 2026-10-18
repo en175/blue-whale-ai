@@ -1029,6 +1029,94 @@ describe.skipIf(!databaseUrl)("多结果任务逐项恢复与删除（IKJJQY）"
       .toEqual([["segment:2", "9016", "removed"]]);
   });
 
+  it("★ 19. 单段场景切分：输出行写入段资产，读取的软删事实随资产状态变化", async () => {
+    await prisma.assets.create({
+      data: { id: 8415n, user_id: BigInt(USER_ID), type: "video", url: "https://example.test/8415.mp4" },
+    });
+    const created = await acceptJob({
+      submissionId: UUID_A, node: "scene-node-single", revision: 0,
+      type: "video_scene_split",
+      input: { source_asset_id: "8166", target_node_id: "scene-node-single", granularity: "standard" },
+    });
+    if (!("generation_job_id" in created)) throw new Error("受理失败");
+    await succeedSceneSplitJob(created.generation_job_id, [{ index: 1, assetId: "8415" }]);
+    const readItems = async () => (await listCanvasRecoveryPage(prisma, PROJECT_ID, 50, null))
+      .records.find(item => item.submission_id === UUID_A)!.items
+      .map(item => [item.output_key, item.asset_id, item.asset_deleted]);
+    expect(await readItems()).toEqual([
+      [TARGET_OUTPUT_KEY, null, null],
+      ["segment:1", "8415", false],
+    ]);
+    const source = { id: "source-8166", type: "mediaNode", position: { x: 100, y: 200 }, data: { assetId: "8166" } };
+    await save({
+      commandId: UUID_D, version: null,
+      nodes: [source, markerNode(multiResultNodeId(UUID_A, "segment:1"), UUID_A, "segment:1", "8415")],
+      changes: [
+        { id: recoveryItemId(UUID_A, TARGET_OUTPUT_KEY), rev: 1, action: "replaceTarget" },
+        { id: recoveryItemId(UUID_A, "segment:1"), rev: 0, action: "apply" },
+      ],
+    });
+    expect((await outputsOfSubmission(UUID_A)).map(row => [row.output_key, row.asset_id?.toString() ?? null]))
+      .toEqual([["segment:1", "8415"]]);
+    expect(await readItems()).toEqual([
+      [TARGET_OUTPUT_KEY, null, null],
+      ["segment:1", "8415", false],
+    ]);
+    await prisma.assets.update({ where: { id: 8415n }, data: { is_delete: true, deleted_at: new Date() } });
+    expect(await readItems()).toEqual([
+      [TARGET_OUTPUT_KEY, null, null],
+      ["segment:1", "8415", true],
+    ]);
+  });
+
+  it("★ 20. 人声分离：track: 键按 job.output_asset_ids 写入对应轨道资产，读取的软删事实一一对应", async () => {
+    await prisma.assets.createMany({
+      data: [
+        { id: 8511n, user_id: BigInt(USER_ID), type: "audio", url: "https://example.test/8511.flac" },
+        { id: 8512n, user_id: BigInt(USER_ID), type: "audio", url: "https://example.test/8512.flac" },
+      ],
+    });
+    const created = await acceptJob({
+      submissionId: UUID_A, node: "vocal-node-tracks", revision: 0,
+      type: "vocal_split",
+      input: { source_asset_id: "5", scene: "audio", output_format: "aac" },
+    });
+    if (!("generation_job_id" in created)) throw new Error("受理失败");
+    await raw.query(
+      "UPDATE generation_jobs SET status='succeeded', output_asset_ids=CAST('[\"8511\",\"8512\"]' AS JSON) WHERE id = ?",
+      [Number(created.generation_job_id)],
+    );
+    const readItems = async () => (await listCanvasRecoveryPage(prisma, PROJECT_ID, 50, null))
+      .records.find(item => item.submission_id === UUID_A)!.items
+      .map(item => [item.output_key, item.asset_id, item.asset_deleted])
+      .sort((a, b) => String(a[0]).localeCompare(String(b[0])));
+    expect(await readItems()).toEqual([
+      [TARGET_OUTPUT_KEY, null, null],
+      ["track:background", "8512", false],
+      ["track:voice", "8511", false],
+    ]);
+    const trackKeys = ["voice", "background"];
+    const assetIdOf = (track: string) => (track === "voice" ? "8511" : "8512");
+    await save({
+      commandId: UUID_D, version: null,
+      nodes: trackKeys.map(track => markerNode(
+        multiResultNodeId(UUID_A, `track:${track}`), UUID_A, `track:${track}`, assetIdOf(track),
+      )),
+      changes: [
+        { id: recoveryItemId(UUID_A, TARGET_OUTPUT_KEY), rev: 1, action: "replaceTarget" },
+        ...trackKeys.map(track => ({ id: recoveryItemId(UUID_A, `track:${track}`), rev: 0, action: "apply" })),
+      ],
+    });
+    expect((await outputsOfSubmission(UUID_A)).map(row => [row.output_key, row.asset_id?.toString() ?? null]))
+      .toEqual([["track:background", "8512"], ["track:voice", "8511"]]);
+    await prisma.assets.update({ where: { id: 8512n }, data: { is_delete: true, deleted_at: new Date() } });
+    expect(await readItems()).toEqual([
+      [TARGET_OUTPUT_KEY, null, null],
+      ["track:background", "8512", true],
+      ["track:voice", "8511", false],
+    ]);
+  });
+
   it("★ 13. 伪造输出键 remove → 422（键必须在投影集内）", async () => {
     const created = await acceptJob({
       submissionId: UUID_A, node: "scene-node-9", revision: 0,

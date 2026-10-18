@@ -175,7 +175,7 @@ describe('多结果家族：成功判定与恢复规划', () => {
     ]);
   });
 
-  it('planRecovery：present 且画布已有匹配标记不再回填；明确软删项不进入投影，全删即不动作', () => {
+  it('planRecovery：present 且画布已有匹配标记与素材不再回填；明确软删项不进入投影，全删即不动作', () => {
     const segmentId = (index: number) => `generation-result:${SUBMISSION}:segment:${index}`;
     const succeeded = {
       job_id: 'sj1', type: 'video_scene_split', status: 'succeeded', progress: 100,
@@ -188,15 +188,18 @@ describe('多结果家族：成功判定与恢复规划', () => {
       node_id: segmentId(index), state: 'present' as const, revision: 1, node_binding_revision: 1,
       asset_id: assetId, asset_deleted: assetDeleted, slot_id: null,
     });
-    const host = (nodes: Record<string, Record<string, unknown>>): GenerationRuntimeHost => ({
-      findNode: (id: string) => (id in nodes
-        ? { id, type: 'mediaNode', position: { x: 0, y: 0 }, data: nodes[id]! } : null),
-    } as unknown as GenerationRuntimeHost);
+    const host = (nodes: Record<string, Record<string, unknown>>) => {
+      const fake = createFakeHost();
+      for (const [id, data] of Object.entries(nodes)) {
+        fake.nodes.set(id, { id, type: 'mediaNode', position: { x: 0, y: 0 }, data });
+      }
+      return fake.host;
+    };
     const marker = (index: number) => ({ generationRecovery: {
       protocolVersion: 1, submissionId: SUBMISSION, outputKey: `segment:${index}` } });
 
     expect(sceneSplitTask.planRecovery!(record({ job: succeeded, items: [targetItem, outputItem(1, '11')] }),
-      host({ 'ph-1': {}, [segmentId(1)]: marker(1) }))).toEqual({ kind: 'none' });
+      host({ 'ph-1': {}, [segmentId(1)]: { ...marker(1), assetId: '11' } }))).toEqual({ kind: 'none' });
 
     expect(sceneSplitTask.planRecovery!(record({ job: succeeded, items: [targetItem, outputItem(1, '8127', true)] }),
       host({ 'ph-1': {} }))).toEqual({ kind: 'none' });
@@ -207,6 +210,31 @@ describe('多结果家族：成功判定与恢复规划', () => {
     if (mixed.kind !== 'apply-outputs') return;
     expect(mixed.projection.outputs).toEqual([
       { outputKey: 'segment:2', nodeId: segmentId(2), assetId: '12', url: '', mediaType: 'video' },
+    ]);
+  });
+
+  it('planRecovery：标记一致但卡片素材与可信值不同 → 仍按可信值回填（不误判已落地）', () => {
+    const segmentId = `generation-result:${SUBMISSION}:segment:1`;
+    const succeeded = {
+      job_id: 'sj1', type: 'video_scene_split', status: 'succeeded', progress: 100,
+      output_asset_ids: ['8215'], stored_error: null, created_at: '2026-10-01T00:00:00Z',
+    };
+    const fake = createFakeHost();
+    fake.nodes.set('ph-1', { id: 'ph-1', type: 'mediaNode', position: { x: 0, y: 0 }, data: {} });
+    fake.nodes.set(segmentId, { id: segmentId, type: 'mediaNode', position: { x: 0, y: 0 }, data: {
+      assetId: '9999',
+      generationRecovery: { protocolVersion: 1, submissionId: SUBMISSION, outputKey: 'segment:1' },
+    } });
+    const plan = sceneSplitTask.planRecovery!(record({ job: succeeded, items: [
+      { recovery_item_id: `gcr:${SUBMISSION}:$target`, output_key: '$target', node_id: 'ph-1',
+        state: 'present', revision: 2, node_binding_revision: 1, asset_id: null, slot_id: null },
+      { recovery_item_id: `gcr:${SUBMISSION}:segment:1`, output_key: 'segment:1', node_id: segmentId,
+        state: 'present', revision: 1, node_binding_revision: 1, asset_id: '8215', asset_deleted: false, slot_id: null },
+    ] }), fake.host);
+    expect(plan).toMatchObject({ kind: 'apply-outputs' });
+    if (plan.kind !== 'apply-outputs') return;
+    expect(plan.projection.outputs).toEqual([
+      { outputKey: 'segment:1', nodeId: segmentId, assetId: '8215', url: '', mediaType: 'video' },
     ]);
   });
 
