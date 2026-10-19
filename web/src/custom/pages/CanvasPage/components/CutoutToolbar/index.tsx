@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { X, ArrowUp, ChevronDown, Scan, User, Package, CircleDot, Crop } from 'lucide-react';
+import DragSlider from '@/custom/components/DragSlider';
 import DropdownMenu from '@/custom/components/DropdownMenu';
 import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../agent/followDialog';
 import {
@@ -64,7 +65,7 @@ export default function CutoutToolbar({
     dispatch();
   };
 
-  const onContourSliderKeyDown = (e: ReactKeyboardEvent<HTMLInputElement>) => {
+  const onContourSliderKeyDown = (e: ReactKeyboardEvent<HTMLElement>) => {
     if (e.key !== 'Escape') return;
     e.preventDefault();
     e.stopPropagation();
@@ -161,17 +162,17 @@ export default function CutoutToolbar({
                   </button>
                   <div className={styles.contourRow} title="描边宽度（px），颜色固定白色">
                     <span className={styles.contourLabel}>宽度</span>
-                    <input
-                      type="range"
+                    <DragSlider
                       className={styles.contourRange}
                       min={IMAGE_CUTOUT_CONTOUR_SIZE_MIN}
                       max={IMAGE_CUTOUT_CONTOUR_SLIDER_MAX}
                       step={1}
                       value={contourSize}
                       disabled={!needContour}
-                      aria-label="描边宽度"
-                      data-testid="cutout-contour-size"
-                      onChange={(event) => onContourSizeChange(Number(event.target.value))}
+                      ariaLabel="描边宽度"
+                      ariaValueText={`${contourSize}px`}
+                      testId="cutout-contour-size"
+                      onChange={onContourSizeChange}
                       onKeyDown={onContourSliderKeyDown}
                     />
                     <span className={styles.contourValue}>{contourSize}px</span>

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import DragSlider from '@/custom/components/DragSlider';
 import { fetchRechargeCustomConfig, type RechargeCustomConfig } from '@/custom/api/recharge';
 import {
   customPriceFen,
@@ -112,19 +113,18 @@ export default function CustomRecharge({
 
       <div className={styles.controlRow}>
         {}
-        <input
+        <DragSlider
           className={styles.slider}
-          type="range"
           min={config.min_credits}
           max={config.max_credits}
           step={config.step_credits}
           value={credits}
           disabled={locked}
-          aria-label="积分数量"
-          onChange={(e) => {
+          ariaLabel="积分数量"
+          onChange={(next) => {
             setCorrection('');
             setDraft(null);
-            setCredits(Number(e.target.value));
+            setCredits(next);
           }}
         />
         <div className={`${styles.inputWrap} ${invalid ? styles.inputWrapInvalid : ''}`}>
