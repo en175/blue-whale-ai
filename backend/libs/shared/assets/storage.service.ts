@@ -1,5 +1,5 @@
 import { Injectable } from "@nestjs/common";
-import type { AssetReader, AssetSigner } from "./ports.js";
+import type { AssetProbe, AssetReader, AssetSigner } from "./ports.js";
 import { createTosStorage, loadTosStorageConfig } from "./tos-storage.js";
 import type { AssetUploadStorage } from "./upload.js";
 
@@ -7,6 +7,7 @@ type Storage = {
   signer: AssetSigner;
   reader: AssetReader;
   uploads: AssetUploadStorage;
+  probe: AssetProbe;
 };
 
 @Injectable()
@@ -31,5 +32,9 @@ export class AssetStorageService {
 
   get uploads(): AssetUploadStorage | null {
     return this.storage?.uploads ?? null;
+  }
+
+  get probe(): AssetProbe | null {
+    return this.storage?.probe ?? null;
   }
 }
