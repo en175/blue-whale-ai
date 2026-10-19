@@ -466,4 +466,144 @@ describe.skipIf(!process.env.IKNCL3_DATABASE_URL)("本地恢复画布公开 API"
     }
     expect((await request("GET", "04e0b9cc-04dd-45ad-930b-3c0000000011")).status).toBe(404);
   });
+
+  it("同 URL 的替代素材不能让已失效的仅 URL 引用报告完成", async () => {
+    const cases = [
+      { suffix: "src", type: "image", path: "nodes.0.data", node: (url: string) => ({ id: "substitute-src", type: "mediaNode", data: { src: url, mediaType: "image" } }) },
+      { suffix: "h264", type: "video", path: "nodes.0.data.srcH264", node: (url: string) => ({ id: "substitute-h264", type: "mediaNode", data: { src: `https://assets.invalid/substitute-main-${sourceId}.mp4`, srcH264: url, mediaType: "video" } }) },
+      { suffix: "voice", type: "audio", path: "nodes.0.data.voice", node: (url: string) => ({ id: "substitute-voice", type: "assetNode", data: { voice: { name: "音色", src: url } } }) },
+    ];
+    const before = await (await fetch(`${base}/api/projects`)).json();
+    const beforeJobs = await prisma.client.generation_jobs.count();
+    const beforeReservations = await prisma.client.cost_reservations.count();
+    for (const [index, item] of cases.entries()) {
+      const url = `https://assets.invalid/substitute-${item.suffix}-${sourceId}.bin`;
+      const original = await prisma.client.assets.create({ data: { user_id: 983003n, project_id: BigInt(sourceId), type: item.type, url } });
+      if (item.suffix === "h264") await prisma.client.assets.create({ data: { user_id: 983003n, project_id: BigInt(sourceId), type: "video", url: `https://assets.invalid/substitute-main-${sourceId}.mp4` } });
+      const body = { ...payload, nodes: JSON.stringify([item.node(url)]) };
+      const id = `04e0b9cc-04dd-45ad-930b-3c000000002${index + 1}`;
+      const created = await request("PUT", id, body);
+      expect(created.status).toBe(200);
+      const complete = await created.json();
+      expect(complete.data.stage).toBe("complete");
+      const targetId = complete.data.targetProjectId;
+      const links = await prisma.client.project_asset.findMany({ where: { project_id: BigInt(targetId), is_delete: 0 }, select: { asset_id: true } });
+      expect(links.map(link => link.asset_id.toString())).toContain(original.id.toString());
+      const substitute = await prisma.client.assets.create({ data: { user_id: 983003n, project_id: BigInt(sourceId), type: item.type, url } });
+      await prisma.client.assets.update({ where: { id: original.id }, data: { is_delete: true } });
+      try {
+        for (const response of [await request("GET", id), await request("PUT", id, body)]) {
+          expect(response.status).toBe(422);
+          const error = await response.json();
+          expect(error.data.reason).toBe("local_recovery_assets_unavailable");
+          expect(error.data.missing).toEqual([{ path: item.path }]);
+          expect(JSON.stringify(error)).not.toContain(url);
+        }
+        await app.close();
+        await start();
+        expect((await request("GET", id)).status).toBe(422);
+        expect(await prisma.client.project_asset.count({ where: { project_id: BigInt(targetId), asset_id: substitute.id } })).toBe(0);
+        const target = await (await fetch(`${base}/api/canvases?projectId=${targetId}`)).json();
+        expect(target.data.version).toBe(complete.data.version);
+      } finally {
+        await prisma.client.assets.update({ where: { id: original.id }, data: { is_delete: false } });
+      }
+    }
+    expect((await (await fetch(`${base}/api/projects`)).json()).data).toHaveLength(before.data.length + cases.length);
+    expect(await prisma.client.generation_jobs.count()).toBe(beforeJobs);
+    expect(await prisma.client.cost_reservations.count()).toBe(beforeReservations);
+  });
+
+  it("原资产仍合法时同 URL 的其他素材不误报缺项，数字资产身份仍拒绝替换", async () => {
+    const url = `https://assets.invalid/dual-${sourceId}.png`;
+    const original = await prisma.client.assets.create({ data: { user_id: 983003n, project_id: BigInt(sourceId), type: "image", url } });
+    const body = { ...payload, nodes: JSON.stringify([{ id: "dual-url", type: "mediaNode", data: { src: url, mediaType: "image" } }]) };
+    const id = "04e0b9cc-04dd-45ad-930b-3c0000000031";
+    const created = await request("PUT", id, body);
+    expect(created.status).toBe(200);
+    const complete = await created.json();
+    const numericBody = { ...payload, nodes: JSON.stringify([{ id: "dual-numeric", type: "mediaNode", data: { assetId: original.id.toString(), src: url, mediaType: "image" } }]) };
+    const numericId = "04e0b9cc-04dd-45ad-930b-3c0000000032";
+    const numeric = await request("PUT", numericId, numericBody);
+    expect(numeric.status).toBe(200);
+    const numericComplete = await numeric.json();
+    for (const [changed, restore] of [[{ url: `https://foreign.invalid/dual-${sourceId}.png` }, { url }], [{ type: "video" }, { type: "image" }]] as const) {
+      await prisma.client.assets.update({ where: { id: original.id }, data: changed });
+      try {
+        const response = await request("GET", id);
+        expect(response.status).toBe(422);
+        const error = await response.json();
+        expect(error.data.reason).toBe("local_recovery_assets_unavailable");
+        expect(error.data.missing).toEqual([{ path: "nodes.0.data" }]);
+      } finally {
+        await prisma.client.assets.update({ where: { id: original.id }, data: restore });
+      }
+    }
+    const substitute = await prisma.client.assets.create({ data: { user_id: 983003n, project_id: BigInt(sourceId), type: "image", url } });
+    expect((await (await request("GET", id)).json()).data).toEqual(complete.data);
+    expect((await (await request("PUT", id, body)).json()).data).toEqual(complete.data);
+    const links = await prisma.client.project_asset.findMany({ where: { project_id: BigInt(complete.data.targetProjectId), is_delete: 0 }, select: { asset_id: true } });
+    expect(links.map(link => link.asset_id.toString())).toEqual([original.id.toString()]);
+    await prisma.client.assets.update({ where: { id: original.id }, data: { is_delete: true } });
+    try {
+      for (const [requestId, requestBody, requestComplete] of [[id, body, complete], [numericId, numericBody, numericComplete]] as const) {
+        for (const response of [await request("GET", requestId), await request("PUT", requestId, requestBody)]) {
+          expect(response.status).toBe(422);
+          const error = await response.json();
+          expect(error.data.reason).toBe("local_recovery_assets_unavailable");
+          expect(error.data.missing).toEqual([{ path: "nodes.0.data", ...(requestComplete === complete ? {} : { assetId: original.id.toString() }) }]);
+          expect(JSON.stringify(error)).not.toContain(url);
+        }
+      }
+      expect(await prisma.client.project_asset.count({ where: { project_id: BigInt(complete.data.targetProjectId), asset_id: substitute.id } })).toBe(0);
+    } finally {
+      await prisma.client.assets.update({ where: { id: original.id }, data: { is_delete: false } });
+    }
+    expect((await (await request("GET", id)).json()).data).toEqual(complete.data);
+    expect((await (await request("GET", numericId)).json()).data).toEqual(numericComplete.data);
+  });
+
+  it("缺少固定资产身份的旧回执只在能证明原关联时继续核验", async () => {
+    const url = `https://assets.invalid/legacy-${sourceId}.png`;
+    const original = await prisma.client.assets.create({ data: { user_id: 983003n, project_id: BigInt(sourceId), type: "image", url } });
+    const body = { ...payload, nodes: JSON.stringify([{ id: "legacy-url", type: "mediaNode", data: { src: url, mediaType: "image" } }]) };
+    const id = "04e0b9cc-04dd-45ad-930b-3c0000000033";
+    const created = await request("PUT", id, body);
+    expect(created.status).toBe(200);
+    const complete = await created.json();
+    const key = { project_id_operation_idempotency_key: { project_id: BigInt(sourceId), operation: "LOCAL_CANVAS_RECOVERY_V1", idempotency_key: id } };
+    const row = await prisma.client.command_idempotency.findUnique({ where: key });
+    const receipt = row!.result_payload as { assets: Array<Record<string, unknown>> } & Record<string, unknown>;
+    const legacyAssets = receipt.assets.map(asset => { const copy = { ...asset }; delete copy.resolvedAssetId; return copy; });
+    await prisma.client.command_idempotency.update({ where: key, data: { result_payload: { ...receipt, assets: legacyAssets } } });
+    const targetId = complete.data.targetProjectId;
+    const substitute = await prisma.client.assets.create({ data: { user_id: 983003n, project_id: BigInt(sourceId), type: "image", url } });
+    expect((await (await request("GET", id)).json()).data).toEqual(complete.data);
+    expect((await (await request("PUT", id, body)).json()).data).toEqual(complete.data);
+    await prisma.client.project_asset.deleteMany({ where: { project_id: BigInt(targetId), asset_id: original.id } });
+    try {
+      for (const response of [await request("GET", id), await request("PUT", id, body)]) {
+        expect(response.status).toBe(422);
+        const error = await response.json();
+        expect(error.data.reason).toBe("local_recovery_assets_unavailable");
+        expect(error.data.missing).toEqual([{ path: "nodes.0.data" }]);
+        expect(JSON.stringify(error)).not.toContain(url);
+      }
+    } finally {
+      await prisma.client.project_asset.create({ data: { user_id: 983003n, project_id: BigInt(targetId), asset_id: original.id } });
+    }
+    await prisma.client.assets.update({ where: { id: original.id }, data: { is_delete: true } });
+    try {
+      for (const response of [await request("GET", id), await request("PUT", id, body)]) {
+        expect(response.status).toBe(422);
+        expect((await response.json()).data.reason).toBe("local_recovery_assets_unavailable");
+      }
+      expect(await prisma.client.project_asset.count({ where: { project_id: BigInt(targetId), asset_id: substitute.id } })).toBe(0);
+    } finally {
+      await prisma.client.assets.update({ where: { id: original.id }, data: { is_delete: false } });
+    }
+    const stored = await prisma.client.command_idempotency.findUnique({ where: key });
+    expect((stored!.result_payload as { assets: Array<Record<string, unknown>> }).assets.every(asset => asset.resolvedAssetId === undefined)).toBe(true);
+    expect((await (await request("GET", id)).json()).data).toEqual(complete.data);
+  });
 });

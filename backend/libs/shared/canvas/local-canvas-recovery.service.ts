@@ -117,9 +117,9 @@ export class LocalCanvasRecoveryService {
     @Inject(CanvasService) private readonly canvas: CanvasService,
   ) {}
 
-  private async validateAssets(ownerId: string, references: AssetReference[]): Promise<PromptMaterial[]> {
+  private async validateAssets(ownerId: string, references: AssetReference[], targetProjectId?: string): Promise<PromptMaterial[]> {
     if (references.length === 0) return [];
-    const ids = references.flatMap(ref => ref.assetId && /^[1-9][0-9]{0,18}$/.test(ref.assetId) ? [BigInt(ref.assetId)] : []);
+    const ids = references.flatMap(ref => [ref.assetId, ref.resolvedAssetId].flatMap(id => id && /^[1-9][0-9]{0,18}$/.test(id) ? [BigInt(id)] : []));
     const materialIds = references.flatMap(ref => ref.assetId && /^asset-.{1,128}$/i.test(ref.assetId) ? [ref.assetId] : []);
     const activeMaterials = materialIds.length === 0 ? [] : await this.prisma.client.material_assets.findMany({ where: {
       user_id: BigInt(ownerId), material_id: { in: materialIds }, status: "Active",
@@ -133,10 +133,20 @@ export class LocalCanvasRecoveryService {
     const byId = new Map(assets.map(asset => [asset.id.toString(), asset]));
     const byUrl = new Map(assets.map(asset => [asset.url, asset]));
     const byMaterial = new Map(assets.filter(asset => asset.material_id && activeMaterialIds.has(asset.material_id)).map(asset => [asset.material_id!, asset]));
+    const unproven = targetProjectId === undefined ? [] : references.filter(ref => !ref.assetId && !ref.resolvedAssetId && ref.url);
+    const proven = unproven.length === 0 ? new Map<string, string>() : await this.provenAssetIds(ownerId, targetProjectId!, unproven.map(ref => ref.url!));
     const missing: Array<{ path: string; assetId?: string }> = [];
     const materials = new Map<string, PromptMaterial>();
     for (const ref of references) {
-      const asset = ref.assetId ? byId.get(ref.assetId) ?? byMaterial.get(ref.assetId) : byUrl.get(ref.url!);
+      let asset = ref.assetId ? byId.get(ref.assetId) ?? byMaterial.get(ref.assetId) : ref.resolvedAssetId ? byId.get(ref.resolvedAssetId) : undefined;
+      if (!asset && !ref.assetId && !ref.resolvedAssetId) {
+        const fixed = proven.get(ref.url!);
+        if (fixed !== undefined) asset = byId.get(fixed);
+        else if (targetProjectId === undefined) {
+          asset = byUrl.get(ref.url!);
+          if (asset) ref.resolvedAssetId = asset.id.toString();
+        }
+      }
       if (!asset || (ref.resolvedAssetId && ref.resolvedAssetId !== asset.id.toString()) || (ref.url && ref.url !== asset.url) || (ref.mediaType && ref.mediaType !== asset.type)) {
         missing.push({ path: ref.path, ...(ref.assetId ? { assetId: ref.assetId } : {}) });
       } else {
@@ -146,6 +156,22 @@ export class LocalCanvasRecoveryService {
     }
     if (missing.length > 0) throw new HttpException({ code: 422, msg: "部分素材已删除、失效或无权访问，恢复尚未完成", data: { reason: "local_recovery_assets_unavailable", missing } }, 422);
     return [...materials.values()];
+  }
+
+  private async provenAssetIds(ownerId: string, targetProjectId: string, urls: string[]): Promise<Map<string, string>> {
+    const links = await this.prisma.client.project_asset.findMany({
+      where: { user_id: BigInt(ownerId), project_id: BigInt(targetProjectId), is_delete: 0 }, select: { asset_id: true },
+    });
+    if (links.length === 0) return new Map();
+    const linked = await this.prisma.client.assets.findMany({ where: { id: { in: links.map(link => link.asset_id) }, url: { in: urls } }, select: { id: true, url: true } });
+    const byUrl = new Map<string, Set<string>>();
+    for (const asset of linked) byUrl.set(asset.url, (byUrl.get(asset.url) ?? new Set()).add(asset.id.toString()));
+    const proven = new Map<string, string>();
+    for (const [url, found] of byUrl) {
+      const [assetId] = [...found];
+      if (found.size === 1 && assetId !== undefined) proven.set(url, assetId);
+    }
+    return proven;
   }
 
   private async key(ownerId: string, sourceProjectId: string, operationId: string) {
@@ -169,7 +195,7 @@ export class LocalCanvasRecoveryService {
     if (!await this.projects.findOwnedById(targetProjectId, ownerId)) {
       reject(404, "local_recovery_not_found", "恢复目标不存在");
     }
-    await this.validateAssets(ownerId, receipt.data.assets);
+    await this.validateAssets(ownerId, receipt.data.assets, targetProjectId);
     const saved = await this.canvas.getByProject(targetProjectId);
     let version = receipt.data.version;
     if (version === undefined && saved.version !== null) {
