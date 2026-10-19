@@ -691,4 +691,32 @@ describe.skipIf(!process.env.IKNCL3_DATABASE_URL)("本地恢复画布公开 API"
     expect(await prisma.client.generation_jobs.count()).toBe(jobs);
     expect(await prisma.client.cost_reservations.count()).toBe(reservations);
   });
+  it.each(["src", "voice.src", "assetId"])("未声明类型的 %s 引用在原资产类型变化后明确缺项", async field => {
+    const url = `https://assets.invalid/original-type-${sourceId}-${field}`;
+    const type = field === "voice.src" ? "audio" : "image";
+    const asset = await prisma.client.assets.create({ data: { user_id: 983003n, project_id: BigInt(sourceId), type, url } });
+    const data = field === "voice.src" ? { voice: { name: "音色", src: url } } : field === "assetId" ? { assetId: asset.id.toString() } : { src: url };
+    const nodes = [{ id: "original-type", type: field === "voice.src" ? "assetNode" : "mediaNode", data }];
+    const body = { ...payload, nodes: JSON.stringify(nodes) };
+    const id = crypto.randomUUID();
+    const created = await request("PUT", id, body);
+    expect(created.status).toBe(200);
+    const complete = await created.json();
+    await prisma.client.assets.update({ where: { id: asset.id }, data: { type: type === "image" ? "video" : "image" } });
+    await app.close();
+    await start();
+    try {
+      for (const response of [await request("GET", id), await request("PUT", id, body)]) {
+        expect(response.status).toBe(422);
+        expect((await response.json()).data).toEqual({ reason: "local_recovery_assets_unavailable", missing: [{ path: field === "voice.src" ? "nodes.0.data.voice" : "nodes.0.data", ...(field === "assetId" ? { assetId: asset.id.toString() } : {}) }] });
+      }
+    } finally {
+      await prisma.client.assets.update({ where: { id: asset.id }, data: { type } });
+    }
+    expect((await (await request("GET", id)).json()).data).toEqual(complete.data);
+    expect((await (await request("PUT", id, body)).json()).data).toEqual(complete.data);
+    const saved = await (await fetch(`${base}/api/canvases?projectId=${complete.data.targetProjectId}`)).json();
+    expect(JSON.parse(saved.data.nodes)).toEqual(nodes);
+    expect(saved.data.version).toBe(complete.data.version);
+  });
 });

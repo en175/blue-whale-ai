@@ -151,6 +151,7 @@ export class LocalCanvasRecoveryService {
       } else {
         if (ref.assetId && byMaterial.has(ref.assetId)) ref.resolvedAssetId = asset.id.toString();
         if (first) ref.resolvedAssetId = asset.id.toString();
+        if (targetProjectId === undefined) ref.mediaType ??= asset.type;
         materials.set(asset.id.toString(), { assetId: asset.id.toString(), mediaType: asset.type as PromptMaterial["mediaType"] });
       }
     }
