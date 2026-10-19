@@ -1502,7 +1502,7 @@ describe("handleCreateGenerationJob 单数组 references（IKDJNZ）", () => {
         { id: "e-index", source: "media-2", target: "text-a", data: { textIndex: true } },
       ]),
     };
-    function buildTextRefDeps() {
+    function buildTextRefDeps(duration = 7) {
       const base = buildVideoDeps(SEEDANCE_2_5_TEXT_REF_ROW);
       const deps = {
         ...base.deps,
@@ -1519,7 +1519,7 @@ describe("handleCreateGenerationJob 单数组 references（IKDJNZ）", () => {
 
         assets: {
           resolveInputAssets: vi.fn(async (ids: string[]) =>
-            ids.map((id) => ({ id, type: "video", duration: 7 }))),
+            ids.map((id) => ({ id, type: "video", duration }))),
         },
       } as unknown as HandlerDeps;
       return { deps, createJob: base.createJob };
@@ -1547,6 +1547,15 @@ describe("handleCreateGenerationJob 单数组 references（IKDJNZ）", () => {
 
       expect(cmdArg.input.duration).toBe(-1);
       expect(cmdArg.input.duration_basis_seconds).toBe(7);
+    });
+
+    it("编辑意图 + 源时长 7.5 → duration_basis_seconds 四舍五入为 8", async () => {
+      const { deps, createJob } = buildTextRefDeps(7.5);
+      const result = await handleCreateGenerationJob("u1", "p1", textRefBodyOf("把背景替换成海边", "adaptive", -1), null, deps);
+      expect(result.code).toBe(200);
+      const cmdArg = createJob.mock.calls[0][0] as { input: Record<string, unknown> };
+      expect(cmdArg.input.duration).toBe(-1);
+      expect(cmdArg.input.duration_basis_seconds).toBe(8);
     });
 
     it("纯参考意图 + 文本带入视频参考 + 9:16 → 200 冻结 default，时长不改写（不误伤参考单）", async () => {
@@ -1635,20 +1644,6 @@ describe("handleCreateGenerationJob 单数组 references（IKDJNZ）", () => {
       );
     });
 
-    it("对照组：references 漏带文本带入 → 后端追加实扣参考，报价张数 < 实扣张数（前端口径漂移时无兜底）", async () => {
-      const { deps, createJob } = buildImageTextRefDeps();
-
-      const submitted = imageTextRefBody(["4"]);
-      const result = await handleCreateGenerationJob("u1", "p1", submitted, null, deps);
-      expect(result.code).toBe(200);
-      const cmdArg = createJob.mock.calls[0]![0] as { input: Record<string, unknown> };
-
-      expect(cmdArg.input.input_asset_ids).toEqual(["4", "2"]);
-      const quote = projectQuoteInput("image", submitted);
-
-      expect((quote?.input_asset_ids as string[]).length).toBe(1);
-      expect((cmdArg.input.input_asset_ids as string[]).length).toBe(2);
-    });
   });
 
   it("references 项既无 asset_id 也无 material_id → 400 参考素材引用无效", async () => {

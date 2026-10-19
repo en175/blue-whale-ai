@@ -107,7 +107,11 @@ export function extractSpecs(
 
 
 
-  specs.reference_count = String(referenceList(input, taskType).length);
+  const references = referenceList(input, taskType);
+  specs.reference_count = String(references.length);
+  if (taskType === 'image') {
+    specs.image_reference = references.length > 0 ? '1' : '0';
+  }
   const basisSeconds = input[DURATION_BASIS_KEY];
   if (typeof basisSeconds === "number" && Number.isFinite(basisSeconds)) {
     specs.duration = String(basisSeconds);
@@ -127,9 +131,14 @@ export function extractSpecs(
 
 
 
-  const videoInputSeconds = sumVideoInputSeconds(input.references);
-  if (videoInputSeconds !== null) {
-    specs.reference_seconds = String(videoInputSeconds);
+  const editMode = input[FROZEN_VIDEO_MODE_KEY] === 'edit';
+  if (editMode) {
+    specs.reference_seconds = '0';
+  } else {
+    const videoInputSeconds = sumVideoInputSeconds(input.references);
+    if (videoInputSeconds !== null) {
+      specs.reference_seconds = String(videoInputSeconds);
+    }
   }
 
   const prompt = input.prompt;
@@ -137,7 +146,7 @@ export function extractSpecs(
     specs.prompt_characters = String(countPromptCharacters(prompt));
   }
 
-  if (input[FROZEN_VIDEO_MODE_KEY] === 'edit') specs.video_edit = '1';
+  if (editMode) specs.video_edit = '1';
   return specs;
 }
 
@@ -194,7 +203,7 @@ export function sumVideoInputSeconds(references: unknown): number | null {
     any = true;
     const seconds = entry.duration;
     if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds <= 0) return null;
-    total += Math.floor(seconds);
+    total += seconds;
   }
-  return any ? total : null;
+  return any ? Math.round(total) : null;
 }

@@ -113,17 +113,34 @@ describe('extractSpecs', () => {
     expect(specs).not.toHaveProperty('title');
   });
 
-  it('★ 编辑模式照写参考秒数 —— 数量口径与含视频输入一致，价格由 videoEdit 倍率乘 2', () => {
+  it('★ 编辑模式参考秒归零 —— 源秒由 duration 表达，价格由 videoEdit 加项承载', () => {
     const specs = videoSpecs({
       references: [{ role: 'reference', type: 'video', asset_id: '2', duration: 5 }],
       video_mode: 'edit',
     });
 
-    expect(specs).toMatchObject({ video: '1', video_edit: '1', reference_seconds: '5' });
+    expect(specs).toMatchObject({ video: '1', video_edit: '1', reference_seconds: '0' });
     expect(videoSpecs({ references: [{ type: 'video', duration: 5 }] })).toHaveProperty(
       'reference_seconds',
       '5',
     );
+  });
+
+  it('★ 参考视频秒数四舍五入：先求和再取整', () => {
+    expect(
+      videoSpecs({ references: [{ type: 'video', duration: 15.1 }] }),
+    ).toMatchObject({ reference_seconds: '15' });
+    expect(
+      videoSpecs({ references: [{ type: 'video', duration: 15.5 }] }),
+    ).toMatchObject({ reference_seconds: '16' });
+    expect(
+      videoSpecs({
+        references: [
+          { type: 'video', duration: 5.6 },
+          { type: 'video', duration: 5.6 },
+        ],
+      }),
+    ).toMatchObject({ reference_seconds: '11' });
   });
 
   it('大小写不敏感地排除内容字段', () => {
@@ -152,6 +169,13 @@ describe('extractSpecs —— 参考素材数**按媒介取不同的键**', () =
     ).toMatchObject({ reference_count: '3' });
 
     expect(extractSpecs({ size: '2k' }, 'image')).toMatchObject({ reference_count: '0' });
+  });
+
+  it('★ 图片分价维度：是否含参考图', () => {
+    expect(
+      extractSpecs({ input_asset_ids: ['1'] }, 'image'),
+    ).toMatchObject({ image_reference: '1' });
+    expect(extractSpecs({ size: '2k' }, 'image')).toMatchObject({ image_reference: '0' });
   });
 
   it('★ 视频/音频只认 references —— input_asset_ids 在它们那儿不是参考列表', () => {
