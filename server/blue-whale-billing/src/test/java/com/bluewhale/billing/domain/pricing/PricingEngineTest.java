@@ -1,5 +1,6 @@
 package com.bluewhale.billing.domain.pricing;
 
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
@@ -380,6 +381,64 @@ class PricingEngineTest {
             assertThatThrownBy(() -> UsageDim.of("usage.tokens"))
                     .isInstanceOf(UsageDim.UnknownUsageDimException.class)
                     .hasMessageContaining("usage.tokens");
+        }
+    }
+
+    @Nested
+    @DisplayName("数量偏移与步长")
+    class QuantityOffsetAndStep {
+
+        private long computeCredits(long quantity, long offset, long step) {
+            var rule = new CompiledRule(
+                    UsageDim.SECONDS, new BasePriceResolver.Constant(1000L),
+                    Map.of(), Map.of(), Map.of(), 1L, 1L, null,
+                    new RoundingPolicy.HalfUp(), offset, step);
+            return PricingEngine.forMedia((m, t) -> rule, DiscountResolver.NONE)
+                    .compute(req("tool", "tool", Map.of()), Usage.of(UsageDim.SECONDS, quantity), T)
+                    .credits();
+        }
+
+        @Test
+        @DisplayName("先加偏移再按步长向上取整")
+        void addsOffsetThenRoundsUpToStep() {
+            assertThat(computeCredits(4, 1, 5)).isEqualTo(5);
+            assertThat(computeCredits(5, 1, 5)).isEqualTo(10);
+            assertThat(computeCredits(10, 1, 5)).isEqualTo(15);
+        }
+
+        @Test
+        @DisplayName("分母按分钟折算并最终向上取整")
+        void convertsPerMinutePriceAndRoundsUp() {
+            var rule = new CompiledRule(
+                    UsageDim.SECONDS, new BasePriceResolver.Constant(45000L),
+                    Map.of(), Map.of(), Map.of(), 60L, 1L, null,
+                    new RoundingPolicy.Ceil(), 0L, 1L);
+            long result = PricingEngine.forMedia((m, t) -> rule, DiscountResolver.NONE)
+                    .compute(req("tool", "tool", Map.of()), Usage.of(UsageDim.SECONDS, 15), T)
+                    .credits();
+            assertThat(result).isEqualTo(12);
+        }
+
+        @Test
+        @DisplayName("零偏移与一步不改变数量（step=0 等价）")
+        void zeroOffsetAndStepOneKeepQuantity() {
+            assertThat(computeCredits(7, 0, 1)).isEqualTo(7);
+            assertThat(computeCredits(7, 0, 0)).isEqualTo(7);
+        }
+
+        @Test
+        @DisplayName("先取整基准量再加维度，偏移不作用于维度")
+        void appliesOffsetBeforeDims() {
+            var rule = new CompiledRule(
+                    UsageDim.SECONDS, new BasePriceResolver.Constant(1000L),
+                    Map.of(UsageDim.COMPLETION_TOKENS, 30000), Map.of(), Map.of(),
+                    1L, 1L, null, new RoundingPolicy.HalfUp(), 1L, 5L);
+            var usage = new Usage(null, null,
+                    Map.of(UsageDim.SECONDS, 4L, UsageDim.COMPLETION_TOKENS, 1L));
+            long result = PricingEngine.forMedia((m, t) -> rule, DiscountResolver.NONE)
+                    .compute(req("tool", "tool", Map.of()), usage, T)
+                    .credits();
+            assertThat(result).isEqualTo(8);
         }
     }
 }

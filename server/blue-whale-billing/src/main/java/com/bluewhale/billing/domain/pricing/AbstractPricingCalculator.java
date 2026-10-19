@@ -65,6 +65,11 @@ public abstract class AbstractPricingCalculator {
 
     protected long aggregateUnits(PricingContext ctx, Usage usage) {
         long units = usage.quantityOf(ctx.rule().baseUnit());
+        units += ctx.rule().quantityOffset();
+        long step = ctx.rule().quantityStep();
+        if (step > 1) {
+            units = ((units + step - 1) / step) * step;
+        }
         for (var e : ctx.rule().dims().entrySet()) {
             units += usage.quantityOf(e.getKey()) * e.getValue() / 10_000L;
         }

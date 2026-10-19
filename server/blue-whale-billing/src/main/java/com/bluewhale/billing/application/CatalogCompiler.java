@@ -86,7 +86,9 @@ public final class CatalogCompiler {
                 rule.unitDenominator() == null ? 1L : rule.unitDenominator(),
                 rule.minCredits() == null ? 1L : rule.minCredits(),
                 rule.maxCredits(),
-                compileRounding(rule.rounding()));
+                compileRounding(rule.rounding()),
+                rule.quantityOffset() == null ? 0L : rule.quantityOffset(),
+                rule.quantityStep() == null ? 1L : rule.quantityStep());
     }
 
     static Map<UsageDim, CompiledRule.DimPrice> compileDimPrices(Map<String, CatalogDocument.DimPrice> raw) {
