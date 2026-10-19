@@ -17,6 +17,7 @@ export function createRecovery(ctx: RuntimeContext, polling: { poll: (execution:
   let failedEpoch: object | null = null;
   const recover = (projectId: string): Promise<void> => {
     const loadEpoch = host.getLoadEpoch();
+    const isCurrentCanvasLoad = () => host.getProjectId() === projectId && host.getLoadEpoch() === loadEpoch;
     if (scanningEpoch === loadEpoch) return scanningRun ?? Promise.resolve();
     scanningEpoch = loadEpoch;
     const run = (async () => {
@@ -24,13 +25,13 @@ export function createRecovery(ctx: RuntimeContext, polling: { poll: (execution:
         let cursor: string | null = null;
         do {
           const page = await host.fetchRecoveryPage(projectId, { cursor });
-          if (host.getProjectId() !== projectId || host.getLoadEpoch() !== loadEpoch) return;
+          if (!isCurrentCanvasLoad()) return;
           for (const record of page.records) reconcileRecord(record);
           cursor = page.next_cursor;
         } while (cursor != null);
         failedEpoch = null;
       } catch (e) {
-        failedEpoch = loadEpoch;
+        if (isCurrentCanvasLoad()) failedEpoch = loadEpoch;
         console.warn('[generation-runtime] 恢复扫描失败（下轮水合重试）:', e);
       } finally {
         if (scanningEpoch === loadEpoch) scanningEpoch = null;

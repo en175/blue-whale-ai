@@ -838,6 +838,27 @@ describe('生成任务运行时：恢复扫描互斥按加载身份隔离（IKJK
     expect(pageCalls).toBe(3);
   });
 
+  it('同项目重载（loadEpoch 推进）：旧扫描随后失败不把新加载判为已就绪', async () => {
+    const { fake, runtime, page } = setup();
+    let rejectOld!: (reason: Error) => void;
+    let pageCalls = 0;
+    page.mockImplementation(() => {
+      pageCalls += 1;
+      if (pageCalls === 1) return new Promise((_resolve, reject) => { rejectOld = reject; });
+      return Promise.reject(new Error('network'));
+    });
+
+    void runtime.recover('p1');
+    fake.advanceEpoch();
+    runtime.reset();
+    await runtime.recover('p1');
+    expect(runtime.isRecoverySettled()).toBe(false);
+
+    rejectOld(new Error('old-network'));
+    await flushMicrotasks(20);
+    expect(runtime.isRecoverySettled()).toBe(false);
+  });
+
   it('旧扫描失败（请求 reject）：锁正确释放，新加载扫描可发出且回执丢失任务仍可补卡', async () => {
     const { fake, runtime, page } = setup();
     let rejectA!: (reason: Error) => void;

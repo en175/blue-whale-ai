@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CanvasRecoverySaveFields, GenerationRecoveryRecord } from '@/custom/api/canvasRecovery';
 import type { JobDetail } from '@/custom/api/jobs';
 import { ApiError } from '@/shared/api/http';
-import { apiMocks, canvasDocMock, flowProps, mediaNodes, renderPage, unmountPage } from './canvasPageTestHarness';
+import { apiMocks, canvasDocMock, flowProps, mediaNodes, navigateRef, renderPage, unmountPage } from './canvasPageTestHarness';
 import { sceneSplitTask } from '../generation/multiOutputTasks';
 
 const captured = JSON.parse(readFileSync(resolve('src/custom/pages/CanvasPage/generation/ikjlxf-deleted-output.fixture.json'), 'utf8')) as {
@@ -950,4 +950,190 @@ describe('IKOSNS 恢复分页迟到时的同笔删卡保存', () => {
       expect(mediaNodes().map(node => node.id).sort()).toEqual([FRONT_SOURCE, LATE_SOURCE].sort());
     }
   });
+});
+
+describe('IKOWS5 旧项目迟到恢复错误不覆盖当前项目就绪状态', () => {
+  const SUB_FRONT = '7c2d1e4b-0000-4000-8000-00000000460a';
+  const SUB_LATE = '7c2d1e4b-0000-4000-8000-00000000460b';
+  const FRONT_SOURCE = 'source-9101';
+  const LATE_SOURCE = 'source-9102';
+  const projectACard = { id: 'a-text-1', type: 'textNode', position: { x: 40, y: 40 }, data: { title: 'A 卡', text: '项目一内容' } };
+  const cardOf = (submissionId: string) => `generation-result:${submissionId}:segment:1`;
+  const protectedItems = (): Array<[string, string]> => [
+    [cardOf(SUB_FRONT), `gcr:${SUB_FRONT}:segment:1`],
+    [cardOf(SUB_LATE), `gcr:${SUB_LATE}:segment:1`],
+  ];
+  const recordOf = (input: {
+    submissionId: string; targetNodeId: string; jobId: string; assetId: string; sourceId: string;
+  }): GenerationRecoveryRecord => ({
+    submission_id: input.submissionId, target_node_id: input.targetNodeId, job_id: input.jobId,
+    task_type: 'video_scene_split', binding_revision: 1, is_current: true,
+    job: { job_id: input.jobId, type: 'video_scene_split', status: 'succeeded', progress: 100,
+      output_asset_ids: [input.assetId], stored_error: null, created_at: '2026-10-19T09:00:00.000Z' },
+    recovery_seed: {
+      target: { role: 'result-placeholder', x: 400, y: 120, width: 640, height: 480, name: '场景切分 · 标准' },
+      sources: [{ node_id: input.sourceId, x: 60, y: 120, width: 320, height: 180, name: '源视频' }],
+    },
+    previous_target_snapshot: null,
+    items: [
+      { recovery_item_id: `gcr:${input.submissionId}:$target`, output_key: '$target', node_id: input.targetNodeId,
+        state: 'replaced', revision: 1, node_binding_revision: 1, asset_id: null, asset_deleted: null, slot_id: null },
+      { recovery_item_id: `gcr:${input.submissionId}:segment:1`, output_key: 'segment:1',
+        node_id: cardOf(input.submissionId), state: 'present', revision: 1, node_binding_revision: 1,
+        asset_id: input.assetId, asset_deleted: true, slot_id: null },
+    ],
+  });
+  const frontPage = {
+    protocol_version: 1, canvas_version: 5, next_cursor: 'late-page',
+    records: [recordOf({ submissionId: SUB_FRONT, targetNodeId: 'b-front-target', jobId: '4600', assetId: '9103', sourceId: FRONT_SOURCE })],
+  };
+  const latePage = {
+    protocol_version: 1, canvas_version: 5, next_cursor: null,
+    records: [recordOf({ submissionId: SUB_LATE, targetNodeId: 'b-late-target', jobId: '4601', assetId: '9104', sourceId: LATE_SOURCE })],
+  };
+  const projectBDetail = {
+    job_id: '4600', status: 'succeeded', progress: 100, asset: null,
+    output_assets: [{ id: '9103', url: 'https://example.test/9103.mp4', type: 'video' }],
+    result: { duration: 15, segments: [{ segment_index: 1, start_time: 0, end_time: 15, segment_asset_id: '9103' }] },
+  } as JobDetail;
+  const projectBNodes = (): RecoveryScene['nodes'] => [
+    { id: FRONT_SOURCE, type: 'mediaNode', position: { x: 60, y: 120 }, data: {
+      assetId: '9100', src: 'https://example.test/9100.mp4', mediaType: 'video', fileName: '源视频 A', width: 320, height: 180 } },
+    { id: cardOf(SUB_FRONT), type: 'mediaNode', position: { x: 780, y: 120 }, data: {
+      assetId: '9103', src: 'https://example.test/9103.mp4', mediaType: 'video', fileName: '第 1 段 A',
+      width: 640, height: 480, generationRecovery: { protocolVersion: 1, submissionId: SUB_FRONT, outputKey: 'segment:1' } } },
+    { id: LATE_SOURCE, type: 'mediaNode', position: { x: 60, y: 620 }, data: {
+      assetId: '9101', src: 'https://example.test/9101.mp4', mediaType: 'video', fileName: '源视频 B', width: 320, height: 180 } },
+    { id: cardOf(SUB_LATE), type: 'mediaNode', position: { x: 780, y: 620 }, data: {
+      assetId: '9104', src: 'https://example.test/9104.mp4', mediaType: 'video', fileName: '第 1 段 B',
+      width: 640, height: 480, generationRecovery: { protocolVersion: 1, submissionId: SUB_LATE, outputKey: 'segment:1' } } },
+  ];
+  const projectBEdges = () => [
+    { id: 'edge-front', source: FRONT_SOURCE, target: cardOf(SUB_FRONT) },
+    { id: 'edge-late', source: LATE_SOURCE, target: cardOf(SUB_LATE) },
+  ];
+  const removeChanges = () => protectedItems().map(([, recoveryItemId]) => (
+    { recoveryItemId, expectedRevision: 1, action: 'remove' }
+  ));
+  const installProtocolMocks = () => {
+    apiMocks.saveCanvasDoc.mockImplementation(async (_project: string, payload: { nodes: unknown[] }) => {
+      const saved = new Set((payload.nodes as Array<{ id: string }>).map(node => node.id));
+      if (protectedItems().some(([nodeId]) => !saved.has(nodeId))) {
+        throw new ApiError(428, '该项目已启用任务恢复保护，请刷新客户端后处理', '', {
+          reason: 'recovery_protocol_required',
+        });
+      }
+      return { id: 22, project_id: 2, version: 6, viewport: '{}', nodes: '[]' };
+    });
+    recoveryApi.put.mockImplementation(async (
+      _project: string, payload: { nodes: Array<{ id: string }> }, _version: number, recovery: CanvasRecoverySaveFields,
+    ) => {
+      const saved = new Set(payload.nodes.map(node => node.id));
+      for (const [nodeId, recoveryItemId] of protectedItems()) {
+        if (saved.has(nodeId)) continue;
+        const declared = recovery.recoveryChanges
+          .some(change => change.recoveryItemId === recoveryItemId && change.action === 'remove');
+        if (!declared) {
+          throw new ApiError(422, '未声明的受保护项从画布缺席，删除须以显式 remove 动作声明', '', {
+            reason: 'recovery_document_mismatch',
+          });
+        }
+      }
+      return {
+        project_id: 'p2', version: 6,
+        recoveryReceipt: { commandId: recovery.commandId, replayed: false,
+          changes: recovery.recoveryChanges.map(change => ({ recoveryItemId: change.recoveryItemId,
+            revision: 2, nodeBindingRevision: 1, state: change.action === 'remove' ? 'removed' : 'present' })),
+        },
+      };
+    });
+  };
+  type StaleProjectAScan = { resolve: (page: unknown) => void; reject: (reason: Error) => void };
+  let staleProjectAScan: StaleProjectAScan | null = null;
+  let fetchSeq = 0;
+  let latePageFails = true;
+  const installRecoveryFetch = () => {
+    fetchSeq = 0;
+    latePageFails = true;
+    staleProjectAScan = null;
+    recoveryApi.fetch.mockImplementation(() => {
+      fetchSeq += 1;
+      if (fetchSeq === 1) {
+        return new Promise((resolve, reject) => { staleProjectAScan = { resolve, reject }; });
+      }
+      if (fetchSeq % 2 === 0) return Promise.resolve(structuredClone(frontPage));
+      if (latePageFails) return Promise.reject(new Error('network'));
+      return Promise.resolve(structuredClone(latePage));
+    });
+  };
+  const openStaleWindow = async (releaseStaleScan: (scan: StaleProjectAScan) => void) => {
+    installProtocolMocks();
+    installRecoveryFetch();
+    seedScene({ nodes: [projectACard], edges: [] });
+    await renderPage();
+    await act(async () => { await vi.waitFor(() => expect(recoveryApi.fetch).toHaveBeenCalledTimes(1)); });
+
+    await act(async () => { navigateRef!('/canvas?project=p2'); });
+    await act(async () => {});
+    seedScene({ nodes: projectBNodes(), edges: projectBEdges() });
+    apiMocks.fetchJobStatus.mockResolvedValue(structuredClone(projectBDetail));
+    await act(async () => { flowProps.current.onViewportChange?.({ x: 0, y: 0, zoom: 1 }); });
+    await act(async () => {
+      await vi.waitFor(() => {
+        const ids = mediaNodes().map(node => node.id);
+        expect(ids).toContain(cardOf(SUB_FRONT));
+        expect(ids).toContain(cardOf(SUB_LATE));
+      }, { timeout: 3000 });
+    });
+
+    await act(async () => { await vi.waitFor(() => expect(recoveryApi.fetch.mock.calls.length).toBeGreaterThanOrEqual(3)); });
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
+
+    await act(async () => { releaseStaleScan(staleProjectAScan!); });
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
+
+    await act(async () => { flowProps.current.onDeleteNode(protectedItems().map(([nodeId]) => nodeId)); });
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 900)); });
+  };
+  const completeLatePageThenEdit = async () => {
+    latePageFails = false;
+    await act(async () => {
+      const source = mediaNodes().find(node => node.id === FRONT_SOURCE)!;
+      (source.data as { onTitleChange: (id: string, name: string) => void })
+        .onTitleChange(FRONT_SOURCE, '源视频 A · 补齐后改名');
+    });
+    await act(async () => { await vi.waitFor(() => expect(recoveryApi.put).toHaveBeenCalled(), { timeout: 5000 }); });
+    await act(async () => { await vi.waitFor(() => expect(document.body.textContent).toContain('已保存'), { timeout: 5000 }); });
+    expect(recoveryApi.put).toHaveBeenCalledTimes(1);
+    expect(recoveryApi.put.mock.calls[0]![0]).toBe('p2');
+    expect(recoveryApi.put.mock.calls[0]![2]).toBe(3);
+    expect(recoveryApi.put.mock.calls[0]![3].recoveryChanges).toEqual(removeChanges());
+    const savedNodes = recoveryApi.put.mock.calls[0]![1].nodes as Array<{
+      id: string; data: { fileName?: string; assetId?: string };
+    }>;
+    expect(savedNodes.map(node => node.id)).toEqual([FRONT_SOURCE, LATE_SOURCE]);
+    expect(savedNodes[0]!.data.fileName).toBe('源视频 A · 补齐后改名');
+    expect(savedNodes[0]!.data.assetId).toBe('9100');
+    expect(document.body.textContent).not.toContain('画布保存冲突');
+  };
+
+  it('B 前页成功后页失败时旧 A 请求再失败：不发缺项恢复命令，B 补齐后一次提交两项 remove', async () => {
+    await openStaleWindow(scan => scan.reject(new Error('stale-a-network')));
+
+    expect(recoveryApi.put).not.toHaveBeenCalled();
+    expect(document.body.textContent).not.toContain('画布保存冲突');
+    expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(1);
+
+    await completeLatePageThenEdit();
+  }, 20000);
+
+  it('对照：旧 A 请求成功返回时同样不组缺项命令', async () => {
+    await openStaleWindow(scan => scan.resolve({ protocol_version: 1, canvas_version: 3, next_cursor: null, records: [] }));
+
+    expect(recoveryApi.put).not.toHaveBeenCalled();
+    expect(document.body.textContent).not.toContain('画布保存冲突');
+    expect(apiMocks.saveCanvasDoc).toHaveBeenCalledTimes(1);
+
+    await completeLatePageThenEdit();
+  }, 20000);
 });
