@@ -10,6 +10,7 @@ import { GenerationModule } from "@lib/shared/generation/generation.module.js";
 import { HomepageHeroModule } from "@lib/shared/homepage-hero/homepage-hero.module.js";
 import { JobsModule } from "@lib/shared/jobs/jobs.module.js";
 import { ModelCapabilityAdminModule } from "@lib/shared/model-capability/model-capability-admin.module.js";
+import { MediaToolPricingAdminModule } from "@lib/shared/media-tool-pricing/media-tool-pricing-admin.module.js";
 import { OperationLogModule } from "@lib/shared/operation-log/operation-log.module.js";
 import { PrismaModule } from "@lib/shared/prisma/prisma.module.js";
 import { RechargeLibModule } from "@lib/shared/recharge/recharge.module.js";
@@ -71,6 +72,7 @@ import { IdentityModule } from "@lib/shared/identity/index.js";
     TopupTierModule,
     OperationLogModule,
     ModelCapabilityAdminModule,
+    MediaToolPricingAdminModule,
     TemplateModule,
     HomepageHeroModule,
     ProjectModule,

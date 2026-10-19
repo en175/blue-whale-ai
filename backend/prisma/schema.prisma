@@ -259,6 +259,21 @@ model generation_model_capability {
   @@index([capability_type, enabled], map: "idx_capability_type_enabled")
 }
 
+model media_tool_pricing {
+  id             BigInt   @id @default(autoincrement())
+  tool_type      String   @db.VarChar(64)
+  label          String   @db.VarChar(64)
+  pricing        Json
+  version        Int      @default(0)
+  enabled        Boolean  @default(true)
+  charge_enabled Boolean  @default(true)
+  gmt_create     DateTime @default(now()) @db.DateTime(0)
+  gmt_modified   DateTime @default(now()) @db.DateTime(0)
+  is_delete      Boolean  @default(false)
+
+  @@unique([tool_type], map: "uk_media_tool_pricing__tool_type")
+}
+
 /// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
 model project {
   id             BigInt    @id @default(autoincrement())
