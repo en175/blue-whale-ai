@@ -639,4 +639,56 @@ describe.skipIf(!process.env.IKNCL3_DATABASE_URL)("本地恢复画布公开 API"
     expect((row!.result_payload as { assets: Array<{ resolvedAssetId?: string }> }).assets[0].resolvedAssetId).toBe(original.id.toString());
     expect((await (await fetch(`${base}/api/canvases?projectId=${targetId}`)).json()).data.version).toBe(0);
   });
+  it.each([
+    { field: "src", interrupted: false },
+    { field: "src", interrupted: true },
+    { field: "srcH264", interrupted: false },
+    { field: "srcH264", interrupted: true },
+    { field: "voice.src", interrupted: false },
+    { field: "voice.src", interrupted: true },
+  ])("同 URL 异类型素材不阻断原 $field 引用重放，保存中断=$interrupted", async ({ field, interrupted }) => {
+    const url = `https://assets.invalid/replay-${sourceId}-${field}-${interrupted}`;
+    const type = field === "srcH264" ? "video" : field === "voice.src" ? "audio" : "image";
+    const original = await prisma.client.assets.create({ data: { user_id: 983003n, project_id: BigInt(sourceId), type, url } });
+    let data: Record<string, unknown> = { src: url, mediaType: type };
+    if (field === "srcH264") {
+      const main = await prisma.client.assets.create({ data: { user_id: 983003n, project_id: BigInt(sourceId), type: "video", url: `${url}-main` } });
+      data = { assetId: main.id.toString(), src: main.url, srcH264: url, mediaType: "video" };
+    } else if (field === "voice.src") {
+      data = { voice: { name: "音色", src: url, type: "audio" } };
+    }
+    const body = { ...payload, nodes: JSON.stringify([{ id: "replay-original", type: field === "voice.src" ? "assetNode" : "mediaNode", data }]) };
+    const id = crypto.randomUUID();
+    if (interrupted) await fixtureSql.query("CREATE TRIGGER ikotvx_replay_fail_canvas BEFORE INSERT ON canvas FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'isolated save interruption'");
+    try {
+      expect((await request("PUT", id, body)).status).toBe(interrupted ? 500 : 200);
+    } finally {
+      if (interrupted) await fixtureSql.query("DROP TRIGGER ikotvx_replay_fail_canvas");
+    }
+    const previous = await (await request("GET", id)).json();
+    const targetId = previous.data.targetProjectId;
+    const before = await (await fetch(`${base}/api/projects`)).json();
+    const sourceBefore = await (await fetch(`${base}/api/canvases?projectId=${sourceId}`)).json();
+    const jobs = await prisma.client.generation_jobs.count();
+    const reservations = await prisma.client.cost_reservations.count();
+    const substitute = await prisma.client.assets.create({ data: { user_id: 983003n, project_id: BigInt(sourceId), type: type === "image" ? "video" : "image", url } });
+    await app.close();
+    await start();
+    const queried = await request("GET", id);
+    expect(queried.status).toBe(200);
+    expect((await queried.json()).data).toEqual(previous.data);
+    const replay = await request("PUT", id, body);
+    expect(replay.status).toBe(200);
+    const complete = await replay.json();
+    expect(complete.data).toMatchObject({ targetProjectId: targetId, stage: "complete", version: 0 });
+    expect((await request("PUT", id, { ...body, name: "更换请求" })).status).toBe(409);
+    const snapshot = await (await fetch(`${base}/api/projects/${targetId}/snapshot`)).json();
+    expect(JSON.parse(snapshot.data.canvas.nodes)).toEqual(JSON.parse(body.nodes));
+    expect(snapshot.data.assets[original.id.toString()].access_url).toBe(url);
+    expect(snapshot.data.assets[substitute.id.toString()]).toBeUndefined();
+    expect((await (await fetch(`${base}/api/projects`)).json()).data).toHaveLength(before.data.length);
+    expect(await (await fetch(`${base}/api/canvases?projectId=${sourceId}`)).json()).toEqual(sourceBefore);
+    expect(await prisma.client.generation_jobs.count()).toBe(jobs);
+    expect(await prisma.client.cost_reservations.count()).toBe(reservations);
+  });
 });

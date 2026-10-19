@@ -117,16 +117,21 @@ export class LocalCanvasRecoveryService {
     @Inject(CanvasService) private readonly canvas: CanvasService,
   ) {}
 
-  private async validateAssets(ownerId: string, references: AssetReference[], targetProjectId?: string): Promise<PromptMaterial[]> {
+  private async validateAssets(
+    ownerId: string,
+    references: AssetReference[],
+    targetProjectId?: string,
+    client: Pick<PrismaService["client"], "assets" | "material_assets"> = this.prisma.client,
+  ): Promise<PromptMaterial[]> {
     if (references.length === 0) return [];
     const ids = references.flatMap(ref => [ref.assetId, ref.resolvedAssetId].flatMap(id => id && /^[1-9][0-9]{0,18}$/.test(id) ? [BigInt(id)] : []));
     const materialIds = references.flatMap(ref => ref.assetId && /^asset-.{1,128}$/i.test(ref.assetId) ? [ref.assetId] : []);
-    const activeMaterials = materialIds.length === 0 ? [] : await this.prisma.client.material_assets.findMany({ where: {
+    const activeMaterials = materialIds.length === 0 ? [] : await client.material_assets.findMany({ where: {
       user_id: BigInt(ownerId), material_id: { in: materialIds }, status: "Active",
     }, select: { material_id: true } });
     const activeMaterialIds = new Set(activeMaterials.map(material => material.material_id));
     const urls = references.flatMap(ref => ref.url ? [ref.url] : []);
-    const assets = await this.prisma.client.assets.findMany({ where: {
+    const assets = await client.assets.findMany({ where: {
       user_id: BigInt(ownerId), is_delete: false, status: "normal", type: { in: ["image", "video", "audio"] },
       OR: [{ id: { in: ids } }, { url: { in: urls } }, { material_id: { in: [...activeMaterialIds] } }],
     }, select: { id: true, url: true, type: true, material_id: true } });
@@ -217,7 +222,6 @@ export class LocalCanvasRecoveryService {
     }
     validateIndependentContent(content[1], sourceProjectId);
     const assets = assetReferences(content[1]);
-    await this.validateAssets(ownerId, assets);
     const requestHash = hash([ownerId, sourceProjectId, payload.name, ...content]);
     await this.prisma.client.$transaction(async tx => {
       const owned = await tx.$queryRaw<Array<{ id: bigint }>>`SELECT id FROM project WHERE id = ${key.project_id} AND owner_id = ${BigInt(ownerId)} AND is_delete = 0 FOR UPDATE`;
@@ -227,6 +231,7 @@ export class LocalCanvasRecoveryService {
         if (existing.request_hash !== requestHash) reject(409, "local_recovery_payload_mismatch", "同一恢复操作的内容已变化，请使用原请求继续");
         return;
       }
+      await this.validateAssets(ownerId, assets, undefined, tx);
       const target = await tx.project.create({ data: { owner_id: BigInt(ownerId), name: payload.name } });
       await tx.command_idempotency.create({ data: { ...key, request_hash: requestHash, resource_id: target.id, accepted_cursor: 0n, result_payload: { ownerId, documentHash: hash(content), assets } } });
     });
