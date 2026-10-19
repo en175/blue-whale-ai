@@ -8,6 +8,7 @@ export interface BillingChargeContext {
   modelId: string;
   taskType: string;
   input: Record<string, unknown>;
+  title?: string;
   ruleSnapshot?: string;
 }
 
@@ -41,6 +42,7 @@ export function createBillingCharge(deps: BillingChargeDeps): BillingCharge {
         taskType: ctx.taskType,
         specs: extractSpecs(ctx.input, ctx.taskType),
         tier,
+        ...(ctx.title !== undefined && { title: ctx.title }),
         ...(ctx.ruleSnapshot !== undefined && { ruleSnapshot: ctx.ruleSnapshot }),
       });
     } catch (error) {

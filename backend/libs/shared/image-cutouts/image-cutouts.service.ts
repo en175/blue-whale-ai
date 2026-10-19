@@ -24,6 +24,7 @@ import {
 import { ProjectService } from "@lib/shared/project/project.service.js";
 import { AssetService } from "@lib/shared/assets/assets.service.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
+import { MediaToolBillingService } from "@lib/shared/media-tool-pricing/media-tool-billing.service.js";
 
 const IDEMPOTENCY_OPERATION = "image_cutout.create";
 const REQUEST_PATH = "/image-cutouts";
@@ -82,6 +83,7 @@ export class ImageCutoutsService {
     private readonly prisma: PrismaService,
     private readonly project: ProjectService,
     private readonly assets: AssetService,
+    private readonly billing: MediaToolBillingService,
   ) {}
 
   async create(
@@ -150,6 +152,11 @@ export class ImageCutoutsService {
     }
 
     const frozenInput: ImageCutoutInput = { ...input };
+    const jobBilling = await this.billing.jobBilling(
+      IMAGE_CUTOUT_JOB_TYPE,
+      userId,
+      frozenInput,
+    );
 
     const outcome = await createMediaToolJobWithRecovery(
       this.prisma.client,
@@ -169,6 +176,8 @@ export class ImageCutoutsService {
         });
         return { jobId: job.id.toString(), status: "queued" };
       },
+      undefined,
+      jobBilling,
     );
     if (outcome.kind === "envelope") return outcome.envelope;
     if (outcome.kind === "idempotency_conflict") {
@@ -192,6 +201,15 @@ export class ImageCutoutsService {
       code,
       message,
       details,
+    );
+  }
+
+  async release(userId: string, jobId: string, reason: string): Promise<void> {
+    await this.billing.release(
+      IMAGE_CUTOUT_JOB_TYPE,
+      userId,
+      Number(jobId),
+      reason,
     );
   }
 }

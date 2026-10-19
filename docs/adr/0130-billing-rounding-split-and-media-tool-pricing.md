@@ -50,7 +50,7 @@
 
 ### 7. 扣费时机沿 ADR-0127
 
-MediaKit 工具与生成一致：提交即扣、失败全额退（复用 worker 终态 outbox 的 `refund:true`），不做部分退差。工具报价走后端接口，与 charge 共用同一份规则快照。4.5 改按张后，部分出图失败与重试重复扣费作为已知风险另行处理。
+MediaKit 工具与生成一致：提交即扣、失败全额退（复用 worker 终态 outbox 的 `refund:true`），不做部分退差。工具报价走后端接口，与 charge 共用同一份规则快照。`media_tool_pricing.charge_enabled=false` 表示该工具免费：不建预扣、失败不退，报价返回 0。4.5 改按张后，部分出图失败与重试重复扣费作为已知风险另行处理。
 
 ## 后果
 

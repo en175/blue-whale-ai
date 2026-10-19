@@ -45,6 +45,17 @@ export class ImageCutoutsController {
           raw: "RocketMQ 入队失败",
         })
         .catch(() => {});
+      await this.imageCutouts
+        .release(user.userId, jobId, "任务入队失败")
+        .catch((releaseError) => {
+          logger.error(
+            `[image-cutout] release failed jobId=${jobId}: ${
+              releaseError instanceof Error
+                ? releaseError.message
+                : String(releaseError)
+            }`,
+          );
+        });
     }
     return result;
   }
