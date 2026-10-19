@@ -20,6 +20,10 @@ export function isAdmin(): boolean {
   return useAuthStore.getState().user?.isAdmin === true;
 }
 
+export function isSuperAdmin(): boolean {
+  return useAuthStore.getState().user?.roles?.includes('super_admin') === true;
+}
+
 export function setSession(user: SessionUser | null) {
   if (user === null) {
     useAuthStore.getState().clearSession();
