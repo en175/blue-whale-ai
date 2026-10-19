@@ -1,5 +1,6 @@
-import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent } from 'react';
+import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { ArrowUp, X, Zap } from 'lucide-react';
+import DragSlider from '@/custom/components/DragSlider';
 import {
   AUDIO_SPEED_MAX_SPEED,
   AUDIO_SPEED_MIN_SPEED,
@@ -50,7 +51,7 @@ export default function AudioSpeedBar({
 
   const pos = speedToPos(speed);
 
-  const onSliderKeyDown = (e: ReactKeyboardEvent<HTMLInputElement>) => {
+  const onSliderKeyDown = (e: ReactKeyboardEvent<HTMLElement>) => {
     if (readOnly) return;
     if (e.key === 'ArrowRight' || e.key === 'ArrowUp' || e.key === 'ArrowLeft' || e.key === 'ArrowDown') {
       e.preventDefault();
@@ -88,18 +89,17 @@ export default function AudioSpeedBar({
       <span className={styles.title}>调速</span>
       {}
       <div className={styles.sliderBox}>
-        <input
-          type="range"
+        <DragSlider
           className={styles.slider}
           min={AUDIO_SPEED_SLIDER_MIN_POS}
           max={AUDIO_SPEED_SLIDER_MAX_POS}
           step={1}
           value={pos}
           disabled={readOnly}
-          style={{ '--fill': `${pos / 10}%` } as CSSProperties}
-          data-testid="audio-speed-slider"
-          aria-label="播放倍速"
-          onChange={(e) => onSpeedChange(posToSpeed(parseInt(e.target.value, 10)))}
+          testId="audio-speed-slider"
+          ariaLabel="播放倍速"
+          ariaValueText={audioSpeedLabel(speed)}
+          onChange={(nextPos) => onSpeedChange(posToSpeed(nextPos))}
           onKeyDown={onSliderKeyDown}
         />
         {}

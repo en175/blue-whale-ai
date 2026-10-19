@@ -16,6 +16,7 @@ import { pickDefaultVideoRatio, videoRatioLabel } from '@/custom/utils/video-asp
 import { aspectRatioOptions, hasAspectRatio } from '@/custom/utils/image-size-ratios';
 import { generationQuoteOptions } from '@/custom/api/generationQuote';
 import RatioGroup from '@/custom/components/RatioGroup';
+import DragSlider from '@/custom/components/DragSlider';
 import Select from '@/custom/components/Select';
 import GenerationQuoteBadge from '../GenerationQuoteBadge';
 import { buildVideoJobReferences } from '../../tools/video/videoJobReferences';
@@ -857,7 +858,7 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
   );
   const textThumbsAt = (base: number) => (attachments ?? []).map((a, i) => renderTextThumb(a, base + i));
 
-  const onDurationSliderKeyDown = (e: ReactKeyboardEvent<HTMLInputElement>) => {
+  const onDurationSliderKeyDown = (e: ReactKeyboardEvent<HTMLElement>) => {
     if (e.key !== 'Escape') return;
     e.preventDefault();
     e.stopPropagation();
@@ -1042,16 +1043,16 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
                   自动，由模型选择时长
                 </label>
               )}
-              <input
-                type="range"
+              <DragSlider
                 className={styles.durationSlider}
                 min={durationRange.min}
                 max={durationRange.max}
                 step={durationRange.step}
                 value={duration === -1 ? durationRange.min : duration}
                 disabled={readOnly || duration === -1}
-                onChange={(e) => {
-                  const v = Number(e.target.value);
+                ariaLabel="时长"
+                ariaValueText={duration === -1 ? '自动' : `${duration}s`}
+                onChange={(v) => {
                   setDuration(v);
                   syncDraftParams({ duration: v });
                 }}

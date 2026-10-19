@@ -229,13 +229,6 @@
 
 .contourRange {
   width: 96px;
-  accent-color: #fff;
-  cursor: pointer;
-}
-
-.contourRange:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
 }
 
 .contourValue {
