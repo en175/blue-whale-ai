@@ -918,10 +918,10 @@ export function applyEditSourceDurationBasis(
     if (typeof seconds !== "number" || !Number.isFinite(seconds) || seconds <= 0) {
       return false;
     }
-    maxSeconds = Math.max(maxSeconds ?? 0, Math.floor(seconds));
+    maxSeconds = Math.max(maxSeconds ?? 0, seconds);
   }
   if (maxSeconds === null) return false;
-  input[DURATION_BASIS_KEY] = maxSeconds;
+  input[DURATION_BASIS_KEY] = Math.round(maxSeconds);
   return true;
 }
 
@@ -949,6 +949,7 @@ export function projectQuoteInput(
   type: GenerationType,
   body: CreateGenerationJobBody,
   capability?: ModelCapabilityView,
+  referenceAssetIdsOverride?: Array<string | number>,
 ): Record<string, unknown> | null {
   const strategy = strategies[type];
   const params = body.parameters as GenerationParameters | undefined;
@@ -966,7 +967,10 @@ export function projectQuoteInput(
 
   const imageReferenceMax =
     capability?.features?.image_reference_max ?? DEFAULT_IMAGE_REFERENCE_MAX;
-  const referenceAssets = resolveReferenceAssets(body, type, imageReferenceMax);
+  const referenceAssets =
+    referenceAssetIdsOverride !== undefined
+      ? { ok: true as const, value: { referenceAssetIds: referenceAssetIdsOverride } }
+      : resolveReferenceAssets(body, type, imageReferenceMax);
 
 
 
@@ -1024,7 +1028,7 @@ function resolveModelId(type: GenerationType, modelId: unknown): string {
 
 
 
-function resolveReferenceAssets(
+export function resolveReferenceAssets(
   body: CreateGenerationJobBody,
   type: GenerationType,
   imageReferenceMax: number,

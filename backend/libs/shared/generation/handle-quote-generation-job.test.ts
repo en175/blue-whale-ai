@@ -214,6 +214,56 @@ describe("handleQuoteGenerationJob", () => {
     expect(quoteArg.taskType).toBe("image");
   });
 
+  it("★ 图片文本带入参考：报价与实扣同口径（image_reference=1，reference_count=2）", async () => {
+    const { client, quote } = fakeBilling();
+    const deps = {
+      ...previewDeps(client, vi.fn().mockResolvedValue("free")),
+      canvas: {
+        getByProject: vi.fn().mockResolvedValue({
+          id: "9",
+          project_id: "1",
+          version: 3,
+          viewport: null,
+          nodes: JSON.stringify([
+            { id: "media-1", type: "mediaNode", data: { mediaType: "image" } },
+            {
+              id: "text-a",
+              type: "textNode",
+              data: {
+                text: "参考这张图",
+                mediaMentions: [{ start: 0, end: 2, nodeId: "media-2", assetId: "2" }],
+                mediaRefs: [
+                  { nodeId: "media-2", assetId: "2", mediaType: "image", name: "源图", url: "http://v/2.png" },
+                ],
+              },
+            },
+            { id: "media-2", type: "mediaNode", data: { mediaType: "image" } },
+          ]),
+          edges: JSON.stringify([
+            { id: "e-attach", source: "text-a", target: "media-1" },
+            { id: "e-index", source: "media-2", target: "text-a", data: { textIndex: true } },
+          ]),
+        }),
+      },
+    } as unknown as Parameters<typeof handleQuoteGenerationJob>[3];
+
+    const result = await handleQuoteGenerationJob(
+      USER_ID,
+      PROJECT_ID,
+      {
+        ...IMAGE_BODY,
+        references: [{ role: "reference", type: "image", asset_id: "4" }],
+        target_node_id: "media-1",
+      },
+      deps,
+    );
+
+    expect(result.code).toBe(200);
+    const quoteArg = quote.mock.calls[0]?.[0] as unknown as QuoteArgs;
+    expect(quoteArg.specs.reference_count).toBe("2");
+    expect(quoteArg.specs.image_reference).toBe("1");
+  });
+
   it("★ 算不出价（UNPRICEABLE 定价漏配）→ credits: null，不报错、不阻断", async () => {
     const { client, quote } = fakeBilling();
     quote.mockRejectedValue(new Error("invalid_argument: UNPRICEABLE"));
@@ -525,7 +575,7 @@ describe("IKJ797 编辑/延长任务报价时长口径", () => {
 
     const quoteArg = quote.mock.calls[0]?.[0] as unknown as QuoteArgs;
     expect(quoteArg.specs.duration).toBe("13");
-    expect(quoteArg.specs.reference_seconds).toBe("13");
+    expect(quoteArg.specs.reference_seconds).toBe("0");
     expect(result.data).toEqual({ credits: 42, quote_revision: expect.any(String), duration_basis: "source_video" });
   });
 
@@ -546,7 +596,7 @@ describe("IKJ797 编辑/延长任务报价时长口径", () => {
 
     const holdArg = charge.mock.calls[0]?.[0] as unknown as HoldArgs;
     expect(holdArg.specs.duration).toBe("13");
-    expect(holdArg.specs.reference_seconds).toBe("13");
+    expect(holdArg.specs.reference_seconds).toBe("0");
   });
 
   it("★ 编辑单「预览价 = 实扣价」—— 同一请求体两路交给 billing 的规格逐字相等", async () => {
@@ -760,7 +810,7 @@ describe("IKJGE6 画布文本带入合并报价口径", () => {
     const holdArg = charge.mock.calls[0]?.[0] as unknown as HoldArgs;
     const quoteArg = quote.mock.calls[0]?.[0] as unknown as QuoteArgs;
     expect(quoteArg.specs.duration).toBe("13");
-    expect(quoteArg.specs.reference_seconds).toBe("13");
+    expect(quoteArg.specs.reference_seconds).toBe("0");
     expect(holdArg.specs.duration).toBe("13");
     const {
       prompt: _prompt,
