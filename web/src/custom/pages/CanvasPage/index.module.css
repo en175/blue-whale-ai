@@ -72,7 +72,7 @@
 }
 
 .mapBtnActive {
-  color: var(--color-accent-text);
+  color: var(--color-text-primary);
 }
 
 .saveStatus {

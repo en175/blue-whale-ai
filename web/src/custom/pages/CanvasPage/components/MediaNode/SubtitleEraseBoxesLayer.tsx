@@ -12,8 +12,8 @@ export interface SubtitleEraseBoxesLayerProps {
   onBoxEnd: () => void;
 }
 
-const BOX_FILL = 'rgba(61, 90, 254, 0.16)';
-const BOX_STROKE = '#3d5afe';
+const BOX_FILL = 'rgba(208, 208, 208, 0.16)';
+const BOX_STROKE = '#d0d0d0';
 const BOX_STROKE_WIDTH = 1.5;
 const BOX_DASH = '6 4';
 

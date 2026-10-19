@@ -47,8 +47,8 @@
 }
 
 .badgeStage {
-  background: rgba(59, 130, 246, 0.18);
-  color: #60a5fa;
+  background: rgba(208, 208, 208, 0.18);
+  color: #d0d0d0;
 }
 
 .charge {
@@ -90,7 +90,7 @@
 .downloadLink {
   align-self: flex-start;
   font-size: 13px;
-  color: #60a5fa;
+  color: #d0d0d0;
   text-decoration: none;
 }
 

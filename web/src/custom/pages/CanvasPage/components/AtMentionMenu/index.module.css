@@ -182,5 +182,5 @@
 .inline .panel { max-height: inherit; }
 .search { flex-shrink: 0; }
 .results { overflow-y: auto; min-height: 0; max-height: 420px; }
-.badge { color: #91caff; flex-shrink: 0; font-size: 12px; }
+.badge { color: #d0d0d0; flex-shrink: 0; font-size: 12px; }
 .itemRow:focus-visible, .kindRow:focus-visible { outline: none; background: #3a3a3a; }

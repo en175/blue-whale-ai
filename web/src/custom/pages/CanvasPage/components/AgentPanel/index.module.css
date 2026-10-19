@@ -131,7 +131,7 @@
   width: 28px;
   height: 28px;
   border-radius: var(--radius-md);
-  background: linear-gradient(135deg, var(--color-accent-primary), #7c3aed);
+  background: linear-gradient(135deg, var(--color-accent-primary), #111111);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1342,7 +1342,7 @@
   padding: 4px 10px;
   border: 1px solid var(--color-accent-primary);
   border-radius: var(--radius-sm);
-  background-color: rgba(80, 140, 255, 0.16);
+  background-color: rgba(208, 208, 208, 0.16);
   color: var(--color-accent-primary);
   font-size: var(--font-size-sm);
   font-weight: 600;
@@ -1352,7 +1352,7 @@
 }
 
 .shotApplyBtn:hover:not(:disabled) {
-  background-color: rgba(80, 140, 255, 0.28);
+  background-color: rgba(208, 208, 208, 0.28);
 }
 
 .shotApplyBtn:disabled {
@@ -2000,7 +2000,7 @@
   padding: 6px 14px;
   border-radius: 10px;
   border: 1px solid var(--color-accent-primary);
-  background-color: rgba(80, 140, 255, 0.2);
+  background-color: rgba(208, 208, 208, 0.2);
   color: var(--color-accent-primary);
   font-size: var(--font-size-md);
   font-weight: 600;
@@ -2009,7 +2009,7 @@
 }
 
 .solutionPrimaryBtn:hover:not(:disabled) {
-  background-color: rgba(80, 140, 255, 0.32);
+  background-color: rgba(208, 208, 208, 0.32);
 }
 
 .solutionGhostBtn {

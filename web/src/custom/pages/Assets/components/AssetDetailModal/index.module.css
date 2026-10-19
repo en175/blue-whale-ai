@@ -122,9 +122,9 @@
   padding: 2px 10px;
   border-radius: var(--radius-full);
   font-size: var(--font-size-xs);
-  color: #93c5fd;
-  background-color: rgba(30, 58, 138, 0.35);
-  border: 1px solid rgba(59, 130, 246, 0.45);
+  color: #d0d0d0;
+  background-color: rgba(17, 17, 17, 0.35);
+  border: 1px solid rgba(208, 208, 208, 0.45);
 }
 
 .stageText {
@@ -136,7 +136,7 @@
   border: 0;
   background: none;
   font-size: var(--font-size-xs);
-  color: #60a5fa;
+  color: #d0d0d0;
   cursor: pointer;
 }
 

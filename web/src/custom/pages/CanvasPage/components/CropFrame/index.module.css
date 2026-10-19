@@ -37,13 +37,13 @@
   position: absolute;
   pointer-events: auto;
   cursor: move;
-  background-color: rgba(90, 170, 255, 0.06);
+  background-color: rgba(208, 208, 208, 0.06);
   touch-action: none;
 }
 
 .frameBox {
   position: absolute;
-  border: 1.5px solid rgba(90, 170, 255, 0.9);
+  border: 1.5px solid rgba(208, 208, 208, 0.9);
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
   pointer-events: none;
 }
@@ -93,14 +93,14 @@
   height: 10px;
   border-radius: 2px;
   background-color: #fff;
-  border: 1.5px solid rgba(90, 170, 255, 0.95);
+  border: 1.5px solid rgba(208, 208, 208, 0.95);
   pointer-events: none;
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
 }
 
 .cornerHit:hover .cornerVisual {
-  border-color: #7cb8ff;
-  background-color: #7cb8ff;
+  border-color: #d0d0d0;
+  background-color: #d0d0d0;
 }
 
 .cornerNwse {

@@ -23,8 +23,8 @@
 }
 
 .picking {
-  color: var(--color-accent-text, #4c6ef5);
-  border: 1px dashed var(--color-accent-text, #4c6ef5);
+  color: var(--color-accent-primary);
+  border: 1px dashed var(--color-accent-primary);
 }
 
 .triggerSlotted {

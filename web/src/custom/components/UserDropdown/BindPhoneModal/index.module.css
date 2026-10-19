@@ -113,12 +113,12 @@
 
 .submitBtn {
   border: 0;
-  background: #2b2a72;
-  color: #fff;
+  background: #d0d0d0;
+  color: #111111;
   font-weight: 600;
 }
 
 .submitBtn:disabled {
-  color: #77779a;
+  color: #888888;
   cursor: not-allowed;
 }
