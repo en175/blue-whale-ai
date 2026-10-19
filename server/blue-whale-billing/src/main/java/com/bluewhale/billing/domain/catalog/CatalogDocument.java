@@ -28,6 +28,8 @@ public record CatalogDocument(
             Long minCredits,
             Long maxCredits,
             String rounding,
+            Long quantityOffset,
+            Long quantityStep,
             Integer schemaVersion
     ) {}
 
