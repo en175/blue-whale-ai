@@ -18,6 +18,7 @@ import {
   applyEditSourceDurationBasis,
   canonicalJson,
   projectQuoteInput,
+  resolveReferenceAssets,
   resolveTextIndexReferences,
   ruleSampleMode,
   type CreateGenerationJobBody,
@@ -117,7 +118,26 @@ export async function handleQuoteGenerationJob(
     }
   }
 
-  const input = projectQuoteInput(type, effectiveBody, capability);
+  let quoteReferenceAssetIds: Array<string | number> | undefined;
+  if (type === "image" && targetNodeId !== null) {
+    const imageReferenceMax =
+      capability?.features?.image_reference_max ?? DEFAULT_IMAGE_REFERENCE_MAX;
+    const direct = resolveReferenceAssets(body, type, imageReferenceMax);
+    if (!direct.ok) return ok(EMPTY_QUOTE);
+    const textIndexRefs = await resolveTextIndexReferences({
+      type,
+      body,
+      projectId,
+      deps: { canvas: deps.canvas },
+      directReferenceAssetIds: direct.value.referenceAssetIds,
+      imageReferenceMax,
+      ...(capability ? { capability } : {}),
+    });
+    if (!textIndexRefs.ok) return ok(EMPTY_QUOTE);
+    quoteReferenceAssetIds = textIndexRefs.value.merged;
+  }
+
+  const input = projectQuoteInput(type, effectiveBody, capability, quoteReferenceAssetIds);
   if (input === null) return ok(EMPTY_QUOTE);
 
   const quoteParams = effectiveBody.parameters as { prompt?: unknown } | undefined;

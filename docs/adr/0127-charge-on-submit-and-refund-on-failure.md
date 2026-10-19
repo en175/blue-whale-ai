@@ -57,6 +57,8 @@
 
 编辑模式**只允许一段参考视频**；选第二段时模式切到 `omni`（全能参考）。这条是本次新加的产品规则——现有代码不按个数切（见改动清单）。
 
+> 2026-10-19 部分被 [ADR-0130](0130-billing-rounding-split-and-media-tool-pricing.md) §3 取代：编辑态 `reference_seconds` 归零，价格改为 `分辨率单价 × (源秒 + 15)`，不再用 `multipliers` ×2。本段保留为历史口径。
+
 ### 6. 音频：按字数
 
 `baseUnit` 改为 `usage.characters`，**每 100 字 1 积分**（按 Unicode 码点计数，空白不计）。字数在提交时即可从 `input.prompt` 数出，满足「提交即定价」。
