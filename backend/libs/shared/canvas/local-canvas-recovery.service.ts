@@ -138,19 +138,14 @@ export class LocalCanvasRecoveryService {
     const missing: Array<{ path: string; assetId?: string }> = [];
     const materials = new Map<string, PromptMaterial>();
     for (const ref of references) {
-      let asset = ref.assetId ? byId.get(ref.assetId) ?? byMaterial.get(ref.assetId) : ref.resolvedAssetId ? byId.get(ref.resolvedAssetId) : undefined;
-      if (!asset && !ref.assetId && !ref.resolvedAssetId) {
-        const fixed = proven.get(ref.url!);
-        if (fixed !== undefined) asset = byId.get(fixed);
-        else if (targetProjectId === undefined) {
-          asset = byUrl.get(ref.url!);
-          if (asset) ref.resolvedAssetId = asset.id.toString();
-        }
-      }
+      const fixedId = ref.resolvedAssetId ?? (ref.assetId === undefined ? proven.get(ref.url!) : undefined);
+      const first = fixedId === undefined && ref.assetId === undefined && targetProjectId === undefined;
+      const asset = ref.assetId ? byId.get(ref.assetId) ?? byMaterial.get(ref.assetId) : first ? byUrl.get(ref.url!) : fixedId === undefined ? undefined : byId.get(fixedId);
       if (!asset || (ref.resolvedAssetId && ref.resolvedAssetId !== asset.id.toString()) || (ref.url && ref.url !== asset.url) || (ref.mediaType && ref.mediaType !== asset.type)) {
         missing.push({ path: ref.path, ...(ref.assetId ? { assetId: ref.assetId } : {}) });
       } else {
         if (ref.assetId && byMaterial.has(ref.assetId)) ref.resolvedAssetId = asset.id.toString();
+        if (first) ref.resolvedAssetId = asset.id.toString();
         materials.set(asset.id.toString(), { assetId: asset.id.toString(), mediaType: asset.type as PromptMaterial["mediaType"] });
       }
     }
@@ -222,7 +217,7 @@ export class LocalCanvasRecoveryService {
     }
     validateIndependentContent(content[1], sourceProjectId);
     const assets = assetReferences(content[1]);
-    const materials = await this.validateAssets(ownerId, assets);
+    await this.validateAssets(ownerId, assets);
     const requestHash = hash([ownerId, sourceProjectId, payload.name, ...content]);
     await this.prisma.client.$transaction(async tx => {
       const owned = await tx.$queryRaw<Array<{ id: bigint }>>`SELECT id FROM project WHERE id = ${key.project_id} AND owner_id = ${BigInt(ownerId)} AND is_delete = 0 FOR UPDATE`;
@@ -238,7 +233,9 @@ export class LocalCanvasRecoveryService {
     const current = await this.get(ownerId, sourceProjectId, operationId);
     if (current.data?.stage === "complete") return current;
     const targetProjectId = current.data!.targetProjectId;
-    const result = await this.canvas.save(ownerId, targetProjectId, { ...payload, expectedVersion: null }, materials);
+    const stored = receiptSchema.safeParse((await this.prisma.client.command_idempotency.findUnique({ where: { project_id_operation_idempotency_key: key } }))?.result_payload);
+    if (!stored.success) reject(404, "local_recovery_not_found", "恢复操作不存在");
+    const result = await this.canvas.save(ownerId, targetProjectId, { ...payload, expectedVersion: null }, await this.validateAssets(ownerId, stored.data.assets, targetProjectId));
     if (result.code !== 200 && result.code !== 412) throw new HttpException(result, result.code);
     return this.get(ownerId, sourceProjectId, operationId);
   }

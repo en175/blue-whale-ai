@@ -474,6 +474,7 @@ describe.skipIf(!process.env.IKNCL3_DATABASE_URL)("本地恢复画布公开 API"
       { suffix: "voice", type: "audio", path: "nodes.0.data.voice", node: (url: string) => ({ id: "substitute-voice", type: "assetNode", data: { voice: { name: "音色", src: url } } }) },
     ];
     const before = await (await fetch(`${base}/api/projects`)).json();
+    const sourceBefore = await (await fetch(`${base}/api/canvases?projectId=${sourceId}`)).json();
     const beforeJobs = await prisma.client.generation_jobs.count();
     const beforeReservations = await prisma.client.cost_reservations.count();
     for (const [index, item] of cases.entries()) {
@@ -502,6 +503,7 @@ describe.skipIf(!process.env.IKNCL3_DATABASE_URL)("本地恢复画布公开 API"
         await app.close();
         await start();
         expect((await request("GET", id)).status).toBe(422);
+        expect((await request("PUT", id, body)).status).toBe(422);
         expect(await prisma.client.project_asset.count({ where: { project_id: BigInt(targetId), asset_id: substitute.id } })).toBe(0);
         const target = await (await fetch(`${base}/api/canvases?projectId=${targetId}`)).json();
         expect(target.data.version).toBe(complete.data.version);
@@ -510,6 +512,7 @@ describe.skipIf(!process.env.IKNCL3_DATABASE_URL)("本地恢复画布公开 API"
       }
     }
     expect((await (await fetch(`${base}/api/projects`)).json()).data).toHaveLength(before.data.length + cases.length);
+    expect(await (await fetch(`${base}/api/canvases?projectId=${sourceId}`)).json()).toEqual(sourceBefore);
     expect(await prisma.client.generation_jobs.count()).toBe(beforeJobs);
     expect(await prisma.client.cost_reservations.count()).toBe(beforeReservations);
   });
@@ -581,6 +584,8 @@ describe.skipIf(!process.env.IKNCL3_DATABASE_URL)("本地恢复画布公开 API"
     expect((await (await request("GET", id)).json()).data).toEqual(complete.data);
     expect((await (await request("PUT", id, body)).json()).data).toEqual(complete.data);
     await prisma.client.project_asset.deleteMany({ where: { project_id: BigInt(targetId), asset_id: original.id } });
+    await app.close();
+    await start();
     try {
       for (const response of [await request("GET", id), await request("PUT", id, body)]) {
         expect(response.status).toBe(422);
@@ -605,5 +610,33 @@ describe.skipIf(!process.env.IKNCL3_DATABASE_URL)("本地恢复画布公开 API"
     const stored = await prisma.client.command_idempotency.findUnique({ where: key });
     expect((stored!.result_payload as { assets: Array<Record<string, unknown>> }).assets.every(asset => asset.resolvedAssetId === undefined)).toBe(true);
     expect((await (await request("GET", id)).json()).data).toEqual(complete.data);
+  });
+
+  it("首次保存中断后出现同 URL 替代素材时，续作仍按原回执身份建立目标关联", async () => {
+    const url = `https://assets.invalid/resume-${sourceId}.png`;
+    const original = await prisma.client.assets.create({ data: { user_id: 983003n, project_id: BigInt(sourceId), type: "image", url } });
+    const body = { ...payload, nodes: JSON.stringify([{ id: "resume-url", type: "mediaNode", data: { src: url, mediaType: "image" } }]) };
+    const id = "04e0b9cc-04dd-45ad-930b-3c0000000034";
+    await fixtureSql.query("CREATE TRIGGER ikotvx_fail_canvas BEFORE INSERT ON canvas FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'isolated save interruption'");
+    let targetId = "";
+    try {
+      expect((await request("PUT", id, body)).status).toBe(500);
+      const partial = await (await request("GET", id)).json();
+      expect(partial.data.stage).toBe("created");
+      targetId = partial.data.targetProjectId;
+    } finally {
+      await fixtureSql.query("DROP TRIGGER ikotvx_fail_canvas");
+    }
+    const substitute = await prisma.client.assets.create({ data: { user_id: 983003n, project_id: BigInt(sourceId), type: "image", url } });
+    const resumed = await request("PUT", id, body);
+    expect(resumed.status).toBe(200);
+    expect((await resumed.json()).data.stage).toBe("complete");
+    const links = await prisma.client.project_asset.findMany({ where: { project_id: BigInt(targetId), is_delete: 0 }, select: { asset_id: true } });
+    expect(links.map(link => link.asset_id.toString())).toEqual([original.id.toString()]);
+    expect(await prisma.client.project_asset.count({ where: { project_id: BigInt(targetId), asset_id: substitute.id } })).toBe(0);
+    const key = { project_id_operation_idempotency_key: { project_id: BigInt(sourceId), operation: "LOCAL_CANVAS_RECOVERY_V1", idempotency_key: id } };
+    const row = await prisma.client.command_idempotency.findUnique({ where: key });
+    expect((row!.result_payload as { assets: Array<{ resolvedAssetId?: string }> }).assets[0].resolvedAssetId).toBe(original.id.toString());
+    expect((await (await fetch(`${base}/api/canvases?projectId=${targetId}`)).json()).data.version).toBe(0);
   });
 });
