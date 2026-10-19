@@ -149,6 +149,12 @@ export function useCanvasSave(host: CanvasSaveHost) {
     if (failure === undefined || definitiveRejection) retainedRecoverySaveRef.current = null;
   };
 
+  const composeSaveFieldsIfRecoverySettled = (): ReturnType<GenerationRuntime['composeSaveFields']> => {
+    const runtime = generationRuntimeRef.current;
+    if (runtime == null || !runtime.isRecoverySettled()) return null;
+    return runtime.composeSaveFields();
+  };
+
   const planRecoverySave = (
     projectId: string,
     signature: string,
@@ -169,7 +175,7 @@ export function useCanvasSave(host: CanvasSaveHost) {
       };
     }
     if (retained != null) retainedRecoverySaveRef.current = null;
-    const recoveryFields = generationRuntimeRef.current?.composeSaveFields() ?? null;
+    const recoveryFields = composeSaveFieldsIfRecoverySettled();
     if (recoveryFields != null) {
       retainedRecoverySaveRef.current = {
         projectId, commandId: recoveryFields.commandId, recoveryChanges: recoveryFields.recoveryChanges,
@@ -227,7 +233,7 @@ export function useCanvasSave(host: CanvasSaveHost) {
     if (runtime == null) return;
     void runtime.recover(projectId).then(() => {
       if (activeProjectRef.current !== projectId) return;
-      if (runtime.composeSaveFields() == null) return;
+      if (composeSaveFieldsIfRecoverySettled() == null) return;
       void flushCanvasSave(projectId, { suppressRecoveryRetry: true }).catch(() => {});
     });
   };

@@ -215,6 +215,7 @@ export interface GenerationRuntime {
   remove(nodeId: string): boolean;
   noteRemovedOutput(nodeId: string, nodeData: Record<string, unknown> | undefined): void;
   recover(projectId: string): Promise<void>;
+  isRecoverySettled(): boolean;
   resumeFromHydration(
     nodeId: string, jobId: string, nodeData?: Record<string, unknown>,
     known?: RecoveryRecordFacts,

@@ -14,6 +14,7 @@ export function createRecovery(ctx: RuntimeContext, polling: { poll: (execution:
 
   let scanningEpoch: object | null = null;
   let scanningRun: Promise<void> | null = null;
+  let failedEpoch: object | null = null;
   const recover = (projectId: string): Promise<void> => {
     const loadEpoch = host.getLoadEpoch();
     if (scanningEpoch === loadEpoch) return scanningRun ?? Promise.resolve();
@@ -27,7 +28,9 @@ export function createRecovery(ctx: RuntimeContext, polling: { poll: (execution:
           for (const record of page.records) reconcileRecord(record);
           cursor = page.next_cursor;
         } while (cursor != null);
+        failedEpoch = null;
       } catch (e) {
+        failedEpoch = loadEpoch;
         console.warn('[generation-runtime] 恢复扫描失败（下轮水合重试）:', e);
       } finally {
         if (scanningEpoch === loadEpoch) scanningEpoch = null;
@@ -36,6 +39,8 @@ export function createRecovery(ctx: RuntimeContext, polling: { poll: (execution:
     scanningRun = run;
     return run;
   };
+
+  const isRecoverySettled = () => scanningEpoch == null && failedEpoch !== host.getLoadEpoch();
 
   const resumeFromRecord = (record: GenerationRecoveryRecord, def?: GenerationTaskDefinition) => {
     resumeFromHydration(record.target_node_id, record.job_id, undefined, {
@@ -180,5 +185,5 @@ export function createRecovery(ctx: RuntimeContext, polling: { poll: (execution:
     }
   };
 
-  return { recover, resumeFromHydration, reconcileConflictItems };
+  return { recover, isRecoverySettled, resumeFromHydration, reconcileConflictItems };
 }
