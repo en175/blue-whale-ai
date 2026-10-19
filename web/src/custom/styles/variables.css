@@ -19,15 +19,15 @@
   --color-border-hover: #444444;
   --color-border-overlay: #2c2c2c;
 
-  --color-accent-primary: #4c6ef5;
-  --color-accent-hover: #5c7cff;
-  --color-accent-active: #3b5bdb;
-  --color-accent-text: #ffffff;
+  --color-accent-primary: #d0d0d0;
+  --color-accent-hover: #ececec;
+  --color-accent-active: #b8b8b8;
+  --color-accent-text: #111111;
 
   --color-success: #40c057;
   --color-warning: #fab005;
   --color-error: #fa5252;
-  --color-info: #339af0;
+  --color-info: #a8a8a8;
 
   --color-accent-agent: #f2b544;
   --color-accent-agent-hover: #e6a838;

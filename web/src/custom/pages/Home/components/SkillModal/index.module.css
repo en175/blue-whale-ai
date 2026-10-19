@@ -340,15 +340,15 @@
 
 .detailUseBtn {
   padding: 6px 16px;
-  background-color: #3e63c4;
-  border-color: #3e63c4;
-  color: #fff;
+  background-color: var(--color-accent-primary);
+  border-color: var(--color-accent-primary);
+  color: var(--color-accent-text);
 }
 
 .detailUseBtn:hover {
-  background-color: #4a70d8;
-  border-color: #4a70d8;
-  color: #fff;
+  background-color: var(--color-accent-hover);
+  border-color: var(--color-accent-hover);
+  color: var(--color-accent-text);
 }
 
 .detailBody {
@@ -690,13 +690,13 @@
 }
 
 .saveBtnActive {
-  background-color: #3e63c4;
-  color: #fff;
+  background-color: var(--color-accent-primary);
+  color: var(--color-accent-text);
   cursor: pointer;
 }
 
 .saveBtnActive:hover {
-  background-color: #4a70d8;
+  background-color: var(--color-accent-hover);
 }
 
 .skillEditor {

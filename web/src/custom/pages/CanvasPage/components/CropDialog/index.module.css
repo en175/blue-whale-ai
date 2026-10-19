@@ -61,13 +61,13 @@
 }
 
 .presetBtnActive {
-  color: #fff;
-  background-color: #3d5afe;
+  color: var(--color-accent-text);
+  background-color: var(--color-accent-primary);
 }
 
 .presetBtnActive:hover {
-  color: #fff;
-  background-color: #3d5afe;
+  color: var(--color-accent-text);
+  background-color: var(--color-accent-hover);
 }
 
 .cancelBtn {

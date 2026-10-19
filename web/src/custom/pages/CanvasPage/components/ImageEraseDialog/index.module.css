@@ -75,8 +75,8 @@
 }
 
 .toolBtnActive {
-  color: #fff;
-  background-color: #3d5afe;
+  color: var(--color-accent-text);
+  background-color: var(--color-accent-primary);
 }
 
 .toolBtn:disabled {

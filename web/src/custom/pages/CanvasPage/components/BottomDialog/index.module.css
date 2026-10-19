@@ -269,7 +269,7 @@
 }
 
 .modeOptionActive {
-  color: var(--color-accent-text);
+  color: var(--color-text-primary);
   background-color: var(--color-bg-active);
   font-weight: 500;
 }
