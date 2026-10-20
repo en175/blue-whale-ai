@@ -23,7 +23,7 @@
 
 import { PrismaMariaDb } from "@prisma/adapter-mariadb";
 import type { Pool } from "mariadb";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildPoolConfig, getPrismaClient } from "./db.js";
 import type { CanvasBinding } from "@lib/contracts";
 
@@ -40,6 +40,18 @@ import { VideoEnhancementsService } from "@lib/shared/video-enhancements/video-e
 import { VideoFrameInterpolationsService } from "@lib/shared/video-frame-interpolations/video-frame-interpolations.service.js";
 import type { AssetStorageService } from "@lib/shared/assets/storage.service.js";
 import type { PrismaClient } from "@prisma/client";
+
+vi.mock("@lib/shared/generation/generation-queue.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@lib/shared/generation/generation-queue.js")>();
+  return {
+    ...actual,
+    enqueueImageEraseJob: vi.fn(),
+    enqueueImageCutoutJob: vi.fn(),
+    enqueueImageOutpaintJob: vi.fn(),
+    enqueueImageEnhanceJob: vi.fn(),
+  };
+});
 
 const databaseUrl = process.env.IKJLTX_DATABASE_URL;
 
@@ -59,7 +71,7 @@ function assetOf(kind: "image" | "video" | "audio") {
 
 const TOOLS = [
   { name: "擦除", op: "image_erase.create", kind: "image" as const,
-    make: (c: unknown, assets: unknown) => new ImageErasuresService({ client: c } as never, { findOwnedById: async () => ({ id: 1n }) } as never, assets as never),
+    make: (c: unknown, assets: unknown) => new ImageErasuresService({ client: c } as never, { findOwnedById: async () => ({ id: 1n }) } as never, assets as never, { jobBilling: async () => undefined, release: async () => {} } as never),
     body: () => ({ source_asset_id: "88", target_node_id: "node-1", erase_scene: "full_screen_text_erase" }) },
   { name: "去字幕", op: "video_subtitle_erase.create", kind: "video" as const,
     make: (c: unknown, assets: unknown) => new VideoSubtitleErasuresService({ client: c } as never, { findOwnedById: async () => ({ id: 1n }) } as never, assets as never),
@@ -81,10 +93,10 @@ const TOOLS = [
     make: (c: unknown, assets: unknown) => new ImageCutoutsService({ client: c } as never, { findOwnedById: async () => ({ id: 1n }) } as never, assets as never, { jobBilling: async () => undefined, release: async () => {} } as never),
     body: () => ({ source_asset_id: "88", target_node_id: "node-1", cutout_scene: "general" }) },
   { name: "扩图", op: "image_outpaint.create", kind: "image" as const,
-    make: (c: unknown, assets: unknown) => new ImageOutpaintsService({ client: c } as never, { findOwnedById: async () => ({ id: 1n }) } as never, assets as never, { uploads: null } as unknown as AssetStorageService),
+    make: (c: unknown, assets: unknown) => new ImageOutpaintsService({ client: c } as never, { findOwnedById: async () => ({ id: 1n }) } as never, assets as never, { uploads: null } as unknown as AssetStorageService, { jobBilling: async () => undefined, release: async () => {} } as never),
     body: () => ({ source_asset_id: "88", target_node_id: "node-1", expand_top: 0.1, expand_bottom: 0, expand_left: 0, expand_right: 0 }) },
   { name: "图像高清", op: "image_enhance.create", kind: "image" as const,
-    make: (c: unknown, assets: unknown) => new ImageEnhancementsService({ client: c } as never, { findOwnedById: async () => ({ id: 1n }) } as never, assets as never),
+    make: (c: unknown, assets: unknown) => new ImageEnhancementsService({ client: c } as never, { findOwnedById: async () => ({ id: 1n }) } as never, assets as never, { jobBilling: async () => undefined, release: async () => {} } as never),
     body: () => ({ source_asset_id: "88", target_node_id: "node-1", version_tier: "pro", multiple: 2, generative_enhance_mode: "generative_first", enable_correct_color: false }) },
   { name: "视频 HD", op: "video_enhance.create", kind: "video" as const,
     make: (c: unknown, assets: unknown) => new VideoEnhancementsService({ client: c } as never, { findOwnedById: async () => ({ id: 1n }) } as never, assets as never),

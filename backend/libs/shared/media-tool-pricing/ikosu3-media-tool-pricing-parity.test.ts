@@ -83,4 +83,17 @@ describe("IKOSU3 media_tool_pricing 迁移：三轨", () => {
       '@@unique([tool_type], map: "uk_media_tool_pricing__tool_type")',
     );
   });
+
+  it("图片工具种子价与验收口径一致（mc → 积分：放大 15/47/67，扩图/擦除 14，抠图 1）", () => {
+    const seed = (tool: string) =>
+      standaloneSql
+        .split("\n")
+        .find((line) => line.startsWith(`('${tool}',`)) ?? "";
+    expect(seed("image_enhance")).toContain('"multiple=2":15000');
+    expect(seed("image_enhance")).toContain('"multiple=4":47000');
+    expect(seed("image_enhance")).toContain('"multiple=6":67000');
+    expect(seed("image_outpaint")).toContain('"value":14000');
+    expect(seed("image_erase")).toContain('"value":14000');
+    expect(seed("image_cutout")).toContain('"value":1000');
+  });
 });

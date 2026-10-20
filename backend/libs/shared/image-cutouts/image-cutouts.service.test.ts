@@ -2,6 +2,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ImageCutoutsService } from "./image-cutouts.service.js";
 
+const { enqueueImageCutoutJob } = vi.hoisted(() => ({ enqueueImageCutoutJob: vi.fn() }));
+vi.mock("@lib/shared/generation/generation-queue.js", () => ({ enqueueImageCutoutJob }));
+
 const { lockMock, bindingViewMock, readIdemMock, writeRowsMock, writeIdemMock } = vi.hoisted(() => ({
   lockMock: vi.fn(),
   bindingViewMock: vi.fn(),
@@ -577,5 +580,20 @@ describe("ImageCutoutsService.create：按工具计价计费", () => {
     await expect(service.create("9", "55", VALID_GENERAL_BODY)).rejects.toThrow("余额不足");
     expect(create).toHaveBeenCalledTimes(1);
     expect(release).not.toHaveBeenCalled();
+  });
+});
+
+describe("ImageCutoutsService.create：计费输入", () => {
+  it("按 image_cutout 计价并入队", async () => {
+    const jobBilling = vi.fn().mockResolvedValue(undefined);
+    const { service } = makeService({ billing: { jobBilling, release: vi.fn() } });
+    const result = await service.create("9", "55", VALID_GENERAL_BODY);
+    expect(result.code).toBe(200);
+    expect(jobBilling).toHaveBeenCalledWith(
+      "image_cutout",
+      "9",
+      expect.objectContaining({ source_asset_id: "88" }),
+    );
+    expect(enqueueImageCutoutJob).toHaveBeenCalledWith("400");
   });
 });

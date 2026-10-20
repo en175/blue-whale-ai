@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { ImageOutpaintsService } from "./image-outpaints.service.js";
+
+const { enqueueImageOutpaintJob } = vi.hoisted(() => ({ enqueueImageOutpaintJob: vi.fn() }));
+vi.mock("@lib/shared/generation/generation-queue.js", () => ({ enqueueImageOutpaintJob }));
 import { IMAGE_OUTPAINT_SOURCE_LIMITS } from "@lib/contracts";
 
 const VALID_BODY = {
@@ -20,6 +23,7 @@ function makeService(overrides: {
   createJob?: unknown;
   storage?: unknown;
   updateAsset?: unknown;
+  billing?: unknown;
 } = {}) {
   const project = overrides.project ?? { findOwnedById: vi.fn().mockResolvedValue({ id: 55n }) };
   const assets =
@@ -49,6 +53,7 @@ function makeService(overrides: {
       project as never,
       assets as never,
       storage as never,
+      (overrides.billing ?? { jobBilling: async () => undefined, release: async () => {} } as never) as never,
     ),
     create,
     costCreate,
@@ -335,5 +340,20 @@ describe("ImageOutpaintsService.create：落任务与免费口径", () => {
     expect(costCreate).not.toHaveBeenCalled();
     const data = create.mock.calls[0][0].data;
     expect(Object.keys(data)).not.toContain("provider");
+  });
+});
+
+describe("ImageOutpaintsService.create：计费输入", () => {
+  it("按 image_outpaint 计价并入队", async () => {
+    const jobBilling = vi.fn().mockResolvedValue(undefined);
+    const { service } = makeService({ billing: { jobBilling, release: vi.fn() } });
+    const result = await service.create("9", "55", VALID_BODY);
+    expect(result.code).toBe(200);
+    expect(jobBilling).toHaveBeenCalledWith(
+      "image_outpaint",
+      "9",
+      expect.objectContaining({ source_asset_id: "88" }),
+    );
+    expect(enqueueImageOutpaintJob).toHaveBeenCalledWith("400");
   });
 });
