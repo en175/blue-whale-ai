@@ -96,6 +96,11 @@ describe("自定义充值配置迁入 system_settings — 069 seed", () => {
     );
     expect(seedMigration).not.toContain("setting_value` = VALUES");
   });
+
+  it("★ enabled 以 JSON 布尔落库，不是 0/1 或字符串", () => {
+    expect(seedMigration).toContain("CAST('true' AS JSON)");
+    expect(seedMigration).toContain("CAST('false' AS JSON)");
+  });
 });
 
 describe("自定义充值配置迁入 system_settings — 070 drop", () => {

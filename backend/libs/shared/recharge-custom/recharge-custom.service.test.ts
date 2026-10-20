@@ -26,26 +26,34 @@ const ROW = {
   gmt_modified: new Date("2026-09-27T00:00:00Z"),
 };
 
-function makeService(row: typeof ROW | null = ROW) {
-  const findUnique = vi.fn().mockResolvedValue(row);
-  const update = vi.fn().mockImplementation(
-    async ({ data }: { data: Record<string, unknown> }) => ({
-      ...ROW,
-      setting_value: String(data.setting_value),
-      version: (row?.version ?? 0) + 1,
-    }),
+function makeService(row: typeof ROW | null = ROW, alwaysConflict = false) {
+  let current = row;
+  const findUnique = vi.fn(async () => current);
+  const updateMany = vi.fn(
+    async ({ where, data }: { where: { version: number }; data: Record<string, unknown> }) => {
+      if (alwaysConflict || !current || current.version !== where.version) {
+        return { count: 0 };
+      }
+      current = {
+        ...current,
+        setting_value: String(data.setting_value),
+        version: current.version + 1,
+        gmt_modified: data.gmt_modified as Date,
+      };
+      return { count: 1 };
+    },
   );
   const service = new RechargeCustomService({
-    client: { system_settings: { findUnique, update } },
+    client: { system_settings: { findUnique, updateMany } },
   } as never);
-  return { service, findUnique, update };
+  return { service, findUnique, updateMany };
 }
 
 function savedConfig(
-  update: ReturnType<typeof vi.fn>,
+  updateMany: ReturnType<typeof vi.fn>,
   call = 0,
 ): Record<string, unknown> {
-  const data = (update.mock.calls[call]?.[0] as { data: { setting_value: string } }).data;
+  const data = (updateMany.mock.calls[call]?.[0] as { data: { setting_value: string } }).data;
   return JSON.parse(data.setting_value) as Record<string, unknown>;
 }
 
@@ -84,11 +92,11 @@ describe("RechargeCustomService.requireConfig", () => {
 
 describe("RechargeCustomService.saveConfig", () => {
   it("只改一个字段：合并后仍合法就放行，其余字段保持原值", async () => {
-    const { service, update } = makeService();
+    const { service, updateMany } = makeService();
 
     await service.saveConfig({ defaultCredits: 900 });
 
-    expect(savedConfig(update)).toMatchObject({
+    expect(savedConfig(updateMany)).toMatchObject({
       minCredits: 600,
       maxCredits: 499_995,
       defaultCredits: 900,
@@ -98,16 +106,16 @@ describe("RechargeCustomService.saveConfig", () => {
   });
 
   it("★ 只改换算率，也要按**整份配置**校验（PRD §7.1 整除要求）", async () => {
-    const { service, update } = makeService();
+    const { service, updateMany } = makeService();
 
     await expect(service.saveConfig({ creditsPerYuan: 4 })).rejects.toMatchObject({
       status: 400,
     });
-    expect(update).not.toHaveBeenCalled();
+    expect(updateMany).not.toHaveBeenCalled();
   });
 
   it("★ 上下限配歪（不整除 / 步长对不齐）→ 400，且**不落库**", async () => {
-    const { service, update } = makeService();
+    const { service, updateMany } = makeService();
 
     await expect(service.saveConfig({ minCredits: 601 })).rejects.toMatchObject({
       status: 400,
@@ -115,7 +123,7 @@ describe("RechargeCustomService.saveConfig", () => {
     await expect(service.saveConfig({ stepCredits: 16 })).rejects.toMatchObject({
       status: 400,
     });
-    expect(update).not.toHaveBeenCalled();
+    expect(updateMany).not.toHaveBeenCalled();
   });
 
   it("默认值超出上下限 → 400", async () => {
@@ -126,17 +134,34 @@ describe("RechargeCustomService.saveConfig", () => {
     ).rejects.toMatchObject({ status: 400 });
   });
 
+  it("★ 非安全整数 → 400，不把整份配置写成读不回来的样子", async () => {
+    const { service, updateMany } = makeService();
+
+    await expect(
+      service.saveConfig({ maxCredits: 9_007_199_254_741_020 }),
+    ).rejects.toMatchObject({ status: 400 });
+    expect(updateMany).not.toHaveBeenCalled();
+  });
+
   it("★ 配置行缺失时保存 → 503，且不写", async () => {
-    const { service, update } = makeService(null);
+    const { service, updateMany } = makeService(null);
 
     await expect(service.saveConfig({ defaultCredits: 900 })).rejects.toMatchObject({
       status: 503,
     });
-    expect(update).not.toHaveBeenCalled();
+    expect(updateMany).not.toHaveBeenCalled();
+  });
+
+  it("★ 连续版本冲突 → 重试用尽后 409，不让两个管理员互相覆盖", async () => {
+    const { service } = makeService(ROW, true);
+
+    await expect(service.saveConfig({ defaultCredits: 900 })).rejects.toMatchObject({
+      status: 409,
+    });
   });
 
   it("权限与提示文案这类不参与数值校验的字段照常保存", async () => {
-    const { service, update } = makeService();
+    const { service, updateMany } = makeService();
 
     await service.saveConfig({
       enabled: false,
@@ -145,7 +170,7 @@ describe("RechargeCustomService.saveConfig", () => {
       permissionDeniedHint: "该活动仅限内测用户",
     });
 
-    expect(savedConfig(update)).toMatchObject({
+    expect(savedConfig(updateMany)).toMatchObject({
       enabled: false,
       permission: "user_group",
       permissionAllowlist: ["9001"],

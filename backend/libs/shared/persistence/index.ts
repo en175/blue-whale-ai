@@ -309,6 +309,7 @@ export {
 export {
   createRechargeCustomConfigRepo,
   RECHARGE_CUSTOM_SETTING_KEY,
+  RechargeCustomConfigConflictError,
   type RechargeCustomConfigRepo,
   type RechargeCustomConfigView,
   type SaveRechargeCustomConfigInput,

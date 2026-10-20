@@ -45,11 +45,13 @@
 1. `069` 把旧表唯一一行转成 `system_settings.rechargeCustom`，**先于**读新键的镜像执行；键已存在时不覆盖；
 2. 新镜像全量上线并验证后，`070` 再 `DROP TABLE recharge_custom_config`。
 
+⚠️ `069` 与 `070` 必须按 standalone SQL 手工执行，**不要跑 `prisma migrate deploy`**：两条迁移同处一批，自动执行器会按序把 `070` 也跑掉，旧表会在新镜像验证前被删。
+
 配置版本从 0 重新起算；历史订单的 `recharge_orders.config_version` 保留旧值，两段序号不连续是有意为之。
 
 ## 结果
 
 - 管理端「自定义充值配置」页与 `GET/PUT /api/admin/recharge-custom-config` 保持不变，只换存储；`GET /api/recharge/custom` 与下单快照字段不变。
-- 配置损坏时管理端与下单返回 503，错误信息指向 `system_settings.rechargeCustom`；由于 `requireConfig` 先失败，损坏的配置无法通过后台 PUT 自愈，需要人工修 JSON 或重跑 seed。
+- 配置损坏时管理端与下单返回 503，错误信息指向 `system_settings.rechargeCustom`；由于 `requireConfig` 先失败，损坏的配置无法通过后台 PUT 自愈，需要人工修 JSON，或删除该行后重跑 `069`（`069` 本身不覆盖已存在的键）。
 - 运维直接改库的风险从「改错一列」变成「改坏整份 JSON」；管理端仍是推荐写入口。
 - 未来若把这份配置改成高频运营改价，应重新评估：它可能不再满足本 ADR 的适用边界，应迁回独立表或配置中心。

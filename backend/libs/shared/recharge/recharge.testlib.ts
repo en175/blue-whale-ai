@@ -144,6 +144,16 @@ export function makePrisma() {
         else settings.set(key, { ...create });
         return settings.get(key);
       },
+      updateMany: async ({ where, data }: { where: Row; data: Row }) => {
+        const key = String(where.setting_key);
+        const existing = settings.get(key);
+        if (!existing) return { count: 0 };
+        if (where.version !== undefined && existing.version !== where.version) {
+          return { count: 0 };
+        }
+        apply(existing, data);
+        return { count: 1 };
+      },
     },
   };
   return { prisma, orders, statusWrites, settings };

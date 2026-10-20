@@ -1,9 +1,16 @@
-import { wallClockRfc3339 } from "@lib/core";
+import { NewApiError, wallClockRfc3339 } from "@lib/core";
 import type { PrismaClient } from "@prisma/client";
 import type { TopupTierPermission } from "./topup-tier-repo.js";
 
 
 export const RECHARGE_CUSTOM_SETTING_KEY = "rechargeCustom";
+
+export class RechargeCustomConfigConflictError extends Error {
+  constructor() {
+    super("rechargeCustom 配置版本冲突");
+    this.name = "RechargeCustomConfigConflictError";
+  }
+}
 
 export interface RechargeCustomConfigView {
   minCredits: number;
@@ -35,7 +42,10 @@ export interface SaveRechargeCustomConfigInput {
 
 export interface RechargeCustomConfigRepo {
   get(): Promise<RechargeCustomConfigView | null>;
-  save(input: SaveRechargeCustomConfigInput): Promise<RechargeCustomConfigView>;
+  save(
+    input: SaveRechargeCustomConfigInput,
+    expectedVersion: number,
+  ): Promise<RechargeCustomConfigView>;
 }
 
 interface StoredConfig {
@@ -65,6 +75,12 @@ const NUMERIC_FIELDS = [
   "stepCredits",
   "creditsValidMonths",
 ] as const;
+
+const PERMISSIONS: readonly TopupTierPermission[] = [
+  "all",
+  "user_group",
+  "member_tier",
+];
 
 
 function toAllowlist(raw: unknown): string[] {
@@ -96,7 +112,9 @@ export function parseStoredConfig(raw: string): StoredConfig | null {
   const config = {} as StoredConfig;
   for (const field of NUMERIC_FIELDS) {
     const value = source[field];
-    if (typeof value !== "number" || !Number.isSafeInteger(value)) return null;
+    if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1) {
+      return null;
+    }
     config[field] = value;
   }
   const enabled = source.enabled;
@@ -104,8 +122,11 @@ export function parseStoredConfig(raw: string): StoredConfig | null {
     return null;
   }
   config.enabled = enabled === true || enabled === 1;
-  if (typeof source.permission !== "string") return null;
-  config.permission = source.permission as TopupTierPermission;
+  const permission = source.permission;
+  if (typeof permission !== "string" || !PERMISSIONS.includes(permission as TopupTierPermission)) {
+    return null;
+  }
+  config.permission = permission as TopupTierPermission;
   if (source.permissionDeniedHint !== undefined && typeof source.permissionDeniedHint !== "string") {
     return null;
   }
@@ -146,6 +167,14 @@ function mergeStored(
   };
 }
 
+function invalidConfigError(): NewApiError {
+  return new NewApiError(
+    "自定义充值配置缺失或损坏：system_settings.rechargeCustom",
+    503,
+    "recharge_custom_unconfigured",
+  );
+}
+
 
 export function createRechargeCustomConfigRepo(
   prisma: PrismaClient,
@@ -165,16 +194,18 @@ export function createRechargeCustomConfigRepo(
       return found ? toView(found.config, found.row) : null;
     },
 
-    async save(input) {
+    async save(input, expectedVersion) {
       const found = await readRow();
-      if (!found) {
-        throw new Error(
-          `自定义充值配置缺失或损坏：system_settings.${RECHARGE_CUSTOM_SETTING_KEY}`,
-        );
-      }
+      if (!found) throw invalidConfigError();
       const next = mergeStored(found.config, input);
-      const row = await prisma.system_settings.update({
-        where: { setting_key: RECHARGE_CUSTOM_SETTING_KEY },
+      if (!parseStoredConfig(JSON.stringify(next))) {
+        throw new NewApiError("自定义充值配置不合法", 400);
+      }
+      const { count } = await prisma.system_settings.updateMany({
+        where: {
+          setting_key: RECHARGE_CUSTOM_SETTING_KEY,
+          version: expectedVersion,
+        },
         data: {
           setting_value: JSON.stringify(next),
           is_secret: false,
@@ -182,13 +213,10 @@ export function createRechargeCustomConfigRepo(
           gmt_modified: new Date(),
         },
       });
-      const config = parseStoredConfig(row.setting_value);
-      if (!config) {
-        throw new Error(
-          `自定义充值配置写入后无法解析：system_settings.${RECHARGE_CUSTOM_SETTING_KEY}`,
-        );
-      }
-      return toView(config, row);
+      if (count === 0) throw new RechargeCustomConfigConflictError();
+      const saved = await readRow();
+      if (!saved) throw invalidConfigError();
+      return toView(saved.config, saved.row);
     },
   };
 }

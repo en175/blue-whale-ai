@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   RECHARGE_CUSTOM_SETTING_KEY,
+  RechargeCustomConfigConflictError,
   createRechargeCustomConfigRepo,
 } from "./recharge-custom-config-repo.js";
 
@@ -28,34 +29,38 @@ const ROW = {
   gmt_modified: new Date("2026-09-27T00:00:00Z"),
 };
 
-function repoWith(row: unknown) {
-  return createRechargeCustomConfigRepo({
-    system_settings: { findUnique: vi.fn().mockResolvedValue(row) },
-  } as never);
-}
-
-function repoWithUpdate(row: unknown, returned: unknown = { ...ROW, version: 7 }) {
-  const update = vi.fn().mockResolvedValue(returned);
-  const repo = createRechargeCustomConfigRepo({
-    system_settings: {
-      findUnique: vi.fn().mockResolvedValue(row),
-      update,
+function makeRepo(row: unknown) {
+  let current = row as typeof ROW | null;
+  const findUnique = vi.fn(async () => current);
+  const updateMany = vi.fn(
+    async ({ where, data }: { where: { version: number }; data: Record<string, unknown> }) => {
+      if (!current || current.version !== where.version) return { count: 0 };
+      current = {
+        ...current,
+        setting_value: String(data.setting_value),
+        version: current.version + 1,
+        gmt_modified: data.gmt_modified as Date,
+      };
+      return { count: 1 };
     },
+  );
+  const repo = createRechargeCustomConfigRepo({
+    system_settings: { findUnique, updateMany },
   } as never);
-  return { repo, update };
+  return { repo, updateMany, findUnique };
 }
 
-function storedConfig(update: ReturnType<typeof vi.fn>, call = 0): Record<string, unknown> {
-  const data = (update.mock.calls[call]?.[0] as { data: { setting_value: string } }).data;
+function storedConfig(
+  updateMany: ReturnType<typeof vi.fn>,
+  call = 0,
+): Record<string, unknown> {
+  const data = (updateMany.mock.calls[call]?.[0] as { data: { setting_value: string } }).data;
   return JSON.parse(data.setting_value) as Record<string, unknown>;
 }
 
 describe("createRechargeCustomConfigRepo.get — 读 system_settings.rechargeCustom", () => {
   it("固定读 rechargeCustom 这一行，并把 JSON 映射成 View", async () => {
-    const findUnique = vi.fn().mockResolvedValue(ROW);
-    const repo = createRechargeCustomConfigRepo({
-      system_settings: { findUnique },
-    } as never);
+    const { repo, findUnique } = makeRepo(ROW);
 
     const view = await repo.get();
 
@@ -77,16 +82,27 @@ describe("createRechargeCustomConfigRepo.get — 读 system_settings.rechargeCus
   });
 
   it("行不存在 → null（由调用方决定是「环境坏了」还是「用默认值」，repo 不替它决定）", async () => {
-    await expect(repoWith(null).get()).resolves.toBeNull();
+    await expect(makeRepo(null).repo.get()).resolves.toBeNull();
   });
 
   it("JSON 损坏 → null，不静默回落默认价", async () => {
-    await expect(repoWith({ ...ROW, setting_value: "{not json" }).get()).resolves.toBeNull();
+    await expect(
+      makeRepo({ ...ROW, setting_value: "{not json" }).repo.get(),
+    ).resolves.toBeNull();
   });
 
-  it("缺必需数值字段 → null", async () => {
-    const broken = JSON.stringify({ ...CONFIG, creditsPerYuan: undefined });
-    await expect(repoWith({ ...ROW, setting_value: broken }).get()).resolves.toBeNull();
+  it("缺必需数值字段或数值非安全整数 → null", async () => {
+    const broken = JSON.stringify({ ...CONFIG, creditsPerYuan: 9007199254740993 });
+    await expect(
+      makeRepo({ ...ROW, setting_value: broken }).repo.get(),
+    ).resolves.toBeNull();
+  });
+
+  it("权限枚举不认识 → null，不把未知值当 all 放行", async () => {
+    const broken = JSON.stringify({ ...CONFIG, permission: "bogus" });
+    await expect(
+      makeRepo({ ...ROW, setting_value: broken }).repo.get(),
+    ).resolves.toBeNull();
   });
 
   it("白名单的 NULL 归一成空数组，不安全整数被丢弃", async () => {
@@ -95,21 +111,20 @@ describe("createRechargeCustomConfigRepo.get — 读 system_settings.rechargeCus
       permission: "user_group",
       permissionAllowlist: [9007199254740993, 42, "007"],
     });
-    const repo = repoWith({ ...ROW, setting_value: withList });
 
-    await expect(repo.get()).resolves.toMatchObject({
+    await expect(makeRepo({ ...ROW, setting_value: withList }).repo.get()).resolves.toMatchObject({
       permissionAllowlist: ["42", "7"],
     });
   });
 });
 
-describe("createRechargeCustomConfigRepo.save — 读改写 + 版本自增", () => {
+describe("createRechargeCustomConfigRepo.save — 读改写 + 乐观版本锁", () => {
   it("保存时合并当前 JSON，只覆盖显式传的键", async () => {
-    const { repo, update } = repoWithUpdate(ROW);
+    const { repo, updateMany } = makeRepo(ROW);
 
-    const view = await repo.save({ minCredits: 750, stepCredits: 75 });
+    const view = await repo.save({ minCredits: 750, stepCredits: 75 }, 6);
 
-    expect(storedConfig(update)).toMatchObject({
+    expect(storedConfig(updateMany)).toMatchObject({
       minCredits: 750,
       maxCredits: 499_995,
       defaultCredits: 600,
@@ -120,13 +135,13 @@ describe("createRechargeCustomConfigRepo.save — 读改写 + 版本自增", () 
     expect(view.version).toBe(7);
   });
 
-  it("写回 version 自增、is_secret=0、gmt_modified，且只按 setting_key 定位", async () => {
-    const { repo, update } = repoWithUpdate(ROW);
+  it("写回按 version 做条件更新，并让 version 自增、is_secret=0", async () => {
+    const { repo, updateMany } = makeRepo(ROW);
 
-    await repo.save({ defaultCredits: 900 });
+    await repo.save({ defaultCredits: 900 }, 6);
 
-    expect(update).toHaveBeenCalledWith({
-      where: { setting_key: RECHARGE_CUSTOM_SETTING_KEY },
+    expect(updateMany).toHaveBeenCalledWith({
+      where: { setting_key: RECHARGE_CUSTOM_SETTING_KEY, version: 6 },
       data: expect.objectContaining({
         is_secret: false,
         version: { increment: 1 },
@@ -135,35 +150,53 @@ describe("createRechargeCustomConfigRepo.save — 读改写 + 版本自增", () 
     });
   });
 
+  it("★ 版本不一致 → 冲突错误，不覆盖别人刚写的配置", async () => {
+    const { repo, updateMany } = makeRepo(ROW);
+
+    await expect(repo.save({ defaultCredits: 900 }, 5)).rejects.toBeInstanceOf(
+      RechargeCustomConfigConflictError,
+    );
+    expect(updateMany).toHaveBeenCalledTimes(1);
+  });
+
   it("换算率（价格算法的输入）写进 JSON：改它等于改所有新订单的价格", async () => {
-    const { repo, update } = repoWithUpdate(ROW);
+    const { repo, updateMany } = makeRepo(ROW);
 
-    await repo.save({ creditsPerYuan: 5 });
+    await repo.save({ creditsPerYuan: 5 }, 6);
 
-    expect(storedConfig(update)).toHaveProperty("creditsPerYuan", 5);
+    expect(storedConfig(updateMany)).toHaveProperty("creditsPerYuan", 5);
   });
 
   it("权限白名单：显式 null = 清空，数组 = 覆盖成这份名单", async () => {
-    const { repo, update } = repoWithUpdate(ROW);
+    const { repo, updateMany } = makeRepo(ROW);
 
-    await repo.save({ permissionAllowlist: null });
-    expect(storedConfig(update)).toHaveProperty("permissionAllowlist", null);
+    await repo.save({ permissionAllowlist: null }, 6);
+    expect(storedConfig(updateMany)).toHaveProperty("permissionAllowlist", null);
 
-    await repo.save({ permissionAllowlist: ["9001"] });
-    expect(storedConfig(update, 1)).toHaveProperty("permissionAllowlist", ["9001"]);
+    await repo.save({ permissionAllowlist: ["9001"] }, 7);
+    expect(storedConfig(updateMany, 1)).toHaveProperty("permissionAllowlist", ["9001"]);
   });
 
   it("enabled 保持 JSON 布尔，不降级成 0/1", async () => {
-    const { repo, update } = repoWithUpdate(ROW);
+    const { repo, updateMany } = makeRepo(ROW);
 
-    await repo.save({ enabled: false });
+    await repo.save({ enabled: false }, 6);
 
-    expect(storedConfig(update)).toHaveProperty("enabled", false);
+    expect(storedConfig(updateMany)).toHaveProperty("enabled", false);
   });
 
-  it("行缺失或损坏时保存直接报错（服务层在此之前已用 requireConfig 拦成 503）", async () => {
-    await expect(repoWithUpdate(null).repo.save({ defaultCredits: 900 })).rejects.toThrow(
-      /rechargeCustom/,
-    );
+  it("★ 写前校验：非安全整数在落库前被拒，不会把配置写成 503 也修不回来的样子", async () => {
+    const { repo, updateMany } = makeRepo(ROW);
+
+    await expect(
+      repo.save({ maxCredits: 9_007_199_254_741_020 }, 6),
+    ).rejects.toMatchObject({ status: 400 });
+    expect(updateMany).not.toHaveBeenCalled();
+  });
+
+  it("行缺失或损坏时保存直接报 503（服务层在此之前已用 requireConfig 拦一次）", async () => {
+    await expect(makeRepo(null).repo.save({ defaultCredits: 900 }, 6)).rejects.toMatchObject({
+      status: 503,
+    });
   });
 });
