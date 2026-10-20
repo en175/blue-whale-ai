@@ -240,6 +240,11 @@ export const ASSET_ERROR_SPECS = {
     status: 400,
     message: "该素材未审核通过，不能用于视频生成",
   },
+  ASSET_MEDIA_INFO_UNAVAILABLE: {
+    code: 2014,
+    status: 503,
+    message: "暂时读不到音视频时长，请稍后重试",
+  },
 } as const satisfies Record<string, ErrorCodeSpec>;
 
 export type AssetErrorName = keyof typeof ASSET_ERROR_SPECS;

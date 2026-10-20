@@ -276,7 +276,6 @@ describe("complete 的文件头校验（IKE53U）", () => {
 
 describe("上传口素材闸（IKGQWR / ADR-0093）", () => {
   const MATERIAL = "asset-20260820153209-6c9z8";
-  const GROUP = "group-20260827113901-cbkmf";
   const NOT_APPROVED = "该素材未审核通过，不能用于视频生成";
   const UNAVAILABLE = "素材状态校验失败，请稍后重试";
 
@@ -315,6 +314,7 @@ describe("上传口素材闸（IKGQWR / ADR-0093）", () => {
       prepareUpload: vi.fn(),
       deleteMultiObjects: vi.fn(),
     } as never,
+    probe: vi.fn().mockResolvedValue({ sizeBytes: 100, durationMs: 6000, width: 1080, height: 1920, codec: null, container: null, fps: null }),
     materialGate,
     materialStatus: statusReader(),
   });
@@ -563,7 +563,6 @@ describe("complete 的来源标记（IKGOTB 遮罩中间素材不进资产列表
 describe("上传接口回显素材关联与状态（IKI65H）", () => {
   const MATERIAL = "asset-20260820153209-6c9z8";
   const OLD_MATERIAL = "asset-20260701090000-oldoldoldold";
-  const GROUP = "group-20260827113901-cbkmf";
   const NOT_APPROVED = "该素材未审核通过，不能用于视频生成";
 
   const boundAsset = (materialId: string = MATERIAL) => ({
@@ -668,6 +667,7 @@ describe("上传接口回显素材关联与状态（IKI65H）", () => {
       makePublic: vi.fn(),
       deleteMultiObjects: vi.fn(),
     },
+    probe: vi.fn().mockResolvedValue({ sizeBytes: 100, durationMs: 6000, width: 1080, height: 1920, codec: null, container: null, fps: null }),
     materialGate: {
       check: vi.fn().mockResolvedValue({ ok: true }),
     },
@@ -761,5 +761,120 @@ describe("上传接口回显素材关联与状态（IKI65H）", () => {
       material_status: null,
     });
     expect(deps.materialStatus.load).not.toHaveBeenCalled();
+  });
+});
+
+describe("complete：服务端探测音视频时长（IKOSU2）", () => {
+  const makeDeps = (probe: unknown) => {
+    const createUploadedAsset = vi.fn().mockResolvedValue(ASSET);
+    return {
+      deps: {
+        projects: { findOwnedById: vi.fn().mockResolvedValue({ id: "313" }) },
+        uploads: {
+          findCommittedUpload: vi.fn().mockResolvedValue(null),
+          createUploadedAsset,
+          linkAssetToProject: vi.fn().mockResolvedValue(true),
+        },
+        storage: {
+          readHead: vi.fn().mockResolvedValue(null),
+          inspectObject: vi.fn().mockResolvedValue({
+            size: 100,
+            mime: "video/mp4",
+            publicUrl: "https://bucket.tos.test/uploads/9/video/x.mp4",
+          }),
+          makePublic: vi.fn(),
+          deleteMultiObjects: vi.fn(),
+        },
+        probe,
+        materialGate: { check: vi.fn() },
+        materialStatus: statusReader(),
+      },
+      createUploadedAsset,
+    };
+  };
+
+  const input = {
+    type: "video" as const,
+    mime: "video/mp4",
+    size: 100,
+    storage_key: "uploads/9/video/x.mp4",
+    project_id: "313",
+    width: 1,
+    height: 2,
+    duration: 3,
+  };
+
+  it("探测结果覆盖客户端给的值", async () => {
+    const probe = vi.fn().mockResolvedValue({
+      sizeBytes: 100,
+      durationMs: 6500,
+      width: 1080,
+      height: 1920,
+      codec: "h264",
+      container: "mp4",
+      fps: 30,
+    });
+    const { deps, createUploadedAsset } = makeDeps(probe);
+    await handleCompleteAsset("9", input, deps as never);
+    expect(probe).toHaveBeenCalledWith("uploads/9/video/x.mp4");
+    expect(createUploadedAsset).toHaveBeenCalledWith(
+      expect.objectContaining({ duration: 6.5, width: 1080, height: 1920 }),
+    );
+  });
+
+  it("探测失败时拒收并删掉刚上传的字节", async () => {
+    const { deps, createUploadedAsset } = makeDeps(
+      vi.fn().mockRejectedValue(new Error("tos down")),
+    );
+    const error = await expectRejected(
+      () => handleCompleteAsset("9", input, deps as never),
+      { code: 2014, status: 503 },
+    );
+    expect(error.message).toContain("音视频时长");
+    expect(createUploadedAsset).not.toHaveBeenCalled();
+    expect(deps.storage.deleteMultiObjects).toHaveBeenCalledWith([
+      "uploads/9/video/x.mp4",
+    ]);
+  });
+
+  it("探测不到时长同样拒收", async () => {
+    const { deps, createUploadedAsset } = makeDeps(
+      vi.fn().mockResolvedValue({
+        sizeBytes: 100,
+        durationMs: null,
+        width: null,
+        height: null,
+        codec: null,
+        container: null,
+        fps: null,
+      }),
+    );
+    await expectRejected(
+      () => handleCompleteAsset("9", input, deps as never),
+      { code: 2014, status: 503 },
+    );
+    expect(createUploadedAsset).not.toHaveBeenCalled();
+  });
+
+  it("图片不探测", async () => {
+    const probe = vi.fn();
+    const { deps } = makeDeps(probe);
+    deps.storage.inspectObject.mockResolvedValue({
+      size: 100,
+      mime: "image/png",
+      publicUrl: "https://bucket.tos.test/uploads/9/image/x.png",
+    });
+    await handleCompleteAsset(
+      "9",
+      {
+        type: "image",
+        mime: "image/png",
+        size: 100,
+        storage_key: "uploads/9/image/x.png",
+        project_id: "313",
+      },
+      deps as never,
+    );
+    expect(probe).not.toHaveBeenCalled();
   });
 });

@@ -81,6 +81,7 @@ export class AgentAssetsController {
       projects: this.projects,
       uploads: this.assets,
       storage: this.storage.uploads,
+      probe: this.storage.probe,
       materialGate: this.material.uploadMaterialGate(),
       materialStatus: this.material.materialStatusReader(),
     });

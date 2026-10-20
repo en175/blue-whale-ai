@@ -14,6 +14,7 @@ import {
 } from "./file-signature.js";
 import type { AssetService } from "./assets.service.js";
 import type { ProjectService } from "@lib/shared/project/project.service.js";
+import type { AssetProbe, MediaInfo } from "./ports.js";
 
 export type PresignAssetInput = {
   type: "image" | "video" | "audio";
@@ -248,6 +249,18 @@ async function readFileSignature(
   return { checked: true, value: sniffFileSignature(head) };
 }
 
+async function probeMedia(
+  probe: AssetProbe | null | undefined,
+  storageKey: string,
+): Promise<MediaInfo | null> {
+  if (!probe) return null;
+  try {
+    return await probe(storageKey);
+  } catch {
+    return null;
+  }
+}
+
 export async function handleCompleteAsset(
   userId: string,
   input: CompleteAssetInput,
@@ -255,6 +268,7 @@ export async function handleCompleteAsset(
     projects: ProjectService;
     uploads: AssetService;
     storage: AssetUploadStorage | null;
+    probe?: AssetProbe | null;
     materialGate: UploadMaterialGate;
     materialStatus: MaterialStatusReader;
   },
@@ -381,6 +395,20 @@ export async function handleCompleteAsset(
     );
   }
 
+  const media =
+    input.type === "image"
+      ? null
+      : await probeMedia(deps.probe, input.storage_key);
+  if (
+    input.type !== "image" &&
+    (media === null || media.durationMs === null || media.durationMs <= 0)
+  ) {
+    return rejectUploadedObject(
+      deps.storage,
+      input.storage_key,
+      assetError("ASSET_MEDIA_INFO_UNAVAILABLE"),
+    );
+  }
   await deps.storage.makePublic(input.storage_key);
   const source =
     input.source === IMAGE_ERASE_MASK_ASSET_SOURCE ? input.source : "uploaded";
@@ -395,9 +423,15 @@ export async function handleCompleteAsset(
       ? { name: Array.from(input.name.trim().split(/[\\/]/).pop() ?? "").slice(0, 255).join("") }
       : {}),
     url: object.publicUrl,
-    ...(input.width == null ? {} : { width: input.width }),
-    ...(input.height == null ? {} : { height: input.height }),
-    ...(input.duration == null ? {} : { duration: input.duration }),
+    ...(media?.width != null
+      ? { width: media.width }
+      : input.width == null ? {} : { width: input.width }),
+    ...(media?.height != null
+      ? { height: media.height }
+      : input.height == null ? {} : { height: input.height }),
+    ...(media?.durationMs != null
+      ? { duration: media.durationMs / 1000 }
+      : input.duration == null ? {} : { duration: input.duration }),
     ...(input.md5 ? { md5: input.md5 } : {}),
     ...(materialId ? { materialId } : {}),
     source,
