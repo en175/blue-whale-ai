@@ -76,29 +76,44 @@ function makeService(overrides: {
   project?: unknown;
   assets?: unknown;
   createJob?: unknown;
+  billing?: unknown;
 } = {}) {
   const project = overrides.project ?? { findOwnedById: vi.fn().mockResolvedValue({ id: 55n }) };
   const assets =
     overrides.assets ??
     {
-      findOwnedSource: vi.fn().mockImplementation(async (id: string) => makeImageAsset()),
+      findOwnedSource: vi.fn().mockImplementation(async (_id: string) => makeImageAsset()),
+    };
+  const billing =
+    overrides.billing ??
+    {
+      jobBilling: vi.fn().mockResolvedValue(undefined),
+      release: vi.fn().mockResolvedValue(undefined),
     };
   const create = overrides.createJob ?? vi.fn().mockResolvedValue({ id: 400n });
   const costCreate = vi.fn();
-  const prisma = {
-    client: {
-      generation_jobs: {
-        create,
-        findUnique: vi.fn().mockResolvedValue({ status: "processing" }),
-      },
-      cost_reservations: { create: costCreate },
+  const client: Record<string, unknown> = {
+    generation_jobs: {
+      create,
+      findUnique: vi.fn().mockResolvedValue({ status: "processing" }),
     },
+    cost_reservations: { create: costCreate },
   };
+  client.$transaction = vi.fn((fn: (tx: unknown) => Promise<unknown>) =>
+    fn(client),
+  );
+  const prisma = { client };
   return {
-    service: new ImageCutoutsService(prisma as never, project as never, assets as never),
+    service: new ImageCutoutsService(
+      prisma as never,
+      project as never,
+      assets as never,
+      billing as never,
+    ),
     create,
     costCreate,
     assets,
+    billing,
   };
 }
 
@@ -526,5 +541,41 @@ describe("IKJLTX：已受理意图重放先于素材等可变状态（B.3 受理
     expect(readIdemMock).not.toHaveBeenCalled();
     expect(lockMock).not.toHaveBeenCalled();
     expect(create).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("ImageCutoutsService.create：按工具计价计费", () => {
+  it("提交前按 image_cutout 取计费钩子，建行后扣款", async () => {
+    const charge = vi.fn().mockResolvedValue(undefined);
+    const release = vi.fn().mockResolvedValue(undefined);
+    const { service, billing, create } = makeService({
+      billing: {
+        jobBilling: vi.fn().mockResolvedValue({ charge, release }),
+        release,
+      },
+    });
+    const result = await service.create("9", "55", VALID_GENERAL_BODY);
+    expect(result.code).toBe(200);
+    expect((billing as { jobBilling: ReturnType<typeof vi.fn> }).jobBilling).toHaveBeenCalledWith(
+      "image_cutout",
+      "9",
+      VALID_GENERAL_BODY,
+    );
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(charge).toHaveBeenCalledWith(400);
+  });
+
+  it("扣款失败时提交上抛，且不产生退款事件", async () => {
+    const charge = vi.fn().mockRejectedValue(new Error("余额不足"));
+    const release = vi.fn().mockResolvedValue(undefined);
+    const { service, create } = makeService({
+      billing: {
+        jobBilling: vi.fn().mockResolvedValue({ charge, release }),
+        release,
+      },
+    });
+    await expect(service.create("9", "55", VALID_GENERAL_BODY)).rejects.toThrow("余额不足");
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(release).not.toHaveBeenCalled();
   });
 });

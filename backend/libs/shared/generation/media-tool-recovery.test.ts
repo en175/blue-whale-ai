@@ -16,8 +16,14 @@ vi.mock("@lib/shared/persistence/index.js", async (importOriginal) => {
     writeCanvasRecoveryRows: writeRowsMock,
     canvasBindingView: bindingViewMock,
     readCreateIdempotency: readIdemMock,
-    transactionWithUniqueRetry: (_prisma: unknown, fn: (tx: unknown) => Promise<unknown>) =>
-      fn(_prisma),
+    transactionWithUniqueRetry: async (_prisma: unknown, fn: (tx: unknown) => Promise<unknown>) => {
+      try {
+        return await fn(_prisma);
+      } catch (error) {
+        if ((error as { code?: string } | null)?.code !== "P2002") throw error;
+        return fn(_prisma);
+      }
+    },
   };
 });
 
@@ -328,5 +334,74 @@ describe("readAcceptedMediaToolReplay / renderMediaToolReplay：前置幂等回�
       data: null,
     }));
     expect(conflict.code).toBe(100302);
+  });
+});
+
+describe("createMediaToolJobWithRecovery：计费补偿", () => {
+  const LEGACY = {
+    projectId: "55",
+    operation: "image_cutout.create",
+    requestHash: "hash-billing",
+    key: "key-billing",
+  };
+
+  function uniqueError(): Error {
+    return Object.assign(new Error("unique conflict"), { code: "P2002" });
+  }
+
+  it("扣款成功后写幂等失败 → 退款并上抛", async () => {
+    const prisma = makePrisma();
+    const charge = vi.fn().mockResolvedValue(undefined);
+    const release = vi.fn().mockResolvedValue(undefined);
+    readIdemMock.mockResolvedValue(null);
+    writeIdemMock.mockRejectedValue(new Error("write failed"));
+    const createJob = vi.fn().mockResolvedValue({ jobId: "400", status: "queued" });
+
+    await expect(
+      createMediaToolJobWithRecovery(prisma, null, createJob, LEGACY, { charge, release }),
+    ).rejects.toThrow("write failed");
+
+    expect(charge).toHaveBeenCalledWith(400);
+    expect(release).toHaveBeenCalledWith(400, "write failed");
+  });
+
+  it("唯一键重试时先退回上一笔扣款，再按新任务扣一次", async () => {
+    const prisma = makePrisma();
+    const charge = vi.fn().mockResolvedValue(undefined);
+    const release = vi.fn().mockResolvedValue(undefined);
+    readIdemMock.mockResolvedValue(null);
+    writeIdemMock.mockRejectedValueOnce(uniqueError()).mockResolvedValue(undefined);
+    const createJob = vi
+      .fn()
+      .mockResolvedValueOnce({ jobId: "400", status: "queued" })
+      .mockResolvedValueOnce({ jobId: "401", status: "queued" });
+
+    const outcome = await createMediaToolJobWithRecovery(prisma, null, createJob, LEGACY, {
+      charge,
+      release,
+    });
+
+    expect(outcome).toMatchObject({ kind: "ok", jobId: "401" });
+    expect(charge.mock.calls).toEqual([[400], [401]]);
+    expect(release).toHaveBeenCalledTimes(1);
+    expect(release).toHaveBeenCalledWith(400, "unique conflict");
+  });
+
+  it("重放不受理新扣款", async () => {
+    const prisma = makePrisma();
+    const charge = vi.fn().mockResolvedValue(undefined);
+    const release = vi.fn().mockResolvedValue(undefined);
+    readIdemMock.mockResolvedValue({ generation_job_id: "777", cursor: 0 });
+    const createJob = vi.fn();
+
+    const outcome = await createMediaToolJobWithRecovery(prisma, null, createJob, LEGACY, {
+      charge,
+      release,
+    });
+
+    expect(outcome).toMatchObject({ kind: "ok", jobId: "777" });
+    expect(createJob).not.toHaveBeenCalled();
+    expect(charge).not.toHaveBeenCalled();
+    expect(release).not.toHaveBeenCalled();
   });
 });

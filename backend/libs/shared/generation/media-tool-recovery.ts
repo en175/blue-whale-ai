@@ -21,6 +21,10 @@ import {
   type CanvasRecoveryAcceptance,
 } from "@lib/shared/persistence/index.js";
 import { writeCreateIdempotency } from "@lib/shared/persistence/generation-job-idempotency.js";
+import {
+  withBillingCompensation,
+  type JobBilling,
+} from "@lib/shared/persistence/job-billing.js";
 import type { CanvasBindingView } from "@lib/shared/persistence/generation-canvas-recovery-repo.js";
 import { canonicalJson } from "./handle-create-generation-job.js";
 
@@ -195,9 +199,21 @@ export async function createMediaToolJobWithRecovery(
     db: PrismaClient | Prisma.TransactionClient,
   ) => Promise<{ jobId: string; status: string }>,
   legacy?: MediaToolLegacyIdempotency,
+  billing?: JobBilling,
 ): Promise<MediaToolCreateOutcome> {
   if (!recovery && !legacy) {
-    const created = await createJob(prisma);
+    const created = await withBillingCompensation(billing, (jobBilling) =>
+      jobBilling === undefined
+        ? createJob(prisma)
+        : prisma.$transaction(
+            async (tx) => {
+              const created = await createJob(tx);
+              await jobBilling.charge(Number(created.jobId));
+              return created;
+            },
+            { maxWait: 10_000, timeout: 30_000 },
+          ),
+    );
     return { kind: "ok", ...created, bindingView: null };
   }
   const operation = recovery ? recovery.operation : legacy!.operation;
@@ -214,53 +230,57 @@ export async function createMediaToolJobWithRecovery(
       });
   if (replayed) return replayed;
   const runTx = () =>
-    transactionWithUniqueRetry(prisma, async (tx) => {
-      if (recovery) {
-        const acceptance: CanvasRecoveryAcceptance = {
-          projectId: recovery.projectId,
-          userId: recovery.userId,
-          binding: recovery.binding,
+    transactionWithUniqueRetry(prisma, (tx) =>
+      withBillingCompensation(billing, async (jobBilling) => {
+        if (recovery) {
+          const acceptance: CanvasRecoveryAcceptance = {
+            projectId: recovery.projectId,
+            userId: recovery.userId,
+            binding: recovery.binding,
+            operation,
+            requestHash,
+            idempotencyKey: key,
+            taskType: recovery.taskType,
+          };
+          const locked = await lockCanvasRecoveryForAcceptance(tx, acceptance);
+          if (locked.kind === "idempotency_conflict") return { conflict: true } as const;
+          if (locked.kind === "replay") return { replayJobId: locked.result.generation_job_id } as const;
+          const created = await createJob(tx);
+          await jobBilling?.charge(Number(created.jobId));
+          await writeCanvasRecoveryRows(tx, locked.plan, BigInt(created.jobId));
+          await writeCreateIdempotency(
+            tx,
+            {
+              projectId: recovery.projectId,
+              jobId: BigInt(created.jobId),
+              acceptedCursor: "0",
+            },
+            { key, requestHash },
+            operation,
+          );
+          return { created } as const;
+        }
+        const existing = await readCreateIdempotency(
+          tx as unknown as PrismaClient,
+          projectId,
+          { key, requestHash },
           operation,
-          requestHash,
-          idempotencyKey: key,
-          taskType: recovery.taskType,
-        };
-        const locked = await lockCanvasRecoveryForAcceptance(tx, acceptance);
-        if (locked.kind === "idempotency_conflict") return { conflict: true } as const;
-        if (locked.kind === "replay") return { replayJobId: locked.result.generation_job_id } as const;
+        );
+        if (existing) {
+          if ("kind" in existing) return { conflict: true } as const;
+          return { replayJobId: existing.generation_job_id } as const;
+        }
         const created = await createJob(tx);
-        await writeCanvasRecoveryRows(tx, locked.plan, BigInt(created.jobId));
+        await jobBilling?.charge(Number(created.jobId));
         await writeCreateIdempotency(
           tx,
-          {
-            projectId: recovery.projectId,
-            jobId: BigInt(created.jobId),
-            acceptedCursor: "0",
-          },
+          { projectId, jobId: BigInt(created.jobId), acceptedCursor: "0" },
           { key, requestHash },
           operation,
         );
         return { created } as const;
-      }
-      const existing = await readCreateIdempotency(
-        tx as unknown as PrismaClient,
-        projectId,
-        { key, requestHash },
-        operation,
-      );
-      if (existing) {
-        if ("kind" in existing) return { conflict: true } as const;
-        return { replayJobId: existing.generation_job_id } as const;
-      }
-      const created = await createJob(tx);
-      await writeCreateIdempotency(
-        tx,
-        { projectId, jobId: BigInt(created.jobId), acceptedCursor: "0" },
-        { key, requestHash },
-        operation,
-      );
-      return { created } as const;
-    });
+      }),
+    );
   let outcome: Awaited<ReturnType<typeof runTx>>;
   try {
     outcome = await runTx();

@@ -40,11 +40,23 @@ export class ImageCutoutsController {
           error instanceof Error ? error.message : String(error)
         }`,
       );
-      await this.imageCutouts
+      const transitioned = await this.imageCutouts
         .markFailed(jobId, ERROR_ENQUEUE_FAILED, "任务入队失败", {
           raw: "RocketMQ 入队失败",
         })
-        .catch(() => {});
+        .catch(() => false);
+      if (!transitioned) return result;
+      await this.imageCutouts
+        .release(user.userId, jobId, "任务入队失败")
+        .catch((releaseError) => {
+          logger.error(
+            `[image-cutout] release failed jobId=${jobId}: ${
+              releaseError instanceof Error
+                ? releaseError.message
+                : String(releaseError)
+            }`,
+          );
+        });
     }
     return result;
   }

@@ -11,12 +11,16 @@ vi.mock("@lib/infra/logging/blue-whale-logger.js", () => ({
 const { enqueueImageCutoutJob } = await import("@lib/shared/generation/generation-queue.js");
 const { ImageCutoutsController } = await import("./image-cutouts.controller.js");
 
-function makeController(serviceOverrides: { create?: unknown; markFailed?: unknown } = {}) {
+function makeController(
+  serviceOverrides: { create?: unknown; markFailed?: unknown; release?: unknown } = {},
+) {
   const service = {
     create:
       serviceOverrides.create ??
       vi.fn().mockResolvedValue(ok({ job_id: "400", status: "queued" })),
-    markFailed: serviceOverrides.markFailed ?? vi.fn().mockResolvedValue(undefined),
+    markFailed:
+      serviceOverrides.markFailed ?? vi.fn().mockResolvedValue(true),
+    release: serviceOverrides.release ?? vi.fn().mockResolvedValue(undefined),
   };
   return {
     controller: new ImageCutoutsController(service as never),
@@ -57,5 +61,16 @@ describe("ImageCutoutsController.create", () => {
       "任务入队失败",
       { raw: "RocketMQ 入队失败" },
     );
+    expect(service.release).toHaveBeenCalledWith("9", "400", "任务入队失败");
+  });
+
+  it("does not refund when the job is no longer queued", async () => {
+    const { controller, service } = makeController({
+      markFailed: vi.fn().mockResolvedValue(false),
+    });
+    vi.mocked(enqueueImageCutoutJob).mockRejectedValue(new Error("rocketmq down"));
+    const result = await controller.create({ userId: "9" } as never, "55", {}, undefined);
+    expect(result.code).toBe(200);
+    expect(service.release).not.toHaveBeenCalled();
   });
 });
