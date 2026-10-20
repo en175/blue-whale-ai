@@ -3,6 +3,7 @@ package com.bluewhale.billing.application;
 import com.bluewhale.billing.domain.catalog.CatalogDocument;
 import com.bluewhale.billing.domain.pricing.BasePriceResolver;
 import com.bluewhale.billing.domain.pricing.UsageDim;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -89,6 +90,48 @@ class CatalogCompilerTest {
         assertThat(rule.baseUnit()).isEqualTo(UsageDim.CONSTANT_ONE);
         assertThat(rule.basePrice()).isEqualTo(new BasePriceResolver.Constant(3_000L));
         assertThat(rule.minCredits()).isEqualTo(1L);
+    }
+
+    @Test
+    @DisplayName("规则快照解析数量偏移与步长")
+    void parsesQuantityOffsetAndStep() {
+        var rule = CatalogCompiler.compileRuleSnapshot("""
+                {"baseUnit":"usage.seconds","basePrice":{"kind":"const","value":1000},
+                 "unitDenominator":60,"quantityOffset":1,"quantityStep":5}
+                """);
+
+        assertThat(rule.quantityOffset()).isEqualTo(1L);
+        assertThat(rule.quantityStep()).isEqualTo(5L);
+        assertThat(rule.unitDenominator()).isEqualTo(60L);
+    }
+
+    @Test
+    @DisplayName("旧快照默认零偏移与一步")
+    void defaultsQuantityOffsetAndStepForLegacySnapshot() {
+        var rule = CatalogCompiler.compileRuleSnapshot("""
+                {"baseUnit":"usage.seconds","basePrice":{"kind":"const","value":1000}}
+                """);
+
+        assertThat(rule.quantityOffset()).isZero();
+        assertThat(rule.quantityStep()).isEqualTo(1L);
+    }
+
+    @Test
+    @DisplayName("负数偏移或步长拒绝")
+    void rejectsNegativeQuantityOffsetOrStep() {
+        assertThatThrownBy(() -> CatalogCompiler.compileRuleSnapshot("""
+                {"baseUnit":"usage.seconds","basePrice":{"kind":"const","value":1000},
+                 "quantityOffset":-1}
+                """))
+                .isInstanceOf(CatalogCompiler.CompileException.class)
+                .hasMessageContaining("quantityOffset");
+
+        assertThatThrownBy(() -> CatalogCompiler.compileRuleSnapshot("""
+                {"baseUnit":"usage.seconds","basePrice":{"kind":"const","value":1000},
+                 "quantityStep":-1}
+                """))
+                .isInstanceOf(CatalogCompiler.CompileException.class)
+                .hasMessageContaining("quantityStep");
     }
 
     @Test

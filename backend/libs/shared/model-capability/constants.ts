@@ -443,14 +443,14 @@ function pricingFieldErr(pricing: unknown, channel?: ChannelId): string | null {
   const denom = pricing.unitDenominator;
   if (denom !== undefined && denom !== null) {
     if (typeof denom !== "number" || !Number.isInteger(denom) || denom <= 0) {
-      return "计价规则(pricing).unitDenominator 须为正整数（1 = 每秒/每张）";
+      return "计价规则(pricing).unitDenominator 须为正整数（1 = 每秒/每张；60 = 每分钟）";
     }
-    if (denom !== 1 && baseUnit !== "usage.characters") {
-      return (
-        `计价规则(pricing).unitDenominator=${denom} 只能用于按字符计费（baseUnit=usage.characters）：` +
-        `非 1 的计费单位分母目前只支持「每 N 个字符一份单价」；按秒/按张等规则的分母必须是 1，` +
-        `否则单价会被除小、每单只剩下限 minCredits`
-      );
+  }
+  for (const key of ["quantityOffset", "quantityStep"] as const) {
+    const v = pricing[key];
+    if (v === undefined || v === null) continue;
+    if (typeof v !== "number" || !Number.isInteger(v) || v < 0) {
+      return `计价规则(pricing).${key} 须为非负整数`;
     }
   }
   for (const key of ["minCredits", "maxCredits"] as const) {
