@@ -308,7 +308,7 @@ export {
 } from "./recharge-order-repo.js";
 export {
   createRechargeCustomConfigRepo,
-  CUSTOM_CONFIG_ROW_ID,
+  RECHARGE_CUSTOM_SETTING_KEY,
   type RechargeCustomConfigRepo,
   type RechargeCustomConfigView,
   type SaveRechargeCustomConfigInput,

@@ -30,7 +30,7 @@ export class RechargeCustomService {
     const config = await this.repo.get();
     if (!config) {
       throw new NewApiError(
-        "自定义充值配置缺失：该环境未初始化 recharge_custom_config",
+        "自定义充值配置缺失：该环境未初始化 system_settings.rechargeCustom（或内容已损坏）",
         503,
         "recharge_custom_unconfigured",
       );
