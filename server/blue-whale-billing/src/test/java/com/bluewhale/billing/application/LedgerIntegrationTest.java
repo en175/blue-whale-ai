@@ -19,9 +19,15 @@ import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -139,6 +145,49 @@ class LedgerIntegrationTest {
         assertInvariant();
     }
 
+
+    @Test
+    void 扣款_同用户并发_批次行锁串行化_不会透支() throws Exception {
+        long lot = grant(CreditSource.GIFT, 10, null, "g-concurrent");
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        CyclicBarrier barrier = new CyclicBarrier(2);
+        try {
+            List<Future<Boolean>> results = new ArrayList<>();
+            for (long jobId : new long[]{601L, 602L}) {
+                results.add(pool.submit(() -> {
+                    barrier.await(10, TimeUnit.SECONDS);
+                    try {
+                        credits.charge(USER, "cmd-concurrent-" + jobId, jobId, 8,
+                                CATALOG_VERSION, NO_DISCOUNT, NO_SNAPSHOT, TITLE);
+                        return true;
+                    } catch (InsufficientCreditsException error) {
+                        return false;
+                    }
+                }));
+            }
+            long succeeded = 0;
+            for (Future<Boolean> result : results) {
+                if (result.get(30, TimeUnit.SECONDS)) {
+                    succeeded++;
+                }
+            }
+            assertThat(succeeded)
+                    .as("同一用户两笔并发扣费只能成功一笔")
+                    .isEqualTo(1);
+            assertThat(remainingOf(lot)).isEqualTo(2);
+            assertInvariant();
+        } finally {
+            pool.shutdownNow();
+        }
+    }
+
+    @Test
+    void 返还_没有扣款记录的任务_无操作() {
+        credits.refund(999_001L, "免费任务入队失败");
+
+        assertThat(reservations.findByJobId(999_001L)).isEmpty();
+        assertThat(ledgerEntryCount()).isZero();
+    }
 
     @Test
     void 返还_把扣掉的量还回原批次_有效期不被重置() {

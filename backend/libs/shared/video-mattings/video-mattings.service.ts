@@ -1,8 +1,9 @@
 import { createHash } from "node:crypto";
+import type { Prisma } from "@prisma/client";
 import { Injectable } from "@nestjs/common";
 import {
+  ASSET_UNAVAILABLE_CODE,
   FAILURE_CODE,
-  IDEMPOTENCY_CONFLICT_CODE,
   IDEMPOTENCY_KEY_REUSED_CODE,
   PARAM_MISSING_CODE,
   RESOURCE_NOT_FOUND_CODE,
@@ -14,19 +15,21 @@ import {
   VIDEO_MATTING_MAX_DURATION_MS,
   VIDEO_MATTING_SOURCE,
   fail,
-  ok,
   videoMattingInputSchema,
   type VideoMattingInput,
 } from "@lib/contracts";
-import { createGenerationCommandRepo } from "@lib/shared/persistence/index.js";
 import {
-  createMediaToolJobWithRecovery,
   mediaToolRequestHash,
   readAcceptedMediaToolReplay,
   renderMediaToolReplay,
   stripCanvasBinding,
   type MediaToolRecovery,
 } from "@lib/shared/generation/media-tool-recovery.js";
+import { enqueueVideoMattingJob } from "@lib/shared/generation/generation-queue.js";
+import { submitMediaToolJob } from "@lib/shared/media-tools/media-tool-submission.js";
+import { resolveSourceDuration } from "@lib/shared/media-tools/source-duration.js";
+import { MediaToolBillingService } from "@lib/shared/media-tool-pricing/media-tool-billing.service.js";
+import { AssetStorageService } from "@lib/shared/assets/storage.service.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";
 import { AssetService } from "@lib/shared/assets/assets.service.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
@@ -75,6 +78,8 @@ export class VideoMattingsService {
     private readonly prisma: PrismaService,
     private readonly project: ProjectService,
     private readonly assets: AssetService,
+    private readonly storage: AssetStorageService,
+    private readonly billing: MediaToolBillingService,
   ) {}
 
   async create(
@@ -152,16 +157,40 @@ export class VideoMattingsService {
       return fail(FAILURE_CODE, "仅支持对视频资产发起智能抠像");
     }
 
-    if (asset.duration_ms != null && asset.duration_ms > VIDEO_MATTING_MAX_DURATION_MS) {
+    const duration = await resolveSourceDuration({
+      prisma: this.prisma.client,
+      storage: this.storage,
+      asset: {
+        id: input[VIDEO_MATTING_INPUT_KEYS.sourceAssetId],
+        storage_key: asset.storage_key,
+        duration_ms: asset.duration_ms,
+      },
+    });
+    if (duration === null) {
+      return fail(
+        ASSET_UNAVAILABLE_CODE,
+        "源视频时长读取失败，请稍后重试或更换素材",
+        { code: "asset_unavailable" },
+      );
+    }
+    if (duration.durationMs > VIDEO_MATTING_MAX_DURATION_MS) {
       return fail(FAILURE_CODE, "暂支持 10 分钟以内的视频智能抠像");
     }
 
-    const frozenInput: VideoMattingInput = { ...input };
+    const frozenInput = { ...input, duration: duration.seconds } as Prisma.InputJsonObject;
 
-    const outcome = await createMediaToolJobWithRecovery(
-      this.prisma.client,
+    const legacy = binding
+      ? undefined
+      : { projectId, operation: IDEMPOTENCY_OPERATION, requestHash, key: clientToken };
+    return submitMediaToolJob({
+      prisma: this.prisma.client,
+      billing: this.billing,
+      toolType: VIDEO_MATTING_JOB_TYPE,
+      userId,
+      input: frozenInput,
       recovery,
-      async (db) => {
+      ...(legacy ? { legacy } : {}),
+      createJob: async (db) => {
         const job = await db.generation_jobs.create({
           data: {
             user_id: BigInt(userId),
@@ -176,33 +205,7 @@ export class VideoMattingsService {
         });
         return { jobId: job.id.toString(), status: "queued" };
       },
-      binding
-        ? undefined
-        : { projectId, operation: IDEMPOTENCY_OPERATION, requestHash, key: clientToken },
-    );
-    if (outcome.kind === "envelope") return outcome.envelope;
-    if (outcome.kind === "idempotency_conflict") {
-      if (binding) return fail(IDEMPOTENCY_CONFLICT_CODE, "幂等键冲突：同键异载荷");
-      return fail(IDEMPOTENCY_KEY_REUSED_CODE, "client_token 已被使用（同 token 仅可重放相同参数）");
-    }
-    return ok({
-      job_id: outcome.jobId,
-      status: outcome.status,
-      ...(outcome.bindingView ? { canvas_binding: outcome.bindingView } : {}),
+      enqueue: enqueueVideoMattingJob,
     });
-  }
-
-  async markFailed(
-    jobId: string,
-    code: string,
-    message: string,
-    details?: Record<string, unknown>,
-  ): Promise<void> {
-    await createGenerationCommandRepo(this.prisma.client).markFailedQueued(
-      jobId,
-      code,
-      message,
-      details,
-    );
   }
 }

@@ -49,6 +49,11 @@ vi.mock("@lib/shared/generation/generation-queue.js", async (importOriginal) => 
     enqueueImageCutoutJob: vi.fn(),
     enqueueImageOutpaintJob: vi.fn(),
     enqueueImageEnhanceJob: vi.fn(),
+    enqueueVideoEnhanceJob: vi.fn(),
+    enqueueVideoFrameInterpolationJob: vi.fn(),
+    enqueueVideoMattingJob: vi.fn(),
+    enqueueVideoSubtitleEraseJob: vi.fn(),
+    enqueueVideoSceneSplitJob: vi.fn(),
   };
 });
 
@@ -68,7 +73,7 @@ const TOOLS = [
     make: (c: unknown) => new ImageErasuresService({ client: c } as never, { findOwnedById: async () => ({ id: 1n }) } as never, { findOwnedSource: async () => assetOf("image") } as never, { jobBilling: async () => undefined, release: async () => {} } as never),
     body: () => ({ source_asset_id: "88", target_node_id: "node-1", erase_scene: "full_screen_text_erase" }) },
   { name: "去字幕", op: "video_subtitle_erase.create", path: "/video-subtitle-erasures", kind: "video" as const,
-    make: (c: unknown) => new VideoSubtitleErasuresService({ client: c } as never, { findOwnedById: async () => ({ id: 1n }) } as never, { findOwnedSource: async () => assetOf("video") } as never),
+    make: (c: unknown) => new VideoSubtitleErasuresService({ client: c } as never, { findOwnedById: async () => ({ id: 1n }) } as never, { findOwnedSource: async () => assetOf("video") } as never, { probe: null } as never, { jobBilling: async () => undefined, release: async () => {} } as never),
     body: () => ({ source_asset_id: "88", target_node_id: "node-1", detect_mode: "subtitle_smart", erase_boxes: [] }) },
   { name: "音视频分离", op: "media_extract.create", path: "/media-extractions", kind: "video" as const,
     make: (c: unknown) => new MediaExtractionsService({ client: c } as never, { findOwnedById: async () => ({ id: 1n }) } as never, { findOwnedSource: async () => assetOf("video") } as never),
@@ -80,7 +85,7 @@ const TOOLS = [
     make: (c: unknown) => new AudioSpeedsService({ client: c } as never, { findOwnedById: async () => ({ id: 1n }) } as never, { findOwnedSource: async () => assetOf("audio") } as never),
     body: () => ({ source_asset_id: "88", speed: 1.5 }) },
   { name: "抠像", op: "video_matting.create", path: "/video-mattings", kind: "video" as const,
-    make: (c: unknown) => new VideoMattingsService({ client: c } as never, { findOwnedById: async () => ({ id: 1n }) } as never, { findOwnedSource: async () => assetOf("video") } as never),
+    make: (c: unknown) => new VideoMattingsService({ client: c } as never, { findOwnedById: async () => ({ id: 1n }) } as never, { findOwnedSource: async () => assetOf("video") } as never, { probe: null } as never, { jobBilling: async () => undefined, release: async () => {} } as never),
 
     body: (submissionId: string) => ({ source_asset_id: "88", target_node_id: "node-1", mode: "portrait", client_token: submissionId }) },
   { name: "抠图", op: "image_cutout.create", path: "/image-cutouts", kind: "image" as const,
@@ -93,10 +98,10 @@ const TOOLS = [
     make: (c: unknown) => new ImageEnhancementsService({ client: c } as never, { findOwnedById: async () => ({ id: 1n }) } as never, { findOwnedSource: async () => assetOf("image") } as never, { jobBilling: async () => undefined, release: async () => {} } as never),
     body: () => ({ source_asset_id: "88", target_node_id: "node-1", version_tier: "pro", multiple: 2, generative_enhance_mode: "generative_first", enable_correct_color: false }) },
   { name: "视频 HD", op: "video_enhance.create", path: "/video-enhancements", kind: "video" as const,
-    make: (c: unknown) => new VideoEnhancementsService({ client: c } as never, { findOwnedById: async () => ({ id: 1n }) } as never, { findOwnedSource: async () => assetOf("video") } as never),
+    make: (c: unknown) => new VideoEnhancementsService({ client: c } as never, { findOwnedById: async () => ({ id: 1n }) } as never, { findOwnedSource: async () => assetOf("video") } as never, { probe: null } as never, { jobBilling: async () => undefined, release: async () => {} } as never),
     body: () => ({ source_asset_id: "88", target_node_id: "node-1", resolution: "1080p" }) },
   { name: "插帧", op: "video_frame_interpolation.create", path: "/video-frame-interpolations", kind: "video" as const,
-    make: (c: unknown) => new VideoFrameInterpolationsService({ client: c } as never, { findOwnedById: async () => ({ id: 1n }) } as never, { findOwnedSource: async () => assetOf("video") } as never),
+    make: (c: unknown) => new VideoFrameInterpolationsService({ client: c } as never, { findOwnedById: async () => ({ id: 1n }) } as never, { findOwnedSource: async () => assetOf("video") } as never, { probe: null } as never, { jobBilling: async () => undefined, release: async () => {} } as never),
     body: () => ({ source_asset_id: "88", target_node_id: "node-1" }) },
 ] as const;
 

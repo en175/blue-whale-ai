@@ -10,6 +10,7 @@ import {
 import { logger } from "@lib/infra/logging/blue-whale-logger.js";
 import {
   createMediaToolJobWithRecovery,
+  type MediaToolLegacyIdempotency,
   type MediaToolRecovery,
 } from "@lib/shared/generation/media-tool-recovery.js";
 import { createGenerationCommandRepo } from "@lib/shared/persistence/index.js";
@@ -22,6 +23,7 @@ export interface MediaToolSubmissionStrategy {
   userId: string;
   input: Record<string, unknown>;
   recovery: MediaToolRecovery | null;
+  legacy?: MediaToolLegacyIdempotency;
   createJob: (
     db: PrismaClient | Prisma.TransactionClient,
   ) => Promise<{ jobId: string; status: string }>;
@@ -37,17 +39,49 @@ export type MediaToolJobEnvelope =
   | RecoveryErrorEnvelope;
 
 async function releaseEnqueueFailure(
-  strategy: MediaToolSubmissionStrategy,
+  args: {
+    prisma: PrismaClient;
+    billing: MediaToolBillingService;
+    userId: string;
+  },
   jobId: string,
-  billed: boolean,
 ): Promise<void> {
-  const transitioned = await createGenerationCommandRepo(strategy.prisma)
+  const transitioned = await createGenerationCommandRepo(args.prisma)
     .markFailedQueued(jobId, ERROR_ENQUEUE_FAILED, "任务入队失败", {
       raw: "RocketMQ 入队失败",
     })
     .catch(() => false);
-  if (!transitioned || !billed) return;
-  await strategy.billing.release(strategy.userId, Number(jobId), "任务入队失败");
+  if (!transitioned) return;
+  await args.billing.release(args.userId, Number(jobId), "任务入队失败");
+}
+
+export async function enqueueMediaToolJob(args: {
+  prisma: PrismaClient;
+  billing: MediaToolBillingService;
+  userId: string;
+  toolType: string;
+  jobId: string;
+  enqueue: (jobId: string) => Promise<void>;
+}): Promise<void> {
+  try {
+    await args.enqueue(args.jobId);
+  } catch (error) {
+    logger.error(
+      `[media-tool] enqueue failed tool=${args.toolType} jobId=${args.jobId}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+    await releaseEnqueueFailure(
+      args,
+      args.jobId,
+    ).catch((releaseError) => {
+      logger.error(
+        `[media-tool] release failed tool=${args.toolType} jobId=${args.jobId}: ${
+          releaseError instanceof Error ? releaseError.message : String(releaseError)
+        }`,
+      );
+    });
+  }
 }
 
 export async function submitMediaToolJob(
@@ -62,33 +96,21 @@ export async function submitMediaToolJob(
     strategy.prisma,
     strategy.recovery,
     strategy.createJob,
-    undefined,
+    strategy.legacy,
     jobBilling,
   );
   if (outcome.kind === "envelope") return outcome.envelope;
   if (outcome.kind === "idempotency_conflict") {
     return fail(IDEMPOTENCY_CONFLICT_CODE, "幂等键冲突：同键异载荷");
   }
-  try {
-    await strategy.enqueue(outcome.jobId);
-  } catch (error) {
-    logger.error(
-      `[media-tool] enqueue failed tool=${strategy.toolType} jobId=${outcome.jobId}: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
-    await releaseEnqueueFailure(
-      strategy,
-      outcome.jobId,
-      jobBilling !== undefined,
-    ).catch((releaseError) => {
-      logger.error(
-        `[media-tool] release failed tool=${strategy.toolType} jobId=${outcome.jobId}: ${
-          releaseError instanceof Error ? releaseError.message : String(releaseError)
-        }`,
-      );
-    });
-  }
+  await enqueueMediaToolJob({
+    prisma: strategy.prisma,
+    billing: strategy.billing,
+    userId: strategy.userId,
+    toolType: strategy.toolType,
+    jobId: outcome.jobId,
+    enqueue: strategy.enqueue,
+  });
   return ok({
     job_id: outcome.jobId,
     status: outcome.status,

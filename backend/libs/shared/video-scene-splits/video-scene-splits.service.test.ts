@@ -1,6 +1,9 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 
+const { enqueueVideoSceneSplitJob } = vi.hoisted(() => ({ enqueueVideoSceneSplitJob: vi.fn() }));
+vi.mock("@lib/shared/generation/generation-queue.js", () => ({ enqueueVideoSceneSplitJob }));
+
 import { VideoSceneSplitsService } from "./video-scene-splits.service.js";
 
 const VALID_BODY = {
@@ -28,7 +31,9 @@ function makeService(overrides: {
   assets?: unknown;
   idemFindUnique?: unknown;
   jobCreate?: unknown;
+  billing?: unknown;
   replayedJob?: unknown;
+  storage?: unknown;
 } = {}) {
   const project = overrides.project ?? { findOwnedById: vi.fn().mockResolvedValue({ id: 55n }) };
   const assets =
@@ -45,13 +50,25 @@ function makeService(overrides: {
     generation_jobs: {
       create: overrides.jobCreate ?? vi.fn().mockResolvedValue({ id: 400n }),
       findUnique: overrides.replayedJob ?? vi.fn(),
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      findUniqueOrThrow: vi.fn().mockResolvedValue({ user_id: 9n }),
     },
+    generation_outbox: { create: vi.fn() },
     cost_reservations: { create: vi.fn() },
   };
-  const client = { $transaction: vi.fn(async (operation: (t: unknown) => Promise<unknown>) => operation(tx)) };
+  const client = {
+    assets: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
+    command_idempotency: {
+      findUnique: overrides.idemFindUnique ?? vi.fn().mockResolvedValue(null),
+    },
+    generation_jobs: {
+      findUnique: overrides.replayedJob ?? vi.fn(),
+    },
+    $transaction: vi.fn(async (operation: (t: unknown) => Promise<unknown>) => operation(tx)),
+  };
   const prisma = { client };
   return {
-    service: new VideoSceneSplitsService(prisma as never, project as never, assets as never),
+    service: new VideoSceneSplitsService(prisma as never, project as never, assets as never, (overrides.storage ?? { probe: null }) as never, (overrides.billing ?? { jobBilling: async () => undefined, release: async () => {} }) as never),
     tx,
     client,
     project,
@@ -199,12 +216,29 @@ describe("VideoSceneSplitsService.create：输入门槛复核（时长 ≤2 小�
     expect(result.code).toBe(200);
   });
 
-  it("lets a video without recorded duration pass to the supplier gate", async () => {
+  it("rejects a video without recorded duration", async () => {
     const { service } = makeService({
       assets: { findOwnedSource: vi.fn().mockResolvedValue(makeVideoAsset({ duration_ms: null })) },
     });
     const result = await service.create("9", "55", VALID_BODY);
-    expect(result.code).toBe(200);
+    expect(result.code).toBe(100202);
+  });
+
+  it("probes a legacy video and rejects when the probe exceeds 2 hours", async () => {
+    const { service, tx } = makeService({
+      assets: { findOwnedSource: vi.fn().mockResolvedValue(makeVideoAsset({ duration_ms: null })) },
+      storage: {
+        probe: vi.fn().mockResolvedValue({
+          durationMs: 2 * 60 * 60 * 1000 + 1,
+          width: 1920,
+          height: 1080,
+        }),
+      },
+    });
+    const result = await service.create("9", "55", VALID_BODY);
+    expect(result.code).not.toBe(200);
+    expect(result.msg).toContain("2 小时");
+    expect(tx.generation_jobs.create).not.toHaveBeenCalled();
   });
 });
 
@@ -249,6 +283,16 @@ describe("VideoSceneSplitsService.create：client_token 幂等三态", () => {
     expect(result.msg).toContain("client_token");
     expect(tx.generation_jobs.create).not.toHaveBeenCalled();
   });
+
+  it("幂等预检异常时回落到事务内校验", async () => {
+    const { service, client, tx } = makeService();
+    client.command_idempotency.findUnique.mockRejectedValueOnce(new Error("corrupt row"));
+
+    const result = await service.create("9", "55", VALID_BODY);
+
+    expect(result.code).toBe(200);
+    expect(tx.command_idempotency.create).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("VideoSceneSplitsService.create：任务与占位数据同事务落库", () => {
@@ -287,6 +331,7 @@ describe("VideoSceneSplitsService.create：任务与占位数据同事务落库"
           source_asset_id: "88",
           target_node_id: "node-1",
           granularity: "fine",
+          duration: 600,
         },
         next_action_at: expect.any(Date),
       }),
@@ -310,3 +355,82 @@ function hashFor(sourceAssetId: string, targetNodeId: string, granularity: strin
     )
     .digest("hex");
 }
+
+describe("VideoSceneSplitsService.create：计费输入", () => {
+  it("按 video_scene_split 计价并入队", async () => {
+    const jobBilling = vi.fn().mockResolvedValue(undefined);
+    const { service } = makeService({ billing: { jobBilling, release: vi.fn() } });
+    const result = await service.create("9", "55", VALID_BODY);
+    expect(result.code).toBe(200);
+    expect(jobBilling).toHaveBeenCalledWith(
+      "video_scene_split",
+      "9",
+      expect.objectContaining({ source_asset_id: "88", duration: 600 }),
+    );
+    expect(enqueueVideoSceneSplitJob).toHaveBeenCalledWith("400");
+  });
+
+  it("releases the charge when enqueue fails for a paid tool", async () => {
+    const release = vi.fn();
+    const { service } = makeService({
+      billing: {
+        jobBilling: vi.fn().mockResolvedValue({ charge: vi.fn(), release: vi.fn() }),
+        release,
+      },
+    });
+    enqueueVideoSceneSplitJob.mockRejectedValueOnce(new Error("rocketmq down"));
+
+    const result = await service.create("9", "55", VALID_BODY);
+
+    expect(result.code).toBe(200);
+    expect(release).toHaveBeenCalledWith("9", 400, "任务入队失败");
+  });
+
+  it("免费工具入队失败 → 仍上报失败，由 Billing 判定无扣款不退款", async () => {
+    const release = vi.fn();
+    const { service } = makeService({
+      billing: { jobBilling: vi.fn().mockResolvedValue(undefined), release },
+    });
+    enqueueVideoSceneSplitJob.mockRejectedValueOnce(new Error("rocketmq down"));
+
+    const result = await service.create("9", "55", VALID_BODY);
+
+    expect(result.code).toBe(200);
+    expect(release).toHaveBeenCalledWith("9", 400, "任务入队失败");
+  });
+
+  it("releases the charge when the transaction fails after the callback charged", async () => {
+    const release = vi.fn().mockResolvedValue(undefined);
+    const { service, client, tx } = makeService({
+      billing: {
+        jobBilling: vi.fn().mockResolvedValue({ charge: vi.fn(), release: vi.fn() }),
+        release,
+      },
+    });
+    client.$transaction.mockImplementationOnce(
+      async (operation: (t: unknown) => Promise<unknown>) => {
+        await operation(tx);
+        throw new Error("commit failed");
+      },
+    );
+
+    await expect(service.create("9", "55", VALID_BODY)).rejects.toThrow("commit failed");
+    expect(release).toHaveBeenCalledWith("9", 400, "commit failed");
+  });
+
+  it("免费工具事务失败 → 仍上报失败，由 Billing 判定无扣款不退款", async () => {
+    const release = vi.fn();
+    const { service, client, tx } = makeService({
+      billing: { jobBilling: vi.fn().mockResolvedValue(undefined), release },
+    });
+    client.$transaction.mockImplementationOnce(
+      async (operation: (t: unknown) => Promise<unknown>) => {
+        await operation(tx);
+        throw new Error("commit failed");
+      },
+    );
+
+    await expect(service.create("9", "55", VALID_BODY)).rejects.toThrow("commit failed");
+    expect(release).toHaveBeenCalledWith("9", 400, "commit failed");
+  });
+});

@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
+const { enqueueVideoFrameInterpolationJob } = vi.hoisted(() => ({ enqueueVideoFrameInterpolationJob: vi.fn() }));
+vi.mock("@lib/shared/generation/generation-queue.js", () => ({ enqueueVideoFrameInterpolationJob }));
+
 import { VideoFrameInterpolationsService } from "./video-frame-interpolations.service.js";
 
 const VALID_BODY = {
@@ -25,6 +28,7 @@ function makeService(overrides: {
   project?: unknown;
   assets?: unknown;
   createJob?: unknown;
+  billing?: unknown;
 } = {}) {
   const project = overrides.project ?? { findOwnedById: vi.fn().mockResolvedValue({ id: 55n }) };
   const assets =
@@ -41,7 +45,7 @@ function makeService(overrides: {
     },
   };
   return {
-    service: new VideoFrameInterpolationsService(prisma as never, project as never, assets as never),
+    service: new VideoFrameInterpolationsService(prisma as never, project as never, assets as never, { probe: null } as never, (overrides.billing ?? { jobBilling: async () => undefined, release: async () => {} }) as never),
     create,
     costCreate,
     assets,
@@ -108,6 +112,7 @@ describe("VideoFrameInterpolationsService.create：契约 schema 复核", () => 
       source_asset_id: "88",
       target_node_id: "node-1",
       fps: 60,
+      duration: 60,
     });
   });
 });
@@ -162,7 +167,7 @@ describe("VideoFrameInterpolationsService.create：无输入门槛（与 HD 高�
     const { service } = makeService({
       assets: {
         findOwnedSource: vi.fn().mockResolvedValue(
-          makeVideoAsset({ width: null, height: null, duration_ms: null }),
+          makeVideoAsset({ width: null, height: null }),
         ),
       },
     });
@@ -183,7 +188,7 @@ describe("VideoFrameInterpolationsService.create：落任务与免费口径", ()
         status: "queued",
         user_id: 9n,
         project_id: 55n,
-        input: VALID_BODY,
+        input: { ...VALID_BODY, duration: 60 },
         next_action_at: expect.any(Date),
       }),
     });
@@ -218,7 +223,7 @@ describe("VideoFrameInterpolationsService.findCurrent：恢复查询（IKHSFE）
     const findFirst = overrides.findFirst ?? vi.fn().mockResolvedValue(makeJobRow());
     const prisma = { client: { generation_jobs: { findFirst } } };
     return {
-      service: new VideoFrameInterpolationsService(prisma as never, project as never, {} as never),
+      service: new VideoFrameInterpolationsService(prisma as never, project as never, {} as never, { probe: null } as never, { jobBilling: async () => undefined, release: async () => {} } as never),
       findFirst,
     };
   }
@@ -264,5 +269,20 @@ describe("VideoFrameInterpolationsService.findCurrent：恢复查询（IKHSFE）
       progress: 0,
       created_at: "2026-09-22T13:00:00+08:00",
     });
+  });
+});
+
+describe("VideoFrameInterpolationsService.create：计费输入", () => {
+  it("按 video_frame_interpolation 计价并入队", async () => {
+    const jobBilling = vi.fn().mockResolvedValue(undefined);
+    const { service } = makeService({ billing: { jobBilling, release: vi.fn() } });
+    const result = await service.create("9", "55", VALID_BODY);
+    expect(result.code).toBe(200);
+    expect(jobBilling).toHaveBeenCalledWith(
+      "video_frame_interpolation",
+      "9",
+      expect.objectContaining({ source_asset_id: "88", duration: 60 }),
+    );
+    expect(enqueueVideoFrameInterpolationJob).toHaveBeenCalledWith("400");
   });
 });

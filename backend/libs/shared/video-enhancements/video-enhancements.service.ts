@@ -1,7 +1,8 @@
+import type { Prisma } from "@prisma/client";
 import { Injectable } from "@nestjs/common";
 import {
+  ASSET_UNAVAILABLE_CODE,
   FAILURE_CODE,
-  IDEMPOTENCY_CONFLICT_CODE,
   PARAM_MISSING_CODE,
   RESOURCE_NOT_FOUND_CODE,
   VIDEO_ENHANCE_INPUT_KEYS,
@@ -11,16 +12,18 @@ import {
   VIDEO_ENHANCE_MIN_INPUT_SHORT_SIDE_PX,
   VIDEO_ENHANCE_SOURCE,
   fail,
-  ok,
   videoEnhanceInputSchema,
   type VideoEnhanceInput,
 } from "@lib/contracts";
-import { createGenerationCommandRepo } from "@lib/shared/persistence/index.js";
 import {
-  createMediaToolJobWithRecovery,
   replayAcceptedMediaTool,
   stripCanvasBinding,
 } from "@lib/shared/generation/media-tool-recovery.js";
+import { enqueueVideoEnhanceJob } from "@lib/shared/generation/generation-queue.js";
+import { submitMediaToolJob } from "@lib/shared/media-tools/media-tool-submission.js";
+import { resolveSourceDuration } from "@lib/shared/media-tools/source-duration.js";
+import { MediaToolBillingService } from "@lib/shared/media-tool-pricing/media-tool-billing.service.js";
+import { AssetStorageService } from "@lib/shared/assets/storage.service.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";
 import { AssetService } from "@lib/shared/assets/assets.service.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
@@ -50,6 +53,8 @@ export class VideoEnhancementsService {
     private readonly prisma: PrismaService,
     private readonly project: ProjectService,
     private readonly assets: AssetService,
+    private readonly storage: AssetStorageService,
+    private readonly billing: MediaToolBillingService,
   ) {}
 
   async create(
@@ -91,9 +96,31 @@ export class VideoEnhancementsService {
       return fail(FAILURE_CODE, "仅支持对视频资产发起 HD 高清");
     }
 
-    if (asset.width != null && asset.height != null) {
-      const longSide = Math.max(asset.width, asset.height);
-      const shortSide = Math.min(asset.width, asset.height);
+    const duration = await resolveSourceDuration({
+      prisma: this.prisma.client,
+      storage: this.storage,
+      probeDimensions: true,
+      asset: {
+        id: input[VIDEO_ENHANCE_INPUT_KEYS.sourceAssetId],
+        storage_key: asset.storage_key,
+        duration_ms: asset.duration_ms,
+        width: asset.width,
+        height: asset.height,
+      },
+    });
+    if (duration === null) {
+      return fail(
+        ASSET_UNAVAILABLE_CODE,
+        "源视频时长读取失败，请稍后重试或更换素材",
+        { code: "asset_unavailable" },
+      );
+    }
+
+    const width = asset.width ?? duration.width;
+    const height = asset.height ?? duration.height;
+    if (width != null && height != null) {
+      const longSide = Math.max(width, height);
+      const shortSide = Math.min(width, height);
       if (
         shortSide < VIDEO_ENHANCE_MIN_INPUT_SHORT_SIDE_PX ||
         shortSide > VIDEO_ENHANCE_MAX_INPUT_SHORT_SIDE_PX ||
@@ -106,12 +133,16 @@ export class VideoEnhancementsService {
       }
     }
 
-    const frozenInput: VideoEnhanceInput = { ...input };
+    const frozenInput = { ...input, duration: duration.seconds } as Prisma.InputJsonObject;
 
-    const outcome = await createMediaToolJobWithRecovery(
-      this.prisma.client,
+    return submitMediaToolJob({
+      prisma: this.prisma.client,
+      billing: this.billing,
+      toolType: VIDEO_ENHANCE_JOB_TYPE,
+      userId,
+      input: frozenInput,
       recovery,
-      async (db) => {
+      createJob: async (db) => {
         const job = await db.generation_jobs.create({
           data: {
             user_id: BigInt(userId),
@@ -126,29 +157,7 @@ export class VideoEnhancementsService {
         });
         return { jobId: job.id.toString(), status: "queued" };
       },
-    );
-    if (outcome.kind === "envelope") return outcome.envelope;
-    if (outcome.kind === "idempotency_conflict") {
-      return fail(IDEMPOTENCY_CONFLICT_CODE, "幂等键冲突：同键异载荷");
-    }
-    return ok({
-      job_id: outcome.jobId,
-      status: outcome.status,
-      ...(outcome.bindingView ? { canvas_binding: outcome.bindingView } : {}),
+      enqueue: enqueueVideoEnhanceJob,
     });
-  }
-
-  async markFailed(
-    jobId: string,
-    code: string,
-    message: string,
-    details?: Record<string, unknown>,
-  ): Promise<void> {
-    await createGenerationCommandRepo(this.prisma.client).markFailedQueued(
-      jobId,
-      code,
-      message,
-      details,
-    );
   }
 }

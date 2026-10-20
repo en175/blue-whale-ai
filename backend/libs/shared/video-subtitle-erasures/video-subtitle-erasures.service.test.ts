@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
+const { enqueueVideoSubtitleEraseJob } = vi.hoisted(() => ({ enqueueVideoSubtitleEraseJob: vi.fn() }));
+vi.mock("@lib/shared/generation/generation-queue.js", () => ({ enqueueVideoSubtitleEraseJob }));
+
 import { VideoSubtitleErasuresService } from "./video-subtitle-erasures.service.js";
 
 const VALID_SMART_BODY = {
@@ -35,6 +38,8 @@ function makeService(overrides: {
   project?: unknown;
   assets?: unknown;
   createJob?: unknown;
+  billing?: unknown;
+  storage?: unknown;
 } = {}) {
   const project = overrides.project ?? { findOwnedById: vi.fn().mockResolvedValue({ id: 55n }) };
   const assets =
@@ -46,12 +51,13 @@ function makeService(overrides: {
   const costCreate = vi.fn();
   const prisma = {
     client: {
+      assets: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
       generation_jobs: { create },
       cost_reservations: { create: costCreate },
     },
   };
   return {
-    service: new VideoSubtitleErasuresService(prisma as never, project as never, assets as never),
+    service: new VideoSubtitleErasuresService(prisma as never, project as never, assets as never, (overrides.storage ?? { probe: null }) as never, (overrides.billing ?? { jobBilling: async () => undefined, release: async () => {} }) as never),
     create,
     costCreate,
     assets,
@@ -217,12 +223,33 @@ describe("VideoSubtitleErasuresService.create：输入门槛复核（2K 分辨�
     const { service } = makeService({
       assets: {
         findOwnedSource: vi.fn().mockResolvedValue(
-          makeVideoAsset({ width: null, height: null, duration_ms: null }),
+          makeVideoAsset({ width: null, height: null }),
         ),
       },
     });
     const result = await service.create("9", "55", VALID_SMART_BODY);
     expect(result.code).toBe(200);
+  });
+
+  it("probes a legacy video and rejects dimensions learned from the probe", async () => {
+    const { service, create } = makeService({
+      assets: {
+        findOwnedSource: vi.fn().mockResolvedValue(
+          makeVideoAsset({ width: null, height: null }),
+        ),
+      },
+      storage: {
+        probe: vi.fn().mockResolvedValue({
+          durationMs: 60_000,
+          width: 3000,
+          height: 1000,
+        }),
+      },
+    });
+    const result = await service.create("9", "55", VALID_SMART_BODY);
+    expect(result.code).not.toBe(200);
+    expect(result.msg).toContain("长边超过");
+    expect(create).not.toHaveBeenCalled();
   });
 
   it("lets a video with only one recorded dimension pass (gate needs both)", async () => {
@@ -249,7 +276,7 @@ describe("VideoSubtitleErasuresService.create：落任务与免费口径", () =>
         status: "queued",
         user_id: 9n,
         project_id: 55n,
-        input: VALID_SMART_BODY,
+        input: { ...VALID_SMART_BODY, duration: 60 },
         next_action_at: expect.any(Date),
       }),
     });
@@ -259,7 +286,7 @@ describe("VideoSubtitleErasuresService.create：落任务与免费口径", () =>
     const { service, create } = makeService();
     const result = await service.create("9", "55", VALID_BOXES_BODY);
     expect(result.code).toBe(200);
-    expect(create.mock.calls[0][0].data.input).toEqual(VALID_BOXES_BODY);
+    expect(create.mock.calls[0][0].data.input).toEqual({ ...VALID_BOXES_BODY, duration: 60 });
   });
 
   it("is free-tier: no cost reservation, no provider row", async () => {
@@ -269,5 +296,20 @@ describe("VideoSubtitleErasuresService.create：落任务与免费口径", () =>
     expect(costCreate).not.toHaveBeenCalled();
     const data = create.mock.calls[0][0].data;
     expect(Object.keys(data)).not.toContain("provider");
+  });
+});
+
+describe("VideoSubtitleErasuresService.create：计费输入", () => {
+  it("按 video_subtitle_erase 计价并入队", async () => {
+    const jobBilling = vi.fn().mockResolvedValue(undefined);
+    const { service } = makeService({ billing: { jobBilling, release: vi.fn() } });
+    const result = await service.create("9", "55", VALID_SMART_BODY);
+    expect(result.code).toBe(200);
+    expect(jobBilling).toHaveBeenCalledWith(
+      "video_subtitle_erase",
+      "9",
+      expect.objectContaining({ source_asset_id: "88", duration: 60 }),
+    );
+    expect(enqueueVideoSubtitleEraseJob).toHaveBeenCalledWith("400");
   });
 });

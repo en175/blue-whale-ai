@@ -97,7 +97,7 @@ describe("submitMediaToolJob（共享提交管线）", () => {
     expect(enqueue).toHaveBeenCalledWith("400");
   });
 
-  it("免费工具入队失败 → 标记失败但不发退款", async () => {
+  it("免费工具入队失败 → 仍上报失败，由 Billing 判定无扣款不退款", async () => {
     markFailedQueued.mockResolvedValue(true);
     const release = vi.fn();
     const { args, enqueue } = makeArgs({
@@ -106,6 +106,6 @@ describe("submitMediaToolJob（共享提交管线）", () => {
     enqueue.mockRejectedValue(new Error("rocketmq down"));
     await submitMediaToolJob(args as never);
     expect(markFailedQueued).toHaveBeenCalled();
-    expect(release).not.toHaveBeenCalled();
+    expect(release).toHaveBeenCalledWith("9", 400, "任务入队失败");
   });
 });

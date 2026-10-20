@@ -1,6 +1,9 @@
 import { createHash } from "node:crypto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+const { enqueueVideoMattingJob } = vi.hoisted(() => ({ enqueueVideoMattingJob: vi.fn() }));
+vi.mock("@lib/shared/generation/generation-queue.js", () => ({ enqueueVideoMattingJob }));
+
 import { VideoMattingsService } from "./video-mattings.service.js";
 import { RecoveryContractError } from "@lib/shared/persistence/index.js";
 
@@ -58,7 +61,9 @@ function makeService(overrides: {
   assets?: unknown;
   idemFindUnique?: unknown;
   jobCreate?: unknown;
+  billing?: unknown;
   replayedJob?: unknown;
+  storage?: unknown;
 } = {}) {
   const project = overrides.project ?? { findOwnedById: vi.fn().mockResolvedValue({ id: 55n }) };
   const assets =
@@ -79,6 +84,7 @@ function makeService(overrides: {
     cost_reservations: { create: vi.fn() },
   };
   const client = {
+    assets: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
     command_idempotency: tx.command_idempotency,
     generation_jobs: tx.generation_jobs,
     cost_reservations: tx.cost_reservations,
@@ -86,7 +92,7 @@ function makeService(overrides: {
   };
   const prisma = { client };
   return {
-    service: new VideoMattingsService(prisma as never, project as never, assets as never),
+    service: new VideoMattingsService(prisma as never, project as never, assets as never, (overrides.storage ?? { probe: null }) as never, (overrides.billing ?? { jobBilling: async () => undefined, release: async () => {} }) as never),
     tx,
     client,
     project,
@@ -289,12 +295,29 @@ describe("VideoMattingsService.create：输入门槛复核（时长 ≤10 分钟
     expect(result.code).toBe(200);
   });
 
-  it("lets a video without recorded duration pass to the supplier gate", async () => {
+  it("rejects a video without recorded duration", async () => {
     const { service } = makeService({
       assets: { findOwnedSource: vi.fn().mockResolvedValue(makeVideoAsset({ duration_ms: null })) },
     });
     const result = await service.create("9", "55", VALID_BODY);
-    expect(result.code).toBe(200);
+    expect(result.code).toBe(100202);
+  });
+
+  it("probes a legacy video and rejects when the probe exceeds 10 minutes", async () => {
+    const { service, tx } = makeService({
+      assets: { findOwnedSource: vi.fn().mockResolvedValue(makeVideoAsset({ duration_ms: null })) },
+      storage: {
+        probe: vi.fn().mockResolvedValue({
+          durationMs: 10 * 60_000 + 1,
+          width: 1920,
+          height: 1080,
+        }),
+      },
+    });
+    const result = await service.create("9", "55", VALID_BODY);
+    expect(result.code).not.toBe(200);
+    expect(result.msg).toContain("10 分钟");
+    expect(tx.generation_jobs.create).not.toHaveBeenCalled();
   });
 });
 
@@ -399,6 +422,7 @@ describe("VideoMattingsService.create：任务与占位数据同事务落库", (
           mode: "greenscreen",
           format: "MP4",
           background_color: "black",
+          duration: 300,
         },
         next_action_at: expect.any(Date),
       }),
@@ -449,6 +473,7 @@ describe("VideoMattingsService.create：恢复协议 v1 接入（IKJJQW）", () 
       target_node_id: "node-1",
       mode: "portrait",
       format: "WEBM",
+      duration: 300,
     });
     expect(lockMock).toHaveBeenCalledTimes(1);
   });
@@ -497,3 +522,18 @@ function hashFor(
     )
     .digest("hex");
 }
+
+describe("VideoMattingsService.create：计费输入", () => {
+  it("按 video_matting 计价并入队", async () => {
+    const jobBilling = vi.fn().mockResolvedValue(undefined);
+    const { service } = makeService({ billing: { jobBilling, release: vi.fn() } });
+    const result = await service.create("9", "55", VALID_BODY);
+    expect(result.code).toBe(200);
+    expect(jobBilling).toHaveBeenCalledWith(
+      "video_matting",
+      "9",
+      expect.objectContaining({ source_asset_id: "88", duration: 300 }),
+    );
+    expect(enqueueVideoMattingJob).toHaveBeenCalledWith("400");
+  });
+});

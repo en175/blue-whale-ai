@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { lockMock, writeRowsMock, bindingViewMock, readIdemMock, writeIdemMock } = vi.hoisted(() => ({
+const { lockMock, writeRowsMock, bindingViewMock, readIdemMock, writeIdemMock, commitFail } = vi.hoisted(() => ({
   lockMock: vi.fn(),
   writeRowsMock: vi.fn(),
   bindingViewMock: vi.fn(),
   readIdemMock: vi.fn(),
   writeIdemMock: vi.fn(),
+  commitFail: { value: false },
 }));
 
 vi.mock("@lib/shared/persistence/index.js", async (importOriginal) => {
@@ -17,12 +18,18 @@ vi.mock("@lib/shared/persistence/index.js", async (importOriginal) => {
     canvasBindingView: bindingViewMock,
     readCreateIdempotency: readIdemMock,
     transactionWithUniqueRetry: async (_prisma: unknown, fn: (tx: unknown) => Promise<unknown>) => {
+      let result: unknown;
       try {
-        return await fn(_prisma);
+        result = await fn(_prisma);
       } catch (error) {
         if ((error as { code?: string } | null)?.code !== "P2002") throw error;
-        return fn(_prisma);
+        result = await fn(_prisma);
       }
+      if (commitFail.value) {
+        commitFail.value = false;
+        throw new Error("commit failed");
+      }
+      return result;
     },
   };
 });
@@ -385,6 +392,23 @@ describe("createMediaToolJobWithRecovery：计费补偿", () => {
     expect(charge.mock.calls).toEqual([[400], [401]]);
     expect(release).toHaveBeenCalledTimes(1);
     expect(release).toHaveBeenCalledWith(400, "unique conflict");
+  });
+
+  it("事务提交失败 → 退回已扣款", async () => {
+    const prisma = makePrisma();
+    const charge = vi.fn().mockResolvedValue(undefined);
+    const release = vi.fn().mockResolvedValue(undefined);
+    readIdemMock.mockResolvedValue(null);
+    writeIdemMock.mockResolvedValue(undefined);
+    const createJob = vi.fn().mockResolvedValue({ jobId: "400", status: "queued" });
+    commitFail.value = true;
+
+    await expect(
+      createMediaToolJobWithRecovery(prisma, null, createJob, LEGACY, { charge, release }),
+    ).rejects.toThrow("commit failed");
+
+    expect(charge).toHaveBeenCalledWith(400);
+    expect(release).toHaveBeenCalledWith(400, "commit failed");
   });
 
   it("重放不受理新扣款", async () => {
