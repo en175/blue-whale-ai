@@ -128,16 +128,20 @@ export class MediaToolBillingService {
     return this.deps;
   }
 
-  private load(toolType: string) {
-    return this.prisma.client.media_tool_pricing.findFirst({
-      where: { tool_type: toolType, is_delete: false, enabled: true },
+  private async load(toolType: string) {
+    const row = await this.prisma.client.media_tool_pricing.findUnique({
+      where: { tool_type: toolType },
       select: {
         label: true,
         pricing: true,
         version: true,
         charge_enabled: true,
+        enabled: true,
+        is_delete: true,
       },
     });
+    if (!row || row.is_delete || !row.enabled) return null;
+    return row;
   }
 
   async jobBilling(
@@ -172,23 +176,33 @@ export class MediaToolBillingService {
     const row = await this.load(toolType);
     if (!row) return { credits: null, quote_revision: null };
     if (!row.charge_enabled) return freeMediaToolQuote(row, input);
-    return quoteMediaTool({
-      row,
-      toolType,
-      userId,
-      input,
-      quote: this.billingDeps().quote,
-    });
+    try {
+      return await quoteMediaTool({
+        row,
+        toolType,
+        userId,
+        input,
+        quote: this.billingDeps().quote,
+      });
+    } catch (error) {
+      logger.warn(
+        `[billing] 工具报价不可用，本次不显示价格：tool=${toolType} ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return { credits: null, quote_revision: null };
+    }
   }
 
-  async release(
-    toolType: string,
-    userId: string,
-    jobId: number,
-    reason: string,
-  ): Promise<void> {
-    const row = await this.load(toolType);
-    if (!row?.charge_enabled) return;
-    await this.billingDeps().release({ userId, jobId, reason });
+  async release(userId: string, jobId: number, reason: string): Promise<void> {
+    try {
+      await this.billingDeps().release({ userId, jobId, reason });
+    } catch (error) {
+      logger.error(
+        `[billing] 工具退款事件发布失败：user=${userId} job=${jobId} 原因=${reason} ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
   }
 }

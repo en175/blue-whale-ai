@@ -195,8 +195,8 @@ export class ImageCutoutsService {
     code: string,
     message: string,
     details?: Record<string, unknown>,
-  ): Promise<void> {
-    await createGenerationCommandRepo(this.prisma.client).markFailedQueued(
+  ): Promise<boolean> {
+    return createGenerationCommandRepo(this.prisma.client).markFailedQueued(
       jobId,
       code,
       message,
@@ -205,11 +205,6 @@ export class ImageCutoutsService {
   }
 
   async release(userId: string, jobId: string, reason: string): Promise<void> {
-    await this.billing.release(
-      IMAGE_CUTOUT_JOB_TYPE,
-      userId,
-      Number(jobId),
-      reason,
-    );
+    await this.billing.release(userId, Number(jobId), reason);
   }
 }

@@ -18,7 +18,8 @@ function makeController(
     create:
       serviceOverrides.create ??
       vi.fn().mockResolvedValue(ok({ job_id: "400", status: "queued" })),
-    markFailed: serviceOverrides.markFailed ?? vi.fn().mockResolvedValue(undefined),
+    markFailed:
+      serviceOverrides.markFailed ?? vi.fn().mockResolvedValue(true),
     release: serviceOverrides.release ?? vi.fn().mockResolvedValue(undefined),
   };
   return {
@@ -61,5 +62,15 @@ describe("ImageCutoutsController.create", () => {
       { raw: "RocketMQ 入队失败" },
     );
     expect(service.release).toHaveBeenCalledWith("9", "400", "任务入队失败");
+  });
+
+  it("does not refund when the job is no longer queued", async () => {
+    const { controller, service } = makeController({
+      markFailed: vi.fn().mockResolvedValue(false),
+    });
+    vi.mocked(enqueueImageCutoutJob).mockRejectedValue(new Error("rocketmq down"));
+    const result = await controller.create({ userId: "9" } as never, "55", {}, undefined);
+    expect(result.code).toBe(200);
+    expect(service.release).not.toHaveBeenCalled();
   });
 });

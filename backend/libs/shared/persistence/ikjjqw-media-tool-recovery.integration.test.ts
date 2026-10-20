@@ -72,7 +72,7 @@ const TOOLS = [
 
     body: (submissionId: string) => ({ source_asset_id: "88", target_node_id: "node-1", mode: "portrait", client_token: submissionId }) },
   { name: "抠图", op: "image_cutout.create", path: "/image-cutouts", kind: "image" as const,
-    make: (c: unknown) => new ImageCutoutsService({ client: c } as never, { findOwnedById: async () => ({ id: 1n }) } as never, { findOwnedSource: async () => assetOf("image") } as never),
+    make: (c: unknown) => new ImageCutoutsService({ client: c } as never, { findOwnedById: async () => ({ id: 1n }) } as never, { findOwnedSource: async () => assetOf("image") } as never, { jobBilling: async () => undefined, release: async () => {} } as never),
     body: () => ({ source_asset_id: "88", target_node_id: "node-1", cutout_scene: "general" }) },
   { name: "扩图", op: "image_outpaint.create", path: "/image-outpaints", kind: "image" as const,
     make: (c: unknown) => new ImageOutpaintsService({ client: c } as never, { findOwnedById: async () => ({ id: 1n }) } as never, { findOwnedSource: async () => assetOf("image") } as never, { uploads: null } as unknown as AssetStorageService),

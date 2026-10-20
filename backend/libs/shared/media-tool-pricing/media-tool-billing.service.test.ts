@@ -9,7 +9,10 @@ import {
   type MediaToolPricingSnapshot,
 } from "./media-tool-billing.service.js";
 
-const PAID_ROW: MediaToolPricingSnapshot = {
+const PAID_ROW: MediaToolPricingSnapshot & {
+  enabled: boolean;
+  is_delete: boolean;
+} = {
   label: "智能抠图",
   pricing: {
     baseUnit: "constant:1",
@@ -19,16 +22,18 @@ const PAID_ROW: MediaToolPricingSnapshot = {
   },
   version: 3,
   charge_enabled: true,
+  enabled: true,
+  is_delete: false,
 };
 
 function makeService(row: unknown) {
-  const findFirst = vi.fn().mockResolvedValue(row);
+  const findUnique = vi.fn().mockResolvedValue(row);
   const prisma = {
-    client: { media_tool_pricing: { findFirst } },
+    client: { media_tool_pricing: { findUnique } },
   };
   return {
     service: new MediaToolBillingService(prisma as never, {} as never),
-    findFirst,
+    findUnique,
   };
 }
 
