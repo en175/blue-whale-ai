@@ -11,9 +11,26 @@ import org.apache.ibatis.annotations.Select;
 public interface ProjectEventMapper extends BaseMapper<ProjectEventEntity> {
 
     @Select("""
-            SELECT COALESCE(MAX(`cursor`), 0) + 1
+            SELECT id
+            FROM project
+            WHERE id = #{projectId}
+            FOR UPDATE
+            """)
+    Long lockProject(@Param("projectId") Long projectId);
+
+    @Select("""
+            SELECT `cursor`
             FROM project_events
             WHERE project_id = #{projectId}
+            ORDER BY `cursor` DESC
+            LIMIT 1
+            FOR UPDATE
             """)
-    Long nextCursor(@Param("projectId") Long projectId);
+    Long latestCursor(@Param("projectId") Long projectId);
+
+    default Long nextCursor(Long projectId) {
+        lockProject(projectId);
+        Long latest = latestCursor(projectId);
+        return latest == null ? 1L : latest + 1;
+    }
 }

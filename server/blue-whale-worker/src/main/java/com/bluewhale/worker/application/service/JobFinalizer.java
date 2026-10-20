@@ -243,6 +243,7 @@ public class JobFinalizer {
     public boolean completeJob(String jobId, List<String> assetIds,
                                String workerId, long fencingToken) {
         Long jobIdLong = Long.parseLong(jobId);
+        lockProjectForJob(jobIdLong);
 
         String outputAssetIdsJson = toJson(assetIds.stream().map(Long::parseLong).toList());
         int guardAffected = jobMapper.completeJobGuard(
@@ -340,6 +341,7 @@ public class JobFinalizer {
                            Map<String, Object> details,
                            String workerId, long fencingToken) {
         Long jobIdLong = Long.parseLong(jobId);
+        lockProjectForJob(jobIdLong);
         int guardAffected = jobMapper.failJobGuard(jobIdLong, workerId, fencingToken,
                 toJson(errorObject(errorCode, errorMessage, details)));
         if (guardAffected != 1) {
@@ -355,6 +357,7 @@ public class JobFinalizer {
     @Transactional
     public boolean expireJob(String jobId) {
         Long jobIdLong = Long.parseLong(jobId);
+        lockProjectForJob(jobIdLong);
         int guardAffected = jobMapper.expireJobGuard(jobIdLong,
                 toJson(errorObject(ERROR_TIMED_OUT, ERROR_TIMED_OUT_MESSAGE, Map.of())));
         if (guardAffected != 1) {
@@ -481,6 +484,7 @@ public class JobFinalizer {
                                       Integer width, Integer height, double duration,
                                       Long upstreamCreatedAtMs, Long finalizeDeadlineMs) {
         Long jobIdLong = Long.parseLong(jobId);
+        lockProjectForJob(jobIdLong);
 
         int guardAffected = jobMapper.publishVideoGuard(jobIdLong, workerId, fencingToken);
         if (guardAffected != 1) {
@@ -554,6 +558,7 @@ public class JobFinalizer {
                                 Map<String, Object> details,
                                 String workerId, long fencingToken) {
         Long jobIdLong = Long.parseLong(jobId);
+        lockProjectForJob(jobIdLong);
         Map<String, Object> errorObj = new java.util.HashMap<>();
         errorObj.put("code", errorCode);
         errorObj.put("message", errorMessage);
@@ -927,6 +932,7 @@ public class JobFinalizer {
                                        String errorMessage, Map<String, Object> details,
                                        String workerId, long fencingToken) {
         Long jobIdLong = Long.parseLong(jobId);
+        lockProjectForJob(jobIdLong);
 
         Map<String, Object> errorObj = new java.util.HashMap<>();
         errorObj.put("code", errorCode);
@@ -961,6 +967,13 @@ public class JobFinalizer {
     }
 
 
+    private void lockProjectForJob(Long jobId) {
+        Long projectId = jobMapper.findProjectId(jobId);
+        if (projectId != null) {
+            eventPublisher.lockProject(projectId);
+        }
+    }
+
     private void publishStatusChanged(GenerationJobEntity job, Map<String, Object> payload) {
         if (job.getProjectId() != null) {
             eventPublisher.publish(job.getProjectId(), "generation_job.status_changed",
@@ -973,6 +986,7 @@ public class JobFinalizer {
     @Transactional
     public void cancelJob(String jobId) {
         Long jobIdLong = Long.parseLong(jobId);
+        lockProjectForJob(jobIdLong);
         List<GenerationOutputSlotEntity> slots = slotMapper.findPendingByJobId(jobIdLong);
         for (GenerationOutputSlotEntity slot : slots) {
             slotMapper.updateSlotStatus(slot.getId(), JobStatusEnum.FAILED.value());
