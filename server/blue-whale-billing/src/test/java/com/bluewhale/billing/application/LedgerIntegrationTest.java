@@ -182,6 +182,14 @@ class LedgerIntegrationTest {
     }
 
     @Test
+    void 返还_没有扣款记录的任务_无操作() {
+        credits.refund(999_001L, "免费任务入队失败");
+
+        assertThat(reservations.findByJobId(999_001L)).isEmpty();
+        assertThat(ledgerEntryCount()).isZero();
+    }
+
+    @Test
     void 返还_把扣掉的量还回原批次_有效期不被重置() {
         long lot = grant(CreditSource.DAILY, 100, LATER, "g7");
         LocalDateTime expiresBefore = expiresOf(lot);

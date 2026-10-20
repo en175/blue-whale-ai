@@ -316,19 +316,18 @@ export class VideoSceneSplitsService {
           toolType: VIDEO_SCENE_SPLIT_JOB_TYPE,
           jobId: createdJobId,
           enqueue: enqueueVideoSceneSplitJob,
-          releaseOnFailure: jobBilling !== undefined,
         });
       }
       return result;
     } catch (error) {
       const failedJobId = !committed && callbackCompleted ? createdJobId : null;
-      if (failedJobId !== null && jobBilling) {
-        await jobBilling
+      if (failedJobId !== null) {
+        await this.billing
           .release(
+            userId,
             Number(failedJobId),
             error instanceof Error ? error.message : String(error),
-          )
-          .catch(() => undefined);
+          );
       }
       if (error instanceof RecoveryContractError) return error.envelope;
       throw error;

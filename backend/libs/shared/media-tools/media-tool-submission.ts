@@ -45,14 +45,13 @@ async function releaseEnqueueFailure(
     userId: string;
   },
   jobId: string,
-  billed: boolean,
 ): Promise<void> {
   const transitioned = await createGenerationCommandRepo(args.prisma)
     .markFailedQueued(jobId, ERROR_ENQUEUE_FAILED, "任务入队失败", {
       raw: "RocketMQ 入队失败",
     })
     .catch(() => false);
-  if (!transitioned || !billed) return;
+  if (!transitioned) return;
   await args.billing.release(args.userId, Number(jobId), "任务入队失败");
 }
 
@@ -63,7 +62,6 @@ export async function enqueueMediaToolJob(args: {
   toolType: string;
   jobId: string;
   enqueue: (jobId: string) => Promise<void>;
-  releaseOnFailure: boolean;
 }): Promise<void> {
   try {
     await args.enqueue(args.jobId);
@@ -76,7 +74,6 @@ export async function enqueueMediaToolJob(args: {
     await releaseEnqueueFailure(
       args,
       args.jobId,
-      args.releaseOnFailure,
     ).catch((releaseError) => {
       logger.error(
         `[media-tool] release failed tool=${args.toolType} jobId=${args.jobId}: ${
@@ -113,7 +110,6 @@ export async function submitMediaToolJob(
     toolType: strategy.toolType,
     jobId: outcome.jobId,
     enqueue: strategy.enqueue,
-    releaseOnFailure: jobBilling !== undefined,
   });
   return ok({
     job_id: outcome.jobId,

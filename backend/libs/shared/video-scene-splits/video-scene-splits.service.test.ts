@@ -386,7 +386,7 @@ describe("VideoSceneSplitsService.create：计费输入", () => {
     expect(release).toHaveBeenCalledWith("9", 400, "任务入队失败");
   });
 
-  it("does not release for a free tool when enqueue fails", async () => {
+  it("免费工具入队失败 → 仍上报失败，由 Billing 判定无扣款不退款", async () => {
     const release = vi.fn();
     const { service } = makeService({
       billing: { jobBilling: vi.fn().mockResolvedValue(undefined), release },
@@ -396,15 +396,15 @@ describe("VideoSceneSplitsService.create：计费输入", () => {
     const result = await service.create("9", "55", VALID_BODY);
 
     expect(result.code).toBe(200);
-    expect(release).not.toHaveBeenCalled();
+    expect(release).toHaveBeenCalledWith("9", 400, "任务入队失败");
   });
 
   it("releases the charge when the transaction fails after the callback charged", async () => {
-    const jobBillingRelease = vi.fn().mockResolvedValue(undefined);
+    const release = vi.fn().mockResolvedValue(undefined);
     const { service, client, tx } = makeService({
       billing: {
-        jobBilling: vi.fn().mockResolvedValue({ charge: vi.fn(), release: jobBillingRelease }),
-        release: vi.fn(),
+        jobBilling: vi.fn().mockResolvedValue({ charge: vi.fn(), release: vi.fn() }),
+        release,
       },
     });
     client.$transaction.mockImplementationOnce(
@@ -415,10 +415,10 @@ describe("VideoSceneSplitsService.create：计费输入", () => {
     );
 
     await expect(service.create("9", "55", VALID_BODY)).rejects.toThrow("commit failed");
-    expect(jobBillingRelease).toHaveBeenCalledWith(400, "commit failed");
+    expect(release).toHaveBeenCalledWith("9", 400, "commit failed");
   });
 
-  it("does not release a free tool when the transaction fails", async () => {
+  it("免费工具事务失败 → 仍上报失败，由 Billing 判定无扣款不退款", async () => {
     const release = vi.fn();
     const { service, client, tx } = makeService({
       billing: { jobBilling: vi.fn().mockResolvedValue(undefined), release },
@@ -431,6 +431,6 @@ describe("VideoSceneSplitsService.create：计费输入", () => {
     );
 
     await expect(service.create("9", "55", VALID_BODY)).rejects.toThrow("commit failed");
-    expect(release).not.toHaveBeenCalled();
+    expect(release).toHaveBeenCalledWith("9", 400, "commit failed");
   });
 });
