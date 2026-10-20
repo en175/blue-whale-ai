@@ -12,6 +12,13 @@
 
 新增依赖须说明：解决什么问题、现有方案为何不够、体积与维护成本。未经评审不得加入。
 
+### 1.1 C 端组件与提示
+
+- C 端新增组件必须使用已引入的 Radix 原语及其现有封装，禁止再自写一套同等交互 DOM。公共组件放 `custom/components/`；页面里新增的同类弹层、下拉、选择、标签、互斥按钮组同样走封装，不要 `createPortal` 另起一套。
+- 现有封装：Dialog → `Modal`；Dropdown Menu → `DropdownMenu`；Select → `Select`；Tabs → `Tabs`；Toggle Group → `RatioGroup`。已有封装能覆盖的直接复用，不要并行再包一层。
+- 提示（toast）统一使用 sonner。业务侧走 `@/custom/components/Toast`（`toast` / `showToast`）；根布局继续挂 sonner `Toaster`。禁止引入其他 toast 库，禁止页面自写提示条替代。
+- 没有对应 Radix 包或现有封装的纯展示控件仍可自写。新增 `@radix-ui/*` 包仍须按第 1 节评审。存量不合格处不要求本任务顺手改。
+
 ---
 
 ## 2. 类型即契约
