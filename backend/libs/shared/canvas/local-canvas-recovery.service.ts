@@ -137,6 +137,7 @@ export class LocalCanvasRecoveryService {
     }, select: { id: true, url: true, type: true, material_id: true } });
     const byId = new Map(assets.map(asset => [asset.id.toString(), asset]));
     const byUrl = new Map(assets.map(asset => [asset.url, asset]));
+    const byTypeAndUrl = new Map(assets.map(asset => [`${asset.type}:${asset.url}`, asset]));
     const byMaterial = new Map(assets.filter(asset => asset.material_id && activeMaterialIds.has(asset.material_id)).map(asset => [asset.material_id!, asset]));
     const unproven = targetProjectId === undefined ? [] : references.filter(ref => !ref.assetId && !ref.resolvedAssetId && ref.url);
     const proven = unproven.length === 0 ? new Map<string, string>() : await this.provenAssetIds(ownerId, targetProjectId!, unproven.map(ref => ref.url!));
@@ -145,7 +146,9 @@ export class LocalCanvasRecoveryService {
     for (const ref of references) {
       const fixedId = ref.resolvedAssetId ?? (ref.assetId === undefined ? proven.get(ref.url!) : undefined);
       const first = fixedId === undefined && ref.assetId === undefined && targetProjectId === undefined;
-      const asset = ref.assetId ? byId.get(ref.assetId) ?? byMaterial.get(ref.assetId) : first ? byUrl.get(ref.url!) : fixedId === undefined ? undefined : byId.get(fixedId);
+      const asset = ref.assetId ? byId.get(ref.assetId) ?? byMaterial.get(ref.assetId) : first
+        ? ref.mediaType ? byTypeAndUrl.get(`${ref.mediaType}:${ref.url}`) : byUrl.get(ref.url!)
+        : fixedId === undefined ? undefined : byId.get(fixedId);
       if (!asset || (ref.resolvedAssetId && ref.resolvedAssetId !== asset.id.toString()) || (ref.url && ref.url !== asset.url) || (targetProjectId !== undefined && !ref.mediaType) || (ref.mediaType && ref.mediaType !== asset.type)) {
         missing.push({ path: ref.path, ...(ref.assetId ? { assetId: ref.assetId } : {}) });
       } else {
