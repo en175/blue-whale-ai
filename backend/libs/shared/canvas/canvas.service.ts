@@ -264,6 +264,7 @@ export class CanvasService {
       commandId?: unknown;
       recoveryChanges?: unknown;
     },
+    recoveryMaterials: Array<{ assetId: string; mediaType: "image" | "video" | "audio" }> = [],
   ) {
     const owned = await this.project.findOwnedById(projectId, ownerId);
     if (!owned) throw new DomainError(DATA_NOT_EXIST_CODE, "项目不存在");
@@ -323,7 +324,7 @@ export class CanvasService {
         throw new BadRequestException(`文本超限（标题 ${limits.title}，正文 ${limits.text} 字），原内容未改动`);
       }
     }
-    const editedMaterials: Array<{ assetId: string; mediaType: "image" | "video" | "audio" }> = [];
+    const editedMaterials: Array<{ assetId: string; mediaType: "image" | "video" | "audio" }> = [...recoveryMaterials];
     const current = await this.repo.getByProject(projectId);
     const previous = JSON.parse(current.nodes ?? "[]") as typeof incoming;
     const guardedByRecovery = await projectHasRecoverySubmissions(this.prisma.client, projectId);
