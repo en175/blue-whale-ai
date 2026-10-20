@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
+const { enqueueMediaExtractJob } = vi.hoisted(() => ({ enqueueMediaExtractJob: vi.fn() }));
+vi.mock("@lib/shared/generation/generation-queue.js", () => ({ enqueueMediaExtractJob }));
+
 import { MediaExtractionsService } from "./media-extractions.service.js";
 
 function makeService(overrides: {
@@ -11,7 +14,7 @@ function makeService(overrides: {
   const assets =
     overrides.assets ??
     {
-      findOwnedSource: vi.fn().mockResolvedValue({ id: 88n, type: "video" }),
+      findOwnedSource: vi.fn().mockResolvedValue({ id: 88n, type: "video", duration_ms: 61_000 }),
     };
   const create = overrides.createJob ?? vi.fn().mockResolvedValue({ id: 400n });
   const costCreate = vi.fn();
@@ -21,10 +24,18 @@ function makeService(overrides: {
       cost_reservations: { create: costCreate },
     },
   };
+  const jobBilling = vi.fn().mockResolvedValue(undefined);
   return {
-    service: new MediaExtractionsService(prisma as never, project as never, assets as never),
+    service: new MediaExtractionsService(
+      prisma as never,
+      project as never,
+      assets as never,
+      { probe: null } as never,
+      { jobBilling, release: vi.fn() } as never,
+    ),
     create,
     costCreate,
+    jobBilling,
   };
 }
 
@@ -61,9 +72,10 @@ describe("MediaExtractionsService.create", () => {
   });
 
   it("creates a media_extract job and returns the job id", async () => {
-    const { service, create } = makeService();
+    const { service, create, jobBilling } = makeService();
     const result = await service.create("9", "55", { source_asset_id: "88", output_format: "mp3" });
     expect(result.code).toBe(200);
+    expect(jobBilling).toHaveBeenCalledWith("media_extract", "9", expect.objectContaining({ duration: 61 }));
     expect(result.data).toMatchObject({ job_id: "400", status: "queued" });
     expect(create).toHaveBeenCalledWith({
       data: expect.objectContaining({
@@ -71,7 +83,7 @@ describe("MediaExtractionsService.create", () => {
         status: "queued",
         user_id: 9n,
         project_id: 55n,
-        input: { source_asset_id: "88", output_format: "mp3" },
+        input: { source_asset_id: "88", output_format: "mp3", duration: 61 },
         next_action_at: expect.any(Date),
       }),
     });
@@ -83,7 +95,7 @@ describe("MediaExtractionsService.create", () => {
     expect(result.code).toBe(200);
     expect(create).toHaveBeenCalledWith({
       data: expect.objectContaining({
-        input: { source_asset_id: "88", output_format: "m4a" },
+        input: { source_asset_id: "88", output_format: "m4a", duration: 61 },
       }),
     });
   });
@@ -112,7 +124,7 @@ describe("MediaExtractionsService.create", () => {
       expect(result.code).toBe(200);
       expect(create).toHaveBeenCalledWith({
         data: expect.objectContaining({
-          input: { source_asset_id: "88", output_format: outputFormat },
+          input: { source_asset_id: "88", output_format: outputFormat, duration: 61 },
         }),
       });
     },

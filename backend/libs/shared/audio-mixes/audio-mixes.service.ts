@@ -6,7 +6,10 @@ import { AssetStorageService } from "@lib/shared/assets/storage.service.js";
 import { loadTosStorageConfig } from "@lib/shared/assets/tos-storage.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";
-import { createGenerationCommandRepo } from "@lib/shared/persistence/index.js";
+import { markFailedQueuedAndNotifyBilling } from "@lib/shared/persistence/index.js";
+import { withBillingCompensation } from "@lib/shared/persistence/job-billing.js";
+import { resolveSourceDuration } from "@lib/shared/media-tools/source-duration.js";
+import { MediaToolBillingService } from "@lib/shared/media-tool-pricing/media-tool-billing.service.js";
 import {
   RecoveryContractError,
   canvasBindingView,
@@ -16,6 +19,7 @@ import {
 } from "@lib/shared/persistence/generation-canvas-recovery-repo.js";
 import type { CanvasRecoveryPlan } from "@lib/shared/persistence/generation-canvas-recovery-repo.js";
 import {
+  ASSET_UNAVAILABLE_CODE,
   AUDIO_MIX_JOB_TYPE,
   AUDIO_MIX_SOURCE,
   PARAM_MISSING_CODE,
@@ -39,8 +43,8 @@ export class AudioMixesService {
     private readonly project: ProjectService,
     private readonly assets: AssetService,
     private readonly storage: AssetStorageService,
+    private readonly billing: MediaToolBillingService,
   ) {}
-
   async create(
     userId: string,
     projectId: string,
@@ -75,17 +79,36 @@ export class AudioMixesService {
       }
       const job = await this.prisma.client.generation_jobs.findFirst({
         where: { id: existing.generation_job_id, project_id: BigInt(projectId), user_id: BigInt(userId), type: AUDIO_MIX_JOB_TYPE },
-        select: { id: true, status: true, version: true, error: true },
+        select: { id: true, status: true, version: true, error: true, input: true },
       });
       if (!job) throw new DomainError(RESOURCE_NOT_FOUND_CODE);
       const error = job.error;
       if (job.status === "failed" && error && typeof error === "object" && !Array.isArray(error)
           && "code" in error && error.code === ERROR_ENQUEUE_FAILED) {
-        const resumed = await this.prisma.client.generation_jobs.updateMany({
-          where: { id: job.id, status: "failed", version: job.version },
-          data: { status: "queued", error: Prisma.DbNull, next_action_at: new Date(Date.now() - 60_000), version: { increment: 1 } },
+        const frozen = job.input as { duration?: unknown; estimated_duration_ms?: unknown } | null;
+        const durationSeconds = typeof frozen?.duration === "number"
+          ? frozen.duration
+          : typeof frozen?.estimated_duration_ms === "number"
+            ? Math.max(1, Math.ceil(frozen.estimated_duration_ms / 1000))
+            : null;
+        if (durationSeconds === null) {
+          throw new DomainError(FAILURE_CODE, "任务缺少计费时长，无法恢复");
+        }
+        const resumeBilling = await this.billing.jobBilling(AUDIO_MIX_JOB_TYPE, userId, {
+          duration: durationSeconds,
         });
-        if (resumed.count === 1) return ok({ job_id: job.id.toString(), status: "queued", replayed: true, enqueue_required: true });
+        const resumed = await withBillingCompensation(resumeBilling, (billing) =>
+          this.prisma.client.$transaction(async (tx) => {
+            const updated = await tx.generation_jobs.updateMany({
+              where: { id: job.id, status: "failed", version: job.version },
+              data: { status: "queued", error: Prisma.DbNull, next_action_at: new Date(Date.now() - 60_000), version: { increment: 1 } },
+            });
+            if (updated.count !== 1) return false;
+            await billing?.charge(Number(job.id));
+            return true;
+          }),
+        );
+        if (resumed) return ok({ job_id: job.id.toString(), status: "queued", replayed: true, enqueue_required: true });
       }
       const latest = await this.prisma.client.generation_jobs.findUniqueOrThrow({ where: { id: job.id }, select: { status: true } });
       return ok({ job_id: job.id.toString(), status: latest.status, replayed: true, enqueue_required: false });
@@ -161,8 +184,23 @@ export class AudioMixesService {
           ...(input.node_id ? { node_id: input.node_id } : {}),
           url: publicUrl,
         };
-        durations[index] = asset.duration_ms == null || !Number.isFinite(asset.duration_ms) || asset.duration_ms < 0
-          ? null : asset.duration_ms;
+        const resolved = await resolveSourceDuration({
+          prisma: this.prisma.client,
+          storage: this.storage,
+          asset: {
+            id: input.asset_id,
+            storage_key: storageKey,
+            duration_ms: asset.duration_ms,
+          },
+        });
+        if (resolved === null) {
+          throw new DomainError(
+            ASSET_UNAVAILABLE_CODE,
+            "音频时长读取失败，请稍后重试或更换素材",
+            503,
+          );
+        }
+        durations[index] = resolved.durationMs;
       }
     };
     try {
@@ -176,8 +214,15 @@ export class AudioMixesService {
     } finally {
       clearTimeout(deadlineTimer);
     }
-    const estimatedDurationMs = durations.some((duration) => duration === null)
-      ? null : Math.max(...(durations as number[]));
+    if (durations.some((duration) => duration === null)) {
+      throw new DomainError(
+        ASSET_UNAVAILABLE_CODE,
+        "音频时长读取失败，请稍后重试或更换素材",
+        503,
+      );
+    }
+    const estimatedDurationMs = Math.max(...(durations as number[]));
+    const durationSeconds = Math.max(1, Math.ceil(estimatedDurationMs / 1000));
 
     const data = {
       user_id: BigInt(userId),
@@ -191,18 +236,32 @@ export class AudioMixesService {
         inputs: frozenInputs,
         output_format: parsed.data.output_format,
         estimated_duration_ms: estimatedDurationMs,
+        duration: durationSeconds,
       },
       next_action_at: new Date(Date.now() - 60_000),
       execution_deadline_at: audioMixDeadline(estimatedDurationMs),
     };
+    const jobBilling = await this.billing.jobBilling(AUDIO_MIX_JOB_TYPE, userId, {
+      duration: durationSeconds,
+    });
     if (!key) {
-      const job = await this.prisma.client.generation_jobs.create({ data });
+      const job = await withBillingCompensation(jobBilling, (billing) =>
+        this.prisma.client.$transaction(
+          async (tx) => {
+            const created = await tx.generation_jobs.create({ data });
+            await billing?.charge(Number(created.id));
+            return created;
+          },
+          { maxWait: 10_000, timeout: 30_000 },
+        ),
+      );
       return ok({ job_id: job.id.toString(), status: "queued", replayed: false, enqueue_required: true });
     }
     let job;
     let replayed = false;
     try {
-      const result = await this.prisma.client.$transaction(async (tx) => {
+      const result = await withBillingCompensation(jobBilling, (billing) =>
+        this.prisma.client.$transaction(async (tx) => {
         let plan: CanvasRecoveryPlan | null = null;
         if (canvasBinding) {
           const locked = await lockCanvasRecoveryForAcceptance(tx, {
@@ -217,12 +276,14 @@ export class AudioMixesService {
           plan = locked.plan;
         }
         const created = await tx.generation_jobs.create({ data });
+        await billing?.charge(Number(created.id));
         await tx.command_idempotency.create({
           data: { ...key, request_hash: hash, generation_job_id: created.id, accepted_cursor: 0n },
         });
         if (plan) await writeCanvasRecoveryRows(tx, plan, created.id);
         return { replayed: false, jobId: created.id.toString() as string | null };
-      });
+        }),
+      );
       replayed = result.replayed;
       job = result.jobId;
     } catch (error) {
@@ -259,9 +320,21 @@ export class AudioMixesService {
     const owned = await this.prisma.client.generation_jobs.findFirst({
       where: { id: jid, project_id: pid, user_id: BigInt(userId), type: AUDIO_MIX_JOB_TYPE,
         source: AUDIO_MIX_SOURCE, is_delete: false },
-      select: { id: true },
+      select: { id: true, input: true },
     });
     if (!owned) throw new DomainError(RESOURCE_NOT_FOUND_CODE);
+    const frozenOwned = owned.input as { duration?: unknown; estimated_duration_ms?: unknown } | null;
+    const retrySeconds = typeof frozenOwned?.duration === "number"
+      ? frozenOwned.duration
+      : typeof frozenOwned?.estimated_duration_ms === "number"
+        ? Math.max(1, Math.ceil(frozenOwned.estimated_duration_ms / 1000))
+        : null;
+    if (retrySeconds === null) {
+      throw new DomainError(FAILURE_CODE, "任务缺少计费时长，无法重试");
+    }
+    const retryBilling = await this.billing.jobBilling(AUDIO_MIX_JOB_TYPE, userId, {
+      duration: retrySeconds,
+    });
     const hash = createHash("sha256").update(
       `POST:audio_mix.retry:${projectId}:${jobId}${canvasBinding ? `:${JSON.stringify(canvasBinding)}` : ""}`,
     ).digest("hex");
@@ -289,7 +362,8 @@ export class AudioMixesService {
       return ok({ job_id: jobId, status: latest.status, replayed: true, enqueue_required: false });
     };
     try {
-      const result = await this.prisma.client.$transaction(async (tx) => {
+      const result = await withBillingCompensation(retryBilling, (billing) =>
+        this.prisma.client.$transaction(async (tx) => {
         let plan: CanvasRecoveryPlan | null = null;
         if (canvasBinding) {
           const locked = await lockCanvasRecoveryForRetry(tx, {
@@ -337,12 +411,14 @@ export class AudioMixesService {
           },
         });
         if (updated.count !== 1) throw new DomainError(409, "音频混合任务正在重试");
+        await billing?.charge(Number(jid));
         await tx.command_idempotency.create({
           data: { ...key, request_hash: hash, generation_job_id: jid, accepted_cursor: 0n },
         });
         if (plan) await writeCanvasRecoveryRows(tx, plan, jid);
         return { replayed: false };
-      });
+        }),
+      );
       if (result.replayed) return this.withBindingView((await replay())!, projectId, canvasBinding);
       return this.withBindingView(
         ok({ job_id: jobId, status: "queued", replayed: false, enqueue_required: true }),
@@ -370,8 +446,14 @@ export class AudioMixesService {
     return { ...result, data: { ...data, canvas_binding: view } } as T;
   }
 
-  async markFailed(jobId: string, code: string, message: string): Promise<string> {
-    await createGenerationCommandRepo(this.prisma.client).markFailedQueued(jobId, code, message);
+  async markFailed(userId: string, jobId: string, code: string, message: string): Promise<string> {
+    await markFailedQueuedAndNotifyBilling({
+      prisma: this.prisma.client,
+      jobId,
+      code,
+      message,
+      release: (id) => this.billing.release(userId, id, message),
+    });
     const current = await this.prisma.client.generation_jobs.findUniqueOrThrow({
       where: { id: BigInt(jobId) }, select: { status: true },
     });

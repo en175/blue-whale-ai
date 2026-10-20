@@ -14,7 +14,15 @@ function makeService(assetsById: Record<string, object> = {
   "12": { id: 12n, project_id: 0n, type: "audio", url: "https://tos.example/12.mp3", storage_key: "12.mp3", duration_ms: 12_500 },
 }) {
   const create = vi.fn().mockResolvedValue({ id: 70n });
-  const prisma = { client: { generation_jobs: { create }, project_asset: { findMany: vi.fn().mockResolvedValue([]) } } };
+  const tx = {
+    generation_jobs: { create },
+    project_asset: { findMany: vi.fn().mockResolvedValue([]) },
+  };
+  const client = {
+    ...tx,
+    $transaction: vi.fn(async (fn: (t: unknown) => Promise<unknown>) => fn(tx)),
+  };
+  const prisma = { client };
   const project = { findOwnedById: vi.fn().mockResolvedValue({ id: 5n }) };
   const assets = { findOwnedSource: vi.fn().mockImplementation(async (id: string) => assetsById[id] ?? null) };
   const inspectObject = vi.fn().mockImplementation(async (key: string) => ({
@@ -23,9 +31,16 @@ function makeService(assetsById: Record<string, object> = {
   const storage = { uploads: { inspectObject } };
   const publicFetch = vi.fn().mockResolvedValue({ ok: true, body: { cancel: vi.fn() } });
   vi.stubGlobal("fetch", publicFetch);
+  const jobBilling = vi.fn().mockResolvedValue(undefined);
   return {
-    service: new AudioMixesService(prisma as never, project as never, assets as never, storage as never),
-    create, project, assets, inspectObject, publicFetch,
+    service: new AudioMixesService(
+      prisma as never,
+      project as never,
+      assets as never,
+      storage as never,
+      { jobBilling, release: vi.fn() } as never,
+    ),
+    create, project, assets, inspectObject, publicFetch, jobBilling,
   };
 }
 
@@ -45,6 +60,7 @@ describe("AudioMixesService.create", () => {
       input: {
         source_node_id: "node-source", output_format: "mp3",
         estimated_duration_ms: 12_500,
+        duration: 13,
         inputs: [
           { asset_id: "11", node_id: "node-source", url: "https://public-tos.example/11.mp3" },
           { asset_id: "12", url: "https://public-tos.example/12.mp3" },
@@ -53,13 +69,13 @@ describe("AudioMixesService.create", () => {
     }) });
   });
 
-  it("freezes unknown estimated duration as null rather than guessing", async () => {
+  it("rejects an input whose duration cannot be resolved", async () => {
     const { service, create } = makeService({
       "11": { id: 11n, project_id: 5n, type: "audio", url: "https://tos.example/11.mp3", storage_key: "11.mp3", duration_ms: 10_000 },
       "12": { id: 12n, project_id: 0n, type: "audio", url: "https://tos.example/12.mp3", storage_key: "12.mp3", duration_ms: null },
     });
-    await service.create("9", "5", input);
-    expect(create.mock.calls[0][0].data.input.estimated_duration_ms).toBeNull();
+    await expect(service.create("9", "5", input)).rejects.toMatchObject({ code: 100202 });
+    expect(create).not.toHaveBeenCalled();
   });
 
   it("resolves each input from a real object and checks a public ranged GET", async () => {
@@ -90,8 +106,8 @@ describe("AudioMixesService.create", () => {
     vi.stubEnv("VOLC_TOS_BUCKET", "our-bucket");
     vi.stubEnv("VOLC_TOS_REGION", "test");
     const { service, inspectObject } = makeService({
-      "11": { project_id: 5n, type: "audio", url: "https://our-bucket.tos.example/generated/9/audio/a.mp3", storage_key: null },
-      "12": { project_id: 0n, type: "audio", url: "https://our-bucket.tos.example/generated/9/audio/b.mp3", storage_key: null },
+      "11": { project_id: 5n, type: "audio", url: "https://our-bucket.tos.example/generated/9/audio/a.mp3", storage_key: null, duration_ms: 10_000 },
+      "12": { project_id: 0n, type: "audio", url: "https://our-bucket.tos.example/generated/9/audio/b.mp3", storage_key: null, duration_ms: 12_000 },
     });
     await service.create("9", "5", input);
     expect(inspectObject.mock.calls.map(([key]) => key)).toEqual([
@@ -115,7 +131,7 @@ describe("AudioMixesService.create", () => {
 
   it("limits concurrent object checks while preserving the order of 100 inputs", async () => {
     const assets = Object.fromEntries(Array.from({ length: 100 }, (_, i) => [String(i + 1), {
-      project_id: 5n, type: "audio", url: `https://tos.example/${i + 1}.mp3`, storage_key: `${i + 1}.mp3`,
+      project_id: 5n, type: "audio", url: `https://tos.example/${i + 1}.mp3`, storage_key: `${i + 1}.mp3`, duration_ms: 10_000 + i,
     }]));
     const { service, inspectObject, create } = makeService(assets);
     let active = 0;
@@ -205,6 +221,17 @@ describe("AudioMixesService.create", () => {
     const { service, create } = makeService();
     expect((await service.create("9", "5", { ...input, output_format: format })).code).toBe(200);
     expect(create.mock.calls[0][0].data.input.output_format).toBe(format);
+  });
+
+  it("bills the longest input duration and charges the created job", async () => {
+    const charge = vi.fn().mockResolvedValue(undefined);
+    const { service, jobBilling } = makeService();
+    jobBilling.mockResolvedValue({ charge, release: vi.fn() });
+
+    await service.create("9", "5", input);
+
+    expect(jobBilling).toHaveBeenCalledWith("audio_mix", "9", { duration: 13 });
+    expect(charge).toHaveBeenCalledWith(70);
   });
 
   it("rejects an unsupported format", async () => {

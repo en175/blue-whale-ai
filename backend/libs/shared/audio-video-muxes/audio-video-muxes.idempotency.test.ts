@@ -36,11 +36,11 @@ describe("audio video mux create idempotency", () => {
     const project = { findOwnedById: vi.fn().mockResolvedValue({ id: 5n }) };
     const assets = { findOwnedSource: vi.fn(async (id: string) => ({
       project_id: 5n, type: id === "11" ? "audio" : "video", url: `https://store.test/${id}.mp4`,
-      storage_key: `${id}.mp4`, duration_ms: 10_000,
+      storage_key: `${id}.mp4`, duration_ms: 10_000, width: 1920, height: 1080,
     })) };
     const storage = { uploads: { inspectObject: vi.fn(async (key: string) => ({ size: 10, publicUrl: `https://store.test/${key}` })) } };
     vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, body: { cancel: vi.fn() } })));
-    const service = new AudioVideoMuxesService({ client } as never, project as never, assets as never, storage as never);
+    const service = new AudioVideoMuxesService({ client } as never, project as never, assets as never, storage as never, { jobBilling: vi.fn().mockResolvedValue(undefined), release: vi.fn() } as never);
 
     const first = await service.create("9", "5", payload, { idempotencyKey: "one-click" });
     const again = await service.create("9", "5", payload, { idempotencyKey: "one-click" });
@@ -55,7 +55,7 @@ describe("audio video mux create idempotency", () => {
   });
 
   it("resumes a failed enqueue once with the same key and never spawns a second job", async () => {
-    const job = { id: 70n, status: "queued", version: 0, error: null as object | null };
+    const job = { id: 70n, status: "queued", version: 0, error: null as object | null, input: { duration: 1, resolution: "1080p" } };
     let command: { request_hash: string; generation_job_id: bigint } | null = null;
     const client = {
       project_asset: { findMany: vi.fn().mockResolvedValue([]) },
@@ -80,11 +80,11 @@ describe("audio video mux create idempotency", () => {
     const project = { findOwnedById: vi.fn().mockResolvedValue({ id: 5n }) };
     const assets = { findOwnedSource: vi.fn(async (id: string) => ({
       project_id: 5n, type: id === "11" ? "audio" : "video", url: `https://store.test/${id}.mp4`,
-      storage_key: `${id}.mp4`, duration_ms: 10_000,
+      storage_key: `${id}.mp4`, duration_ms: 10_000, width: 1920, height: 1080,
     })) };
     const storage = { uploads: { inspectObject: vi.fn(async (key: string) => ({ size: 10, publicUrl: `https://store.test/${key}` })) } };
     vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, body: { cancel: vi.fn() } })));
-    const service = new AudioVideoMuxesService({ client } as never, project as never, assets as never, storage as never);
+    const service = new AudioVideoMuxesService({ client } as never, project as never, assets as never, storage as never, { jobBilling: vi.fn().mockResolvedValue(undefined), release: vi.fn() } as never);
 
     const first = await service.create("9", "5", payload, { idempotencyKey: "recover-key" });
     expect(first.data).toMatchObject({ job_id: "70", replayed: false, enqueue_required: true });
@@ -109,7 +109,7 @@ describe("audio video mux create idempotency", () => {
     const project = { findOwnedById: vi.fn().mockResolvedValue({ id: 5n }) };
     const assets = { findOwnedSource: vi.fn() };
     const storage = { uploads: { inspectObject: vi.fn() } };
-    const service = new AudioVideoMuxesService({ client } as never, project as never, assets as never, storage as never);
+    const service = new AudioVideoMuxesService({ client } as never, project as never, assets as never, storage as never, { jobBilling: vi.fn().mockResolvedValue(undefined), release: vi.fn() } as never);
     await expect(service.create("9", "5", payload, { idempotencyKey })).rejects.toMatchObject({ status: 400 });
     expect(storage.uploads.inspectObject).not.toHaveBeenCalled();
     expect(client.generation_jobs.create).not.toHaveBeenCalled();

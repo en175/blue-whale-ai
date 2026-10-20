@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
+import type { Prisma } from "@prisma/client";
 import { Injectable } from "@nestjs/common";
 import {
-  CANVAS_RECOVERY_PROTOCOL_VERSION,
+  ASSET_UNAVAILABLE_CODE,
   FAILURE_CODE,
   IDEMPOTENCY_KEY_REUSED_CODE,
   PARAM_MISSING_CODE,
@@ -16,7 +17,6 @@ import {
   VOCAL_SPLIT_SOURCE,
   canvasBindingSchema,
   fail,
-  ok,
   vocalSplitInputSchema,
   type CanvasBinding,
   type VocalSplitInput,
@@ -24,13 +24,15 @@ import {
   type VocalSplitScene,
 } from "@lib/contracts";
 import {
-  RecoveryContractError,
-  canvasBindingView,
-  createGenerationCommandRepo,
-  lockCanvasRecoveryForAcceptance,
-  writeCanvasRecoveryRows,
-  type CanvasRecoveryAcceptance,
-} from "@lib/shared/persistence/index.js";
+  readAcceptedMediaToolReplay,
+  renderMediaToolReplay,
+  type MediaToolRecovery,
+} from "@lib/shared/generation/media-tool-recovery.js";
+import { enqueueVocalSplitJob } from "@lib/shared/generation/generation-queue.js";
+import { submitMediaToolJob } from "@lib/shared/media-tools/media-tool-submission.js";
+import { resolveSourceDuration } from "@lib/shared/media-tools/source-duration.js";
+import { MediaToolBillingService } from "@lib/shared/media-tool-pricing/media-tool-billing.service.js";
+import { AssetStorageService } from "@lib/shared/assets/storage.service.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";
 import { AssetService } from "@lib/shared/assets/assets.service.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
@@ -54,6 +56,8 @@ export class VocalSplitsService {
     private readonly prisma: PrismaService,
     private readonly project: ProjectService,
     private readonly assets: AssetService,
+    private readonly storage: AssetStorageService,
+    private readonly billing: MediaToolBillingService,
   ) {}
 
   async create(
@@ -123,119 +127,77 @@ export class VocalSplitsService {
       return fail(FAILURE_CODE, "仅支持从视频或音频资产发起人声背景分离");
     }
 
-    if (canvasBinding) {
-      const requestHash = createHash("sha256")
-        .update(
-          `POST:/api/projects/${projectId}/vocal-splits` +
-            `\0${input[VOCAL_SPLIT_INPUT_KEYS.sourceAssetId]}` +
-            `\0${input[VOCAL_SPLIT_INPUT_KEYS.scene]}` +
-            `\0${input[VOCAL_SPLIT_INPUT_KEYS.outputFormat]}` +
-            `\0${JSON.stringify(canvasBinding)}`,
-        )
-        .digest("hex");
-      const acceptance: CanvasRecoveryAcceptance = {
-        projectId,
-        userId,
-        binding: canvasBinding,
-        operation: IDEMPOTENCY_OPERATION,
-        requestHash,
-        idempotencyKey: canvasBinding.submission_id,
-        taskType: VOCAL_SPLIT_JOB_TYPE,
-      };
-      try {
-        return await this.prisma.client.$transaction(async (tx) => {
-          const locked = await lockCanvasRecoveryForAcceptance(tx, acceptance);
-          if (locked.kind === "replay") {
-            const replayed = await tx.generation_jobs.findUnique({
-              where: { id: BigInt(locked.result.generation_job_id) },
-              select: { status: true },
-            });
-            return ok({
-              job_id: locked.result.generation_job_id,
-              status: replayed?.status ?? "queued",
-              canvas_binding: await canvasBindingView(
-                this.prisma.client, projectId, canvasBinding.submission_id,
-              ),
-            });
-          }
-          if (locked.kind === "idempotency_conflict") {
-            return fail(IDEMPOTENCY_KEY_REUSED_CODE, "Idempotency-Key 已被使用（同键仅可重放相同参数）");
-          }
-          const job = await tx.generation_jobs.create({
-            data: {
-              user_id: BigInt(userId),
-              project_id: BigInt(projectId),
-              type: VOCAL_SPLIT_JOB_TYPE,
-              source: VOCAL_SPLIT_SOURCE,
-              status: "queued",
-              progress: 0,
-              input: {
-                ...input,
-              },
-              next_action_at: new Date(Date.now() - 60_000),
-            },
-          });
-          await tx.command_idempotency.create({
-            data: {
-              project_id: BigInt(projectId),
-              operation: IDEMPOTENCY_OPERATION,
-              idempotency_key: canvasBinding.submission_id,
-              request_hash: requestHash,
-              generation_job_id: job.id,
-              accepted_cursor: 0n,
-            },
-          });
-          await writeCanvasRecoveryRows(tx, locked.plan, job.id);
-          return ok({
-            job_id: job.id.toString(),
-            status: "queued",
-            canvas_binding: {
-              protocol_version: CANVAS_RECOVERY_PROTOCOL_VERSION,
-              submission_id: canvasBinding.submission_id,
-              target_node_id: canvasBinding.target_node_id,
-              binding_revision: locked.plan.bindingRevision,
-              job_id: job.id.toString(),
-              is_current: true,
-            },
-          });
-        });
-      } catch (error) {
-        if (error instanceof RecoveryContractError) return error.envelope;
-        throw error;
+    const requestHash = canvasBinding
+      ? createHash("sha256")
+          .update(
+            `POST:/api/projects/${projectId}/vocal-splits` +
+              `\0${input[VOCAL_SPLIT_INPUT_KEYS.sourceAssetId]}` +
+              `\0${input[VOCAL_SPLIT_INPUT_KEYS.scene]}` +
+              `\0${input[VOCAL_SPLIT_INPUT_KEYS.outputFormat]}` +
+              `\0${JSON.stringify(canvasBinding)}`,
+          )
+          .digest("hex")
+      : "";
+    const recovery: MediaToolRecovery | null = canvasBinding
+      ? {
+          projectId,
+          userId,
+          taskType: VOCAL_SPLIT_JOB_TYPE,
+          operation: IDEMPOTENCY_OPERATION,
+          requestHash,
+          binding: canvasBinding,
+        }
+      : null;
+    if (recovery) {
+      const replay = await readAcceptedMediaToolReplay(this.prisma.client, recovery);
+      if (replay) {
+        return renderMediaToolReplay(replay, () =>
+          fail(IDEMPOTENCY_KEY_REUSED_CODE, "Idempotency-Key 已被使用（同键仅可重放相同参数）"),
+        );
       }
     }
 
-    const job = await this.prisma.client.generation_jobs.create({
-      data: {
-        user_id: BigInt(userId),
-        project_id: BigInt(projectId),
-        type: VOCAL_SPLIT_JOB_TYPE,
-        source: VOCAL_SPLIT_SOURCE,
-        status: "queued",
-        progress: 0,
-        input: {
-          ...input,
-        },
-        next_action_at: new Date(Date.now() - 60_000),
+    const duration = await resolveSourceDuration({
+      prisma: this.prisma.client,
+      storage: this.storage,
+      asset: {
+        id: sourceAssetId,
+        storage_key: asset.storage_key,
+        duration_ms: asset.duration_ms,
       },
     });
-    return ok({
-      job_id: job.id.toString(),
-      status: "queued",
-    });
-  }
+    if (duration === null) {
+      return fail(
+        ASSET_UNAVAILABLE_CODE,
+        "源素材时长读取失败，请稍后重试或更换素材",
+        { code: "asset_unavailable" },
+      );
+    }
+    const frozenInput = { ...input, duration: duration.seconds } as Prisma.InputJsonObject;
 
-  async markFailed(
-    jobId: string,
-    code: string,
-    message: string,
-    details?: Record<string, unknown>,
-  ): Promise<void> {
-    await createGenerationCommandRepo(this.prisma.client).markFailedQueued(
-      jobId,
-      code,
-      message,
-      details,
-    );
+    return submitMediaToolJob({
+      prisma: this.prisma.client,
+      billing: this.billing,
+      toolType: VOCAL_SPLIT_JOB_TYPE,
+      userId,
+      input: frozenInput,
+      recovery,
+      createJob: async (db) => {
+        const job = await db.generation_jobs.create({
+          data: {
+            user_id: BigInt(userId),
+            project_id: BigInt(projectId),
+            type: VOCAL_SPLIT_JOB_TYPE,
+            source: VOCAL_SPLIT_SOURCE,
+            status: "queued",
+            progress: 0,
+            input: frozenInput,
+            next_action_at: new Date(Date.now() - 60_000),
+          },
+        });
+        return { jobId: job.id.toString(), status: "queued" };
+      },
+      enqueue: enqueueVocalSplitJob,
+    });
   }
 }

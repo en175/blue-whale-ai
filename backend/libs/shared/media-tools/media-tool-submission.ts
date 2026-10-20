@@ -13,7 +13,7 @@ import {
   type MediaToolLegacyIdempotency,
   type MediaToolRecovery,
 } from "@lib/shared/generation/media-tool-recovery.js";
-import { createGenerationCommandRepo } from "@lib/shared/persistence/index.js";
+import { markFailedQueuedAndNotifyBilling } from "@lib/shared/persistence/index.js";
 import type { MediaToolBillingService } from "@lib/shared/media-tool-pricing/media-tool-billing.service.js";
 
 export interface MediaToolSubmissionStrategy {
@@ -46,13 +46,14 @@ async function releaseEnqueueFailure(
   },
   jobId: string,
 ): Promise<void> {
-  const transitioned = await createGenerationCommandRepo(args.prisma)
-    .markFailedQueued(jobId, ERROR_ENQUEUE_FAILED, "任务入队失败", {
-      raw: "RocketMQ 入队失败",
-    })
-    .catch(() => false);
-  if (!transitioned) return;
-  await args.billing.release(args.userId, Number(jobId), "任务入队失败");
+  await markFailedQueuedAndNotifyBilling({
+    prisma: args.prisma,
+    jobId,
+    code: ERROR_ENQUEUE_FAILED,
+    message: "任务入队失败",
+    details: { raw: "RocketMQ 入队失败" },
+    release: (id) => args.billing.release(args.userId, id, "任务入队失败"),
+  });
 }
 
 export async function enqueueMediaToolJob(args: {

@@ -1,23 +1,12 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
-import { ERROR_ENQUEUE_FAILED, RECOVERY_REASONS, ok } from "@lib/contracts";
-import { VocalSplitsService } from "@lib/shared/vocal-splits/vocal-splits.service.js";
+import { describe, expect, it, vi } from "vitest";
+import { ok } from "@lib/contracts";
+import { VocalSplitsController } from "./vocal-splits.controller.js";
 
-vi.mock("@lib/shared/generation/generation-queue.js", () => ({
-  enqueueVocalSplitJob: vi.fn(),
-}));
-vi.mock("@lib/infra/logging/blue-whale-logger.js", () => ({
-  logger: { error: vi.fn() },
-}));
-
-const { enqueueVocalSplitJob } = await import("@lib/shared/generation/generation-queue.js");
-const { VocalSplitsController } = await import("./vocal-splits.controller.js");
-
-function makeController(serviceOverrides: { create?: unknown; markFailed?: unknown } = {}) {
+function makeController(serviceOverrides: { create?: unknown } = {}) {
   const service = {
     create:
       serviceOverrides.create ??
       vi.fn().mockResolvedValue(ok({ job_id: "400", status: "queued" })),
-    markFailed: serviceOverrides.markFailed ?? vi.fn().mockResolvedValue(undefined),
   };
   return {
     controller: new VocalSplitsController(service as never),
@@ -26,56 +15,18 @@ function makeController(serviceOverrides: { create?: unknown; markFailed?: unkno
 }
 
 describe("VocalSplitsController.create", () => {
-  beforeEach(() => {
-    vi.mocked(enqueueVocalSplitJob).mockReset();
-  });
-  it("enqueues the created job and returns the result unchanged", async () => {
+  it("delegates to the service and returns its envelope unchanged", async () => {
     const { controller, service } = makeController();
-    vi.mocked(enqueueVocalSplitJob).mockResolvedValue(undefined);
     const result = await controller.create({ userId: "9" } as never, "55", {}, undefined);
-    expect(enqueueVocalSplitJob).toHaveBeenCalledWith("400");
+    expect(service.create).toHaveBeenCalledWith("9", "55", {}, undefined);
     expect(result.code).toBe(200);
-    expect(service.markFailed).not.toHaveBeenCalled();
   });
 
-  it("does not enqueue when the service rejects the request", async () => {
+  it("passes through a service rejection", async () => {
     const { controller } = makeController({
       create: vi.fn().mockResolvedValue({ code: 400, msg: "bad", data: null }),
     });
     const result = await controller.create({ userId: "9" } as never, "55", {}, undefined);
     expect(result.code).toBe(400);
-    expect(enqueueVocalSplitJob).not.toHaveBeenCalled();
-  });
-
-  it("畸形幂等键由实际服务拒绝后不建任务、不入队", async () => {
-    const create = vi.fn();
-    const service = new VocalSplitsService(
-      { client: { generation_jobs: { create } } } as never,
-      { findOwnedById: vi.fn().mockResolvedValue({ id: 55n }) } as never,
-      { findOwnedSource: vi.fn().mockResolvedValue({ id: 88n, type: "video" }) } as never,
-    );
-    const controller = new VocalSplitsController(service);
-    const result = await Reflect.apply(controller.create, controller, [
-      { userId: "9" }, "55", { source_asset_id: "88" }, null,
-    ]);
-    expect(result).toMatchObject({
-      code: 400,
-      data: { reason: RECOVERY_REASONS.invalidPayload },
-    });
-    expect(create).not.toHaveBeenCalled();
-    expect(enqueueVocalSplitJob).not.toHaveBeenCalled();
-  });
-
-  it("marks the job failed (enqueue_failed) when the queue rejects the message", async () => {
-    const { controller, service } = makeController();
-    vi.mocked(enqueueVocalSplitJob).mockRejectedValue(new Error("rocketmq down"));
-    const result = await controller.create({ userId: "9" } as never, "55", {}, undefined);
-    expect(result.code).toBe(200);
-    expect(service.markFailed).toHaveBeenCalledWith(
-      "400",
-      ERROR_ENQUEUE_FAILED,
-      "任务入队失败",
-      { raw: "RocketMQ 入队失败" },
-    );
   });
 });
