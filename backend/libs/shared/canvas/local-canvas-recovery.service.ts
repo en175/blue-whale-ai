@@ -146,12 +146,12 @@ export class LocalCanvasRecoveryService {
       const fixedId = ref.resolvedAssetId ?? (ref.assetId === undefined ? proven.get(ref.url!) : undefined);
       const first = fixedId === undefined && ref.assetId === undefined && targetProjectId === undefined;
       const asset = ref.assetId ? byId.get(ref.assetId) ?? byMaterial.get(ref.assetId) : first ? byUrl.get(ref.url!) : fixedId === undefined ? undefined : byId.get(fixedId);
-      if (!asset || (ref.resolvedAssetId && ref.resolvedAssetId !== asset.id.toString()) || (ref.url && ref.url !== asset.url) || (ref.mediaType && ref.mediaType !== asset.type)) {
+      if (!asset || (ref.resolvedAssetId && ref.resolvedAssetId !== asset.id.toString()) || (ref.url && ref.url !== asset.url) || (targetProjectId !== undefined && !ref.mediaType) || (ref.mediaType && ref.mediaType !== asset.type)) {
         missing.push({ path: ref.path, ...(ref.assetId ? { assetId: ref.assetId } : {}) });
       } else {
         if (ref.assetId && byMaterial.has(ref.assetId)) ref.resolvedAssetId = asset.id.toString();
         if (first) ref.resolvedAssetId = asset.id.toString();
-        if (targetProjectId === undefined) ref.mediaType ??= asset.type;
+        if (targetProjectId === undefined) ref.mediaType ||= asset.type;
         materials.set(asset.id.toString(), { assetId: asset.id.toString(), mediaType: asset.type as PromptMaterial["mediaType"] });
       }
     }

@@ -691,17 +691,98 @@ describe.skipIf(!process.env.IKNCL3_DATABASE_URL)("本地恢复画布公开 API"
     expect(await prisma.client.generation_jobs.count()).toBe(jobs);
     expect(await prisma.client.cost_reservations.count()).toBe(reservations);
   });
-  it.each(["src", "voice.src", "assetId"])("未声明类型的 %s 引用在原资产类型变化后明确缺项", async field => {
-    const url = `https://assets.invalid/original-type-${sourceId}-${field}`;
+  it.each(["src", "voice.src", "assetId"].flatMap(field =>
+    ["invalid", "audio"].map(mediaType => ({ field, mediaType })),
+  ).concat({ field: "srcH264", mediaType: "" }))("$field 拒绝非法或不匹配类型 $mediaType，空值不放宽备用视频", async ({ field, mediaType }) => {
+    const asset = await prisma.client.assets.create({ data: { user_id: 983003n, project_id: BigInt(sourceId), type: "image", url: `https://assets.invalid/type-rejection-${crypto.randomUUID()}` } });
+    const reference = { src: asset.url, mediaType, ...(field === "assetId" ? { assetId: asset.id.toString() } : {}) };
+    const data = field === "srcH264" ? { src: asset.url, mediaType: "", srcH264: asset.url } : field === "voice.src" ? { voice: reference } : reference;
+    const id = crypto.randomUUID();
+    const before = [await prisma.client.project.count(), await prisma.client.command_idempotency.count(), await prisma.client.generation_jobs.count(), await prisma.client.cost_reservations.count()];
+    const response = await request("PUT", id, { ...payload, nodes: JSON.stringify([{ id: "invalid-type", type: "mediaNode", data }]) });
+    expect(response.status).toBe(422);
+    expect((await response.json()).data).toEqual({ reason: "local_recovery_assets_unavailable", missing: [{ path: field === "srcH264" ? "nodes.0.data.srcH264" : field === "voice.src" ? "nodes.0.data.voice" : "nodes.0.data", ...(field === "assetId" ? { assetId: asset.id.toString() } : {}) }] });
+    expect((await request("GET", id)).status).toBe(404);
+    expect([await prisma.client.project.count(), await prisma.client.command_idempotency.count(), await prisma.client.generation_jobs.count(), await prisma.client.cost_reservations.count()]).toEqual(before);
+  });
+  it.each(["src", "voice.src", "assetId"].flatMap(field =>
+    [false, true].flatMap(interrupted => ["", undefined].map(mediaType => ({ field, interrupted, mediaType }))),
+  ))("旧回执 $field 缺少首次类型时拒绝补认，保存中断=$interrupted，类型=$mediaType", async ({ field, interrupted, mediaType }) => {
+    const url = `https://assets.invalid/legacy-type-${crypto.randomUUID()}`;
     const type = field === "voice.src" ? "audio" : "image";
     const asset = await prisma.client.assets.create({ data: { user_id: 983003n, project_id: BigInt(sourceId), type, url } });
-    const data = field === "voice.src" ? { voice: { name: "音色", src: url } } : field === "assetId" ? { assetId: asset.id.toString() } : { src: url };
+    const reference = { src: url, mediaType: "", ...(field === "assetId" ? { assetId: asset.id.toString() } : {}) };
+    const data = field === "voice.src" ? { voice: reference } : reference;
+    const body = { ...payload, nodes: JSON.stringify([{ id: "legacy-type", type: "mediaNode", data }]) };
+    const id = crypto.randomUUID();
+    if (interrupted) await fixtureSql.query("CREATE TRIGGER ikp2lc_legacy_fail_canvas BEFORE INSERT ON canvas FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'isolated save interruption'");
+    try {
+      expect((await request("PUT", id, body)).status).toBe(interrupted ? 500 : 200);
+    } finally {
+      if (interrupted) await fixtureSql.query("DROP TRIGGER ikp2lc_legacy_fail_canvas");
+    }
+    const key = { project_id_operation_idempotency_key: { project_id: BigInt(sourceId), operation: "LOCAL_CANVAS_RECOVERY_V1", idempotency_key: id } };
+    const row = await prisma.client.command_idempotency.findUniqueOrThrow({ where: key });
+    const receipt = row.result_payload as { assets: Array<Record<string, unknown>> } & Record<string, unknown>;
+    const legacy = { ...receipt, assets: receipt.assets.map(ref => {
+      const copy = { ...ref };
+      if (mediaType === undefined) delete copy.mediaType;
+      else copy.mediaType = mediaType;
+      return copy;
+    }) };
+    await prisma.client.command_idempotency.update({ where: key, data: { result_payload: legacy } });
+    const legacyRow = await prisma.client.command_idempotency.findUniqueOrThrow({ where: key });
+    const sourceBefore = await (await fetch(`${base}/api/canvases?projectId=${sourceId}`)).json();
+    const targetBefore = await (await fetch(`${base}/api/canvases?projectId=${row.resource_id}`)).json();
+    const before = [await prisma.client.project.count(), await prisma.client.command_idempotency.count(), await prisma.client.generation_jobs.count(), await prisma.client.cost_reservations.count()];
+    await prisma.client.assets.update({ where: { id: asset.id }, data: { type: "video" } });
+    await app.close();
+    await start();
+    for (const restored of [false, true]) {
+      if (restored) await prisma.client.assets.update({ where: { id: asset.id }, data: { type } });
+      for (const response of [await request("GET", id), await request("PUT", id, body)]) {
+        expect.soft(response.status).toBe(422);
+        expect.soft((await response.json()).data).toEqual({ reason: "local_recovery_assets_unavailable", missing: [{ path: field === "voice.src" ? "nodes.0.data.voice" : "nodes.0.data", ...(field === "assetId" ? { assetId: asset.id.toString() } : {}) }] });
+      }
+    }
+    expect(await prisma.client.command_idempotency.findUniqueOrThrow({ where: key })).toEqual(legacyRow);
+    expect(await (await fetch(`${base}/api/canvases?projectId=${sourceId}`)).json()).toEqual(sourceBefore);
+    expect(await (await fetch(`${base}/api/canvases?projectId=${row.resource_id}`)).json()).toEqual(targetBefore);
+    expect([await prisma.client.project.count(), await prisma.client.command_idempotency.count(), await prisma.client.generation_jobs.count(), await prisma.client.cost_reservations.count()]).toEqual(before);
+  });
+  it.each(["src", "voice.src", "assetId"].flatMap(field =>
+    [false, true].flatMap(interrupted => ["empty", "omitted", "explicit"].map(declaration => ({ field, interrupted, declaration }))),
+  ))("$field 首次固定实际类型，声明=$declaration，保存中断=$interrupted", async ({ field, interrupted, declaration }) => {
+    const url = `https://assets.invalid/original-type-${crypto.randomUUID()}`;
+    const type = field === "voice.src" ? "audio" : field === "assetId" ? "video" : "image";
+    const asset = await prisma.client.assets.create({ data: { user_id: 983003n, project_id: BigInt(sourceId), type, url } });
+    const reference = {
+      ...(field === "assetId" ? { assetId: asset.id.toString() } : { src: url }),
+      ...(declaration === "omitted" ? {} : { mediaType: declaration === "empty" ? "" : type }),
+    };
+    const data = field === "voice.src" ? { voice: reference } : reference;
     const nodes = [{ id: "original-type", type: field === "voice.src" ? "assetNode" : "mediaNode", data }];
     const body = { ...payload, nodes: JSON.stringify(nodes) };
+    const originalBody = JSON.stringify(body);
     const id = crypto.randomUUID();
-    const created = await request("PUT", id, body);
-    expect(created.status).toBe(200);
-    const complete = await created.json();
+    const projectsBefore = await prisma.client.project.count();
+    const receiptsBefore = await prisma.client.command_idempotency.count();
+    const jobs = await prisma.client.generation_jobs.count();
+    const reservations = await prisma.client.cost_reservations.count();
+    const sourceBefore = await (await fetch(`${base}/api/canvases?projectId=${sourceId}`)).json();
+    if (interrupted) await fixtureSql.query("CREATE TRIGGER ikp2lc_fail_canvas BEFORE INSERT ON canvas FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'isolated save interruption'");
+    try {
+      expect((await request("PUT", id, body)).status).toBe(interrupted ? 500 : 200);
+    } finally {
+      if (interrupted) await fixtureSql.query("DROP TRIGGER ikp2lc_fail_canvas");
+    }
+    const previous = await (await request("GET", id)).json();
+    expect(previous.data.stage).toBe(interrupted ? "created" : "complete");
+    const targetId = previous.data.targetProjectId;
+    const key = { project_id_operation_idempotency_key: { project_id: BigInt(sourceId), operation: "LOCAL_CANVAS_RECOVERY_V1", idempotency_key: id } };
+    const receipt = await prisma.client.command_idempotency.findUniqueOrThrow({ where: key });
+    expect(receipt.result_payload).toMatchObject({ assets: [{ mediaType: type, ...(field === "assetId" ? { assetId: asset.id.toString() } : { resolvedAssetId: asset.id.toString() }) }] });
+    const targetBefore = await (await fetch(`${base}/api/canvases?projectId=${targetId}`)).json();
     await prisma.client.assets.update({ where: { id: asset.id }, data: { type: type === "image" ? "video" : "image" } });
     await app.close();
     await start();
@@ -710,13 +791,31 @@ describe.skipIf(!process.env.IKNCL3_DATABASE_URL)("本地恢复画布公开 API"
         expect(response.status).toBe(422);
         expect((await response.json()).data).toEqual({ reason: "local_recovery_assets_unavailable", missing: [{ path: field === "voice.src" ? "nodes.0.data.voice" : "nodes.0.data", ...(field === "assetId" ? { assetId: asset.id.toString() } : {}) }] });
       }
+      expect(await prisma.client.command_idempotency.findUniqueOrThrow({ where: key })).toEqual(receipt);
+      expect(await (await fetch(`${base}/api/canvases?projectId=${targetId}`)).json()).toEqual(targetBefore);
     } finally {
       await prisma.client.assets.update({ where: { id: asset.id }, data: { type } });
     }
-    expect((await (await request("GET", id)).json()).data).toEqual(complete.data);
-    expect((await (await request("PUT", id, body)).json()).data).toEqual(complete.data);
-    const saved = await (await fetch(`${base}/api/canvases?projectId=${complete.data.targetProjectId}`)).json();
+    expect((await (await request("GET", id)).json()).data).toEqual(previous.data);
+    const resumed = await request("PUT", id, body);
+    expect(resumed.status).toBe(200);
+    expect((await resumed.json()).data).toMatchObject({ targetProjectId: targetId, stage: "complete", version: 0 });
+    expect((await request("PUT", id, { ...body, name: "更换请求" })).status).toBe(409);
+    const saved = await (await fetch(`${base}/api/canvases?projectId=${targetId}`)).json();
     expect(JSON.parse(saved.data.nodes)).toEqual(nodes);
-    expect(saved.data.version).toBe(complete.data.version);
+    const edited = await fetch(`${base}/api/canvases/${targetId}`, { method: "PUT", headers: { "content-type": "application/json", "if-match": `"${saved.data.version}"` }, body: JSON.stringify({ nodes: JSON.stringify([...nodes, { id: "new-edit", type: "textNode", data: { text: "目标新编辑" } }]) }) });
+    expect(edited.status).toBe(200);
+    const editedTarget = await (await fetch(`${base}/api/canvases?projectId=${targetId}`)).json();
+    expect((await request("PUT", id, body)).status).toBe(200);
+    expect(await (await fetch(`${base}/api/canvases?projectId=${targetId}`)).json()).toEqual(editedTarget);
+    expect(JSON.stringify(body)).toBe(originalBody);
+    expect(await (await fetch(`${base}/api/canvases?projectId=${sourceId}`)).json()).toEqual(sourceBefore);
+    const stored = await prisma.client.command_idempotency.findUniqueOrThrow({ where: key });
+    expect(stored.request_hash).toBe(receipt.request_hash);
+    expect(stored.result_payload).toMatchObject(receipt.result_payload as Record<string, unknown>);
+    expect(await prisma.client.project.count()).toBe(projectsBefore + 1);
+    expect(await prisma.client.command_idempotency.count()).toBe(receiptsBefore + 1);
+    expect(await prisma.client.generation_jobs.count()).toBe(jobs);
+    expect(await prisma.client.cost_reservations.count()).toBe(reservations);
   });
 });
