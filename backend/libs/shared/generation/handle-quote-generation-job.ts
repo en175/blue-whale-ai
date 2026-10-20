@@ -10,9 +10,10 @@ import {
 } from "@lib/shared/persistence/index.js";
 
 import type { BillingQuote } from "../billing/billing-quote.js";
+import type { AssetProbe } from "../assets/ports.js";
 import {
   resolveReferenceDurations,
-  videoAssetIdsNeedingDuration,
+  videoAssetIdsForDuration,
 } from "./resolve-reference-durations.js";
 import {
   applyEditSourceDurationBasis,
@@ -30,7 +31,9 @@ export interface QuoteGenerationJobDeps {
   projects: Pick<ProjectRepo, "findOwnedById">;
   models: Pick<ModelCapabilityRepo, "listEnabledByType">;
   canvas: Pick<CanvasRepo, "getByProject">;
-  assets: Pick<AssetOwnershipOps, "resolveInputAssets">;
+  assets: Pick<AssetOwnershipOps, "resolveInputAssets"> &
+    Partial<Pick<AssetOwnershipOps, "findStorageKeys" | "saveMediaInfo">>;
+  probe?: AssetProbe;
   quote: BillingQuote;
 }
 
@@ -106,10 +109,11 @@ export async function handleQuoteGenerationJob(
       const merged = textIndexRefs.value.videoReferences;
       const ruling = await resolveReferenceDurations({
         references: merged,
-        assetIdsOf: videoAssetIdsNeedingDuration,
+        assetIdsOf: videoAssetIdsForDuration,
         userId,
         projectId,
         assets: deps.assets,
+        ...(deps.probe ? { probe: deps.probe } : {}),
       });
       effectiveBody = {
         ...body,

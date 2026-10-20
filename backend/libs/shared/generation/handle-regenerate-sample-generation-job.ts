@@ -77,6 +77,7 @@ export interface RegenerateSampleQuoteDeps {
   models: Parameters<typeof handleQuoteGenerationJob>[3]["models"];
   canvas: Parameters<typeof handleQuoteGenerationJob>[3]["canvas"];
   assets: Parameters<typeof handleQuoteGenerationJob>[3]["assets"];
+  probe?: Parameters<typeof handleQuoteGenerationJob>[3]["probe"];
   sampleSource: { findFinalizeSourceJob(args: {
     projectId: string;
     userId: string;
@@ -116,6 +117,7 @@ export async function handleRegenerateSampleQuote(
     models: deps.models,
     canvas: deps.canvas,
     assets: deps.assets,
+    ...(deps.probe ? { probe: deps.probe } : {}),
     quote: deps.quote,
   });
 }

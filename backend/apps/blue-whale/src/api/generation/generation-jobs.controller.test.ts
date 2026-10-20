@@ -73,6 +73,7 @@ function makeController() {
     {} as never,
     { materialStatusRepo: {} } as never,
     {} as never,
+    { probe: null } as never,
     {} as never,
   );
 }

@@ -37,6 +37,7 @@ import {
 import { createRequestMaterialGate } from "@lib/shared/generation/material-gate-wiring.js";
 import { MaterialService } from "@lib/shared/material/material.service.js";
 import { AssetService } from "@lib/shared/assets/assets.service.js";
+import { AssetStorageService } from "@lib/shared/assets/storage.service.js";
 import { ERROR_ENQUEUE_FAILED } from "@lib/contracts";
 import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js";
 import { enqueueFailureLog } from "@lib/infra/mq/rocketmq-producer.js";
@@ -57,6 +58,7 @@ export class GenerationJobsController {
     private readonly canvas: CanvasService,
     private readonly material: MaterialService,
     private readonly assets: AssetService,
+    private readonly storage: AssetStorageService,
     private readonly identity: IdentityService,
   ) {}
 
@@ -169,6 +171,7 @@ export class GenerationJobsController {
         models: this.models,
         canvas: this.canvas,
         assets: this.command.assets,
+        ...(this.storage.probe ? { probe: this.storage.probe } : {}),
         materialGate: this.buildMaterialGate(user.userId),
         billing,
         quote: this.billingQuote(),
@@ -244,6 +247,7 @@ export class GenerationJobsController {
       models: this.models,
       canvas: this.canvas,
       assets: this.command.assets,
+      ...(this.storage.probe ? { probe: this.storage.probe } : {}),
       quote,
     });
   }
@@ -344,6 +348,7 @@ export class GenerationJobsController {
       models: this.models,
       canvas: this.canvas,
       assets: this.command.assets,
+      ...(this.storage.probe ? { probe: this.storage.probe } : {}),
       sampleSource: this.command.finalize,
       quote,
     });
@@ -377,6 +382,7 @@ export class GenerationJobsController {
           models: this.models,
           canvas: this.canvas,
           assets: this.command.assets,
+          ...(this.storage.probe ? { probe: this.storage.probe } : {}),
           materialGate: this.buildMaterialGate(user.userId),
           billing,
           quote: this.billingQuote(),

@@ -81,7 +81,7 @@ describe.skipIf(!process.env.IKDLQH_DATABASE_URL)("Text attachment ordering publ
     });
     const canvasService = new CanvasService(prisma, projects);
     Reflect.defineMetadata("design:paramtypes", [CanvasService], CanvasesController);
-    Reflect.defineMetadata("design:paramtypes", [ProjectService, GenerationCommandService, ModelCapabilityReadService, CanvasService, MaterialService, AssetService, IdentityService], GenerationJobsController);
+    Reflect.defineMetadata("design:paramtypes", [ProjectService, GenerationCommandService, ModelCapabilityReadService, CanvasService, MaterialService, AssetService, AssetStorageService, IdentityService], GenerationJobsController);
     Reflect.defineMetadata("design:paramtypes", [ModelCapabilityReadService], GenerationModelsController);
     Reflect.defineMetadata("design:paramtypes", [ProjectService, CanvasService, SnapshotService, PrismaService], ProjectsController);
     class HarnessModule {}
@@ -94,6 +94,7 @@ describe.skipIf(!process.env.IKDLQH_DATABASE_URL)("Text attachment ordering publ
       { provide: ModelCapabilityReadService, useValue: new ModelCapabilityReadService(prisma) },
       { provide: MaterialService, useValue: new MaterialService(prisma, new SystemSettingsService(prisma)) },
       { provide: AssetService, useValue: new AssetService(prisma, new AssetStorageService()) },
+      { provide: AssetStorageService, useValue: new AssetStorageService() },
       { provide: IdentityService, useValue: new IdentityService(prisma) },
     ] })(HarnessModule);
     app = await NestFactory.create(HarnessModule, { logger: false, bodyParser: false });

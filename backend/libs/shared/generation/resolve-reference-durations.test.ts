@@ -4,13 +4,23 @@ import type { ReferenceItemInput } from "./reference-item-input.js";
 import {
   localAssetReferenceIds,
   resolveReferenceDurations,
-  videoAssetIdsNeedingDuration,
+  videoAssetIdsForDuration,
 } from "./resolve-reference-durations.js";
 
 function fakeAssets(
   byId: Record<string, { type?: string; duration?: number | null }>,
-): { assets: { resolveInputAssets: (ids: string[]) => Promise<unknown[]> }; calls: string[][] } {
+  probeTargets: Record<string, string> = {},
+): {
+  assets: {
+    resolveInputAssets: (ids: string[]) => Promise<unknown[]>;
+    findStorageKeys: (ids: string[]) => Promise<Map<string, string>>;
+    saveMediaInfo: (id: string, info: unknown) => Promise<boolean>;
+  };
+  calls: string[][];
+  saved: Array<{ id: string; info: unknown }>;
+} {
   const calls: string[][] = [];
+  const saved: Array<{ id: string; info: unknown }> = [];
   const resolveInputAssets = vi.fn(async (ids: string[]) => {
     calls.push([...ids]);
     return ids.flatMap((id) =>
@@ -31,11 +41,26 @@ function fakeAssets(
         : [],
     );
   });
-  return { assets: { resolveInputAssets }, calls };
+  const findStorageKeys = vi.fn(async (ids: string[]) =>
+    new Map(
+      ids.flatMap((id) =>
+        id in probeTargets ? [[id, probeTargets[id]!] as const] : [],
+      ),
+    ),
+  );
+  const saveMediaInfo = vi.fn(async (id: string, info: unknown) => {
+    saved.push({ id, info });
+    return true;
+  });
+  return {
+    assets: { resolveInputAssets, findStorageKeys, saveMediaInfo },
+    calls,
+    saved,
+  };
 }
 
-describe("videoAssetIdsNeedingDuration（报价面筛选）", () => {
-  it("只取缺时长的本地视频引用，去重", () => {
+describe("videoAssetIdsForDuration（报价面筛选）", () => {
+  it("取全部本地视频引用（客户端时长不豁免权威值），去重", () => {
     const refs: ReferenceItemInput[] = [
       { role: "reference", type: "video", asset_id: "7" },
       { role: "reference", type: "video", asset_id: "7" },
@@ -43,7 +68,7 @@ describe("videoAssetIdsNeedingDuration（报价面筛选）", () => {
       { role: "reference", type: "image", asset_id: "9" },
       { role: "reference", type: "video", material_id: "Asset-lib" },
     ];
-    expect(videoAssetIdsNeedingDuration(refs)).toEqual(["7"]);
+    expect(videoAssetIdsForDuration(refs)).toEqual(["7", "8"]);
   });
 });
 
@@ -67,7 +92,7 @@ describe("resolveReferenceDurations（共享管线）", () => {
     { role: "reference", type: "image", asset_id: "9" },
   ];
 
-  it("数齐 → resolved：缺时长视频条目按 assets.duration 回填，其余原样", async () => {
+  it("数齐 → resolved：视频条目一律按资产时长回填，客户端值不优先", async () => {
     const { assets } = fakeAssets({ "7": { duration: 13.5 }, "8": { duration: 99 }, "9": { type: "image" } });
     const result = await resolveReferenceDurations({
       references: refs,
@@ -80,7 +105,7 @@ describe("resolveReferenceDurations（共享管线）", () => {
       kind: "resolved",
       references: [
         { role: "reference", type: "video", asset_id: "7", duration: 13.5 },
-        { role: "reference", type: "video", asset_id: "8", duration: 3 },
+        { role: "reference", type: "video", asset_id: "8", duration: 99 },
         { role: "reference", type: "image", asset_id: "9" },
       ],
       assetsById: expect.any(Map),
@@ -103,7 +128,7 @@ describe("resolveReferenceDurations（共享管线）", () => {
     const { assets, calls } = fakeAssets({});
     const result = await resolveReferenceDurations({
       references: [{ role: "reference", type: "video", material_id: "Asset-lib" }],
-      assetIdsOf: videoAssetIdsNeedingDuration,
+      assetIdsOf: videoAssetIdsForDuration,
       userId: "42",
       projectId: "1",
       assets,
@@ -112,7 +137,7 @@ describe("resolveReferenceDurations（共享管线）", () => {
     expect(calls).toEqual([]);
   });
 
-  it("duration 为 null/非正数 → 不回填（宁可量不到也不按 0 估）", async () => {
+  it("duration 为 null/非正数且无探测能力 → probe_failed（不按 0 估，也不放行）", async () => {
     const refs2: ReferenceItemInput[] = [
       { role: "reference", type: "video", asset_id: "7" },
       { role: "reference", type: "video", asset_id: "8" },
@@ -120,14 +145,98 @@ describe("resolveReferenceDurations（共享管线）", () => {
     const { assets } = fakeAssets({ "7": { duration: null }, "8": { duration: 0 } });
     const result = await resolveReferenceDurations({
       references: refs2,
-      assetIdsOf: videoAssetIdsNeedingDuration,
+      assetIdsOf: videoAssetIdsForDuration,
       userId: "42",
       projectId: "1",
       assets,
     });
+    expect(result).toEqual({ kind: "probe_failed" });
+  });
+
+  it("缺时长 → 探测一次、回填资产行，并用探测结果计费", async () => {
+    const refs2: ReferenceItemInput[] = [
+      { role: "reference", type: "video", asset_id: "7" },
+    ];
+    const { assets, saved } = fakeAssets({ "7": { duration: null } }, {
+      "7": "uploads/42/video/a.mp4",
+    });
+    const probe = vi.fn().mockResolvedValue({
+      sizeBytes: 100,
+      durationMs: 6500,
+      width: 1080,
+      height: 1920,
+      codec: "h264",
+      container: "mp4",
+      fps: 30,
+    });
+    const result = await resolveReferenceDurations({
+      references: refs2,
+      assetIdsOf: videoAssetIdsForDuration,
+      userId: "42",
+      projectId: "1",
+      assets,
+      probe,
+    });
+    expect(probe).toHaveBeenCalledWith("uploads/42/video/a.mp4");
+    expect(saved).toEqual([
+      {
+        id: "7",
+        info: expect.objectContaining({ durationMs: 6500, width: 1080 }),
+      },
+    ]);
     expect(result).toMatchObject({
       kind: "resolved",
-      references: refs2,
+      references: [{ role: "reference", type: "video", asset_id: "7", duration: 6.5 }],
     });
+  });
+
+  it("客户端给了时长但库里没有 → 仍探测并回填，客户端值被覆盖", async () => {
+    const refs2: ReferenceItemInput[] = [
+      { role: "reference", type: "video", asset_id: "7", duration: 1 },
+    ];
+    const { assets, saved } = fakeAssets({ "7": { duration: null } }, {
+      "7": "uploads/42/video/a.mp4",
+    });
+    const probe = vi.fn().mockResolvedValue({
+      sizeBytes: 100,
+      durationMs: 60000,
+      width: null,
+      height: null,
+      codec: null,
+      container: null,
+      fps: null,
+    });
+    const result = await resolveReferenceDurations({
+      references: refs2,
+      assetIdsOf: videoAssetIdsForDuration,
+      userId: "42",
+      projectId: "1",
+      assets,
+      probe,
+    });
+    expect(probe).toHaveBeenCalledTimes(1);
+    expect(saved).toHaveLength(1);
+    expect(result).toMatchObject({
+      kind: "resolved",
+      references: [{ role: "reference", type: "video", asset_id: "7", duration: 60 }],
+    });
+  });
+
+  it("探测失败 → probe_failed，调用方拒绝提交", async () => {
+    const refs2: ReferenceItemInput[] = [
+      { role: "reference", type: "video", asset_id: "7" },
+    ];
+    const { assets } = fakeAssets({ "7": { duration: null } }, {
+      "7": "uploads/42/video/a.mp4",
+    });
+    const result = await resolveReferenceDurations({
+      references: refs2,
+      assetIdsOf: videoAssetIdsForDuration,
+      userId: "42",
+      projectId: "1",
+      assets,
+      probe: vi.fn().mockRejectedValue(new Error("tos down")),
+    });
+    expect(result).toEqual({ kind: "probe_failed" });
   });
 });
