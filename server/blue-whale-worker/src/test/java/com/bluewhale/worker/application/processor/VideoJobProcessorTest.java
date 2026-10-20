@@ -1573,16 +1573,15 @@ class VideoJobProcessorTest {
         }
 
         @Test
-        @DisplayName("非 edit/prolong 任务传 duration=-1 → invalid_input（收窄后不再通用放行）")
-        void autoDurationRejectedForNonEdit() {
+        @DisplayName("自动时长是通用能力：非 edit/extend 任务同样接受 duration=-1")
+        void autoDurationAcceptedForAnyMode() {
             Map<String, Object> input = baseInput();
             input.put("duration", -1);
-            input.put("references", List.of(Map.of("role", "reference", "type", "image")));
+            input.put("references", List.of(Map.of("role", "reference", "type", "image",
+                    "material_id", "Asset-image-1")));
             ClaimedVideoJobDto claim = videoClaim("301", false, null, 0, 0, null, input);
 
-            VideoInputError error = org.junit.jupiter.api.Assertions.assertThrows(
-                    VideoInputError.class, () -> processor.buildSubmitRequest(claim));
-            assertThat(error.getCode()).isEqualTo(GenerationError.ERROR_INVALID_INPUT);
+            assertThat(processor.buildSubmitRequest(claim).duration()).isEqualTo(-1);
         }
 
         @Test
@@ -1616,17 +1615,16 @@ class VideoJobProcessorTest {
         }
 
         @Test
-        @DisplayName("IKK1T9：冻结模式为 text2video 时 duration=-1 仍拒（不因推断漏网）")
-        void autoDurationRejectedForFrozenTextToVideoMode() {
+        @DisplayName("IKK1T9：冻结模式为 text2video 时 duration=-1 同样放行")
+        void autoDurationAcceptedForFrozenTextToVideoMode() {
             Map<String, Object> input = baseInput();
             input.put("duration", -1);
             input.put("video_mode", "text2video");
-            input.put("references", List.of(Map.of("role", "reference", "type", "video")));
+            input.put("references", List.of(Map.of("role", "reference", "type", "video",
+                    "material_id", "Asset-video-1")));
             ClaimedVideoJobDto claim = videoClaim("303", false, null, 0, 0, null, input);
 
-            VideoInputError error = org.junit.jupiter.api.Assertions.assertThrows(
-                    VideoInputError.class, () -> processor.buildSubmitRequest(claim));
-            assertThat(error.getCode()).isEqualTo(GenerationError.ERROR_INVALID_INPUT);
+            assertThat(processor.buildSubmitRequest(claim).duration()).isEqualTo(-1);
         }
 
         @Test

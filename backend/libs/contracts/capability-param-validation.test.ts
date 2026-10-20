@@ -310,6 +310,19 @@ describe("checkGenerationParamLimit 任务类型约束（IKFPYX）", () => {
     })?.field).toBe("duration");
   });
 
+  it("全能参考同样支持自动与指定秒数", () => {
+    const capability = {
+      ...taskCapability,
+      task_types: { omni: { allow_auto_duration: true } },
+    };
+    expect(checkGenerationParamLimit(capability, {
+      size: "1080p", aspect_ratio: "adaptive", duration: -1, mode: "omni",
+    })).toBeNull();
+    expect(checkGenerationParamLimit(capability, {
+      size: "1080p", aspect_ratio: "adaptive", duration: 10, mode: "omni",
+    })).toBeNull();
+  });
+
   it.each([undefined, null, false])("未开放自动时长的配置 %s 不接受 -1", (allow_auto_duration) => {
     expect(checkGenerationParamLimit({ ...taskCapability,
       task_types: { extend: { allow_auto_duration } },

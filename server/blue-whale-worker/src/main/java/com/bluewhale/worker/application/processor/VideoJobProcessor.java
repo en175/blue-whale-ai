@@ -495,9 +495,7 @@ public class VideoJobProcessor implements JobProcessor {
         boolean omniTaskTypeAllowed =
                 input.get("omni_reference_task_type_allowed") instanceof Boolean b && b;
 
-        boolean autoDurationAllowed = "edit".equals(videoTaskType) || "extend".equals(videoTaskType);
-        boolean durationOk = Double.isFinite(duration)
-                && (duration > 0 || (duration == -1 && autoDurationAllowed));
+        boolean durationOk = Double.isFinite(duration) && (duration > 0 || duration == -1);
         if (prompt.isEmpty() || model.isEmpty() || !durationOk) {
             log.warn("[IKE7JP] 前置校验遗漏：job {} 视频参数无效仍进入 worker（taskType={} duration={}）",
                     claim.id(), videoTaskType, duration);

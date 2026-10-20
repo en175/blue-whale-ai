@@ -2,12 +2,14 @@ import { Plus, X } from 'lucide-react';
 import type { KeyValueRow } from '../../utils/billing-catalog/catalogDraft';
 import {
   GPT_PROVIDER_SIZES,
+  TASK_TYPE_DURATION_OPTIONS,
   TASK_TYPE_KEYS,
   channelOf,
   type ChannelId,
   type GptMatrix,
   type RatioForm,
   type SizeForm,
+  type TaskTypeDurationStrategy,
 } from './model-form';
 import {
   FEATURE_BOOL_LABELS,
@@ -18,10 +20,10 @@ import {
 import {
   featureApplies,
 } from './feature-fields';
-import { Badge, Button, Checkbox, Chip, Field, Input, Select, Table } from '../../ui';
+import { Badge, Button, Checkbox, Chip, Field, Input, Segmented, Select, Table } from '../../ui';
 import DimensionMatrix from './DimensionMatrix';
 import { Hint } from '../../ui';
-import { CHIP_LIST, CHECK_STACK, FULL, GRID2, GRID3, INLINE_ROW, LABEL, SECTION, SIZE_ROW, TASK_ROW } from './formLayout';
+import { CHIP_LIST, CHECK_STACK, FULL, GRID2, GRID3, INLINE_ROW, LABEL, SECTION, SIZE_ROW } from './formLayout';
 
 interface SizeMaterialTabProps {
   type: ModelType;
@@ -84,10 +86,8 @@ interface SizeMaterialTabProps {
     setDraft: (value: Record<string, string>) => void;
     add: (taskType: string) => void;
     remove: (taskType: string, ratio: string) => void;
-    autoDuration: Record<string, boolean>;
-    toggleAutoDuration: (taskType: string) => void;
-    followDuration: Record<string, boolean>;
-    toggleFollowDuration: (taskType: string) => void;
+    duration: Record<string, TaskTypeDurationStrategy>;
+    setDuration: (taskType: string, strategy: TaskTypeDurationStrategy) => void;
   };
 }
 
@@ -463,51 +463,61 @@ export default function SizeMaterialTab({
       {}
       {type === 'video' && (
         <>
-          <h3 style={SECTION}>视频模式 task_types <Hint>勾选 = 该模式对模型开放；未勾选的模式不出现。比例留空 = 该模式沿用基础「比例选项」。勾「仅自动时长」时用户不可选秒数；勾「允许自动或指定秒数」时可选自动或基础范围内秒数。编辑自动时长跟随原视频，延长自动时长由模型选择。</Hint></h3>
-          {TASK_TYPE_KEYS.map((taskType) => (
-            <div style={TASK_ROW} key={taskType}>
-              <Checkbox
-                checked={!!taskTypes.enabled[taskType]}
-                onChange={() => taskTypes.toggle(taskType)}
-                label={taskType}
-              />
-              <Checkbox
-                checked={!!taskTypes.followDuration[taskType]}
-                disabled={!taskTypes.enabled[taskType]}
-                onChange={() => taskTypes.toggleFollowDuration(taskType)}
-                label="仅自动时长"
-              />
-              {(taskType === 'edit' || taskType === 'extend') && (
-                <Checkbox
-                  checked={!taskTypes.followDuration[taskType] && !!taskTypes.autoDuration[taskType]}
-                  disabled={!taskTypes.enabled[taskType] || !!taskTypes.followDuration[taskType]}
-                  onChange={() => taskTypes.toggleAutoDuration(taskType)}
-                  label="允许自动或指定秒数"
-                />
-              )}
-              <div style={CHIP_LIST}>
-                {(taskTypes.ratios[taskType] ?? []).map((ratio) => (
-                  <Chip key={ratio} onClick={() => taskTypes.remove(taskType, ratio)}>
-                    {ratio} ×
-                  </Chip>
-                ))}
-              </div>
-              <Input
-                size="sm"
-                placeholder="如 16:9，回车添加"
-                value={taskTypes.draft[taskType] ?? ''}
-                onChange={(e) => taskTypes.setDraft({ ...taskTypes.draft, [taskType]: e.target.value })}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault();
-                    taskTypes.add(taskType);
-                  }
-                }}
-                style={FULL}
-              />
-              <Button onClick={() => taskTypes.add(taskType)}>添加</Button>
-            </div>
-          ))}
+          <h3 style={SECTION}>视频模式 task_types <Hint>勾选 = 该模式对模型开放；未勾选的模式不出现。比例留空 = 该模式沿用基础「比例选项」。时长策略逐模式配置：指定秒数 = 只能选基础范围；仅自动 = 用户不可选秒数；自动或指定 = 用户可二选一。</Hint></h3>
+          <Table>
+            <thead>
+              <tr>
+                <th style={{ width: 168 }}>模式</th>
+                <th style={{ width: 190 }}>时长策略</th>
+                <th>比例选项</th>
+              </tr>
+            </thead>
+            <tbody>
+              {TASK_TYPE_KEYS.map((taskType) => (
+                <tr key={taskType}>
+                  <td>
+                    <Checkbox
+                      checked={!!taskTypes.enabled[taskType]}
+                      onChange={() => taskTypes.toggle(taskType)}
+                      label={taskType}
+                    />
+                  </td>
+                  <td>
+                    <Segmented
+                      value={taskTypes.duration[taskType] ?? 'specified'}
+                      options={TASK_TYPE_DURATION_OPTIONS}
+                      onChange={(value) => taskTypes.setDuration(taskType, value)}
+                      disabled={!taskTypes.enabled[taskType]}
+                      aria-label={`${taskType} 时长策略`}
+                    />
+                  </td>
+                  <td>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
+                      {(taskTypes.ratios[taskType] ?? []).map((ratio) => (
+                        <Chip key={ratio} onClick={() => taskTypes.remove(taskType, ratio)}>
+                          {ratio} ×
+                        </Chip>
+                      ))}
+                      <Input
+                        size="sm"
+                        placeholder="如 16:9，回车添加"
+                        value={taskTypes.draft[taskType] ?? ''}
+                        onChange={(e) => taskTypes.setDraft({ ...taskTypes.draft, [taskType]: e.target.value })}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            taskTypes.add(taskType);
+                          }
+                        }}
+                        style={{ flex: '1 1 150px', minWidth: 0 }}
+                      />
+                      <Button size="sm" onClick={() => taskTypes.add(taskType)}>添加</Button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
         </>
       )}
     </>

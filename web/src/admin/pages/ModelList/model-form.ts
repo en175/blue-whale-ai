@@ -57,6 +57,14 @@ export const KNOWN_FEATURE_KEYS = [
 export const TASK_TYPE_KEYS = ['text2video', 'omni', 'image_reference', 'first_frame', 'first_last_frame', 'edit', 'extend'] as const;
 export type TaskTypeKey = (typeof TASK_TYPE_KEYS)[number];
 
+export type TaskTypeDurationStrategy = 'follow' | 'auto-or-specified' | 'specified';
+
+export const TASK_TYPE_DURATION_OPTIONS: { value: TaskTypeDurationStrategy; label: string }[] = [
+  { value: 'specified', label: '指定秒数' },
+  { value: 'follow', label: '仅自动' },
+  { value: 'auto-or-specified', label: '自动或指定' },
+];
+
 export const DEFAULT_PROVIDER_ID = 'new-api';
 
 
@@ -735,31 +743,6 @@ export function pickTaskTypeRatios(features: Record<string, unknown> | undefined
   return out;
 }
 
-export function pickTaskTypeFollowDuration(features: Record<string, unknown> | undefined): Record<string, boolean> {
-  const raw = readFeature(features, 'task_types');
-  const map = raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
-  const out: Record<string, boolean> = {};
-  for (const taskType of TASK_TYPE_KEYS) {
-    const entry = map[taskType];
-    const durations =
-      entry && typeof entry === 'object' && !Array.isArray(entry)
-        ? (entry as Record<string, unknown>).allowed_durations
-        : undefined;
-    out[taskType] = Array.isArray(durations) && durations.length === 1 && durations[0] === -1;
-  }
-  return out;
-}
-
-export function pickTaskTypeAutoDuration(features: Record<string, unknown> | undefined): Record<string, boolean> {
-  const raw = readFeature(features, 'task_types');
-  const map = raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
-  return Object.fromEntries(TASK_TYPE_KEYS.map((key) => {
-    const entry = map[key];
-    return [key, !!entry && typeof entry === 'object' && !Array.isArray(entry)
-      && (entry as Record<string, unknown>).allow_auto_duration === true];
-  }));
-}
-
 export function pickTaskTypeEnabled(features: Record<string, unknown> | undefined): Record<string, boolean> {
   const raw = readFeature(features, 'task_types');
   const map = raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
@@ -770,12 +753,33 @@ export function pickTaskTypeEnabled(features: Record<string, unknown> | undefine
   return out;
 }
 
+export function pickTaskTypeDuration(features: Record<string, unknown> | undefined): Record<string, TaskTypeDurationStrategy> {
+  const raw = readFeature(features, 'task_types');
+  const map = raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
+  const out: Record<string, TaskTypeDurationStrategy> = {};
+  for (const taskType of TASK_TYPE_KEYS) {
+    const entry = map[taskType];
+    const record =
+      entry && typeof entry === 'object' && !Array.isArray(entry)
+        ? (entry as Record<string, unknown>)
+        : null;
+    const durations = record?.allowed_durations;
+    if (Array.isArray(durations) && durations.length === 1 && durations[0] === -1) {
+      out[taskType] = 'follow';
+    } else if (record?.allow_auto_duration === true) {
+      out[taskType] = 'auto-or-specified';
+    } else {
+      out[taskType] = 'specified';
+    }
+  }
+  return out;
+}
+
 export function buildTaskTypes(
   base: Record<string, unknown>,
   ratios: Record<string, string[]>,
   enabled: Record<string, boolean>,
-  followDuration: Record<string, boolean>,
-  autoDuration: Record<string, boolean> = {},
+  duration: Record<string, TaskTypeDurationStrategy> = {},
 ): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const taskType of TASK_TYPE_KEYS) {
@@ -791,8 +795,9 @@ export function buildTaskTypes(
     delete rest.allow_auto_duration;
     const next: Record<string, unknown> = { ...rest };
     if (list.length) next.allowed_ratios = list;
-    if (followDuration[taskType]) next.allowed_durations = [-1];
-    else if (autoDuration[taskType]) next.allow_auto_duration = true;
+    const strategy = duration[taskType] ?? 'specified';
+    if (strategy === 'follow') next.allowed_durations = [-1];
+    else if (strategy === 'auto-or-specified') next.allow_auto_duration = true;
     out[taskType] = next;
   }
   return out;

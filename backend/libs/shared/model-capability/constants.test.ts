@@ -862,7 +862,7 @@ it.each([true, false, null])("IKLUVP 配置写入与目录归一保留自动选�
 });
 
 
-it.each(["text2video", "omni", "image_reference", "first_frame", "first_last_frame"])("IKLUVP 不为执行侧未支持的模式 %s 开放自动", (mode) => {
+it.each(["text2video", "omni", "image_reference", "first_frame", "first_last_frame", "edit", "extend"])("自动时长对所有模式通用：%s 可写入", (mode) => {
   expect(parseModelUpdateBody({ features: { task_types: { [mode]: { allow_auto_duration: true } } } }))
-    .toMatchObject({ ok: false });
+    .toMatchObject({ ok: true });
 });
