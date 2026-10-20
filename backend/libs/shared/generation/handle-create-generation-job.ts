@@ -22,7 +22,7 @@ import {
   type CanvasBinding,
   ERROR_INVALID_INPUT,
   ERROR_INVALID_REFERENCE,
-  ERROR_REFERENCE_ASSET_UNAVAILABLE,
+  ASSET_UNAVAILABLE_CODE,
   ERROR_INVALID_REFERENCE_TYPE,
   ERROR_MODEL_UNAVAILABLE,
   ERROR_UNSUPPORTED_INPUT,
@@ -2065,10 +2065,25 @@ export async function handleCreateGenerationJob(
     }
     if (ruling.kind === "probe_failed") {
       return fail(
-        errorCodeToNumeric(ERROR_REFERENCE_ASSET_UNAVAILABLE),
-        "参考素材时长读取失败，请稍后重试",
-        { code: ERROR_REFERENCE_ASSET_UNAVAILABLE },
+        ASSET_UNAVAILABLE_CODE,
+        "参考素材时长读取失败，请稍后重试或更换素材",
+        { code: "asset_unavailable" },
       );
+    }
+    if (type === "video" && capability?.features) {
+      const limitErr = checkReferenceLimits(
+        capability.features,
+        ruling.references
+          .filter((item) => item.role === "reference")
+          .map((item) => ({ type: item.type, duration: item.duration })),
+        "video",
+        videoMode ?? null,
+      );
+      if (limitErr) {
+        return fail(errorCodeToNumeric(ERROR_INVALID_REFERENCE), limitErr, {
+          code: ERROR_INVALID_REFERENCE,
+        });
+      }
     }
 
 

@@ -13,7 +13,7 @@ import type { BillingQuote } from "../billing/billing-quote.js";
 import type { AssetProbe } from "../assets/ports.js";
 import {
   resolveReferenceDurations,
-  videoAssetIdsNeedingDuration,
+  videoAssetIdsForDuration,
 } from "./resolve-reference-durations.js";
 import {
   applyEditSourceDurationBasis,
@@ -109,7 +109,7 @@ export async function handleQuoteGenerationJob(
       const merged = textIndexRefs.value.videoReferences;
       const ruling = await resolveReferenceDurations({
         references: merged,
-        assetIdsOf: videoAssetIdsNeedingDuration,
+        assetIdsOf: videoAssetIdsForDuration,
         userId,
         projectId,
         assets: deps.assets,

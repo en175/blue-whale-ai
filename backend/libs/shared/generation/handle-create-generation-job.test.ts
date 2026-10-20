@@ -3199,7 +3199,7 @@ describe("handleCreateGenerationJob 视频参考时长冻结（token 计费）",
     ]);
   });
 
-  it("调用方已带的时长不被资产值覆盖（素材库引用只能靠它）", async () => {
+  it("本地资产引用以资产时长为准，客户端值被覆盖", async () => {
     const { deps, createJob } = buildVideoDeps();
     vi.mocked(deps.assets.resolveInputAssets).mockImplementation(async (ids: string[]) =>
       ids.map((id) => ({
@@ -3229,7 +3229,7 @@ describe("handleCreateGenerationJob 视频参考时长冻结（token 计费）",
     expect(result.code).toBe(200);
     const cmdArg = createJob.mock.calls[0]![0] as { input: Record<string, unknown> };
     expect(cmdArg.input.references).toEqual([
-      { role: "reference", type: "video", asset_id: "12", duration: 5 },
+      { role: "reference", type: "video", asset_id: "12", duration: 99 },
     ]);
   });
 
@@ -3260,7 +3260,7 @@ describe("handleCreateGenerationJob 视频参考时长冻结（token 计费）",
       deps,
     );
 
-    expect(result.code).toBe(1006);
+    expect(result.code).toBe(100202);
     expect(createJob).not.toHaveBeenCalled();
   });
 
