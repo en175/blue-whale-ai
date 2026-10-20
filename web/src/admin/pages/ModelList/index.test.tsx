@@ -649,36 +649,50 @@ describe('ModelList 视频模式时长策略（IKLUVP）', () => {
     ...videoPriced,
     features: {
       task_types: {
-        edit: { allowed_ratios: ['adaptive'] },
-        extend: { allowed_ratios: ['adaptive'] },
+        omni: {},
+        edit: { allowed_ratios: ['adaptive'], allowed_durations: [-1] },
+        extend: { allowed_ratios: ['adaptive'], allow_auto_duration: true },
       },
     },
   };
 
-  it('时长策略按模式只读展示，不再提供手选开关', async () => {
+  function durationGroup(mode: string): HTMLElement {
+    const group = document.body.querySelector<HTMLElement>(
+      `[role="group"][aria-label="${mode} 时长策略"]`,
+    );
+    if (!group) throw new Error(`没有找到 ${mode} 时长策略`);
+    return group;
+  }
+
+  it('每个模式都提供三态时长策略', async () => {
     api.fetchAdminModels.mockResolvedValue([withModes]);
     await renderPage();
     await openRowEdit('视频');
     await openTab('尺寸与素材');
 
-    expect(document.body.textContent).toContain('自动（跟随原视频）');
-    expect(document.body.textContent).toContain('自动或指定秒数');
-    expect(document.body.textContent).toContain('指定秒数');
-    const labels = [...document.body.querySelectorAll<HTMLElement>('[role="checkbox"]')]
-      .map((el) => el.closest('label')?.textContent ?? '');
-    expect(labels.some((text) => text.includes('仅自动时长'))).toBe(false);
-    expect(labels.some((text) => text.includes('允许自动或指定秒数'))).toBe(false);
+    const groups = [...document.body.querySelectorAll<HTMLElement>(
+      '[role="group"][aria-label$="时长策略"]',
+    )];
+    expect(groups).toHaveLength(7);
+    expect(durationGroup('omni').querySelector('[aria-pressed="true"]')?.textContent).toBe('指定秒数');
+    expect(durationGroup('edit').querySelector('[aria-pressed="true"]')?.textContent).toBe('仅自动');
+    expect(durationGroup('extend').querySelector('[aria-pressed="true"]')?.textContent).toBe('自动或指定');
   });
 
-  it('保存时按模式派生：编辑写 [-1]，延长写 allow_auto_duration', async () => {
+  it('任意模式都可以改成自动或指定并保存', async () => {
     api.fetchAdminModels.mockResolvedValue([withModes]);
     await renderPage();
     await openRowEdit('视频');
     await openTab('尺寸与素材');
+
+    const auto = [...durationGroup('omni').querySelectorAll('button')]
+      .find((item) => item.textContent === '自动或指定');
+    await click(auto);
     await click(button('保存'));
 
     const payload = api.updateAdminModel.mock.calls[0]?.[1] as { features: Record<string, unknown> };
     expect(payload.features.task_types).toEqual({
+      omni: { allow_auto_duration: true },
       edit: { allowed_ratios: ['adaptive'], allowed_durations: [-1] },
       extend: { allowed_ratios: ['adaptive'], allow_auto_duration: true },
     });

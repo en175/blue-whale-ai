@@ -2,13 +2,14 @@ import { Plus, X } from 'lucide-react';
 import type { KeyValueRow } from '../../utils/billing-catalog/catalogDraft';
 import {
   GPT_PROVIDER_SIZES,
+  TASK_TYPE_DURATION_OPTIONS,
   TASK_TYPE_KEYS,
   channelOf,
-  taskTypeDurationLabel,
   type ChannelId,
   type GptMatrix,
   type RatioForm,
   type SizeForm,
+  type TaskTypeDurationStrategy,
 } from './model-form';
 import {
   FEATURE_BOOL_LABELS,
@@ -19,7 +20,7 @@ import {
 import {
   featureApplies,
 } from './feature-fields';
-import { Badge, Button, Checkbox, Chip, Field, Input, Select, Table } from '../../ui';
+import { Badge, Button, Checkbox, Chip, Field, Input, Segmented, Select, Table } from '../../ui';
 import DimensionMatrix from './DimensionMatrix';
 import { Hint } from '../../ui';
 import { CHIP_LIST, CHECK_STACK, FULL, GRID2, GRID3, INLINE_ROW, LABEL, SECTION, SIZE_ROW } from './formLayout';
@@ -85,6 +86,8 @@ interface SizeMaterialTabProps {
     setDraft: (value: Record<string, string>) => void;
     add: (taskType: string) => void;
     remove: (taskType: string, ratio: string) => void;
+    duration: Record<string, TaskTypeDurationStrategy>;
+    setDuration: (taskType: string, strategy: TaskTypeDurationStrategy) => void;
   };
 }
 
@@ -460,7 +463,7 @@ export default function SizeMaterialTab({
       {}
       {type === 'video' && (
         <>
-          <h3 style={SECTION}>视频模式 task_types <Hint>勾选 = 该模式对模型开放；未勾选的模式不出现。比例留空 = 该模式沿用基础「比例选项」。时长策略由模式决定，只读展示：编辑跟随原视频，延长可选自动或指定秒数，其余模式指定秒数。</Hint></h3>
+          <h3 style={SECTION}>视频模式 task_types <Hint>勾选 = 该模式对模型开放；未勾选的模式不出现。比例留空 = 该模式沿用基础「比例选项」。时长策略逐模式配置：指定秒数 = 只能选基础范围；仅自动 = 用户不可选秒数；自动或指定 = 用户可二选一。</Hint></h3>
           <Table>
             <thead>
               <tr>
@@ -480,7 +483,13 @@ export default function SizeMaterialTab({
                     />
                   </td>
                   <td>
-                    <span style={{ color: 'var(--admin-text-muted)' }}>{taskTypeDurationLabel(taskType)}</span>
+                    <Segmented
+                      value={taskTypes.duration[taskType] ?? 'specified'}
+                      options={TASK_TYPE_DURATION_OPTIONS}
+                      onChange={(value) => taskTypes.setDuration(taskType, value)}
+                      disabled={!taskTypes.enabled[taskType]}
+                      aria-label={`${taskType} 时长策略`}
+                    />
                   </td>
                   <td>
                     <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>

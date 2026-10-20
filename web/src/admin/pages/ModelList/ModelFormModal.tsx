@@ -65,6 +65,7 @@ import {
   parseGptMatrix,
   pickTaskTypeRatios,
   pickTaskTypeEnabled,
+  pickTaskTypeDuration,
   ratiosFromModel,
   readFeature,
   sizesFromModel,
@@ -73,6 +74,7 @@ import {
   type GptMatrix,
   type RatioForm,
   type SizeForm,
+  type TaskTypeDurationStrategy,
 } from './model-form';
 import {
   FEATURE_BOOL_LABELS,
@@ -151,6 +153,9 @@ export default function ModelFormModal({ initial, models, defaultType, onClose, 
   );
   const [taskTypesBase, setTaskTypesBase] = useState<Record<string, unknown>>(() =>
     readTaskTypesBase(initial?.features),
+  );
+  const [taskTypeDuration, setTaskTypeDuration] = useState<Record<string, TaskTypeDurationStrategy>>(() =>
+    pickTaskTypeDuration(initial?.features),
   );
 
   const [videoDimensions, setVideoDimensions] = useState<KeyValueRow[]>(() =>
@@ -266,6 +271,7 @@ export default function ModelFormModal({ initial, models, defaultType, onClose, 
     setFeatureNumbers(pickFeatureNumbers(src.features));
     setFeatureStrings(pickFeatureStrings(src.features));
     setTaskTypeRatios(pickTaskTypeRatios(src.features));
+    setTaskTypeDuration(pickTaskTypeDuration(src.features));
     setTaskTypesBase(readTaskTypesBase(src.features));
     setVideoDimensions(pickVideoDimensions(src.features));
     setExtraFeatures(pretty(dropKnownFeatures(src.features)));
@@ -385,7 +391,7 @@ export default function ModelFormModal({ initial, models, defaultType, onClose, 
     } catch {
       extra = {};
     }
-    const taskTypes = buildTaskTypes(taskTypesBase, taskTypeRatios, taskTypeEnabled);
+    const taskTypes = buildTaskTypes(taskTypesBase, taskTypeRatios, taskTypeEnabled, taskTypeDuration);
     const dimensions = buildVideoDimensions(videoDimensions);
     return {
       type,
@@ -585,6 +591,9 @@ export default function ModelFormModal({ initial, models, defaultType, onClose, 
             setDraft: setTaskRatioDraft,
             add: addTaskRatio,
             remove: removeTaskRatio,
+            duration: taskTypeDuration,
+            setDuration: (taskType: string, strategy: TaskTypeDurationStrategy) =>
+              setTaskTypeDuration((p) => ({ ...p, [taskType]: strategy })),
           }}
         />
       )}

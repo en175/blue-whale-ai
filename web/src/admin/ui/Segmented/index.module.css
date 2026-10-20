@@ -1,0 +1,45 @@
+.group {
+  display: inline-flex;
+  padding: 2px;
+  border: 1px solid var(--admin-border);
+  border-radius: var(--admin-radius-control);
+  background: var(--admin-surface-sunken);
+}
+
+.option {
+  height: 26px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--admin-text-muted);
+  font-family: inherit;
+  font-size: var(--admin-font-xs);
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color 0.12s ease,
+    color 0.12s ease;
+}
+
+.option:hover:not(:disabled) {
+  color: var(--admin-text);
+}
+
+.option:focus-visible {
+  outline: none;
+  box-shadow: var(--admin-focus);
+}
+
+.active,
+.active:hover:not(:disabled) {
+  background: var(--admin-surface);
+  color: var(--admin-accent);
+  font-weight: 500;
+  box-shadow: var(--admin-shadow-card);
+}
+
+.option:disabled {
+  color: var(--admin-text-disabled);
+  cursor: not-allowed;
+}

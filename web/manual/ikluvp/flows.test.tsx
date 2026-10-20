@@ -45,12 +45,16 @@ it.each(['C3', 'C4', 'C5', 'H1', 'A1'])('验收场景 %s 可操作并生成证�
     expect(events.find(event => event.kind === '提交结果').data.response.code).toBe(200);
   } else if (caseId === 'A1') {
     await click(button('打开模型配置')); await click(button('尺寸与素材'));
-    expect(document.body.textContent).toContain('自动（跟随原视频）');
-    expect(document.body.textContent).toContain('自动或指定秒数');
+    const omni = document.querySelector<HTMLElement>('[role="group"][aria-label="omni 时长策略"]');
+    expect(omni).not.toBeNull();
+    const auto = [...omni!.querySelectorAll<HTMLButtonElement>('button')]
+      .find(item => item.textContent === '自动或指定');
+    await click(auto);
     await click(button('保存'));
     await vi.waitFor(() => expect(events.some(event => event.kind === '提交结果'), JSON.stringify(events)).toBe(true));
     const result = events.find(event => event.kind === '提交结果').data.response;
     expect(result.code).toBe(200);
+    expect(result.data.model.features.task_types.omni.allow_auto_duration).toBe(true);
     expect(result.data.model.features.task_types.extend.allow_auto_duration).toBe(true);
     expect(result.data.model.features.task_types.edit.allowed_durations).toEqual([-1]);
   } else {

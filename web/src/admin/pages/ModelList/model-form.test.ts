@@ -15,10 +15,10 @@ import {
   parseGptMatrix,
   pickTaskTypeRatios,
   pickTaskTypeEnabled,
+  pickTaskTypeDuration,
   ratiosFromModel,
   readFeature,
   sizesFromModel,
-  taskTypeDurationLabel,
   type FormSnapshot,
   type RatioForm,
 } from './model-form';
@@ -651,7 +651,7 @@ describe('task_types 结构化编辑（IKHBDO）', () => {
       prolong: { allowed_ratios: ['adaptive'] },
       edit: { allowed_ratios: ['adaptive'] },
     };
-    expect(buildTaskTypes(base, { edit: ['adaptive'] }, { edit: true })).toEqual({
+    expect(buildTaskTypes(base, { edit: ['adaptive'] }, { edit: true }, { edit: 'follow' })).toEqual({
       edit: { allowed_ratios: ['adaptive'], allowed_durations: [-1] },
     });
   });
@@ -662,23 +662,25 @@ describe('task_types 结构化编辑（IKHBDO）', () => {
     ).toEqual({});
   });
 
-  it('时长策略按模式派生：编辑写 [-1]，延长写 allow_auto_duration，其它模式清空两个键', () => {
-    expect(
-      buildTaskTypes({ edit: { allowed_ratios: ['adaptive'], allow_auto_duration: true } }, { edit: ['adaptive'] }, { edit: true }),
-    ).toEqual({ edit: { allowed_ratios: ['adaptive'], allowed_durations: [-1] } });
-    expect(
-      buildTaskTypes({ extend: { allowed_ratios: ['adaptive'], allowed_durations: [-1] } }, { extend: ['adaptive'] }, { extend: true }),
-    ).toEqual({ extend: { allowed_ratios: ['adaptive'], allow_auto_duration: true } });
-    expect(
-      buildTaskTypes({ first_frame: { allowed_durations: [-1], allow_auto_duration: true } }, {}, { first_frame: true }),
-    ).toEqual({ first_frame: {} });
+  it('三态时长策略写回：指定删键 / 仅自动写 [-1] / 自动或指定写 allow_auto_duration', () => {
+    const base = { omni: { allowed_durations: [-1], allow_auto_duration: true } };
+    expect(buildTaskTypes(base, {}, { omni: true }, { omni: 'specified' })).toEqual({ omni: {} });
+    expect(buildTaskTypes(base, {}, { omni: true }, { omni: 'follow' })).toEqual({
+      omni: { allowed_durations: [-1] },
+    });
+    expect(buildTaskTypes(base, {}, { omni: true }, { omni: 'auto-or-specified' })).toEqual({
+      omni: { allow_auto_duration: true },
+    });
   });
 
-  it('时长策略按模式固定展示', () => {
-    expect(taskTypeDurationLabel('edit')).toBe('自动（跟随原视频）');
-    expect(taskTypeDurationLabel('extend')).toBe('自动或指定秒数');
-    expect(taskTypeDurationLabel('first_frame')).toBe('指定秒数');
-    expect(taskTypeDurationLabel('unknown')).toBe('指定秒数');
+  it('从能力行读回三态', () => {
+    expect(pickTaskTypeDuration({
+      task_types: {
+        edit: { allowed_durations: [-1] },
+        extend: { allow_auto_duration: true },
+        omni: {},
+      },
+    })).toMatchObject({ edit: 'follow', extend: 'auto-or-specified', omni: 'specified' });
   });
 
   it('勾选但比例留空 → 保留空对象（键在 = 开放且无额外约束）', () => {
@@ -772,15 +774,15 @@ describe('音频 / 文本行（IKHBDO）', () => {
 });
 
 
-it('IKLUVP 时长策略由模式派生并保留扩展配置', () => {
-  expect(buildTaskTypes({ extend: { extra: 7 } }, { extend: ['adaptive'] }, { extend: true })).toEqual({
+it('IKLUVP 三态策略保留扩展配置', () => {
+  expect(buildTaskTypes({ extend: { extra: 7 } }, { extend: ['adaptive'] }, { extend: true }, { extend: 'auto-or-specified' })).toEqual({
     extend: { extra: 7, allowed_ratios: ['adaptive'], allow_auto_duration: true },
   });
 });
 
 
-it('IKLUVP 归一后的配置保存往返保持不变', () => {
+it('IKLUVP 配置保存往返保持不变', () => {
   const task_types = { extend: { allow_auto_duration: true }, edit: { allowed_durations: [-1] }, omni: {} };
   const features = { task_types };
-  expect(buildTaskTypes(task_types, {}, pickTaskTypeEnabled(features))).toEqual(task_types);
+  expect(buildTaskTypes(task_types, {}, pickTaskTypeEnabled(features), pickTaskTypeDuration(features))).toEqual(task_types);
 });
