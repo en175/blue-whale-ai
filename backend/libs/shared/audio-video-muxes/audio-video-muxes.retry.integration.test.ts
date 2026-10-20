@@ -2,7 +2,7 @@ import "reflect-metadata";
 import { Module } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
 import { json } from "express";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { AudioVideoMuxesController } from "../../../apps/blue-whale/src/api/audio-video-muxes/audio-video-muxes.controller.js";
 import { enqueueAudioVideoMuxJob } from "../generation/generation-queue.js";
 import { PrismaService } from "../prisma/prisma.service.js";
@@ -18,6 +18,8 @@ describe.skipIf(!databaseUrl)("audio video mux retry in an isolated MySQL databa
   let projectId: string;
   let app: Awaited<ReturnType<typeof NestFactory.create>>;
   let baseUrl: string;
+  let charge: ReturnType<typeof vi.fn>;
+  let release: ReturnType<typeof vi.fn>;
   const createdAssets: bigint[] = [];
   let snapshot: Record<string, unknown>;
 
@@ -28,6 +30,8 @@ describe.skipIf(!databaseUrl)("audio video mux retry in an isolated MySQL databa
     }
     process.env.DATABASE_URL = databaseUrl;
     prisma = new PrismaService();
+    charge = vi.fn().mockResolvedValue(undefined);
+    release = vi.fn().mockResolvedValue(undefined);
     const project = await prisma.client.project.create({ data: { owner_id: 9n, name: "IKIHPL retry" } });
     projectId = String(project.id);
     const audio = await prisma.client.assets.create({ data: {
@@ -54,7 +58,7 @@ describe.skipIf(!databaseUrl)("audio video mux retry in an isolated MySQL databa
       {} as never,
       {} as never,
       {} as never,
-      { jobBilling: vi.fn().mockResolvedValue(undefined), release: vi.fn() } as never,
+      { jobBilling: vi.fn().mockResolvedValue({ charge, release }), release } as never,
     );
     Reflect.defineMetadata("design:paramtypes", [AudioVideoMuxesService], AudioVideoMuxesController);
     class HarnessModule {}
@@ -84,6 +88,11 @@ describe.skipIf(!databaseUrl)("audio video mux retry in an isolated MySQL databa
     else process.env.DATABASE_URL = previousDatabaseUrl;
   });
 
+  beforeEach(() => {
+    charge?.mockClear();
+    release?.mockClear();
+  });
+
   async function failedJob(frozenInput: object | null = snapshot) {
     return prisma.client.generation_jobs.create({ data: {
       project_id: BigInt(projectId), user_id: 9n, type: "audio_video_mux", source: "dock",
@@ -100,7 +109,11 @@ describe.skipIf(!databaseUrl)("audio video mux retry in an isolated MySQL databa
     const replay = await service.retry("9", projectId, String(original.id), "same-click");
     const newJobId = String(first.data?.job_id);
     expect(newJobId).not.toBe(String(original.id));
+    expect(charge).toHaveBeenCalledTimes(1);
+    expect(charge).toHaveBeenCalledWith(Number(newJobId));
+    expect(charge).not.toHaveBeenCalledWith(Number(original.id));
     expect(replay).toMatchObject({ code: 200, data: { job_id: newJobId, replayed: true } });
+    expect(charge).toHaveBeenCalledTimes(1);
 
     const retryRow = await prisma.client.generation_jobs.findUniqueOrThrow({ where: { id: BigInt(newJobId) } });
     expect(retryRow.retry_of_job_id).toBe(original.id);
@@ -194,6 +207,7 @@ describe.skipIf(!databaseUrl)("audio video mux retry in an isolated MySQL databa
     });
     expect(retryRow.status).toBe("failed");
     expect(retryRow.error).toMatchObject({ code: "enqueue_failed" });
+    expect(release).toHaveBeenCalledWith(Number(retryRow.id));
 
     const replay = await send("recover-mq");
     expect(await replay.json()).toMatchObject({ data: { job_id: String(retryRow.id), status: "failed", replayed: true, enqueue_required: false } });

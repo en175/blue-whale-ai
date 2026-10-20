@@ -290,7 +290,7 @@ export class AudioMixesService {
     const owned = await this.prisma.client.generation_jobs.findFirst({
       where: { id: jid, project_id: pid, user_id: BigInt(userId), type: AUDIO_MIX_JOB_TYPE,
         source: AUDIO_MIX_SOURCE, is_delete: false },
-      select: { id: true, status: true, input: true },
+      select: { id: true, input: true },
     });
     if (!owned) throw new DomainError(RESOURCE_NOT_FOUND_CODE);
     const frozenOwned = owned.input as { duration?: unknown; estimated_duration_ms?: unknown } | null;
@@ -473,7 +473,7 @@ async function verifyDedicatedMixRetryTarget(
   }
   if (trusted === targetNodeId) return null;
   return recoveryError(
-    422, "专属重试目标与原受理关联不符，不能改绑同 jobId 的承接目标",
+    422, "专属重试目标与原受理关联不符，不能改绑原任务的承接目标",
     RECOVERY_REASONS.documentMismatch,
   );
 }

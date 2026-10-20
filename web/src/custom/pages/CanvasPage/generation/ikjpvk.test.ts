@@ -227,7 +227,7 @@ describe('接续可靠受理恢复任务（IKJPVK）', () => {
     expect(vi.mocked(createAudioMix)).toHaveBeenCalledTimes(1);
   });
 
-  it('反例三：同类占位收到可靠失败记录后收敛为失败卡，并可按既有规则以原 jobId 重试', async () => {
+  it('反例三：同类占位收到可靠失败记录后收敛为失败卡，并以原 jobId 发起重试（返回新 jobId）', async () => {
     const ctx = setup();
     const oldCreate = deferred<MixCreateResult>();
     vi.mocked(createAudioMix).mockImplementationOnce(() => oldCreate.promise);
@@ -249,8 +249,8 @@ describe('接续可靠受理恢复任务（IKJPVK）', () => {
 
     ctx.setJobStatus('processing');
     vi.mocked(retryAudioMix).mockResolvedValue({
-      job_id: '901', status: 'queued', replayed: false,
-      canvas_binding: ctx.bindingView('retry-sub-1', nodeId, '901', 2),
+      job_id: '902', status: 'queued', replayed: false,
+      canvas_binding: ctx.bindingView('retry-sub-1', nodeId, '902', 2),
     });
     expect(ctx.runtime.retry(nodeId)).toBe(true);
     await flush();
@@ -260,9 +260,9 @@ describe('接续可靠受理恢复任务（IKJPVK）', () => {
     expect(retryJobId).toBe('901');
     expect(retryKey).toMatch(/^[0-9a-f-]{8,}$/);
     expect(retryBinding).toMatchObject({ protocol_version: 1, target_node_id: nodeId });
-    expect(ctx.nodes.get(nodeId)?.data).toMatchObject({ jobId: '901', genStatus: 'generating' });
-    expect(ctx.runtime.statusOf(nodeId)).toMatchObject({ phase: 'generating', jobId: '901' });
-    expect(ctx.fetchJobStatus.mock.calls.filter(([jobId]) => String(jobId) === '901').length).toBeGreaterThanOrEqual(1);
+    expect(ctx.nodes.get(nodeId)?.data).toMatchObject({ jobId: '902', genStatus: 'generating' });
+    expect(ctx.runtime.statusOf(nodeId)).toMatchObject({ phase: 'generating', jobId: '902' });
+    expect(ctx.fetchJobStatus.mock.calls.filter(([jobId]) => String(jobId) === '902').length).toBeGreaterThanOrEqual(1);
   });
 
   it('正常对照：当前合法创建受理回填任务身份、交接并启动轮询，占位卡与来源线保留', async () => {
