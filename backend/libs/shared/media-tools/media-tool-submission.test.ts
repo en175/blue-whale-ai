@@ -96,4 +96,16 @@ describe("submitMediaToolJob（共享提交管线）", () => {
     expect(charge).not.toHaveBeenCalled();
     expect(enqueue).toHaveBeenCalledWith("400");
   });
+
+  it("免费工具入队失败 → 标记失败但不发退款", async () => {
+    markFailedQueued.mockResolvedValue(true);
+    const release = vi.fn();
+    const { args, enqueue } = makeArgs({
+      billing: { jobBilling: vi.fn().mockResolvedValue(undefined), release },
+    });
+    enqueue.mockRejectedValue(new Error("rocketmq down"));
+    await submitMediaToolJob(args as never);
+    expect(markFailedQueued).toHaveBeenCalled();
+    expect(release).not.toHaveBeenCalled();
+  });
 });

@@ -163,7 +163,6 @@ export class ImageErasuresService {
       billing: this.billing,
       toolType: IMAGE_ERASE_JOB_TYPE,
       userId,
-      projectId,
       input: frozenInput,
       recovery,
       createJob: async (db) => {

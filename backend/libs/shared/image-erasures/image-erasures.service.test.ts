@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ImageErasuresService } from "./image-erasures.service.js";
+
+const { enqueueImageEraseJob } = vi.hoisted(() => ({ enqueueImageEraseJob: vi.fn() }));
+vi.mock("@lib/shared/generation/generation-queue.js", () => ({ enqueueImageEraseJob }));
 import { RecoveryContractError } from "@lib/shared/persistence/index.js";
 
 const { lockMock, bindingViewMock, readIdemMock, writeRowsMock, writeIdemMock } = vi.hoisted(() => ({
@@ -72,6 +75,7 @@ function makeService(overrides: {
   project?: unknown;
   assets?: unknown;
   createJob?: unknown;
+  billing?: unknown;
 } = {}) {
   const project = overrides.project ?? { findOwnedById: vi.fn().mockResolvedValue({ id: 55n }) };
   const assets =
@@ -90,7 +94,7 @@ function makeService(overrides: {
     },
   };
   return {
-    service: new ImageErasuresService(prisma as never, project as never, assets as never, { jobBilling: async () => undefined, release: async () => {} } as never),
+    service: new ImageErasuresService(prisma as never, project as never, assets as never, (overrides.billing ?? { jobBilling: async () => undefined, release: async () => {} } as never) as never),
     create,
     costCreate,
     assets,
@@ -453,5 +457,20 @@ describe("ImageErasuresService.create：恢复协议 v1 接入（IKJJQW）", () 
     expect(result.code).toBe(200);
     expect(result.data).toMatchObject({ job_id: "400", status: "queued" });
     expect(create).not.toHaveBeenCalled();
+  });
+});
+
+describe("ImageErasuresService.create：计费输入", () => {
+  it("按 image_erase 计价并入队", async () => {
+    const jobBilling = vi.fn().mockResolvedValue(undefined);
+    const { service } = makeService({ billing: { jobBilling, release: vi.fn() } });
+    const result = await service.create("9", "55", VALID_TEXT_BODY);
+    expect(result.code).toBe(200);
+    expect(jobBilling).toHaveBeenCalledWith(
+      "image_erase",
+      "9",
+      expect.objectContaining({ source_asset_id: "88" }),
+    );
+    expect(enqueueImageEraseJob).toHaveBeenCalledWith("400");
   });
 });

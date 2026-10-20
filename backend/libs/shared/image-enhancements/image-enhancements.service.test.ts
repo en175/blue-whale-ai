@@ -2,6 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 
 import { ImageEnhancementsService } from "./image-enhancements.service.js";
 
+const { enqueueImageEnhanceJob } = vi.hoisted(() => ({ enqueueImageEnhanceJob: vi.fn() }));
+vi.mock("@lib/shared/generation/generation-queue.js", () => ({ enqueueImageEnhanceJob }));
+
 const VALID_BODY = {
   source_asset_id: "88",
   target_node_id: "node-1",
@@ -49,6 +52,7 @@ describe("ImageEnhancementsService.create：计费输入", () => {
       "9",
       expect.objectContaining({ multiple: 4 }),
     );
+    expect(enqueueImageEnhanceJob).toHaveBeenCalledWith("400");
   });
 });
 

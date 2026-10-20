@@ -155,7 +155,6 @@ export class ImageCutoutsService {
       billing: this.billing,
       toolType: IMAGE_CUTOUT_JOB_TYPE,
       userId,
-      projectId,
       input: frozenInput,
       recovery,
       createJob: async (db) => {

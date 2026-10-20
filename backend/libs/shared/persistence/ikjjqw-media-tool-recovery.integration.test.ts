@@ -19,7 +19,7 @@
 
 import { PrismaMariaDb } from "@prisma/adapter-mariadb";
 import type { Pool } from "mariadb";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildPoolConfig, getPrismaClient } from "./db.js";
 import { RECOVERY_REASONS, type CanvasBinding } from "@lib/contracts";
 import { listCanvasRecoveryPage } from "./generation-canvas-recovery-repo.js";
@@ -39,6 +39,18 @@ import { ImageEnhancementsService } from "@lib/shared/image-enhancements/image-e
 import { VideoEnhancementsService } from "@lib/shared/video-enhancements/video-enhancements.service.js";
 import { VideoFrameInterpolationsService } from "@lib/shared/video-frame-interpolations/video-frame-interpolations.service.js";
 import type { AssetStorageService } from "@lib/shared/assets/storage.service.js";
+
+vi.mock("@lib/shared/generation/generation-queue.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@lib/shared/generation/generation-queue.js")>();
+  return {
+    ...actual,
+    enqueueImageEraseJob: vi.fn(),
+    enqueueImageCutoutJob: vi.fn(),
+    enqueueImageOutpaintJob: vi.fn(),
+    enqueueImageEnhanceJob: vi.fn(),
+  };
+});
 
 const databaseUrl = process.env.IKJJQW_DATABASE_URL;
 

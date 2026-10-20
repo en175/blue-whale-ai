@@ -121,7 +121,6 @@ export class ImageEnhancementsService {
       billing: this.billing,
       toolType: IMAGE_ENHANCE_JOB_TYPE,
       userId,
-      projectId,
       input: frozenInput,
       recovery,
       createJob: async (db) => {

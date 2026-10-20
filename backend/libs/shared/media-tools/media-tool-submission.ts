@@ -20,7 +20,6 @@ export interface MediaToolSubmissionStrategy {
   billing: MediaToolBillingService;
   toolType: string;
   userId: string;
-  projectId: string;
   input: Record<string, unknown>;
   recovery: MediaToolRecovery | null;
   createJob: (
@@ -40,13 +39,14 @@ export type MediaToolJobEnvelope =
 async function releaseEnqueueFailure(
   strategy: MediaToolSubmissionStrategy,
   jobId: string,
+  billed: boolean,
 ): Promise<void> {
   const transitioned = await createGenerationCommandRepo(strategy.prisma)
     .markFailedQueued(jobId, ERROR_ENQUEUE_FAILED, "任务入队失败", {
       raw: "RocketMQ 入队失败",
     })
     .catch(() => false);
-  if (!transitioned) return;
+  if (!transitioned || !billed) return;
   await strategy.billing.release(strategy.userId, Number(jobId), "任务入队失败");
 }
 
@@ -77,7 +77,11 @@ export async function submitMediaToolJob(
         error instanceof Error ? error.message : String(error)
       }`,
     );
-    await releaseEnqueueFailure(strategy, outcome.jobId).catch((releaseError) => {
+    await releaseEnqueueFailure(
+      strategy,
+      outcome.jobId,
+      jobBilling !== undefined,
+    ).catch((releaseError) => {
       logger.error(
         `[media-tool] release failed tool=${strategy.toolType} jobId=${outcome.jobId}: ${
           releaseError instanceof Error ? releaseError.message : String(releaseError)

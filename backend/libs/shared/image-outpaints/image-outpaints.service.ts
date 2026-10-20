@@ -148,7 +148,6 @@ export class ImageOutpaintsService {
       billing: this.billing,
       toolType: IMAGE_OUTPAINT_JOB_TYPE,
       userId,
-      projectId,
       input: frozenInput,
       recovery,
       createJob: async (db) => {
