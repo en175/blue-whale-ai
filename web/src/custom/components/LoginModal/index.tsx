@@ -9,7 +9,7 @@ import {
   toSessionUser,
   type LoginData,
 } from '@/custom/api/auth';
-import { fetchAdminSession } from '@/admin/api/adminSession';
+import { fetchAdminSession } from '@/shared/api/adminSession';
 import { isApiError } from '@/shared/api/http';
 import Modal from '@/custom/components/Modal';
 import { useAuthStore, type SessionUser } from '@/shared/stores/auth';

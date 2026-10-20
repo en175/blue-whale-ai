@@ -1,6 +1,5 @@
 import { queryOptions } from '@tanstack/react-query';
-import { http, type ApiRequestInit } from './http';
-import { putToPresignedUrl, type PresignData } from '@/custom/api/assets';
+import { http, putToPresignedUrl, type ApiRequestInit, type PresignData } from './http';
 
 export const HOMEPAGE_HERO_MAX_ENABLED = 8;
 

@@ -1,4 +1,7 @@
 import { apiRequest } from '@/shared/api/http';
+import type { RechargeCustomConfig } from '@/shared/types/recharge';
+
+export type { RechargeCustomConfig };
 
 export interface RechargeTier {
   id: string;
@@ -17,18 +20,6 @@ export interface RechargeTier {
 export interface RechargeTierCatalog {
   tiers: RechargeTier[];
   credits_per_yuan: number;
-}
-
-export interface RechargeCustomConfig {
-  enabled: boolean;
-  min_credits: number;
-  max_credits: number;
-  default_credits: number;
-  step_credits: number;
-  credits_per_yuan: number;
-  credits_valid_months: number;
-  can_purchase: boolean | null;
-  denied_hint: string;
 }
 
 export interface RechargeOrder {
