@@ -46,13 +46,13 @@
    | `allow_auto_duration: true`，无 `allowed_durations` | `-1` 或基础范围及步长 | 自动与指定秒数可选 |
    | `allowed_durations: [-1]` | 仅 `-1` | 自动锁定 |
 
-   当前 worker 的自动时长只支持 edit / extend。写侧拒绝其他模式的 `allow_auto_duration: true`，管理端只在这两个模式提供该选项；本单不扩展执行侧模式能力。
+   （2026-10-20 通用化修订后已失效）当时 worker 的自动时长只支持 edit / extend。写侧拒绝其他模式的 `allow_auto_duration: true`，管理端只在这两个模式提供该选项。
 
    模式内字段使用 snake_case。外层 `taskTypes` 历史别名归一为 `task_types` 时，保留模式内字段。Seedance 2.5 的 `extend` 补入 `allow_auto_duration: true`，保留 adaptive 比例与 4–30 秒基础范围；`edit` 继续使用 `allowed_durations: [-1]`。旧配置不会由模型名前缀或模式名自动扩权，须执行本单提供的定向配置 SQL。先部署支持新字段的 backend 与 web，再经人工审批更新存量配置并刷新目录缓存。
 
    自动可选表示由模型选择时长；编辑自动表示跟随原视频。快照中的 `duration` 保留用户的 `-1` 或正数，`video_mode` 保留显式模式，worker 按既有字段消费，不增加执行期能力字段。
 
-   通用化修订，2026-10-20：时长策略改为每个模式独立配置的三态（`指定秒数` / `仅自动` / `自动或指定`），管理端对全部视频模式提供同一控件，不再按模式写死或只读展示。写侧不再限制 `allow_auto_duration` 的模式，执行侧对任一模式的 `duration = -1` 原样下发；上游按模型的实际限制（例如 Seedance 2.5 视频编辑只接受 `-1`）由能力行配置表达，不在代码里分叉。`allowed_durations: [-1]` 与 `allow_auto_duration: true` 的语义、优先级不变。
+   通用化修订，2026-10-20：时长策略改为每个模式独立配置的三态（`指定秒数` / `仅自动` / `自动或指定`），管理端对全部视频模式提供同一控件，不再按模式写死或只读展示。写侧不再限制 `allow_auto_duration` 的模式，执行侧对任一模式的 `duration = -1` 原样下发；上游按模型的实际限制（例如 Seedance 2.5 视频编辑只接受 `-1`）由能力行配置表达，不在代码里分叉。`allowed_durations: [-1]` 与 `allow_auto_duration: true` 的语义、优先级不变。部署顺序：worker-java 须先于或与 backend/web 同批上线；新 worker 只放宽校验，worker-first 向后兼容。
 
 4. **模式显式传递，执行侧只读快照。** 前端传模式 → 接纳侧按能力行校验并**冻结进 job 快照**（复用 IKJ795 的 `video_task_type` 机制，把「推出来的值」换成「传进来的值」）→ worker 按快照下发 `omni_reference_task_type` 与 `ratio` / `duration`。**worker 不得改写任何用户入参**，也不得含模型名前缀判定。
 5. **`omni_reference_task_type` 只在 Seedance 2.5 下发**（官方该参数的模型支持仅 2.5）。2.0 靠 `content[].role` 表达，payload 逐位不变。new-api 侧**零改动**——2.5 专用渠道 `volcengine-25`（type 66）已支持该字段。

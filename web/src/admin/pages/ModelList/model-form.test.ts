@@ -679,8 +679,16 @@ describe('task_types 结构化编辑（IKHBDO）', () => {
         edit: { allowed_durations: [-1] },
         extend: { allow_auto_duration: true },
         omni: {},
+        text2video: { allowed_durations: [5] },
+        image_reference: { allowed_durations: [-1, 5] },
       },
-    })).toMatchObject({ edit: 'follow', extend: 'auto-or-specified', omni: 'specified' });
+    })).toMatchObject({
+      edit: 'follow',
+      extend: 'auto-or-specified',
+      omni: 'specified',
+      text2video: 'specified',
+      image_reference: 'specified',
+    });
   });
 
   it('勾选但比例留空 → 保留空对象（键在 = 开放且无额外约束）', () => {

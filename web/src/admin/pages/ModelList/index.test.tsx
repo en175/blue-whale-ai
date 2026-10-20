@@ -677,6 +677,14 @@ describe('ModelList 视频模式时长策略（IKLUVP）', () => {
     expect(durationGroup('omni').querySelector('[aria-pressed="true"]')?.textContent).toBe('指定秒数');
     expect(durationGroup('edit').querySelector('[aria-pressed="true"]')?.textContent).toBe('仅自动');
     expect(durationGroup('extend').querySelector('[aria-pressed="true"]')?.textContent).toBe('自动或指定');
+    expect(
+      [...durationGroup('text2video').querySelectorAll('button')]
+        .every((item) => item.getAttribute('aria-disabled') === 'true'),
+    ).toBe(true);
+    expect(
+      [...durationGroup('omni').querySelectorAll('button')]
+        .every((item) => item.getAttribute('aria-disabled') === null),
+    ).toBe(true);
   });
 
   it('任意模式都可以改成自动或指定并保存', async () => {
