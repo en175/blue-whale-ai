@@ -407,6 +407,7 @@ export function HeroCarouselView({
         width={1920}
         height={1080}
         decoding="async"
+        fetchPriority="high"
         aria-hidden="true"
       />
       {state.slots.map((slot, index) => {
