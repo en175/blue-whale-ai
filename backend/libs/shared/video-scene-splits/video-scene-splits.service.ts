@@ -24,6 +24,7 @@ import {
   readAcceptedMediaToolReplay,
   renderMediaToolReplay,
 } from "@lib/shared/generation/media-tool-recovery.js";
+import { logger } from "@lib/infra/logging/blue-whale-logger.js";
 import {
   RecoveryContractError,
   canvasBindingView,
@@ -122,21 +123,31 @@ export class VideoSceneSplitsService {
     const project = await this.project.findOwnedById(projectId, userId);
     if (!project) return fail(RESOURCE_NOT_FOUND_CODE, "资源不存在");
 
-    const replay = canvasBinding
-      ? await readAcceptedMediaToolReplay(this.prisma.client, {
-          projectId,
-          userId,
-          taskType: VIDEO_SCENE_SPLIT_JOB_TYPE,
-          operation: IDEMPOTENCY_OPERATION,
-          requestHash,
-          binding: canvasBinding,
-        })
-      : await readAcceptedMediaToolReplay(this.prisma.client, {
-          projectId,
-          operation: IDEMPOTENCY_OPERATION,
-          requestHash,
-          key: clientToken,
-        });
+    let replay: Awaited<ReturnType<typeof readAcceptedMediaToolReplay>> | null;
+    try {
+      replay = canvasBinding
+        ? await readAcceptedMediaToolReplay(this.prisma.client, {
+            projectId,
+            userId,
+            taskType: VIDEO_SCENE_SPLIT_JOB_TYPE,
+            operation: IDEMPOTENCY_OPERATION,
+            requestHash,
+            binding: canvasBinding,
+          })
+        : await readAcceptedMediaToolReplay(this.prisma.client, {
+            projectId,
+            operation: IDEMPOTENCY_OPERATION,
+            requestHash,
+            key: clientToken,
+          });
+    } catch (error) {
+      logger.warn(
+        `[video-scene-split] 幂等预检失败，回落到事务内校验：${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      replay = null;
+    }
     if (replay) {
       return renderMediaToolReplay(replay, () =>
         fail(IDEMPOTENCY_KEY_REUSED_CODE, "client_token 已被使用（同 token 仅可重放相同参数）"),
@@ -181,9 +192,11 @@ export class VideoSceneSplitsService {
 
     let createdJobId: string | null = null;
     let committed = false;
+    let callbackCompleted = false;
     try {
       const result = await transactionWithUniqueRetry(this.prisma.client, async (tx) => {
       createdJobId = null;
+      callbackCompleted = false;
       let recoveryPlan: CanvasRecoveryPlan | null = null;
       if (canvasBinding) {
         const acceptance: CanvasRecoveryAcceptance = {
@@ -289,6 +302,9 @@ export class VideoSceneSplitsService {
           job_id: job.id.toString(),
           status: "queued",
         });
+      }).then((result) => {
+        callbackCompleted = true;
+        return result;
       });
       });
       committed = true;
@@ -305,8 +321,7 @@ export class VideoSceneSplitsService {
       }
       return result;
     } catch (error) {
-      const failedJobId = committed ? null : createdJobId;
-      createdJobId = null;
+      const failedJobId = !committed && callbackCompleted ? createdJobId : null;
       if (failedJobId !== null && jobBilling) {
         await jobBilling
           .release(

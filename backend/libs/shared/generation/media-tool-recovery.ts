@@ -234,6 +234,7 @@ export async function createMediaToolJobWithRecovery(
   const runTx = () =>
     transactionWithUniqueRetry(prisma, (tx) => {
       callbackCompleted = false;
+      chargedJobId = null;
       return withBillingCompensation(billing, async (jobBilling) => {
         if (recovery) {
           const acceptance: CanvasRecoveryAcceptance = {

@@ -217,7 +217,7 @@ describe("VideoEnhancementsService.create：输入门槛复核（短边 [360,108
     const { service, create } = makeService({
       assets: {
         findOwnedSource: vi.fn().mockResolvedValue(
-          makeVideoAsset({ width: null, height: null, duration_ms: null }),
+          makeVideoAsset({ width: null, height: null }),
         ),
       },
       storage: {

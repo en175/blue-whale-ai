@@ -39,6 +39,7 @@ function makeService(overrides: {
   assets?: unknown;
   createJob?: unknown;
   billing?: unknown;
+  storage?: unknown;
 } = {}) {
   const project = overrides.project ?? { findOwnedById: vi.fn().mockResolvedValue({ id: 55n }) };
   const assets =
@@ -50,12 +51,13 @@ function makeService(overrides: {
   const costCreate = vi.fn();
   const prisma = {
     client: {
+      assets: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
       generation_jobs: { create },
       cost_reservations: { create: costCreate },
     },
   };
   return {
-    service: new VideoSubtitleErasuresService(prisma as never, project as never, assets as never, { probe: null } as never, (overrides.billing ?? { jobBilling: async () => undefined, release: async () => {} }) as never),
+    service: new VideoSubtitleErasuresService(prisma as never, project as never, assets as never, (overrides.storage ?? { probe: null }) as never, (overrides.billing ?? { jobBilling: async () => undefined, release: async () => {} }) as never),
     create,
     costCreate,
     assets,
@@ -227,6 +229,27 @@ describe("VideoSubtitleErasuresService.create：输入门槛复核（2K 分辨�
     });
     const result = await service.create("9", "55", VALID_SMART_BODY);
     expect(result.code).toBe(200);
+  });
+
+  it("probes a legacy video and rejects dimensions learned from the probe", async () => {
+    const { service, create } = makeService({
+      assets: {
+        findOwnedSource: vi.fn().mockResolvedValue(
+          makeVideoAsset({ width: null, height: null }),
+        ),
+      },
+      storage: {
+        probe: vi.fn().mockResolvedValue({
+          durationMs: 60_000,
+          width: 3000,
+          height: 1000,
+        }),
+      },
+    });
+    const result = await service.create("9", "55", VALID_SMART_BODY);
+    expect(result.code).not.toBe(200);
+    expect(result.msg).toContain("长边超过");
+    expect(create).not.toHaveBeenCalled();
   });
 
   it("lets a video with only one recorded dimension pass (gate needs both)", async () => {

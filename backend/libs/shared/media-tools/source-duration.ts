@@ -7,6 +7,8 @@ export interface SourceAssetDurationFields {
   id: string;
   storage_key: string | null;
   duration_ms?: number | null | undefined;
+  width?: number | null;
+  height?: number | null;
 }
 
 export interface ResolvedSourceDuration {
@@ -24,18 +26,36 @@ export async function resolveSourceDuration(args: {
   prisma: PrismaClient;
   storage: AssetStorageService;
   asset: SourceAssetDurationFields;
+  probeDimensions?: boolean;
 }): Promise<ResolvedSourceDuration | null> {
   const { asset } = args;
-  if (typeof asset.duration_ms === "number" && asset.duration_ms > 0) {
+  const knownDurationMs =
+    typeof asset.duration_ms === "number" && asset.duration_ms > 0
+      ? asset.duration_ms
+      : null;
+  const needsDimensions =
+    args.probeDimensions === true &&
+    (asset.width == null || asset.height == null);
+  if (knownDurationMs !== null && !needsDimensions) {
     return {
-      seconds: toSeconds(asset.duration_ms),
-      durationMs: asset.duration_ms,
+      seconds: toSeconds(knownDurationMs),
+      durationMs: knownDurationMs,
       width: null,
       height: null,
     };
   }
   const probe = args.storage.probe;
-  if (!probe || !asset.storage_key) return null;
+  if (!probe || !asset.storage_key) {
+    if (knownDurationMs !== null) {
+      return {
+        seconds: toSeconds(knownDurationMs),
+        durationMs: knownDurationMs,
+        width: null,
+        height: null,
+      };
+    }
+    return null;
+  }
   let info;
   try {
     info = await probe(asset.storage_key);
@@ -45,12 +65,24 @@ export async function resolveSourceDuration(args: {
         error instanceof Error ? error.message : String(error)
       }`,
     );
+    if (knownDurationMs !== null) {
+      return {
+        seconds: toSeconds(knownDurationMs),
+        durationMs: knownDurationMs,
+        width: null,
+        height: null,
+      };
+    }
     return null;
   }
-  if (info.durationMs === null || info.durationMs <= 0) return null;
+  if (knownDurationMs === null && (info.durationMs === null || info.durationMs <= 0)) {
+    return null;
+  }
+  const durationMs = knownDurationMs ?? info.durationMs;
+  if (durationMs === null) return null;
   try {
     await createAssetOwnershipOps(args.prisma).saveMediaInfo(asset.id, {
-      durationMs: info.durationMs,
+      durationMs,
       width: info.width,
       height: info.height,
     });
@@ -62,8 +94,8 @@ export async function resolveSourceDuration(args: {
     );
   }
   return {
-    seconds: toSeconds(info.durationMs),
-    durationMs: info.durationMs,
+    seconds: toSeconds(durationMs),
+    durationMs,
     width: info.width,
     height: info.height,
   };

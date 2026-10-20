@@ -57,6 +57,50 @@ describe("resolveSourceDuration", () => {
     );
   });
 
+  it("有库内时长但缺尺寸 → 需要尺寸时探测补齐，保留库内时长", async () => {
+    const { args, storage } = makeArgs({
+      asset: {
+        id: "88",
+        storage_key: "uploads/9/video/a.mp4",
+        duration_ms: 10_000,
+        width: null,
+        height: null,
+      },
+      probeDimensions: true,
+    });
+    storage.probe.mockResolvedValue({
+      durationMs: 12_000,
+      width: 1920,
+      height: 1080,
+    });
+    await expect(resolveSourceDuration(args as never)).resolves.toEqual({
+      seconds: 10,
+      durationMs: 10_000,
+      width: 1920,
+      height: 1080,
+    });
+  });
+
+  it("补尺寸探测失败 → 保留库内时长，不阻断", async () => {
+    const { args, storage } = makeArgs({
+      asset: {
+        id: "88",
+        storage_key: "uploads/9/video/a.mp4",
+        duration_ms: 10_000,
+        width: null,
+        height: null,
+      },
+      probeDimensions: true,
+    });
+    storage.probe.mockRejectedValue(new Error("tos down"));
+    await expect(resolveSourceDuration(args as never)).resolves.toEqual({
+      seconds: 10,
+      durationMs: 10_000,
+      width: null,
+      height: null,
+    });
+  });
+
   it("不足 1 秒按 1 秒计", async () => {
     const { args } = makeArgs({
       asset: { id: "88", storage_key: "k", duration_ms: 400 },

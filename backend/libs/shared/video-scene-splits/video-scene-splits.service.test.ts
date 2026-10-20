@@ -283,6 +283,16 @@ describe("VideoSceneSplitsService.create：client_token 幂等三态", () => {
     expect(result.msg).toContain("client_token");
     expect(tx.generation_jobs.create).not.toHaveBeenCalled();
   });
+
+  it("幂等预检异常时回落到事务内校验", async () => {
+    const { service, client, tx } = makeService();
+    client.command_idempotency.findUnique.mockRejectedValueOnce(new Error("corrupt row"));
+
+    const result = await service.create("9", "55", VALID_BODY);
+
+    expect(result.code).toBe(200);
+    expect(tx.command_idempotency.create).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("VideoSceneSplitsService.create：任务与占位数据同事务落库", () => {
@@ -386,6 +396,41 @@ describe("VideoSceneSplitsService.create：计费输入", () => {
     const result = await service.create("9", "55", VALID_BODY);
 
     expect(result.code).toBe(200);
+    expect(release).not.toHaveBeenCalled();
+  });
+
+  it("releases the charge when the transaction fails after the callback charged", async () => {
+    const jobBillingRelease = vi.fn().mockResolvedValue(undefined);
+    const { service, client, tx } = makeService({
+      billing: {
+        jobBilling: vi.fn().mockResolvedValue({ charge: vi.fn(), release: jobBillingRelease }),
+        release: vi.fn(),
+      },
+    });
+    client.$transaction.mockImplementationOnce(
+      async (operation: (t: unknown) => Promise<unknown>) => {
+        await operation(tx);
+        throw new Error("commit failed");
+      },
+    );
+
+    await expect(service.create("9", "55", VALID_BODY)).rejects.toThrow("commit failed");
+    expect(jobBillingRelease).toHaveBeenCalledWith(400, "commit failed");
+  });
+
+  it("does not release a free tool when the transaction fails", async () => {
+    const release = vi.fn();
+    const { service, client, tx } = makeService({
+      billing: { jobBilling: vi.fn().mockResolvedValue(undefined), release },
+    });
+    client.$transaction.mockImplementationOnce(
+      async (operation: (t: unknown) => Promise<unknown>) => {
+        await operation(tx);
+        throw new Error("commit failed");
+      },
+    );
+
+    await expect(service.create("9", "55", VALID_BODY)).rejects.toThrow("commit failed");
     expect(release).not.toHaveBeenCalled();
   });
 });

@@ -100,10 +100,13 @@ export class VideoSubtitleErasuresService {
     const duration = await resolveSourceDuration({
       prisma: this.prisma.client,
       storage: this.storage,
+      probeDimensions: true,
       asset: {
         id: input[VIDEO_SUBTITLE_ERASE_INPUT_KEYS.sourceAssetId],
         storage_key: asset.storage_key,
         duration_ms: asset.duration_ms,
+        width: asset.width,
+        height: asset.height,
       },
     });
     if (duration === null) {
