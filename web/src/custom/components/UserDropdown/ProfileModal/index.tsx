@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import { createPortal } from 'react-dom';
-import { X, Loader2 } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
+import Modal from '@/custom/components/Modal';
+import { joinClassNames } from '@/custom/utils/class-names';
 import styles from './index.module.css';
 
 interface ProfileModalProps {
@@ -26,67 +27,74 @@ export default function ProfileModal({ nickname, phone, onClose, onSave, error, 
     if (ok) onClose();
   };
 
-  return createPortal(
-    <div className={styles.overlay} onClick={() => { if (!saving) onClose(); }}>
-      <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
-        {}
-        <div className={styles.header}>
-          <h3 className={styles.title}>个人资料</h3>
-          <button className={styles.closeBtn} onClick={() => { if (!saving) onClose(); }} title="关闭">
-            <X size={16} strokeWidth={2} />
-          </button>
-        </div>
-
-        {}
-        <div className={styles.avatarRow}>
-          <div className={styles.avatar}>{(name.trim() || nickname).charAt(0).toLowerCase() || 'u'}</div>
-          <span className={styles.avatarHint}>昵称首字占位头像</span>
-        </div>
-
-        {}
-        <div className={styles.field}>
-          <span className={styles.label}>昵称</span>
-          <input
-            className={styles.input}
-            value={name}
-            maxLength={20}
-            onChange={(e) => { setName(e.target.value); onErrorClear?.(); }}
-            placeholder="请输入昵称"
+  return (
+    <Modal
+      open
+      title="个人资料"
+      onCancel={() => {
+        if (!saving) onClose();
+      }}
+      keyboard={!saving}
+      mask={{ closable: !saving }}
+      width={440}
+      classNames={{ container: styles.modal }}
+      footer={
+        <>
+          <button
+            type="button"
+            className={styles.cancelBtn}
+            onClick={() => {
+              if (!saving) onClose();
+            }}
             disabled={saving}
-          />
-        </div>
-
-        {}
-        <div className={styles.field}>
-          <span className={styles.label}>手机号码</span>
-          <input
-            className={`${styles.input} ${styles.inputDisabled}`}
-            value={phone}
-            disabled
-            title="手机号码不可修改"
-          />
-        </div>
-
-        {}
-        {error && (
-          <div className={styles.errorMsg}>{error}</div>
-        )}
-
-        {}
-        <div className={styles.footer}>
-          <button className={styles.cancelBtn} onClick={() => { if (!saving) onClose(); }} disabled={saving}>
+          >
             取消
           </button>
           <button
-            className={`${styles.saveBtn} ${canSave && !saving ? styles.saveBtnActive : ''}`}
+            type="button"
+            className={joinClassNames(styles.saveBtn, canSave && !saving ? styles.saveBtnActive : '')}
             onClick={handleSave}
             disabled={!canSave || saving}
           >
-            {saving ? <><Loader2 size={14} className={styles.spinner} /> 保存中…</> : '保存'}
+            {saving ? (
+              <>
+                <Loader2 size={14} className={styles.spinner} /> 保存中…
+              </>
+            ) : (
+              '保存'
+            )}
           </button>
-        </div>
+        </>
+      }
+    >
+      <div className={styles.avatarRow}>
+        <div className={styles.avatar}>{(name.trim() || nickname).charAt(0).toLowerCase() || 'u'}</div>
+        <span className={styles.avatarHint}>昵称首字占位头像</span>
       </div>
-    </div>,
-    document.body
+      <div className={styles.field}>
+        <span className={styles.label}>昵称</span>
+        <input
+          className={styles.input}
+          value={name}
+          maxLength={20}
+          onChange={(e) => {
+            setName(e.target.value);
+            onErrorClear?.();
+          }}
+          placeholder="请输入昵称"
+          disabled={saving}
+        />
+      </div>
+      <div className={styles.field}>
+        <span className={styles.label}>手机号码</span>
+        <input
+          className={`${styles.input} ${styles.inputDisabled}`}
+          value={phone}
+          disabled
+          title="手机号码不可修改"
+        />
+      </div>
+      {error && <div className={styles.errorMsg}>{error}</div>}
+    </Modal>
   );
 }
