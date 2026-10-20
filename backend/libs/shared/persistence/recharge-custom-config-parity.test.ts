@@ -1,94 +1,138 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
+import { dirname, join, relative } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 
-function read(rel: string): string {
-  return readFileSync(new URL(rel, import.meta.url), "utf8");
-}
+const read = (rel: string) => readFileSync(new URL(rel, import.meta.url), "utf8");
 
-const migrationSql = read(
-  "../../../prisma/migrations/20260927040000_recharge_custom_config/migration.sql",
+const seedMigration = read(
+  "../../../prisma/migrations/20261020120000_ikiugj_recharge_custom_to_system_settings/migration.sql",
 );
-const standaloneSql = read("../../../prisma/schema/050_recharge_custom_config.sql");
-const snapshotSql = read("../../../../docs/sql/20260927_recharge_custom_config.sql");
+const seedStandalone = read(
+  "../../../prisma/schema/070_ikiugj_recharge_custom_to_system_settings.sql",
+);
+const seedSnapshot = read(
+  "../../../../docs/sql/20261020_ikiugj_recharge_custom_to_system_settings.sql",
+);
+
+const dropMigration = read(
+  "../../../prisma/migrations/20261020130000_ikiugj_drop_recharge_custom_config/migration.sql",
+);
+const dropStandalone = read("../../../prisma/schema/071_ikiugj_drop_recharge_custom_config.sql");
+const dropSnapshot = read("../../../../docs/sql/20261020_ikiugj_drop_recharge_custom_config.sql");
+
 const schemaPrisma = read("../../../prisma/schema.prisma");
 
-describe("迁移 050 — 自定义充值配置 + 订单 tier_id 可空", () => {
+const HERE = dirname(fileURLToPath(import.meta.url));
+const REPO_ROOT = join(HERE, "../../../..");
+const SELF = fileURLToPath(import.meta.url);
+
+function statementsOf(sql: string): string[] {
+  return sql
+    .split("\n")
+    .filter((line) => !line.trimStart().startsWith("--"))
+    .join("\n")
+    .split(";")
+    .map((statement) => statement.trim())
+    .filter(Boolean);
+}
+
+function collectSourceFiles(dir: string, out: string[] = []): string[] {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (["node_modules", "dist", ".git", "gen"].includes(entry.name)) continue;
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) collectSourceFiles(full, out);
+    else if (/\.tsx?$/.test(entry.name)) out.push(full);
+  }
+  return out;
+}
+
+describe("自定义充值配置迁入 system_settings — 069 seed", () => {
   it("三轨逐字一致（改一处必须三处同改）", () => {
-    expect(standaloneSql).toBe(migrationSql);
-    expect(snapshotSql).toBe(migrationSql);
+    expect(seedStandalone).toBe(seedMigration);
+    expect(seedSnapshot).toBe(seedMigration);
   });
 
-  it("含 SET NAMES utf8mb4（列注释里有中文，charset 回归保护）", () => {
-    expect(standaloneSql).toContain("SET NAMES utf8mb4");
+  it("含 SET NAMES utf8mb4（中文注释/JSON 的 charset 回归保护）", () => {
+    expect(seedMigration).toContain("SET NAMES utf8mb4");
   });
 
-  it("★ 独立表 `recharge_custom_config`，**单行**（主键钉住 id，不是自增）", () => {
-    expect(standaloneSql).toMatch(/CREATE TABLE `recharge_custom_config`/);
-    expect(standaloneSql).toMatch(/PRIMARY KEY \(`id`\)/);
-    expect(standaloneSql).not.toMatch(/`id`\s+INT\s+NOT NULL AUTO_INCREMENT/);
+  it("可执行正文只有 SET NAMES + 一条 INSERT ... SELECT（幂等语句）", () => {
+    const statements = statementsOf(seedMigration);
+    expect(statements).toHaveLength(2);
+    expect(statements[0]).toBe("SET NAMES utf8mb4");
+    expect(statements[1]).toMatch(/^INSERT INTO `system_settings`/);
+    expect(statements[1]).toContain("ON DUPLICATE KEY UPDATE");
   });
 
-  it("★ 为什么**不塞进 system_settings** 必须写在文件里（否则下一个人会去合表）", () => {
-    expect(standaloneSql).toContain("system_settings");
-    expect(standaloneSql).toContain("凭证");
-    expect(standaloneSql).toContain("AES");
-  });
-
-  it("★ PRD §10.3 的九个字段一个不少（外加步长与版本）", () => {
-    for (const column of [
-      "min_credits",
-      "max_credits",
-      "default_credits",
-      "credits_per_yuan",
-      "step_credits",
+  it("★ 迁移日期的十个字段一个不少，键名与 repo 的 JSON 形态一致", () => {
+    for (const key of [
+      "minCredits",
+      "maxCredits",
+      "defaultCredits",
+      "creditsPerYuan",
+      "stepCredits",
       "enabled",
       "permission",
-      "permission_allowlist",
-      "permission_denied_hint",
-      "credits_valid_months",
-      "version",
+      "permissionAllowlist",
+      "permissionDeniedHint",
+      "creditsValidMonths",
     ]) {
-      expect(standaloneSql, `缺列 ${column}`).toContain(`\`${column}\``);
+      expect(seedMigration, `缺键 ${key}`).toContain(`'${key}'`);
     }
   });
 
-  it("★ 种子行就是 PRD §7.1 的默认配置，且**只种一行**", () => {
-    expect(standaloneSql).toMatch(
-      /\(1,\s*600,\s*499995,\s*600,\s*15,\s*15,\s*1,\s*'all',\s*NULL,\s*'',\s*24,\s*0\)/,
+  it("★ 明文行：is_secret 固定 0；版本重置为 0（用户确认）", () => {
+    expect(seedMigration).toMatch(/`is_secret`/);
+    expect(seedMigration).toMatch(
+      /0,\n\s*`gmt_create`,\n\s*`gmt_modified`,\n\s*0\nFROM `recharge_custom_config`/,
     );
-    expect(standaloneSql).toContain("初始值");
   });
 
-  it("★ 默认那组数能被每元积分数整除（PRD §7.1「需能被换算比例整除」）", () => {
-    expect(600 % 15).toBe(0);
-    expect(499_995 % 15).toBe(0);
-    expect(600 % 15).toBe(0);
-    expect((499_995 - 600) % 15).toBe(0);
-    expect((600 - 600) % 15).toBe(0);
-  });
-
-  it("★ 权限列与档位**同一套枚举**（PRD §10.3「与固定积分卡一致」）", () => {
-    expect(standaloneSql).toMatch(/`permission`\s+VARCHAR\(16\)\s+NOT NULL DEFAULT 'all'/);
-    expect(standaloneSql).toContain("member_tier");
-    expect(standaloneSql).toMatch(/`permission_allowlist`\s+JSON\s+NULL/);
-  });
-
-  it("★ `recharge_orders.tier_id` 改成**可空**：自定义充值没有档位", () => {
-    expect(standaloneSql).toMatch(
-      /MODIFY COLUMN `tier_id` BIGINT NULL/,
+  it("★ 幂等不覆盖：键已存在时不做任何字段回写", () => {
+    expect(seedMigration).toMatch(
+      /ON DUPLICATE KEY UPDATE\s*\n\s*`setting_key` = 'rechargeCustom'/,
     );
-    expect(standaloneSql).toContain("对账");
-    expect(schemaPrisma).toMatch(/tier_id\s+BigInt\?/);
+    expect(seedMigration).not.toContain("setting_value` = VALUES");
   });
 
-  it("★ Prisma 模型与建表语句同源", () => {
-    expect(schemaPrisma).toContain("model recharge_custom_config {");
-    expect(schemaPrisma).toMatch(/id\s+Int\s+@id\b/);
-    expect(schemaPrisma).not.toMatch(/id\s+Int\s+@id\s+@default\(autoincrement\(\)\)[\s\S]{0,200}recharge_custom_config/);
+  it("★ enabled 以 JSON 布尔落库，不是 0/1 或字符串", () => {
+    expect(seedMigration).toContain("CAST('true' AS JSON)");
+    expect(seedMigration).toContain("CAST('false' AS JSON)");
+  });
+});
+
+describe("自定义充值配置迁入 system_settings — 070 drop", () => {
+  it("三轨逐字一致", () => {
+    expect(dropStandalone).toBe(dropMigration);
+    expect(dropSnapshot).toBe(dropMigration);
   });
 
-  it("★ 订单快照里「有效期」这一列的口径改了：自定义充值单会写入非空值", () => {
-    expect(schemaPrisma).toContain("credits_expire_at");
+  it("可执行正文只有 SET NAMES + 一条 DROP TABLE", () => {
+    const statements = statementsOf(dropMigration);
+    expect(statements).toHaveLength(2);
+    expect(statements[0]).toBe("SET NAMES utf8mb4");
+    expect(statements[1]).toBe("DROP TABLE IF EXISTS `recharge_custom_config`");
+  });
+});
+
+describe("schema.prisma 与全仓残留", () => {
+  it("Prisma 模型已删除，system_settings 仍在", () => {
+    expect(schemaPrisma).not.toMatch(/\bmodel\s+recharge_custom_config\s*\{/);
+    expect(schemaPrisma).toMatch(/\bmodel\s+system_settings\s*\{/);
+    expect(schemaPrisma).toMatch(/setting_key\s+String\s+@id/);
+  });
+
+  it("★ backend / web/src 源码里不再引用旧表", () => {
+    const roots = [join(REPO_ROOT, "backend"), join(REPO_ROOT, "web/src")];
+    const offenders = roots
+      .flatMap((root) => collectSourceFiles(root))
+      .filter((file) => file !== SELF)
+      .filter((file) => /\brecharge_custom_config\b/.test(readFileSync(file, "utf8")))
+      .map((file) => relative(REPO_ROOT, file))
+      .sort();
+
+    expect(offenders).toEqual([]);
   });
 });

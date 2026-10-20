@@ -2,6 +2,7 @@ import { Injectable } from "@nestjs/common";
 import { NewApiError } from "@lib/core";
 import {
   createRechargeCustomConfigRepo,
+  RechargeCustomConfigConflictError,
   type RechargeCustomConfigRepo,
   type RechargeCustomConfigView,
   type SaveRechargeCustomConfigInput,
@@ -30,7 +31,7 @@ export class RechargeCustomService {
     const config = await this.repo.get();
     if (!config) {
       throw new NewApiError(
-        "自定义充值配置缺失：该环境未初始化 recharge_custom_config",
+        "自定义充值配置缺失：该环境未初始化 system_settings.rechargeCustom（或内容已损坏）",
         503,
         "recharge_custom_unconfigured",
       );
@@ -39,19 +40,26 @@ export class RechargeCustomService {
   }
 
   async saveConfig(input: SaveRechargeCustomConfigInput): Promise<RechargeCustomConfigView> {
-    const current = await this.requireConfig();
-    const next = {
-      minCredits: input.minCredits ?? current.minCredits,
-      maxCredits: input.maxCredits ?? current.maxCredits,
-      defaultCredits: input.defaultCredits ?? current.defaultCredits,
-      creditsPerYuan: input.creditsPerYuan ?? current.creditsPerYuan,
-      stepCredits: input.stepCredits ?? current.stepCredits,
-    };
-    const invalid = validateCustomConfig(next);
-    if (invalid) {
-      throw new NewApiError(invalid, 400);
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const current = await this.requireConfig();
+      const next = {
+        minCredits: input.minCredits ?? current.minCredits,
+        maxCredits: input.maxCredits ?? current.maxCredits,
+        defaultCredits: input.defaultCredits ?? current.defaultCredits,
+        creditsPerYuan: input.creditsPerYuan ?? current.creditsPerYuan,
+        stepCredits: input.stepCredits ?? current.stepCredits,
+      };
+      const invalid = validateCustomConfig(next);
+      if (invalid) {
+        throw new NewApiError(invalid, 400);
+      }
+      try {
+        return await this.repo.save(input, current.version);
+      } catch (error) {
+        if (!(error instanceof RechargeCustomConfigConflictError)) throw error;
+      }
     }
-    return this.repo.save(input);
+    throw new NewApiError("自定义充值配置已被其他管理员修改，请刷新后重试", 409);
   }
 
   async buildOffer(userId: number | null): Promise<CustomRechargeOffer> {

@@ -83,7 +83,7 @@ describe("RechargeService — 自定义充值下单（模块 B，PRD §7）", ()
   it("★ 取整以积分为准：价格四舍五入到分，到账积分仍是用户要的那个整数", async () => {
     makeHttp();
     const { service, orders, setCustomConfig } = await makeService();
-    setCustomConfig({ min_credits: BigInt(1), default_credits: BigInt(1), step_credits: BigInt(1) });
+    setCustomConfig({ minCredits: 1, defaultCredits: 1, stepCredits: 1 });
 
     const created = await service.createOrder({ userId: 9001, credits: 601 });
 
@@ -132,7 +132,7 @@ describe("RechargeService — 自定义充值下单（模块 B，PRD §7）", ()
   it("★ 自定义充值停用（enabled=0）→ 拒绝下单", async () => {
     makeHttp();
     const { service, orders, setCustomConfig } = await makeService();
-    setCustomConfig({ enabled: 0 });
+    setCustomConfig({ enabled: false });
 
     await expect(service.createOrder({ userId: 9001, credits: 600 })).rejects.toThrow(
       /暂未开放/,
@@ -145,8 +145,8 @@ describe("RechargeService — 自定义充值下单（模块 B，PRD §7）", ()
     const { service, orders, setCustomConfig } = await makeService();
     setCustomConfig({
       permission: "user_group",
-      permission_allowlist: ["9001"],
-      permission_denied_hint: "该活动仅限内测用户",
+      permissionAllowlist: ["9001"],
+      permissionDeniedHint: "该活动仅限内测用户",
     });
 
     await expect(service.createOrder({ userId: 7007, credits: 600 })).rejects.toThrow(
@@ -161,7 +161,7 @@ describe("RechargeService — 自定义充值下单（模块 B，PRD §7）", ()
   it("★ 没配提示文案时用默认文案（不能把空串当提示展示）", async () => {
     makeHttp();
     const { service, setCustomConfig } = await makeService();
-    setCustomConfig({ permission: "user_group", permission_allowlist: [] });
+    setCustomConfig({ permission: "user_group", permissionAllowlist: [] });
 
     await expect(service.createOrder({ userId: 9001, credits: 600 })).rejects.toThrow(
       /暂不可购买自定义充值/,
@@ -171,7 +171,7 @@ describe("RechargeService — 自定义充值下单（模块 B，PRD §7）", ()
   it("★ member_tier 权限本阶段**只是占位**：不拦人（PRD §10.4 阶段 2 生效）", async () => {
     makeHttp();
     const { service, setCustomConfig } = await makeService();
-    setCustomConfig({ permission: "member_tier", permission_allowlist: null });
+    setCustomConfig({ permission: "member_tier", permissionAllowlist: null });
 
     const created = await service.createOrder({ userId: 9001, credits: 600 });
     expect(created.credits).toBe(600);
@@ -183,7 +183,7 @@ describe("RechargeService — 自定义充值下单（模块 B，PRD §7）", ()
 
     const before = await service.createOrder({ userId: 9001, credits: 600 });
     orders.get(before.tradeNo)!.status = "paid";
-    setCustomConfig({ credits_per_yuan: 5 });
+    setCustomConfig({ creditsPerYuan: 5 });
     const after = await service.createOrder({ userId: 9001, credits: 600 });
 
     expect(orders.get(before.tradeNo)?.amount_fen).toBe(4_000n);
@@ -259,7 +259,7 @@ describe("RechargeService — 自定义充值下单（模块 B，PRD §7）", ()
   it("★ 自定义充值的有效期也真的生效：按支付成功时刻 + 配置月数算，与档位单同一条口径", async () => {
     const http = makeHttp();
     const { service, orders, setCustomConfig } = await makeService();
-    setCustomConfig({ credits_valid_months: 6 });
+    setCustomConfig({ creditsValidMonths: 6 });
     const created = await service.createOrder({ userId: 9001, credits: 600 });
 
     await service.handleNotify(

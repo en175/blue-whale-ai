@@ -48,7 +48,7 @@ export function validateCustomConfig(next: CustomConfigNumbers): string | null {
     ["每元积分数", creditsPerYuan],
     ["积分步长", stepCredits],
   ] as const) {
-    if (!Number.isInteger(value) || value < 1) {
+    if (!Number.isSafeInteger(value) || value < 1) {
       return `${label}须为 1 以上的整数`;
     }
   }

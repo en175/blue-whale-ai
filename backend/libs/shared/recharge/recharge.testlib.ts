@@ -1,5 +1,8 @@
 import { vi } from "vitest";
-import type { TopupTierPermission } from "@lib/shared/persistence/index.js";
+import {
+  RECHARGE_CUSTOM_SETTING_KEY,
+  type TopupTierPermission,
+} from "@lib/shared/persistence/index.js";
 import { SystemSettingsService } from "@lib/shared/system-settings/index.js";
 import { stubTierRepo } from "@lib/shared/topup-tier/topup-tier.testlib.js";
 import { RechargeCustomService } from "@lib/shared/recharge-custom/recharge-custom.service.js";
@@ -14,7 +17,6 @@ export type Row = Record<string, unknown>;
 export function makePrisma() {
   const orders = new Map<string, Row>();
   const settings = new Map<string, Row>();
-  const customConfig = new Map<number, Row>();
   const statusWrites: string[] = [];
 
   const matches = (row: Row, where: Row): boolean => {
@@ -142,39 +144,42 @@ export function makePrisma() {
         else settings.set(key, { ...create });
         return settings.get(key);
       },
-    },
-    recharge_custom_config: {
-      findUnique: async ({ where }: { where: Row }) =>
-        customConfig.get(Number(where.id)) ?? null,
-      upsert: async ({ where, create, update }: { where: Row; create: Row; update: Row }) => {
-        const id = Number(where.id);
-        const existing = customConfig.get(id);
-        if (existing) apply(existing, update);
-        else customConfig.set(id, { ...create });
-        return customConfig.get(id);
+      updateMany: async ({ where, data }: { where: Row; data: Row }) => {
+        const key = String(where.setting_key);
+        const existing = settings.get(key);
+        if (!existing) return { count: 0 };
+        if (where.version !== undefined && existing.version !== where.version) {
+          return { count: 0 };
+        }
+        apply(existing, data);
+        return { count: 1 };
       },
     },
   };
-  return { prisma, orders, statusWrites, customConfig };
+  return { prisma, orders, statusWrites, settings };
 }
 
 export function defaultCustomConfigRow(overrides: Row = {}): Row {
-  return {
-    id: 1,
-    min_credits: BigInt(600),
-    max_credits: BigInt(499_995),
-    default_credits: BigInt(600),
-    credits_per_yuan: 15,
-    step_credits: BigInt(15),
-    enabled: 1,
+  const config = {
+    minCredits: 600,
+    maxCredits: 499_995,
+    defaultCredits: 600,
+    creditsPerYuan: 15,
+    stepCredits: 15,
+    enabled: true,
     permission: "all",
-    permission_allowlist: null,
-    permission_denied_hint: "",
-    credits_valid_months: 24,
+    permissionAllowlist: null,
+    permissionDeniedHint: "",
+    creditsValidMonths: 24,
+    ...overrides,
+  };
+  return {
+    setting_key: RECHARGE_CUSTOM_SETTING_KEY,
+    setting_value: JSON.stringify(config),
+    is_secret: false,
     version: 5,
     gmt_create: new Date("2026-09-27T00:00:00.000Z"),
     gmt_modified: new Date("2026-09-27T00:00:00.000Z"),
-    ...overrides,
   };
 }
 
@@ -290,8 +295,8 @@ export type Tier = typeof TIER;
 export async function makeService(
   options: { grantRetryWindowMs?: number } = {},
 ) {
-  const { prisma, orders, statusWrites, customConfig } = makePrisma();
-  customConfig.set(1, defaultCustomConfigRow());
+  const { prisma, orders, statusWrites, settings: settingRows } = makePrisma();
+  settingRows.set(RECHARGE_CUSTOM_SETTING_KEY, defaultCustomConfigRow());
   const settings = new SystemSettingsService({ client: prisma } as never);
   await settings.update({
     credentials: {
@@ -321,7 +326,12 @@ export async function makeService(
     statusWrites,
     prisma,
     setCustomConfig: (patch: Row) => {
-      customConfig.set(1, { ...(customConfig.get(1) ?? defaultCustomConfigRow()), ...patch });
+      const row = settingRows.get(RECHARGE_CUSTOM_SETTING_KEY) ?? defaultCustomConfigRow();
+      const current = JSON.parse(String(row.setting_value)) as Row;
+      settingRows.set(RECHARGE_CUSTOM_SETTING_KEY, {
+        ...row,
+        setting_value: JSON.stringify({ ...current, ...patch }),
+      });
     },
     addTier: (t: Tier) => {
       tiersById.set(t.id, { ...t });
