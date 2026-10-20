@@ -49,6 +49,7 @@ function makeService(overrides: {
       project as never,
       assets as never,
       storage as never,
+      { jobBilling: async () => undefined, release: async () => {} } as never,
     ),
     create,
     costCreate,

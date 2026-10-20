@@ -90,7 +90,7 @@ function makeService(overrides: {
     },
   };
   return {
-    service: new ImageErasuresService(prisma as never, project as never, assets as never),
+    service: new ImageErasuresService(prisma as never, project as never, assets as never, { jobBilling: async () => undefined, release: async () => {} } as never),
     create,
     costCreate,
     assets,

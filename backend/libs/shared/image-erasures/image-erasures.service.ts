@@ -1,7 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import {
   FAILURE_CODE,
-  IDEMPOTENCY_CONFLICT_CODE,
   IMAGE_ERASE_INPUT_FORMATS,
   IMAGE_ERASE_INPUT_KEYS,
   IMAGE_ERASE_JOB_TYPE,
@@ -14,15 +13,15 @@ import {
   RESOURCE_NOT_FOUND_CODE,
   fail,
   imageEraseInputSchema,
-  ok,
   type ImageEraseInput,
 } from "@lib/contracts";
-import { createGenerationCommandRepo } from "@lib/shared/persistence/index.js";
 import {
-  createMediaToolJobWithRecovery,
   replayAcceptedMediaTool,
   stripCanvasBinding,
 } from "@lib/shared/generation/media-tool-recovery.js";
+import { enqueueImageEraseJob } from "@lib/shared/generation/generation-queue.js";
+import { submitMediaToolJob } from "@lib/shared/media-tools/media-tool-submission.js";
+import { MediaToolBillingService } from "@lib/shared/media-tool-pricing/media-tool-billing.service.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";
 import { AssetService } from "@lib/shared/assets/assets.service.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
@@ -74,6 +73,7 @@ export class ImageErasuresService {
     private readonly prisma: PrismaService,
     private readonly project: ProjectService,
     private readonly assets: AssetService,
+    private readonly billing: MediaToolBillingService,
   ) {}
 
   async create(
@@ -158,10 +158,15 @@ export class ImageErasuresService {
 
     const frozenInput: ImageEraseInput = { ...input };
 
-    const outcome = await createMediaToolJobWithRecovery(
-      this.prisma.client,
+    return submitMediaToolJob({
+      prisma: this.prisma.client,
+      billing: this.billing,
+      toolType: IMAGE_ERASE_JOB_TYPE,
+      userId,
+      projectId,
+      input: frozenInput,
       recovery,
-      async (db) => {
+      createJob: async (db) => {
         const job = await db.generation_jobs.create({
           data: {
             user_id: BigInt(userId),
@@ -176,29 +181,7 @@ export class ImageErasuresService {
         });
         return { jobId: job.id.toString(), status: "queued" };
       },
-    );
-    if (outcome.kind === "envelope") return outcome.envelope;
-    if (outcome.kind === "idempotency_conflict") {
-      return fail(IDEMPOTENCY_CONFLICT_CODE, "幂等键冲突：同键异载荷");
-    }
-    return ok({
-      job_id: outcome.jobId,
-      status: outcome.status,
-      ...(outcome.bindingView ? { canvas_binding: outcome.bindingView } : {}),
+      enqueue: enqueueImageEraseJob,
     });
-  }
-
-  async markFailed(
-    jobId: string,
-    code: string,
-    message: string,
-    details?: Record<string, unknown>,
-  ): Promise<void> {
-    await createGenerationCommandRepo(this.prisma.client).markFailedQueued(
-      jobId,
-      code,
-      message,
-      details,
-    );
   }
 }

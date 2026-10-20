@@ -15,6 +15,7 @@ function makeService(overrides: {
   project?: unknown;
   assets?: unknown;
   createJob?: unknown;
+  billing?: unknown;
 } = {}) {
   const project = overrides.project ?? { findOwnedById: vi.fn().mockResolvedValue({ id: 55n }) };
   const assets =
@@ -29,11 +30,27 @@ function makeService(overrides: {
     },
   };
   return {
-    service: new ImageEnhancementsService(prisma as never, project as never, assets as never),
+    service: new ImageEnhancementsService(prisma as never, project as never, assets as never, (overrides.billing ?? { jobBilling: async () => undefined, release: async () => {} }) as never),
     create,
     costCreate,
   };
 }
+
+describe("ImageEnhancementsService.create：计费输入", () => {
+  it("把 multiple 原样交给工具计价（2/4/6 档位由价目表决定）", async () => {
+    const jobBilling = vi.fn().mockResolvedValue(undefined);
+    const { service } = makeService({
+      billing: { jobBilling, release: vi.fn() },
+    });
+    const result = await service.create("9", "55", { ...VALID_BODY, multiple: 4 });
+    expect(result.code).toBe(200);
+    expect(jobBilling).toHaveBeenCalledWith(
+      "image_enhance",
+      "9",
+      expect.objectContaining({ multiple: 4 }),
+    );
+  });
+});
 
 describe("ImageEnhancementsService.create：契约 schema 复核", () => {
   it("rejects a missing source_asset_id", async () => {

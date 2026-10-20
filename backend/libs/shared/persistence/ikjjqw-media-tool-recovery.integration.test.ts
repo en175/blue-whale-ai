@@ -53,7 +53,7 @@ function assetOf(kind: "image" | "video" | "audio") {
 
 const TOOLS = [
   { name: "擦除", op: "image_erase.create", path: "/image-erasures", kind: "image" as const,
-    make: (c: unknown) => new ImageErasuresService({ client: c } as never, { findOwnedById: async () => ({ id: 1n }) } as never, { findOwnedSource: async () => assetOf("image") } as never),
+    make: (c: unknown) => new ImageErasuresService({ client: c } as never, { findOwnedById: async () => ({ id: 1n }) } as never, { findOwnedSource: async () => assetOf("image") } as never, { jobBilling: async () => undefined, release: async () => {} } as never),
     body: () => ({ source_asset_id: "88", target_node_id: "node-1", erase_scene: "full_screen_text_erase" }) },
   { name: "去字幕", op: "video_subtitle_erase.create", path: "/video-subtitle-erasures", kind: "video" as const,
     make: (c: unknown) => new VideoSubtitleErasuresService({ client: c } as never, { findOwnedById: async () => ({ id: 1n }) } as never, { findOwnedSource: async () => assetOf("video") } as never),
@@ -75,10 +75,10 @@ const TOOLS = [
     make: (c: unknown) => new ImageCutoutsService({ client: c } as never, { findOwnedById: async () => ({ id: 1n }) } as never, { findOwnedSource: async () => assetOf("image") } as never, { jobBilling: async () => undefined, release: async () => {} } as never),
     body: () => ({ source_asset_id: "88", target_node_id: "node-1", cutout_scene: "general" }) },
   { name: "扩图", op: "image_outpaint.create", path: "/image-outpaints", kind: "image" as const,
-    make: (c: unknown) => new ImageOutpaintsService({ client: c } as never, { findOwnedById: async () => ({ id: 1n }) } as never, { findOwnedSource: async () => assetOf("image") } as never, { uploads: null } as unknown as AssetStorageService),
+    make: (c: unknown) => new ImageOutpaintsService({ client: c } as never, { findOwnedById: async () => ({ id: 1n }) } as never, { findOwnedSource: async () => assetOf("image") } as never, { uploads: null } as unknown as AssetStorageService, { jobBilling: async () => undefined, release: async () => {} } as never),
     body: () => ({ source_asset_id: "88", target_node_id: "node-1", expand_top: 0.1, expand_bottom: 0, expand_left: 0, expand_right: 0 }) },
   { name: "图像高清", op: "image_enhance.create", path: "/image-enhancements", kind: "image" as const,
-    make: (c: unknown) => new ImageEnhancementsService({ client: c } as never, { findOwnedById: async () => ({ id: 1n }) } as never, { findOwnedSource: async () => assetOf("image") } as never),
+    make: (c: unknown) => new ImageEnhancementsService({ client: c } as never, { findOwnedById: async () => ({ id: 1n }) } as never, { findOwnedSource: async () => assetOf("image") } as never, { jobBilling: async () => undefined, release: async () => {} } as never),
     body: () => ({ source_asset_id: "88", target_node_id: "node-1", version_tier: "pro", multiple: 2, generative_enhance_mode: "generative_first", enable_correct_color: false }) },
   { name: "视频 HD", op: "video_enhance.create", path: "/video-enhancements", kind: "video" as const,
     make: (c: unknown) => new VideoEnhancementsService({ client: c } as never, { findOwnedById: async () => ({ id: 1n }) } as never, { findOwnedSource: async () => assetOf("video") } as never),
