@@ -103,6 +103,7 @@ const runtimeMock = vi.hoisted(() => {
       cancel: vi.fn(() => true),
       remove: vi.fn(() => true),
       recover: vi.fn(async () => {}),
+      isRecoverySettled: vi.fn(() => true),
       resumeFromHydration: vi.fn(),
       statusOf: vi.fn(() => null),
       bindingRevisionOf: vi.fn(() => 0),

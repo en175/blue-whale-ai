@@ -175,6 +175,69 @@ describe('多结果家族：成功判定与恢复规划', () => {
     ]);
   });
 
+  it('planRecovery：present 且画布已有匹配标记与素材不再回填；明确软删项不进入投影，全删即不动作', () => {
+    const segmentId = (index: number) => `generation-result:${SUBMISSION}:segment:${index}`;
+    const succeeded = {
+      job_id: 'sj1', type: 'video_scene_split', status: 'succeeded', progress: 100,
+      output_asset_ids: ['11', '12'], stored_error: null, created_at: '2026-10-01T00:00:00Z',
+    };
+    const targetItem = { recovery_item_id: `gcr:${SUBMISSION}:$target`, output_key: '$target', node_id: 'ph-1',
+      state: 'present' as const, revision: 2, node_binding_revision: 1, asset_id: null, slot_id: null };
+    const outputItem = (index: number, assetId: string, assetDeleted: boolean | null = null) => ({
+      recovery_item_id: `gcr:${SUBMISSION}:segment:${index}`, output_key: `segment:${index}`,
+      node_id: segmentId(index), state: 'present' as const, revision: 1, node_binding_revision: 1,
+      asset_id: assetId, asset_deleted: assetDeleted, slot_id: null,
+    });
+    const host = (nodes: Record<string, Record<string, unknown>>) => {
+      const fake = createFakeHost();
+      for (const [id, data] of Object.entries(nodes)) {
+        fake.nodes.set(id, { id, type: 'mediaNode', position: { x: 0, y: 0 }, data });
+      }
+      return fake.host;
+    };
+    const marker = (index: number) => ({ generationRecovery: {
+      protocolVersion: 1, submissionId: SUBMISSION, outputKey: `segment:${index}` } });
+
+    expect(sceneSplitTask.planRecovery!(record({ job: succeeded, items: [targetItem, outputItem(1, '11')] }),
+      host({ 'ph-1': {}, [segmentId(1)]: { ...marker(1), assetId: '11' } }))).toEqual({ kind: 'none' });
+
+    expect(sceneSplitTask.planRecovery!(record({ job: succeeded, items: [targetItem, outputItem(1, '8127', true)] }),
+      host({ 'ph-1': {} }))).toEqual({ kind: 'none' });
+
+    const mixed = sceneSplitTask.planRecovery!(record({ job: succeeded,
+      items: [targetItem, outputItem(1, '8127', true), outputItem(2, '12')] }), host({ 'ph-1': {} }));
+    expect(mixed).toMatchObject({ kind: 'apply-outputs' });
+    if (mixed.kind !== 'apply-outputs') return;
+    expect(mixed.projection.outputs).toEqual([
+      { outputKey: 'segment:2', nodeId: segmentId(2), assetId: '12', url: '', mediaType: 'video' },
+    ]);
+  });
+
+  it('planRecovery：标记一致但卡片素材与可信值不同 → 仍按可信值回填（不误判已落地）', () => {
+    const segmentId = `generation-result:${SUBMISSION}:segment:1`;
+    const succeeded = {
+      job_id: 'sj1', type: 'video_scene_split', status: 'succeeded', progress: 100,
+      output_asset_ids: ['8215'], stored_error: null, created_at: '2026-10-01T00:00:00Z',
+    };
+    const fake = createFakeHost();
+    fake.nodes.set('ph-1', { id: 'ph-1', type: 'mediaNode', position: { x: 0, y: 0 }, data: {} });
+    fake.nodes.set(segmentId, { id: segmentId, type: 'mediaNode', position: { x: 0, y: 0 }, data: {
+      assetId: '9999',
+      generationRecovery: { protocolVersion: 1, submissionId: SUBMISSION, outputKey: 'segment:1' },
+    } });
+    const plan = sceneSplitTask.planRecovery!(record({ job: succeeded, items: [
+      { recovery_item_id: `gcr:${SUBMISSION}:$target`, output_key: '$target', node_id: 'ph-1',
+        state: 'present', revision: 2, node_binding_revision: 1, asset_id: null, slot_id: null },
+      { recovery_item_id: `gcr:${SUBMISSION}:segment:1`, output_key: 'segment:1', node_id: segmentId,
+        state: 'present', revision: 1, node_binding_revision: 1, asset_id: '8215', asset_deleted: false, slot_id: null },
+    ] }), fake.host);
+    expect(plan).toMatchObject({ kind: 'apply-outputs' });
+    if (plan.kind !== 'apply-outputs') return;
+    expect(plan.projection.outputs).toEqual([
+      { outputKey: 'segment:1', nodeId: segmentId, assetId: '8215', url: '', mediaType: 'video' },
+    ]);
+  });
+
   it('planRecovery：失败且卡缺失补失败卡（恢复卡无业务参数，重试提示重新编辑）', () => {
     const plan = sceneSplitTask.planRecovery!(record({
       job: { job_id: 'sj1', type: 'video_scene_split', status: 'failed', progress: 0, output_asset_ids: [], stored_error: { code: 1, msg: '切分失败' }, created_at: '2026-10-01T00:00:00Z' },
@@ -256,6 +319,7 @@ interface FakeHost {
   edges: Array<{ source: string; target: string }>;
   inserts: RuntimeNodeView[];
   removes: string[];
+  toasts: string[];
   saves: number;
 }
 
@@ -264,6 +328,7 @@ function createFakeHost(): FakeHost {
   const edges: Array<{ source: string; target: string }> = [];
   const inserts: RuntimeNodeView[] = [];
   const removes: string[] = [];
+  const toasts: string[] = [];
   const counters = { saves: 0 };
   const loadEpoch = {};
   const host: GenerationRuntimeHost = {
@@ -289,13 +354,13 @@ function createFakeHost(): FakeHost {
     applyTerminal: () => 'terminal',
     settleCancelled: () => {},
     saveCanvas: async () => { counters.saves += 1; return true; },
-    toast: () => {},
+    toast: (kind, message) => { toasts.push(`${kind}:${message}`); },
     openRechargeForCreditsError: () => false,
     addAuthResume: () => {},
     rememberAsset: () => {},
     fetchRecoveryPage: async () => ({ protocol_version: 1, canvas_version: null, records: [], next_cursor: null }),
   };
-  return { host, nodes, edges, inserts, removes, get saves() { return counters.saves; } };
+  return { host, nodes, edges, inserts, removes, toasts, get saves() { return counters.saves; } };
 }
 
 const flushMicrotasks = async (rounds = 16) => {
@@ -660,5 +725,188 @@ describe('多结果家族：运行时集成', () => {
     expect(voice!.position).toEqual({ x: 958, y: 0 });
     expect(music!.position).toEqual({ x: 958, y: 300 });
     expect(fake.removes).toContain('vs-1');
+  });
+
+  it('明确软删的段：恢复零警告、零建卡、零差分，任务卡保持不动', async () => {
+    const fake = createFakeHost();
+    const targetCard: RuntimeNodeView = {
+      id: 'ph-1', type: 'mediaNode', position: { x: 958, y: 0 },
+      data: { fileName: '用户任务卡', mediaType: 'video', sceneSplit: { sourceAssetId: '5', lastInput: {} } },
+    };
+    fake.nodes.set(targetCard.id, targetCard);
+    const page = oneSegmentPage();
+    const record = page.records[0]!;
+    record.items[1]!.asset_id = '8127';
+    record.items[1]!.asset_deleted = true;
+    const runtime = setupRuntime(fake, [oneSegmentDetail()], page);
+    await runtime.recover('p1');
+    await flushMicrotasks(20);
+    expect(fake.toasts).toEqual([]);
+    expect(fake.inserts).toHaveLength(0);
+    expect(fake.removes).toHaveLength(0);
+    expect(fake.nodes.get('ph-1')).toEqual(targetCard);
+    expect(runtime.composeSaveFields()).toBeNull();
+  });
+
+  it('轮询收敛遇明确软删：清掉进行中态、零警告、不建卡也不复活素材', async () => {
+    const fake = createFakeHost();
+    fake.nodes.set('ph-1', { id: 'ph-1', type: 'mediaNode', position: { x: 958, y: 0 },
+      data: { genStatus: 'generating', jobId: 'sj1', mediaType: 'video', fileName: '用户任务卡',
+        sceneSplit: { sourceAssetId: '5', lastInput: {} },
+        generationRecovery: { protocolVersion: 1, submissionId: SUBMISSION, outputKey: '$target' } } });
+    const page = oneSegmentPage();
+    const record = page.records[0]!;
+    record.items[1]!.asset_id = '8127';
+    record.items[1]!.asset_deleted = true;
+    const detail = { job_id: 'sj1', status: 'succeeded', progress: 100, asset: null, output_assets: [], result: null };
+    const runtime = setupRuntime(fake, [detail], page);
+    runtime.resumeFromHydration('ph-1', 'sj1', fake.nodes.get('ph-1')!.data);
+    await flushMicrotasks(30);
+    expect(fake.toasts).toEqual([]);
+    expect(fake.inserts).toHaveLength(0);
+    expect(fake.nodes.get('ph-1')).toMatchObject({ data: {
+      fileName: '用户任务卡', progress: 100, sceneSplit: { sourceAssetId: '5' },
+    } });
+    expect(fake.nodes.get('ph-1')!.data.genStatus).toBeUndefined();
+    expect(runtime.composeSaveFields()).toBeNull();
+  });
+
+  it('部分段明确软删：只按存活可信产物落卡，保留原卡不转换目标，差分不声明已删段', async () => {
+    const fake = createFakeHost();
+    fake.nodes.set('ph-1', { id: 'ph-1', type: 'mediaNode', position: { x: 958, y: 0 },
+      data: { sceneSplit: { sourceAssetId: '5', lastInput: {} } } });
+    const page = twoSegmentPage();
+    const record = page.records[0]!;
+    record.items[1]!.asset_id = '8127';
+    record.items[1]!.asset_deleted = true;
+    const detail = {
+      job_id: 'sj1', status: 'succeeded', progress: 100, asset: null,
+      output_assets: [{ id: 'a2', url: 'http://t/2.mp4', type: 'video' }],
+      result: { duration: 30, segments: [
+        { segment_index: 1, start_time: 0, end_time: 15, segment_asset_id: '8127' },
+        { segment_index: 2, start_time: 15, end_time: 30, segment_asset_id: 'a2' },
+      ] },
+    };
+    const runtime = setupRuntime(fake, [detail], page);
+    await runtime.recover('p1');
+    await flushMicrotasks(20);
+    expect(fake.toasts).toEqual([]);
+    expect(fake.nodes.get(`generation-result:${SUBMISSION}:segment:2`)).toMatchObject({
+      data: { assetId: 'a2', src: 'http://t/2.mp4' },
+    });
+    expect(fake.nodes.has(`generation-result:${SUBMISSION}:segment:1`)).toBe(false);
+    expect(fake.removes).not.toContain('ph-1');
+    expect(fake.nodes.get('ph-1')).toMatchObject({ data: { progress: 100, sceneSplit: { sourceAssetId: '5' } } });
+    expect(fake.nodes.get('ph-1')!.data.genStatus).toBeUndefined();
+    expect(runtime.composeSaveFields()!.recoveryChanges).toEqual([
+      { recoveryItemId: `gcr:${SUBMISSION}:segment:2`, expectedRevision: 0, action: 'apply' },
+    ]);
+  });
+
+  it('已持久化的软删段卡：扫描不自动删卡，显式删除生成合法 remove 且不动存活段', async () => {
+    const fake = createFakeHost();
+    const page = twoSegmentPage();
+    const record = page.records[0]!;
+    record.items[0]!.state = 'replaced';
+    record.items[1]!.state = 'present';
+    record.items[1]!.revision = 1;
+    record.items[1]!.asset_deleted = true;
+    record.items[2]!.state = 'present';
+    record.items[2]!.revision = 1;
+    const card = (key: string, assetId: string): RuntimeNodeView => ({
+      id: `generation-result:${SUBMISSION}:${key}`, type: 'mediaNode', position: { x: 958, y: 0 },
+      data: { assetId, src: `http://t/${assetId}.mp4`, mediaType: 'video',
+        generationRecovery: { protocolVersion: 1, submissionId: SUBMISSION, outputKey: key } },
+    });
+    fake.nodes.set(`generation-result:${SUBMISSION}:segment:1`, card('segment:1', 'a1'));
+    fake.nodes.set(`generation-result:${SUBMISSION}:segment:2`, card('segment:2', 'a2'));
+    fake.nodes.set('ph-1', { id: 'ph-1', type: 'mediaNode', position: { x: 958, y: 0 },
+      data: { sceneSplit: { sourceAssetId: '5', lastInput: {} },
+        generationRecovery: { protocolVersion: 1, submissionId: SUBMISSION, outputKey: '$target' } } });
+    const runtime = setupRuntime(fake, [twoSegmentDetail()], page);
+
+    await runtime.recover('p1');
+    await flushMicrotasks(20);
+    expect(fake.toasts).toEqual([]);
+    expect(fake.removes).toEqual([]);
+    expect(runtime.composeSaveFields()).toBeNull();
+
+    expect(runtime.remove(`generation-result:${SUBMISSION}:segment:1`)).toBe(true);
+    expect(runtime.composeSaveFields()!.recoveryChanges).toEqual([
+      { recoveryItemId: `gcr:${SUBMISSION}:segment:1`, expectedRevision: 1, action: 'remove' },
+    ]);
+  });
+
+  it('人声分离：已持久化的软删轨卡同样只能由显式删除生成 remove', async () => {
+    const fake = createFakeHost();
+    const card = (track: string, assetId: string): RuntimeNodeView => ({
+      id: `generation-result:${SUBMISSION}:track:${track}`, type: 'mediaNode', position: { x: 958, y: 0 },
+      data: { assetId, src: `http://t/${assetId}.flac`, mediaType: 'audio',
+        generationRecovery: { protocolVersion: 1, submissionId: SUBMISSION, outputKey: `track:${track}` } },
+    });
+    fake.nodes.set(`generation-result:${SUBMISSION}:track:voice`, card('voice', 't1'));
+    fake.nodes.set(`generation-result:${SUBMISSION}:track:music`, card('music', 't2'));
+    const page: GenerationRecoveryPage = {
+      protocol_version: 1, canvas_version: 1, next_cursor: null,
+      records: [{
+        submission_id: SUBMISSION, target_node_id: 'vs-1', job_id: 'vj1', task_type: 'vocal_split',
+        binding_revision: 1, is_current: true,
+        job: { job_id: 'vj1', type: 'vocal_split', status: 'succeeded', progress: 100, output_asset_ids: ['t1', 't2'], stored_error: null, created_at: '2026-10-01T00:00:00Z' },
+        recovery_seed: { target: { role: 'result-placeholder', x: 958, y: 0, width: 320, height: 320, name: '素材视频(人声背景分离)' }, sources: [] },
+        previous_target_snapshot: null,
+        items: [
+          { recovery_item_id: `gcr:${SUBMISSION}:$target`, output_key: '$target', node_id: 'vs-1', state: 'replaced', revision: 1, node_binding_revision: 1, asset_id: null, slot_id: null },
+          { recovery_item_id: `gcr:${SUBMISSION}:track:voice`, output_key: 'track:voice', node_id: `generation-result:${SUBMISSION}:track:voice`, state: 'present', revision: 1, node_binding_revision: 1, asset_id: 't1', asset_deleted: true, slot_id: null },
+          { recovery_item_id: `gcr:${SUBMISSION}:track:music`, output_key: 'track:music', node_id: `generation-result:${SUBMISSION}:track:music`, state: 'present', revision: 1, node_binding_revision: 1, asset_id: 't2', asset_deleted: false, slot_id: null },
+        ],
+      }],
+    };
+    const runtime = setupRuntime(fake, [{ status: 'succeeded' }], page);
+
+    await runtime.recover('p1');
+    await flushMicrotasks(20);
+    expect(fake.toasts).toEqual([]);
+    expect(fake.removes).toEqual([]);
+    expect(runtime.composeSaveFields()).toBeNull();
+
+    expect(runtime.remove(`generation-result:${SUBMISSION}:track:voice`)).toBe(true);
+    expect(runtime.composeSaveFields()!.recoveryChanges).toEqual([
+      { recoveryItemId: `gcr:${SUBMISSION}:track:voice`, expectedRevision: 1, action: 'remove' },
+    ]);
+  });
+
+  it('已软删但卡缺失或素材身份不符的 present 项：扫描与保存都不声明删除', async () => {
+    const persistedPage = () => {
+      const page = twoSegmentPage();
+      const target = page.records[0]!;
+      target.items[0]!.state = 'replaced';
+      target.items[1]!.state = 'present';
+      target.items[1]!.revision = 1;
+      target.items[1]!.asset_deleted = true;
+      target.items[2]!.state = 'present';
+      target.items[2]!.revision = 1;
+      return page;
+    };
+    const card = (key: string, assetId: string): RuntimeNodeView => ({
+      id: `generation-result:${SUBMISSION}:${key}`, type: 'mediaNode', position: { x: 958, y: 0 },
+      data: { assetId, src: `http://t/${assetId}.mp4`, mediaType: 'video',
+        generationRecovery: { protocolVersion: 1, submissionId: SUBMISSION, outputKey: key } },
+    });
+    for (const build of [
+      (fake: FakeHost) => { fake.nodes.set(`generation-result:${SUBMISSION}:segment:2`, card('segment:2', 'a2')); },
+      (fake: FakeHost) => {
+        fake.nodes.set(`generation-result:${SUBMISSION}:segment:1`, card('segment:1', 'other'));
+        fake.nodes.set(`generation-result:${SUBMISSION}:segment:2`, card('segment:2', 'a2'));
+      },
+    ]) {
+      const fake = createFakeHost();
+      build(fake);
+      const runtime = setupRuntime(fake, [twoSegmentDetail()], persistedPage());
+      await runtime.recover('p1');
+      await flushMicrotasks(20);
+      expect(fake.removes).toEqual([]);
+      expect(fake.toasts).toEqual([]);
+      expect(runtime.composeSaveFields()).toBeNull();
+    }
   });
 });

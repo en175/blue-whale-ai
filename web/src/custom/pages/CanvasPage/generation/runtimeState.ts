@@ -23,6 +23,11 @@ export interface GenerationRuntimeDeps {
   newId?: () => string;
 }
 
+export interface RemovedOutput {
+  marker: GenerationRecoveryMarker;
+  assetId: string | null;
+}
+
 export interface ActiveExecution {
   round: string;
   projectId: string;
@@ -57,6 +62,8 @@ export interface RuntimeContext {
   intents: Map<string, ExplicitIntent>;
   nodeBindings: Map<string, number>;
   boundJobIds: Set<string>;
+  removedOutputs: Map<string, RemovedOutput>;
+  noteRemovedOutput: (nodeId: string, nodeData: Record<string, unknown> | undefined) => void;
   deleting: Set<string>;
   retryAttempts: Map<string, { jobId: string; key: string; bound: boolean; binding: CanvasBinding | null }>;
   retryInFlight: Set<string>;
@@ -92,6 +99,15 @@ export function createContext(host: GenerationRuntimeHost, deps: GenerationRunti
   const intents = new Map<string, ExplicitIntent>();
   const nodeBindings = new Map<string, number>();
   const boundJobIds = new Set<string>();
+  const removedOutputs = new Map<string, RemovedOutput>();
+  const noteRemovedOutput = (nodeId: string, nodeData: Record<string, unknown> | undefined) => {
+    const marker = readMarker(nodeData);
+    if (marker == null) return;
+    removedOutputs.set(nodeId, {
+      marker,
+      assetId: nodeData?.assetId == null ? null : String(nodeData.assetId),
+    });
+  };
   const deleting = new Set<string>();
   const retryAttempts = new Map<string, { jobId: string; key: string; bound: boolean; binding: CanvasBinding | null }>();
   const retryInFlight = new Set<string>();
@@ -162,7 +178,8 @@ export function createContext(host: GenerationRuntimeHost, deps: GenerationRunti
   return {
     host, doFetchJobStatus, doFetchRecoveryPage, doResolveItems, schedule, unschedule, newId,
     defs, active, timers, ledger, reconciledSubmissions, unavailableOutputItems, intents,
-    nodeBindings, boundJobIds, deleting, retryAttempts, retryInFlight, submitAttempts,
+    nodeBindings, boundJobIds, removedOutputs, noteRemovedOutput, deleting, retryAttempts,
+    retryInFlight, submitAttempts,
     nextRound, recoveryItemIdOf, readMarker, defForNode, defForRecord, owns, clearTimer,
     setLedger, adoptBindingView, recoveryReason, adoptConflictBindingRevision, queueSettleIntent,
   };
@@ -176,6 +193,7 @@ export function resetContext(ctx: RuntimeContext) {
   ctx.intents.clear();
   ctx.nodeBindings.clear();
   ctx.boundJobIds.clear();
+  ctx.removedOutputs.clear();
   ctx.reconciledSubmissions.clear();
   ctx.unavailableOutputItems.clear();
   ctx.deleting.clear();

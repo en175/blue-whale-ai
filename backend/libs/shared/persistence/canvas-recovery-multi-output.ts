@@ -78,6 +78,18 @@ export function parseAssetIds(value: unknown): string[] | null {
   return ids;
 }
 
+export function trustedAssetIdOf(
+  projection: Extract<VirtualOutputProjection, { kind: "ok" }>,
+  job: ProjectableJob | null,
+  outputKey: string,
+): string | null {
+  if (outputKey === PRIMARY_OUTPUT_KEY) {
+    const assets = parseAssetIds(job?.output_asset_ids);
+    return assets !== null && assets.length === 1 ? assets[0]! : null;
+  }
+  return projection.items.find(item => item.outputKey === outputKey)?.assetId ?? null;
+}
+
 async function projectSceneSplit(
   tx: SceneSplitTx,
   job: ProjectableJob,

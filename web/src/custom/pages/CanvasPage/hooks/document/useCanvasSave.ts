@@ -149,6 +149,12 @@ export function useCanvasSave(host: CanvasSaveHost) {
     if (failure === undefined || definitiveRejection) retainedRecoverySaveRef.current = null;
   };
 
+  const composeSaveFieldsIfRecoverySettled = (): ReturnType<GenerationRuntime['composeSaveFields']> => {
+    const runtime = generationRuntimeRef.current;
+    if (runtime == null || !runtime.isRecoverySettled()) return null;
+    return runtime.composeSaveFields();
+  };
+
   const planRecoverySave = (
     projectId: string,
     signature: string,
@@ -169,7 +175,7 @@ export function useCanvasSave(host: CanvasSaveHost) {
       };
     }
     if (retained != null) retainedRecoverySaveRef.current = null;
-    const recoveryFields = generationRuntimeRef.current?.composeSaveFields() ?? null;
+    const recoveryFields = composeSaveFieldsIfRecoverySettled();
     if (recoveryFields != null) {
       retainedRecoverySaveRef.current = {
         projectId, commandId: recoveryFields.commandId, recoveryChanges: recoveryFields.recoveryChanges,
@@ -222,7 +228,20 @@ export function useCanvasSave(host: CanvasSaveHost) {
     return false;
   };
 
-  const flushCanvasSave = (projectId: string): Promise<boolean> => {
+  const retrySaveAfterRecovery = (projectId: string): void => {
+    const runtime = generationRuntimeRef.current;
+    if (runtime == null) return;
+    void runtime.recover(projectId).then(() => {
+      if (activeProjectRef.current !== projectId) return;
+      if (composeSaveFieldsIfRecoverySettled() == null) return;
+      void flushCanvasSave(projectId, { suppressRecoveryRetry: true }).catch(() => {});
+    });
+  };
+
+  const flushCanvasSave = (
+    projectId: string,
+    options: { suppressRecoveryRetry?: boolean } = {},
+  ): Promise<boolean> => {
     const runFlush = async (): Promise<boolean> => {
       if (activeProjectRef.current !== projectId) return false;
       if (hydratedProjectRef.current === null) return false;
@@ -280,7 +299,7 @@ export function useCanvasSave(host: CanvasSaveHost) {
             throw error;
           }
           if (!recoveryFields && readRecoveryErrorReason(error) === 'recovery_protocol_required') {
-            void generationRuntimeRef.current?.recover(projectId);
+            if (!options.suppressRecoveryRetry) retrySaveAfterRecovery(projectId);
           }
           const aligned = adoptCanvasConflictVersion(error);
           if (aligned && confirmEmpty) {
@@ -420,7 +439,7 @@ export function useCanvasSave(host: CanvasSaveHost) {
               return;
             }
             if (!recoveryFields && readRecoveryErrorReason(e) === 'recovery_protocol_required') {
-              void generationRuntimeRef.current?.recover(currentId);
+              retrySaveAfterRecovery(currentId);
               setSaveBlocked(true);
               setSaveStatus('error');
               showToast('warn', '画布包含任务恢复保护内容，正在同步状态，请稍后重试保存');

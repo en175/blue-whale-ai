@@ -253,11 +253,13 @@ export function createActions(ctx: RuntimeContext, polling: { poll: (execution: 
     const claimedMarker = readMarker(claimed.node.data);
     if (claimedMarker != null && claimedMarker.outputKey !== TARGET_OUTPUT_KEY) {
       host.markLocallyRemoved(nodeId);
+      ctx.noteRemovedOutput(nodeId, claimed.node.data);
       host.removeMediaNode(nodeId);
       return true;
     }
     const jobIdRaw = claimed.node.data?.jobId;
     if (jobIdRaw == null || !host.getProjectId() || !claimed.def.cancel) {
+      ctx.noteRemovedOutput(nodeId, claimed.node.data);
       host.removeMediaNode(nodeId);
       return true;
     }
@@ -277,6 +279,7 @@ export function createActions(ctx: RuntimeContext, polling: { poll: (execution: 
       if (detail?.status === 'succeeded') { stopWithCompleted(detail); return; }
       if (detail?.status === 'cancelled' || detail?.status === 'failed') {
         host.markLocallyRemoved(nodeId);
+        ctx.noteRemovedOutput(nodeId, claimed.node.data);
         host.removeMediaNode(nodeId);
         finish();
         return;

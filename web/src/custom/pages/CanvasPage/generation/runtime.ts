@@ -25,7 +25,9 @@ export function createGenerationRuntime(host: GenerationRuntimeHost, deps: Gener
     retry: actions.retry,
     cancel: actions.cancel,
     remove: actions.remove,
+    noteRemovedOutput: ctx.noteRemovedOutput,
     recover: recovery.recover,
+    isRecoverySettled: recovery.isRecoverySettled,
     resumeFromHydration: recovery.resumeFromHydration,
     statusOf: (nodeId: string): InFlightTaskState | null => {
       const entry = ctx.active.get(nodeId);

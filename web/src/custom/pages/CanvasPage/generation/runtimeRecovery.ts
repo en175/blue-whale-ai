@@ -1,34 +1,47 @@
 import type { GenerationRecoveryRecord } from '@/custom/api/canvasRecovery';
 import type { JobDetail } from '@/custom/api/jobs';
-import { isJobInFlight, type GenerationTaskDefinition, type RecoveryRecordFacts } from './types';
+import {
+  isJobInFlight, isRecoveryOutputIdentity, isRecoveryOutputOnCanvas, type GenerationTaskDefinition, type RecoveryRecordFacts,
+} from './types';
 import { TARGET_OUTPUT_KEY, type ActiveExecution, type RuntimeContext } from './runtimeState';
 
 export function createRecovery(ctx: RuntimeContext, polling: { poll: (execution: ActiveExecution, jobId: string) => void; fanOutOutputs: (execution: ActiveExecution, submissionId: string, jobId: string, knownDetail?: JobDetail, knownRecord?: GenerationRecoveryRecord) => Promise<void> }) {
   const {
     host, doResolveItems, active, ledger, reconciledSubmissions, nodeBindings, boundJobIds,
-    nextRound, readMarker, defForNode, defForRecord, owns, clearTimer, setLedger,
+    nextRound, readMarker, defForNode, defForRecord, owns, clearTimer, setLedger, removedOutputs,
   } = ctx;
   const { fanOutOutputs } = polling;
 
   let scanningEpoch: object | null = null;
-  const recover = async (projectId: string): Promise<void> => {
+  let scanningRun: Promise<void> | null = null;
+  let failedEpoch: object | null = null;
+  const recover = (projectId: string): Promise<void> => {
     const loadEpoch = host.getLoadEpoch();
-    if (scanningEpoch === loadEpoch) return;
+    const isCurrentCanvasLoad = () => host.getProjectId() === projectId && host.getLoadEpoch() === loadEpoch;
+    if (scanningEpoch === loadEpoch) return scanningRun ?? Promise.resolve();
     scanningEpoch = loadEpoch;
-    try {
-      let cursor: string | null = null;
-      do {
-        const page = await host.fetchRecoveryPage(projectId, { cursor });
-        if (host.getProjectId() !== projectId || host.getLoadEpoch() !== loadEpoch) return;
-        for (const record of page.records) reconcileRecord(record);
-        cursor = page.next_cursor;
-      } while (cursor != null);
-    } catch (e) {
-      console.warn('[generation-runtime] 恢复扫描失败（下轮水合重试）:', e);
-    } finally {
-      if (scanningEpoch === loadEpoch) scanningEpoch = null;
-    }
+    const run = (async () => {
+      try {
+        let cursor: string | null = null;
+        do {
+          const page = await host.fetchRecoveryPage(projectId, { cursor });
+          if (!isCurrentCanvasLoad()) return;
+          for (const record of page.records) reconcileRecord(record);
+          cursor = page.next_cursor;
+        } while (cursor != null);
+        failedEpoch = null;
+      } catch (e) {
+        if (isCurrentCanvasLoad()) failedEpoch = loadEpoch;
+        console.warn('[generation-runtime] 恢复扫描失败（下轮水合重试）:', e);
+      } finally {
+        if (scanningEpoch === loadEpoch) scanningEpoch = null;
+      }
+    })();
+    scanningRun = run;
+    return run;
   };
+
+  const isRecoverySettled = () => scanningEpoch == null && failedEpoch !== host.getLoadEpoch();
 
   const resumeFromRecord = (record: GenerationRecoveryRecord, def?: GenerationTaskDefinition) => {
     resumeFromHydration(record.target_node_id, record.job_id, undefined, {
@@ -47,7 +60,15 @@ export function createRecovery(ctx: RuntimeContext, polling: { poll: (execution:
           || (claiming.submissionId != null && claiming.submissionId !== record.submission_id)))))
       || (nodeBindings.get(record.target_node_id) ?? 0)
         > (targetItem?.node_binding_revision ?? record.binding_revision);
+    const appliedOnCanvas = (item: GenerationRecoveryRecord['items'][number]): boolean =>
+      isRecoveryOutputOnCanvas(record, item, host.findNode(item.node_id));
+    const explicitlyRemoved = (item: GenerationRecoveryRecord['items'][number]): boolean => {
+      const removed = removedOutputs.get(item.node_id);
+      return removed != null && isRecoveryOutputIdentity(record, item, removed.marker, removed.assetId);
+    };
     for (const item of record.items) {
+      if (item.asset_deleted === true
+        && !(item.state === 'present' && (appliedOnCanvas(item) || explicitlyRemoved(item)))) continue;
       setLedger({
         recoveryItemId: item.recovery_item_id,
         submissionId: record.submission_id,
@@ -165,5 +186,5 @@ export function createRecovery(ctx: RuntimeContext, polling: { poll: (execution:
     }
   };
 
-  return { recover, resumeFromHydration, reconcileConflictItems };
+  return { recover, isRecoverySettled, resumeFromHydration, reconcileConflictItems };
 }

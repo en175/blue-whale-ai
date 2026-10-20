@@ -1,0 +1,138 @@
+{
+  "scene3416": {
+    "submission_id": "4d5e6f7a-0000-4000-8000-000000034160",
+    "page": {
+      "records": [
+        {
+          "submission_id": "4d5e6f7a-0000-4000-8000-000000034160",
+          "target_node_id": "review4-scene-target",
+          "job_id": "3416",
+          "task_type": "video_scene_split",
+          "binding_revision": 1,
+          "is_current": true,
+          "job": {
+            "job_id": "3416",
+            "type": "video_scene_split",
+            "status": "succeeded",
+            "progress": 100,
+            "output_asset_ids": ["8215", "8216", "8217", "8218"],
+            "stored_error": null,
+            "created_at": "2026-10-18T10:12:00.000Z"
+          },
+          "recovery_seed": {
+            "target": { "role": "result-placeholder", "x": 958, "y": 0, "width": 320, "height": 320, "name": "场景切分 · 标准" },
+            "sources": [{ "node_id": "review4-source", "x": 100, "y": 200, "width": 480, "height": 854, "name": "源视频" }]
+          },
+          "previous_target_snapshot": null,
+          "items": [
+            { "recovery_item_id": "gcr:4d5e6f7a-0000-4000-8000-000000034160:$target", "output_key": "$target", "node_id": "review4-scene-target", "state": "replaced", "revision": 2, "node_binding_revision": 1, "asset_id": null, "asset_deleted": null, "slot_id": null },
+            { "recovery_item_id": "gcr:4d5e6f7a-0000-4000-8000-000000034160:segment:1", "output_key": "segment:1", "node_id": "generation-result:4d5e6f7a-0000-4000-8000-000000034160:segment:1", "state": "present", "revision": 1, "node_binding_revision": 1, "asset_id": "8215", "asset_deleted": false, "slot_id": null },
+            { "recovery_item_id": "gcr:4d5e6f7a-0000-4000-8000-000000034160:segment:2", "output_key": "segment:2", "node_id": "generation-result:4d5e6f7a-0000-4000-8000-000000034160:segment:2", "state": "present", "revision": 1, "node_binding_revision": 1, "asset_id": "8216", "asset_deleted": false, "slot_id": null },
+            { "recovery_item_id": "gcr:4d5e6f7a-0000-4000-8000-000000034160:segment:3", "output_key": "segment:3", "node_id": "generation-result:4d5e6f7a-0000-4000-8000-000000034160:segment:3", "state": "present", "revision": 1, "node_binding_revision": 1, "asset_id": "8217", "asset_deleted": false, "slot_id": null },
+            { "recovery_item_id": "gcr:4d5e6f7a-0000-4000-8000-000000034160:segment:4", "output_key": "segment:4", "node_id": "generation-result:4d5e6f7a-0000-4000-8000-000000034160:segment:4", "state": "present", "revision": 1, "node_binding_revision": 1, "asset_id": "8218", "asset_deleted": false, "slot_id": null }
+          ]
+        }
+      ],
+      "next_cursor": null
+    },
+    "detail": {
+      "job_id": "3416",
+      "status": "succeeded",
+      "progress": 100,
+      "asset": null,
+      "output_assets": [
+        { "id": "8215", "url": "https://example.test/8215.mp4", "type": "video", "width": 480, "height": 854 },
+        { "id": "8216", "url": "https://example.test/8216.mp4", "type": "video", "width": 480, "height": 854 },
+        { "id": "8217", "url": "https://example.test/8217.mp4", "type": "video", "width": 480, "height": 854 },
+        { "id": "8218", "url": "https://example.test/8218.mp4", "type": "video", "width": 480, "height": 854 }
+      ],
+      "result": {
+        "duration": 30.08,
+        "segments": [
+          { "segment_index": 1, "start_time": 0, "end_time": 2.0416667, "segment_asset_id": "8215" },
+          { "segment_index": 2, "start_time": 2.0416667, "end_time": 3.5, "segment_asset_id": "8216" },
+          { "segment_index": 3, "start_time": 3.5, "end_time": 4.75, "segment_asset_id": "8217" },
+          { "segment_index": 4, "start_time": 4.75, "end_time": 30.041666, "segment_asset_id": "8218" }
+        ]
+      },
+      "text_input_signature": null,
+      "tracks": null,
+      "video_stage": "video",
+      "source_sample_job_id": null,
+      "final_job_id": null,
+      "finalize_deadline_at": null,
+      "charge_state": null,
+      "actual_credits": null
+    },
+    "nodes": [
+      { "id": "review4-source", "type": "mediaNode", "position": { "x": 100, "y": 200 }, "data": { "assetId": "8166", "mediaType": "video", "fileName": "源视频", "width": 480, "height": 854 } },
+      { "id": "generation-result:4d5e6f7a-0000-4000-8000-000000034160:segment:1", "type": "mediaNode", "position": { "x": 1000, "y": 0 }, "data": { "src": "https://example.test/8215.mp4", "assetId": "8215", "mediaType": "video", "fileName": "用户改名第 1 段", "width": 480, "height": 854, "jobId": "3416", "progress": 100, "generationRecovery": { "protocolVersion": 1, "submissionId": "4d5e6f7a-0000-4000-8000-000000034160", "outputKey": "segment:1" } } },
+      { "id": "generation-result:4d5e6f7a-0000-4000-8000-000000034160:segment:2", "type": "mediaNode", "position": { "x": 1260, "y": 0 }, "data": { "src": "https://example.test/8216.mp4", "assetId": "8216", "mediaType": "video", "fileName": "第 2 段 00:02-00:03", "width": 480, "height": 854, "jobId": "3416", "progress": 100, "generationRecovery": { "protocolVersion": 1, "submissionId": "4d5e6f7a-0000-4000-8000-000000034160", "outputKey": "segment:2" } } },
+      { "id": "generation-result:4d5e6f7a-0000-4000-8000-000000034160:segment:3", "type": "mediaNode", "position": { "x": 1500, "y": 700 }, "data": { "src": "https://example.test/8217.mp4", "assetId": "8217", "mediaType": "video", "fileName": "第 3 段 00:03-00:04", "width": 480, "height": 854, "jobId": "3416", "progress": 100, "generationRecovery": { "protocolVersion": 1, "submissionId": "4d5e6f7a-0000-4000-8000-000000034160", "outputKey": "segment:3" } } },
+      { "id": "generation-result:4d5e6f7a-0000-4000-8000-000000034160:segment:4", "type": "mediaNode", "position": { "x": 1780, "y": 0 }, "data": { "src": "https://example.test/8218.mp4", "assetId": "8218", "mediaType": "video", "fileName": "第 4 段 00:04-00:30", "width": 480, "height": 854, "jobId": "3416", "progress": 100, "generationRecovery": { "protocolVersion": 1, "submissionId": "4d5e6f7a-0000-4000-8000-000000034160", "outputKey": "segment:4" } } }
+    ],
+    "edges": [
+      { "id": "e-3416-1", "source": "review4-source", "target": "generation-result:4d5e6f7a-0000-4000-8000-000000034160:segment:1" },
+      { "id": "e-3416-2", "source": "review4-source", "target": "generation-result:4d5e6f7a-0000-4000-8000-000000034160:segment:2" },
+      { "id": "e-3416-3", "source": "review4-source", "target": "generation-result:4d5e6f7a-0000-4000-8000-000000034160:segment:3" },
+      { "id": "e-3416-4", "source": "review4-source", "target": "generation-result:4d5e6f7a-0000-4000-8000-000000034160:segment:4" }
+    ]
+  },
+  "scene3260": {
+    "submission_id": "7c2d1e4b-0000-4000-8000-000000003260",
+    "page": {
+      "records": [
+        {
+          "submission_id": "7c2d1e4b-0000-4000-8000-000000003260",
+          "target_node_id": "review5-scene-target",
+          "job_id": "3260",
+          "task_type": "video_scene_split",
+          "binding_revision": 1,
+          "is_current": true,
+          "job": {
+            "job_id": "3260",
+            "type": "video_scene_split",
+            "status": "succeeded",
+            "progress": 100,
+            "output_asset_ids": ["8127"],
+            "stored_error": null,
+            "created_at": "2026-10-18T09:40:00.000Z"
+          },
+          "recovery_seed": {
+            "target": { "role": "result-placeholder", "x": 120, "y": 80, "width": 640, "height": 480, "name": "场景切分 · 标准" },
+            "sources": []
+          },
+          "previous_target_snapshot": null,
+          "items": [
+            { "recovery_item_id": "gcr:7c2d1e4b-0000-4000-8000-000000003260:$target", "output_key": "$target", "node_id": "review5-scene-target", "state": "pending", "revision": 1, "node_binding_revision": 1, "asset_id": null, "asset_deleted": null, "slot_id": null },
+            { "recovery_item_id": "gcr:7c2d1e4b-0000-4000-8000-000000003260:segment:1", "output_key": "segment:1", "node_id": "generation-result:7c2d1e4b-0000-4000-8000-000000003260:segment:1", "state": "pending", "revision": 0, "node_binding_revision": 0, "asset_id": "8127", "asset_deleted": true, "slot_id": null }
+          ]
+        }
+      ],
+      "next_cursor": null
+    },
+    "detail": {
+      "job_id": "3260",
+      "status": "succeeded",
+      "progress": 100,
+      "asset": null,
+      "output_assets": [],
+      "result": {
+        "duration": 12.5,
+        "segments": [{ "segment_index": 1, "start_time": 0, "end_time": 12.5, "segment_asset_id": "8127" }]
+      },
+      "text_input_signature": null,
+      "tracks": null,
+      "video_stage": "video",
+      "source_sample_job_id": null,
+      "final_job_id": null,
+      "finalize_deadline_at": null,
+      "charge_state": null,
+      "actual_credits": null
+    },
+    "nodes": [
+      { "id": "review5-scene-target", "type": "mediaNode", "position": { "x": 120, "y": 80 }, "data": { "src": "", "fileName": "用户改名的场景任务卡", "mediaType": "video", "width": 640, "height": 480, "sceneSplit": { "sourceAssetId": "8100", "lastInput": { "source_asset_id": "8100", "target_node_id": "review5-scene-target", "granularity": "standard" } } } }
+    ],
+    "edges": []
+  }
+}

@@ -16,6 +16,7 @@ export interface GenerationRecoveryItem {
   revision: number;
   node_binding_revision: number;
   asset_id: string | null;
+  asset_deleted?: boolean | null;
   slot_id: string | null;
 }
 

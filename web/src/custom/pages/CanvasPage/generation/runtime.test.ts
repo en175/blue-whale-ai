@@ -559,6 +559,23 @@ describe('生成任务运行时：recover', () => {
     expect(status.calls).toHaveLength(1);
   });
 
+  it('扫描在飞时同加载重复 recover：返回同一 Promise，随首次扫描一起收敛且只发一次页请求', async () => {
+    const { runtime, page } = setup();
+    let releaseFirst!: (page: GenerationRecoveryPage) => void;
+    page.mockImplementation(() => new Promise((resolve) => { releaseFirst = resolve; }));
+    const first = runtime.recover('p1');
+    const second = runtime.recover('p1');
+    expect(second).toBe(first);
+    let secondSettled = false;
+    void second.then(() => { secondSettled = true; });
+    await flushMicrotasks();
+    expect(page).toHaveBeenCalledTimes(1);
+    expect(secondSettled).toBe(false);
+    releaseFirst({ protocol_version: 1, canvas_version: 1, records: [], next_cursor: null });
+    await Promise.all([first, second]);
+    expect(secondSettled).toBe(true);
+  });
+
   it('进行中但卡不在（受理回执丢失）：按恢复种子补卡一次，不重复建卡', async () => {
     const { fake, runtime, page } = setup();
     page.mockImplementation(async () => ({
@@ -819,6 +836,27 @@ describe('生成任务运行时：恢复扫描互斥按加载身份隔离（IKJK
     expect(fake.inserts).toHaveLength(1);
     await runtime.recover('p1');
     expect(pageCalls).toBe(3);
+  });
+
+  it('同项目重载（loadEpoch 推进）：旧扫描随后失败不把新加载判为已就绪', async () => {
+    const { fake, runtime, page } = setup();
+    let rejectOld!: (reason: Error) => void;
+    let pageCalls = 0;
+    page.mockImplementation(() => {
+      pageCalls += 1;
+      if (pageCalls === 1) return new Promise((_resolve, reject) => { rejectOld = reject; });
+      return Promise.reject(new Error('network'));
+    });
+
+    void runtime.recover('p1');
+    fake.advanceEpoch();
+    runtime.reset();
+    await runtime.recover('p1');
+    expect(runtime.isRecoverySettled()).toBe(false);
+
+    rejectOld(new Error('old-network'));
+    await flushMicrotasks(20);
+    expect(runtime.isRecoverySettled()).toBe(false);
   });
 
   it('旧扫描失败（请求 reject）：锁正确释放，新加载扫描可发出且回执丢失任务仍可补卡', async () => {
