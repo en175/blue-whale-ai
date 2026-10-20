@@ -804,6 +804,50 @@ describe.skipIf(!process.env.IKNCL3_DATABASE_URL)("本地恢复画布公开 API"
     expect(await prisma.client.generation_jobs.count()).toBe(jobs);
     expect(await prisma.client.cost_reservations.count()).toBe(reservations);
   });
+  it.each([
+    { field: "initialRefs", type: "image", otherType: "video" },
+    { field: "initialRefs", type: "video", otherType: "image" },
+    { field: "voice", type: "audio", otherType: "video" },
+  ].flatMap(item => [false, true].map(matching => ({ ...item, matching }))))("空 mediaType 沿用 $field 的 $type 声明，存在匹配资产=$matching", async ({ field, type, otherType, matching }) => {
+    const url = `https://assets.invalid/type-fallback-${crypto.randomUUID()}`;
+    const original = matching ? await prisma.client.assets.create({ data: { user_id: 983003n, project_id: BigInt(sourceId), type, url } }) : undefined;
+    const other = await prisma.client.assets.create({ data: { user_id: 983003n, project_id: BigInt(sourceId), type: otherType, url } });
+    const jobs = await prisma.client.generation_jobs.count();
+    const reservations = await prisma.client.cost_reservations.count();
+    const sourceBefore = await (await fetch(`${base}/api/canvases?projectId=${sourceId}`)).json();
+    for (const empty of [false, true]) {
+      const reference = { id: "typed-reference", src: url, type, ...(empty ? { mediaType: "" } : {}) };
+      const data = field === "voice" ? { voice: reference } : { initialRefs: [reference] };
+      const body = { ...payload, nodes: JSON.stringify([{ id: "typed-card", type: "assetNode", data }]) };
+      const id = crypto.randomUUID();
+      const before = [await prisma.client.project.count(), await prisma.client.command_idempotency.count()];
+      const response = await request("PUT", id, body);
+      expect(response.status).toBe(matching ? 200 : 422);
+      const result = await response.json();
+      if (!original) {
+        expect(result.data).toEqual({ reason: "local_recovery_assets_unavailable", missing: [{ path: field === "voice" ? "nodes.0.data.voice" : "nodes.0.data.initialRefs.0" }] });
+        expect((await request("GET", id)).status).toBe(404);
+        expect([await prisma.client.project.count(), await prisma.client.command_idempotency.count()]).toEqual(before);
+        continue;
+      }
+      expect(result.data.stage).toBe("complete");
+      const key = { project_id_operation_idempotency_key: { project_id: BigInt(sourceId), operation: "LOCAL_CANVAS_RECOVERY_V1", idempotency_key: id } };
+      const row = await prisma.client.command_idempotency.findUniqueOrThrow({ where: key });
+      expect(row.result_payload).toMatchObject({ assets: [{ url, mediaType: type, resolvedAssetId: original.id.toString() }] });
+      const snapshot = await (await fetch(`${base}/api/projects/${result.data.targetProjectId}/snapshot`)).json();
+      expect(JSON.parse(snapshot.data.canvas.nodes)).toEqual(JSON.parse(body.nodes));
+      expect(snapshot.data.assets[original.id.toString()].access_url).toBe(url);
+      expect(snapshot.data.assets[other.id.toString()]).toBeUndefined();
+      await app.close();
+      await start();
+      expect((await (await request("GET", id)).json()).data).toEqual(result.data);
+      expect((await (await request("PUT", id, body)).json()).data).toEqual(result.data);
+      expect(await prisma.client.command_idempotency.findUniqueOrThrow({ where: key })).toEqual(row);
+    }
+    expect(await (await fetch(`${base}/api/canvases?projectId=${sourceId}`)).json()).toEqual(sourceBefore);
+    expect(await prisma.client.generation_jobs.count()).toBe(jobs);
+    expect(await prisma.client.cost_reservations.count()).toBe(reservations);
+  });
   it.each(["src", "voice.src", "assetId"].flatMap(field =>
     ["invalid", "audio"].map(mediaType => ({ field, mediaType })),
   ).concat({ field: "srcH264", mediaType: "" }))("$field 拒绝非法或不匹配类型 $mediaType，空值不放宽备用视频", async ({ field, mediaType }) => {

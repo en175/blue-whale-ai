@@ -67,7 +67,7 @@ function assetReferences(nodes: unknown): AssetReference[] {
     }
     if (id !== undefined || (typeof url === "string" && url.length > 0)) {
       if (id !== undefined && !/^asset-.{1,128}$/i.test(String(id)) && (!/^[1-9][0-9]{0,18}$/.test(String(id)) || BigInt(String(id)) > 9223372036854775807n)) reject(400, "local_recovery_invalid_payload", "素材身份格式无效");
-      result.push({ path, ...(id === undefined ? {} : { assetId: String(id) }), ...(typeof url === "string" && url.length > 0 ? { url } : {}), ...(typeof entry.mediaType === "string" ? { mediaType: entry.mediaType } : typeof entry.type === "string" && ["image", "video", "audio"].includes(entry.type) ? { mediaType: entry.type } : {}) });
+      result.push({ path, ...(id === undefined ? {} : { assetId: String(id) }), ...(typeof url === "string" && url.length > 0 ? { url } : {}), ...(typeof entry.mediaType === "string" && entry.mediaType.length > 0 ? { mediaType: entry.mediaType } : typeof entry.type === "string" && ["image", "video", "audio"].includes(entry.type) ? { mediaType: entry.type } : {}) });
     }
     if (typeof entry.srcH264 === "string" && entry.srcH264.length > 0) {
       result.push({ path: `${path}.srcH264`, url: entry.srcH264, mediaType: "video" });
