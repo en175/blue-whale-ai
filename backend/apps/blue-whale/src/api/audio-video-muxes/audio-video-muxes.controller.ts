@@ -36,7 +36,7 @@ export class AudioVideoMuxesController {
       await enqueueAudioVideoMuxJob(jobId);
     } catch (error) {
       logger.error(`[audio_video_mux] enqueue failed jobId=${jobId}: ${error instanceof Error ? error.message : String(error)}`);
-      await this.audioVideoMuxes.markFailed(jobId, ERROR_ENQUEUE_FAILED, "任务入队失败");
+      await this.audioVideoMuxes.markFailed(user.userId, jobId, ERROR_ENQUEUE_FAILED, "任务入队失败");
       throw new DomainError(FAILURE_CODE, "任务入队失败");
     }
     return result;
@@ -66,11 +66,12 @@ export class AudioVideoMuxesController {
       return;
     }
     if (result.data?.enqueue_required) {
+      const retryJobId = String(result.data.job_id);
       try {
-        await enqueueAudioVideoMuxJob(jobId);
+        await enqueueAudioVideoMuxJob(retryJobId);
       } catch (error) {
-        logger.error(`[audio_video_mux] retry enqueue failed jobId=${jobId}: ${error instanceof Error ? error.message : String(error)}`);
-        const status = await this.audioVideoMuxes.markFailed(jobId, ERROR_ENQUEUE_FAILED, "重试任务入队失败");
+        logger.error(`[audio_video_mux] retry enqueue failed jobId=${retryJobId}: ${error instanceof Error ? error.message : String(error)}`);
+        const status = await this.audioVideoMuxes.markFailed(user.userId, retryJobId, ERROR_ENQUEUE_FAILED, "重试任务入队失败");
         if (status === "failed") throw new DomainError(FAILURE_CODE, "重试任务入队失败");
         return { ...result, data: { ...result.data, status } };
       }

@@ -61,7 +61,7 @@ describe.skipIf(!databaseUrl)("audio video mux creation when enqueue fails", () 
       size: 16, mime: key.endsWith(".mp4") ? "video/mp4" : "audio/mpeg", publicUrl: `https://audio-video-mux.test/${key}`,
     }) } };
     const assets = new AssetService(prisma, storage as never);
-    const service = new AudioVideoMuxesService(prisma, projects, assets, storage as never);
+    const service = new AudioVideoMuxesService(prisma, projects, assets, storage as never, { jobBilling: async () => undefined, release: async () => {} } as never);
     Reflect.defineMetadata("design:paramtypes", [AudioVideoMuxesService], AudioVideoMuxesController);
     Reflect.defineMetadata("design:paramtypes", [
       ProjectService, GenerationCommandService, ModelCapabilityReadService,

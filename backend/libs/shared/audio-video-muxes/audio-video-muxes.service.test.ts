@@ -8,21 +8,39 @@ const input = {
 
 function makeService(assetsById: Record<string, object> = {
   "11": { id: 11n, project_id: 5n, type: "audio", url: "https://tos.example/11.mp3", storage_key: "11.mp3", duration_ms: 10_000 },
-  "12": { id: 12n, project_id: 0n, type: "video", url: "https://tos.example/12.mp4", storage_key: "12.mp4", duration_ms: 12_500 },
+  "12": { id: 12n, project_id: 0n, type: "video", url: "https://tos.example/12.mp4", storage_key: "12.mp4", duration_ms: 12_500, width: 1920, height: 1080 },
 }) {
   const create = vi.fn().mockResolvedValue({ id: 70n });
-  const prisma = { client: { generation_jobs: { create }, project_asset: { findMany: vi.fn().mockResolvedValue([]) } } };
+  const tx = {
+    generation_jobs: { create },
+    project_asset: { findMany: vi.fn().mockResolvedValue([]) },
+  };
+  const client = {
+    ...tx,
+    $transaction: vi.fn(async (fn: (t: unknown) => Promise<unknown>) => fn(tx)),
+  };
+  const prisma = { client };
   const project = { findOwnedById: vi.fn().mockResolvedValue({ id: 5n }) };
   const assets = { findOwnedSource: vi.fn().mockImplementation(async (id: string) => assetsById[id] ?? null) };
   const inspectObject = vi.fn().mockImplementation(async (key: string) => ({
     size: 100, mime: "video/mp4", publicUrl: `https://public-tos.example/${key}`,
   }));
-  const storage = { uploads: { inspectObject } };
+  const storage = {
+    uploads: { inspectObject },
+    probe: vi.fn().mockResolvedValue({ durationMs: 10_000, width: 1920, height: 1080 }),
+  };
   const publicFetch = vi.fn().mockResolvedValue({ ok: true, body: { cancel: vi.fn() } });
   vi.stubGlobal("fetch", publicFetch);
+  const jobBilling = vi.fn().mockResolvedValue(undefined);
   return {
-    service: new AudioVideoMuxesService(prisma as never, project as never, assets as never, storage as never),
-    create, project, assets, inspectObject, publicFetch,
+    service: new AudioVideoMuxesService(
+      prisma as never,
+      project as never,
+      assets as never,
+      storage as never,
+      { jobBilling, release: vi.fn() } as never,
+    ),
+    create, project, assets, inspectObject, publicFetch, storage, jobBilling,
   };
 }
 
@@ -45,6 +63,8 @@ describe("AudioVideoMuxesService.create", () => {
         is_audio_reserve: true,
         sync: "none",
         estimated_duration_ms: 12_500,
+        duration: 13,
+        resolution: "1080p",
         submit_attempt: 1,
       },
     }) });
@@ -65,13 +85,24 @@ describe("AudioVideoMuxesService.create", () => {
     });
   });
 
-  it("takes the estimated duration from the source video asset only, unknown stays null", async () => {
+  it("takes the longer side for sync=none and rejects an unresolvable duration", async () => {
     const { service, create } = makeService({
+      "11": { id: 11n, project_id: 5n, type: "audio", url: "https://tos.example/11.mp3", storage_key: "11.mp3", duration_ms: 99_000 },
+      "12": { id: 12n, project_id: 0n, type: "video", url: "https://tos.example/12.mp4", storage_key: "12.mp4", duration_ms: 12_500, width: 1920, height: 1080 },
+    });
+    await service.create("9", "5", input);
+    expect(create.mock.calls[0][0].data.input).toMatchObject({
+      estimated_duration_ms: 99_000,
+      duration: 99,
+    });
+
+    const { service: unresolvable, create: unresolvableCreate, storage } = makeService({
       "11": { id: 11n, project_id: 5n, type: "audio", url: "https://tos.example/11.mp3", storage_key: "11.mp3", duration_ms: 99_000 },
       "12": { id: 12n, project_id: 0n, type: "video", url: "https://tos.example/12.mp4", storage_key: "12.mp4", duration_ms: null },
     });
-    await service.create("9", "5", input);
-    expect(create.mock.calls[0][0].data.input.estimated_duration_ms).toBeNull();
+    storage.probe.mockRejectedValue(new Error("tos down"));
+    await expect(unresolvable.create("9", "5", input)).rejects.toMatchObject({ code: 100202 });
+    expect(unresolvableCreate).not.toHaveBeenCalled();
   });
 
   it("keeps each media type in its own slot", async () => {
@@ -169,6 +200,42 @@ describe("AudioVideoMuxesService.create", () => {
     await expect(service.create("9", "5", body)).rejects.toMatchObject({ code: 100000, status: 400 });
     expect(inspectObject).not.toHaveBeenCalled();
     expect(create).not.toHaveBeenCalled();
+  });
+
+  it("bills output duration and the video resolution tier", async () => {
+    const charge = vi.fn().mockResolvedValue(undefined);
+    const { service, jobBilling } = makeService();
+    jobBilling.mockResolvedValue({ charge, release: vi.fn() });
+
+    await service.create("9", "5", input);
+
+    expect(jobBilling).toHaveBeenCalledWith("audio_video_mux", "9", {
+      duration: 13,
+      resolution: "1080p",
+    });
+    expect(charge).toHaveBeenCalledWith(70);
+  });
+
+  it("sync=none bills the longer side and maps 2K / 4K by long side", async () => {
+    const { service, jobBilling } = makeService({
+      "11": { id: 11n, project_id: 5n, type: "audio", url: "https://tos.example/11.mp3", storage_key: "11.mp3", duration_ms: 90_000 },
+      "12": { id: 12n, project_id: 0n, type: "video", url: "https://tos.example/12.mp4", storage_key: "12.mp4", duration_ms: 61_000, width: 2560, height: 1440 },
+    });
+    await service.create("9", "5", input);
+    expect(jobBilling).toHaveBeenCalledWith("audio_video_mux", "9", {
+      duration: 90,
+      resolution: "2k",
+    });
+
+    const { service: quad, jobBilling: quadBilling } = makeService({
+      "11": { id: 11n, project_id: 5n, type: "audio", url: "https://tos.example/11.mp3", storage_key: "11.mp3", duration_ms: 10_000 },
+      "12": { id: 12n, project_id: 0n, type: "video", url: "https://tos.example/12.mp4", storage_key: "12.mp4", duration_ms: 61_000, width: 3840, height: 2160 },
+    });
+    await quad.create("9", "5", input);
+    expect(quadBilling).toHaveBeenCalledWith("audio_video_mux", "9", {
+      duration: 61,
+      resolution: "4k",
+    });
   });
 
   it("derives the execution deadline from the video estimate with the frozen budget formula", async () => {

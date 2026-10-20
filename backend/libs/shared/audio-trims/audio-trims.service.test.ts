@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
+const { enqueueAudioTrimJob } = vi.hoisted(() => ({ enqueueAudioTrimJob: vi.fn() }));
+vi.mock("@lib/shared/generation/generation-queue.js", () => ({ enqueueAudioTrimJob }));
+
 import { AudioTrimsService } from "./audio-trims.service.js";
 
 function makeService(overrides: {
@@ -15,6 +18,7 @@ function makeService(overrides: {
         id: 88n,
         type: "audio",
         storage_key: "audio/source.mp3",
+        duration_ms: 61_000,
       }),
     };
   const create = overrides.createJob ?? vi.fn().mockResolvedValue({ id: 400n });
@@ -25,10 +29,18 @@ function makeService(overrides: {
       cost_reservations: { create: costCreate },
     },
   };
+  const jobBilling = vi.fn().mockResolvedValue(undefined);
   return {
-    service: new AudioTrimsService(prisma as never, project as never, assets as never),
+    service: new AudioTrimsService(
+      prisma as never,
+      project as never,
+      assets as never,
+      { probe: null } as never,
+      { jobBilling, release: vi.fn() } as never,
+    ),
     create,
     costCreate,
+    jobBilling,
   };
 }
 
@@ -66,7 +78,7 @@ describe("AudioTrimsService.create", () => {
   });
 
   it("creates an audio_trim job and returns the job id", async () => {
-    const { service, create } = makeService();
+    const { service, create, jobBilling } = makeService();
     const result = await service.create("9", "55", {
       source_asset_id: "88",
       start_time: 1.5,
@@ -74,6 +86,7 @@ describe("AudioTrimsService.create", () => {
       output_format: "mp3",
     });
     expect(result.code).toBe(200);
+    expect(jobBilling).toHaveBeenCalledWith("audio_trim", "9", expect.objectContaining({ duration: 9 }));
     expect(result.data).toMatchObject({ job_id: "400", status: "queued" });
     expect(create).toHaveBeenCalledWith({
       data: expect.objectContaining({
@@ -87,6 +100,7 @@ describe("AudioTrimsService.create", () => {
           start_time: 1.5,
           end_time: 10,
           output_format: "mp3",
+          duration: 9,
         },
         next_action_at: expect.any(Date),
       }),
@@ -100,6 +114,7 @@ describe("AudioTrimsService.create", () => {
     expect(create.mock.calls[0][0].data.input).toEqual({
       source_asset_id: "88",
       output_format: "mp3",
+      duration: 61,
     });
   });
 
@@ -114,6 +129,7 @@ describe("AudioTrimsService.create", () => {
       source_asset_id: "88",
       start_time: 2.25,
       output_format: "mp3",
+      duration: 59,
     });
   });
 
@@ -122,7 +138,7 @@ describe("AudioTrimsService.create", () => {
       assets: {
         findOwnedSource: vi
           .fn()
-          .mockResolvedValue({ id: 88n, type: "audio", storage_key: "audio/voice.flac" }),
+          .mockResolvedValue({ id: 88n, type: "audio", storage_key: "audio/voice.flac", duration_ms: 61_000 }),
       },
     });
     const result = await service.create("9", "55", { source_asset_id: "88" });
@@ -130,6 +146,7 @@ describe("AudioTrimsService.create", () => {
     expect(create.mock.calls[0][0].data.input).toEqual({
       source_asset_id: "88",
       output_format: "flac",
+      duration: 61,
     });
   });
 
@@ -140,7 +157,7 @@ describe("AudioTrimsService.create", () => {
   ])("falls back to m4a for storage_key=%s", async (storageKey, expected) => {
     const { service, create } = makeService({
       assets: {
-        findOwnedSource: vi.fn().mockResolvedValue({ id: 88n, type: "audio", storage_key: storageKey }),
+        findOwnedSource: vi.fn().mockResolvedValue({ id: 88n, type: "audio", storage_key: storageKey, duration_ms: 61_000 }),
       },
     });
     const result = await service.create("9", "55", { source_asset_id: "88" });
@@ -173,7 +190,7 @@ describe("AudioTrimsService.create", () => {
       expect(result.code).toBe(200);
       expect(create).toHaveBeenCalledWith({
         data: expect.objectContaining({
-          input: { source_asset_id: "88", output_format: outputFormat },
+          input: { source_asset_id: "88", output_format: outputFormat, duration: 61 },
         }),
       });
     },
@@ -207,6 +224,7 @@ describe("AudioTrimsService.create", () => {
       start_time: 0.01,
       end_time: 0.02,
       output_format: "mp3",
+      duration: 1,
     });
   });
 

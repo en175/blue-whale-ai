@@ -61,7 +61,7 @@ describe.skipIf(!databaseUrl)("audio mix creation when enqueue fails", () => {
       size: 16, mime: "audio/mpeg", publicUrl: `https://audio-mix.test/${key}`,
     }) } };
     const assets = new AssetService(prisma, storage as never);
-    const service = new AudioMixesService(prisma, projects, assets, storage as never);
+    const service = new AudioMixesService(prisma, projects, assets, storage as never, { jobBilling: async () => undefined, release: async () => {} } as never);
     Reflect.defineMetadata("design:paramtypes", [AudioMixesService], AudioMixesController);
     Reflect.defineMetadata("design:paramtypes", [
       ProjectService, GenerationCommandService, ModelCapabilityReadService,

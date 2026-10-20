@@ -188,6 +188,7 @@ export {
   type CreateJobOptions,
   type CreatedJob,
 } from "./generation-command-repo.js";
+export { markFailedQueuedAndNotifyBilling } from "./fail-enqueue.js";
 export {
   CREATE_GENERATION_JOB_OPERATION,
   FINALIZE_GENERATION_JOB_OPERATION,

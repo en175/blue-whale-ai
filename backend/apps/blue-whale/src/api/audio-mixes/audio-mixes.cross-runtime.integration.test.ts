@@ -106,7 +106,7 @@ describe.skipIf(process.env.IKI68N_CROSS_RUNTIME !== "1")("audio_mix cross runti
         return bytes ? { size: bytes.length, mime: "audio/mpeg", publicUrl: `${inputBase}/${key}` } : null;
       } } } as unknown as AssetStorageService;
       const assets = new AssetService(prisma, storage);
-      const audioMixes = new AudioMixesService(prisma, projects, assets, storage);
+      const audioMixes = new AudioMixesService(prisma, projects, assets, storage, { jobBilling: async () => undefined, release: async () => {} } as never);
       Reflect.defineMetadata("design:paramtypes", [AudioMixesService], AudioMixesController);
       Reflect.defineMetadata("design:paramtypes", [JobsService], JobsController);
       Reflect.defineMetadata("design:paramtypes", [AssetService], AssetsController);
@@ -149,13 +149,13 @@ describe.skipIf(process.env.IKI68N_CROSS_RUNTIME !== "1")("audio_mix cross runti
         expect((await fetch(input.url)).status).toBe(206);
       }
 
-      const runWorker = async (token: string, phase: "fail" | "succeed", oldFence?: bigint) => {
+      const runWorker = async (token: string, phase: "fail" | "succeed", oldFence?: bigint, targetJobId: string = created.data.job_id) => {
         const worker = spawn("docker", ["run", "--rm", "-e", "IKI68N_CROSS_RUNTIME=1",
           "-e", `IKI68N_DB_GUARD_TOKEN=${token}`,
           "-e", `IKI68N_CROSS_RUNTIME_PHASE=${phase}`,
           ...(oldFence === undefined ? [] : ["-e", `IKI68N_OLD_FENCE=${oldFence}`]),
           "-e", `IKI68N_EXTERNAL_DB_URL=jdbc:mysql://host.docker.internal:${port}/${databaseName}?allowPublicKeyRetrieval=true&useSSL=false`,
-          "-e", `IKI68N_CROSS_RUNTIME_JOB_ID=${created.data.job_id}`,
+          "-e", `IKI68N_CROSS_RUNTIME_JOB_ID=${targetJobId}`,
           "-e", `IKI68N_STORAGE_UPLOAD_URL=http://host.docker.internal:${outputPort}/stored/out.mp3`,
           "-e", `IKI68N_STORAGE_PUBLIC_URL=http://127.0.0.1:${outputPort}/stored/out.mp3`,
           "-v", `${repo}:/workspace`, "-w", "/workspace/server",
@@ -197,22 +197,27 @@ describe.skipIf(process.env.IKI68N_CROSS_RUNTIME !== "1")("audio_mix cross runti
       const retryBodies = await Promise.all(retryResponses.map((response) => response.json())) as Array<{
         data: { job_id: string; status: string; replayed: boolean }
       }>;
-      expect(retryBodies.map((body) => body.data.job_id)).toEqual([created.data.job_id, created.data.job_id]);
+      const retryJobId = retryBodies[0]!.data.job_id;
+      expect(retryJobId).not.toBe(created.data.job_id);
+      expect(retryBodies.map((body) => body.data.job_id)).toEqual([retryJobId, retryJobId]);
       expect(retryBodies.map((body) => body.data.status)).toEqual(["queued", "queued"]);
       expect(retryBodies.filter((body) => !body.data.replayed)).toHaveLength(1);
-      expect(vi.mocked(enqueueAudioMixJob).mock.calls).toEqual([[created.data.job_id]]);
-      const retriedJob = await prisma.client.generation_jobs.findUniqueOrThrow({ where: { id: job.id } });
+      expect(vi.mocked(enqueueAudioMixJob).mock.calls).toEqual([[retryJobId]]);
+      const originalAfterRetry = await prisma.client.generation_jobs.findUniqueOrThrow({ where: { id: job.id } });
+      expect(originalAfterRetry.status).toBe("failed");
+      const retriedJob = await prisma.client.generation_jobs.findUniqueOrThrow({ where: { id: BigInt(retryJobId) } });
       expect(retriedJob.input).toEqual(job.input);
       expect(retriedJob.provider_task_id).toBeNull();
-      expect(retriedJob.retry_count).toBe(1);
-      expect(retriedJob.fencing_token).toBe(failedJob.fencing_token + 1n);
-      expect(await prisma.client.generation_jobs.count({ where: { id: job.id } })).toBe(1);
-      expect(await prisma.client.cost_reservations.count({ where: { generation_job_id: job.id } })).toBe(0);
+      expect(retriedJob.retry_count).toBe(0);
+      expect(retriedJob.retry_of_job_id).toBe(job.id);
+      expect(retriedJob.fencing_token).toBe(0n);
+      expect(await prisma.client.generation_jobs.count({ where: { retry_of_job_id: job.id } })).toBe(1);
+      expect(await prisma.client.cost_reservations.count({ where: { generation_job_id: BigInt(retryJobId) } })).toBe(0);
 
-      const accepted = await runWorker(guardToken, "succeed", failedJob.fencing_token);
+      const accepted = await runWorker(guardToken, "succeed", undefined, retryJobId);
       expect(accepted.exitCode, accepted.output).toBe(0);
 
-      const jobResponse = await originalFetch(`${base}/api/jobs/${created.data.job_id}`);
+      const jobResponse = await originalFetch(`${base}/api/jobs/${retryJobId}`);
       const jobView = await jobResponse.json() as { code: number; data: { status: string; asset: { id: string; url: string } } };
       expect(jobView).toMatchObject({ code: 200, data: { status: "succeeded" } });
       const assetId = jobView.data.asset.id;
@@ -228,7 +233,7 @@ describe.skipIf(process.env.IKI68N_CROSS_RUNTIME !== "1")("audio_mix cross runti
       const finalReplay = await retry();
       expect((await finalReplay.json() as { data: { status: string; replayed: boolean } }).data)
         .toMatchObject({ status: "succeeded", replayed: true });
-      expect(vi.mocked(enqueueAudioMixJob).mock.calls).toEqual([[created.data.job_id]]);
+      expect(vi.mocked(enqueueAudioMixJob).mock.calls).toEqual([[retryJobId]]);
     } finally {
       vi.unstubAllGlobals();
       await app?.close();

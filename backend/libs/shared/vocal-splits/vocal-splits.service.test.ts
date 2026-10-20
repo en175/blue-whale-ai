@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import { RECOVERY_REASONS } from "@lib/contracts";
 
+const { enqueueVocalSplitJob } = vi.hoisted(() => ({ enqueueVocalSplitJob: vi.fn() }));
+vi.mock("@lib/shared/generation/generation-queue.js", () => ({ enqueueVocalSplitJob }));
+
 import { VocalSplitsService } from "./vocal-splits.service.js";
 
 function makeService(overrides: {
@@ -12,7 +15,7 @@ function makeService(overrides: {
   const assets =
     overrides.assets ??
     {
-      findOwnedSource: vi.fn().mockResolvedValue({ id: 88n, type: "video" }),
+      findOwnedSource: vi.fn().mockResolvedValue({ id: 88n, type: "video", duration_ms: 61_000 }),
     };
   const create = overrides.createJob ?? vi.fn().mockResolvedValue({ id: 400n });
   const costCreate = vi.fn();
@@ -24,11 +27,19 @@ function makeService(overrides: {
       cost_reservations: { create: costCreate },
     },
   };
+  const jobBilling = vi.fn().mockResolvedValue(undefined);
   return {
-    service: new VocalSplitsService(prisma as never, project as never, assets as never),
+    service: new VocalSplitsService(
+      prisma as never,
+      project as never,
+      assets as never,
+      { probe: null } as never,
+      { jobBilling, release: vi.fn() } as never,
+    ),
     create,
     costCreate,
     transaction,
+    jobBilling,
   };
 }
 
@@ -153,7 +164,7 @@ describe("VocalSplitsService.create：缺省补默认与建单", () => {
     expect(result.code).toBe(200);
     expect(create).toHaveBeenCalledWith({
       data: expect.objectContaining({
-        input: { source_asset_id: "88", scene: "audio", output_format: "aac" },
+        input: { source_asset_id: "88", scene: "audio", output_format: "aac", duration: 61 },
       }),
     });
   });
@@ -169,7 +180,7 @@ describe("VocalSplitsService.create：缺省补默认与建单", () => {
       expect(result.code).toBe(200);
       expect(create).toHaveBeenCalledWith({
         data: expect.objectContaining({
-          input: { source_asset_id: "88", scene: "audio", output_format: outputFormat },
+          input: { source_asset_id: "88", scene: "audio", output_format: outputFormat, duration: 61 },
         }),
       });
     },
@@ -186,20 +197,21 @@ describe("VocalSplitsService.create：缺省补默认与建单", () => {
       expect(result.code).toBe(200);
       expect(create).toHaveBeenCalledWith({
         data: expect.objectContaining({
-          input: { source_asset_id: "88", scene, output_format: "aac" },
+          input: { source_asset_id: "88", scene, output_format: "aac", duration: 61 },
         }),
       });
     },
   );
 
   it("creates a vocal_split job and returns the job id", async () => {
-    const { service, create } = makeService();
+    const { service, create, jobBilling } = makeService();
     const result = await service.create("9", "55", {
       source_asset_id: "88",
       scene: "drama",
       output_format: "flac",
     });
     expect(result.code).toBe(200);
+    expect(jobBilling).toHaveBeenCalledWith("vocal_split", "9", expect.objectContaining({ duration: 61 }));
     expect(result.data).toMatchObject({ job_id: "400", status: "queued" });
     expect(create).toHaveBeenCalledWith({
       data: expect.objectContaining({
@@ -209,7 +221,7 @@ describe("VocalSplitsService.create：缺省补默认与建单", () => {
         progress: 0,
         user_id: 9n,
         project_id: 55n,
-        input: { source_asset_id: "88", scene: "drama", output_format: "flac" },
+        input: { source_asset_id: "88", scene: "drama", output_format: "flac", duration: 61 },
         next_action_at: expect.any(Date),
       }),
     });

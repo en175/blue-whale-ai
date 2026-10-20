@@ -149,8 +149,8 @@ describe.skipIf(!databaseUrl)("混合/合成提交归属真库验证（IKJJQZ）
     };
     const storage = { uploads: { inspectObject: vi.fn(async (key: string) => ({ size: 10, publicUrl: `https://store.test/${key}` })) } };
     vi.stubGlobal("fetch", vi.fn(async () => new Response("x", { status: 206 })));
-    mixes = new AudioMixesService(prismaService, project as never, mixAssets as never, storage as never);
-    muxes = new AudioVideoMuxesService(prismaService, project as never, muxAssets as never, storage as never);
+    mixes = new AudioMixesService(prismaService, project as never, mixAssets as never, storage as never, { jobBilling: async () => undefined, release: async () => {} } as never);
+    muxes = new AudioVideoMuxesService(prismaService, project as never, muxAssets as never, storage as never, { jobBilling: async () => undefined, release: async () => {} } as never);
   });
 
   afterAll(async () => {
@@ -199,14 +199,16 @@ describe.skipIf(!databaseUrl)("混合/合成提交归属真库验证（IKJJQZ）
     expect(await prisma.generation_jobs.count({ where: { project_id: BigInt(PROJECT_ID) } })).toBe(2);
   });
 
-  it("★2 专属重试（mix）：任务重置与归属版本推进同一事务；同 jobId ≠ 同提交意图", async () => {
+  it("★2 专属重试（mix）：新 job 接管归属；原 job 保持 failed", async () => {
     const created = await createMixJob(binding(S3, "mix-node", 0), S3);
     const jobId = created.data!.job_id!;
     await markJobFailed(jobId);
     const retried = await mixes.retry(USER_ID, PROJECT_ID, jobId, S4, undefined, binding(S4, "mix-node", 1));
+    const retriedJobId = retried.data!.job_id!;
+    expect(retriedJobId).not.toBe(jobId);
     expect(retried).toMatchObject({
       code: 200,
-      data: { job_id: jobId, status: "queued", replayed: false, canvas_binding: { submission_id: S4, binding_revision: 2, is_current: true } },
+      data: { status: "queued", replayed: false, canvas_binding: { submission_id: S4, binding_revision: 2, is_current: true } },
     });
 
     const owner = await prisma.generation_canvas_node_owners.findUniqueOrThrow({
@@ -220,11 +222,13 @@ describe.skipIf(!databaseUrl)("混合/合成提交归属真库验证（IKJJQZ）
     });
     expect(Number(owner.binding_revision)).toBe(2);
     expect(owner.generation_canvas_submission_id).toBe(newSubmission.id);
-    expect(newSubmission).toMatchObject({ target_state: "pending", generation_job_id: BigInt(jobId) });
+    expect(newSubmission).toMatchObject({ target_state: "pending", generation_job_id: BigInt(retriedJobId) });
     expect(oldSubmission).toMatchObject({ target_state: "transferred" });
     expect(Number(oldSubmission.target_revision)).toBe(2);
-    const job = await prisma.generation_jobs.findUniqueOrThrow({ where: { id: BigInt(jobId) } });
-    expect(job).toMatchObject({ status: "queued", retry_count: 1 });
+    const original = await prisma.generation_jobs.findUniqueOrThrow({ where: { id: BigInt(jobId) } });
+    expect(original.status).toBe("failed");
+    const retryJob = await prisma.generation_jobs.findUniqueOrThrow({ where: { id: BigInt(retriedJobId) } });
+    expect(retryJob).toMatchObject({ status: "queued", retry_count: 0, retry_of_job_id: BigInt(jobId) });
 
     expect(await prisma.generation_canvas_submissions.count({ where: { project_id: BigInt(PROJECT_ID) } })).toBe(2);
 
@@ -233,7 +237,7 @@ describe.skipIf(!databaseUrl)("混合/合成提交归属真库验证（IKJJQZ）
     const records = await recoveryPage();
     expect(records.some(record => record.submission_id === S3)).toBe(false);
     const newRecord = records.find(record => record.submission_id === S4);
-    expect(newRecord).toMatchObject({ is_current: true, job_id: jobId });
+    expect(newRecord).toMatchObject({ is_current: true, job_id: retriedJobId });
     expect((newRecord!.job as { status?: string }).status).toBe("queued");
     const [resolvedOld] = await resolveCanvasRecoveryItems(prisma, PROJECT_ID, [
       recoveryItemId(S3, TARGET_OUTPUT_KEY),
@@ -242,7 +246,7 @@ describe.skipIf(!databaseUrl)("混合/合成提交归属真库验证（IKJJQZ）
     expect(resolvedOld.job).toBeNull();
   });
 
-  it("★3 专属重试（mux）：同款事务语义；新意图接管旧项 transferred", async () => {
+  it("★3 专属重试（mux）：新 job 接管归属；原 job 保持 failed", async () => {
 
     await prisma.assets.createMany({
       data: [
@@ -254,9 +258,11 @@ describe.skipIf(!databaseUrl)("混合/合成提交归属真库验证（IKJJQZ）
     const jobId = created.data!.job_id!;
     await markJobFailed(jobId);
     const retried = await muxes.retry(USER_ID, PROJECT_ID, jobId, S6, binding(S6, "mux-node", 1));
+    const retriedJobId = retried.data!.job_id!;
+    expect(retriedJobId).not.toBe(jobId);
     expect(retried).toMatchObject({
       code: 200,
-      data: { job_id: jobId, status: "queued", canvas_binding: { submission_id: S6, binding_revision: 2, is_current: true } },
+      data: { status: "queued", canvas_binding: { submission_id: S6, binding_revision: 2, is_current: true } },
     });
     const owner = await prisma.generation_canvas_node_owners.findUniqueOrThrow({
       where: { project_id_node_id: { project_id: BigInt(PROJECT_ID), node_id: "mux-node" } },
@@ -266,8 +272,10 @@ describe.skipIf(!databaseUrl)("混合/合成提交归属真库验证（IKJJQZ）
       where: { project_id_submission_id: { project_id: BigInt(PROJECT_ID), submission_id: S5 } },
     });
     expect(oldSubmission.target_state).toBe("transferred");
-    const job = await prisma.generation_jobs.findUniqueOrThrow({ where: { id: BigInt(jobId) } });
-    expect(job).toMatchObject({ status: "queued", retry_count: 1 });
+    const original = await prisma.generation_jobs.findUniqueOrThrow({ where: { id: BigInt(jobId) } });
+    expect(original.status).toBe("failed");
+    const retryJob = await prisma.generation_jobs.findUniqueOrThrow({ where: { id: BigInt(retriedJobId) } });
+    expect(retryJob).toMatchObject({ status: "queued", retry_of_job_id: BigInt(jobId) });
 
     const [resolved] = await resolveCanvasRecoveryItems(prisma, PROJECT_ID, [
       recoveryItemId(S5, TARGET_OUTPUT_KEY),
@@ -339,8 +347,11 @@ describe.skipIf(!databaseUrl)("混合/合成提交归属真库验证（IKJJQZ）
     expect(winners).toHaveLength(1);
     expect(losers).toHaveLength(1);
 
-    const job = await prisma.generation_jobs.findUniqueOrThrow({ where: { id: BigInt(jobId) } });
-    expect(job).toMatchObject({ status: "queued", retry_count: 1 });
+    const winnerJobId = String(winners[0]!.data!.job_id);
+    const original = await prisma.generation_jobs.findUniqueOrThrow({ where: { id: BigInt(jobId) } });
+    expect(original.status).toBe("failed");
+    const retryJob = await prisma.generation_jobs.findUniqueOrThrow({ where: { id: BigInt(winnerJobId) } });
+    expect(retryJob).toMatchObject({ status: "queued", retry_of_job_id: BigInt(jobId) });
     expect(await prisma.generation_canvas_submissions.count({ where: { project_id: BigInt(PROJECT_ID) } })).toBe(2);
     const owner = await prisma.generation_canvas_node_owners.findUniqueOrThrow({
       where: { project_id_node_id: { project_id: BigInt(PROJECT_ID), node_id: "mix-node" } },
@@ -411,17 +422,21 @@ describe.skipIf(!databaseUrl)("混合/合成提交归属真库验证（IKJJQZ）
     expect(settledSubmission.target_state).toBe("transferred");
   });
 
-  it("★9 专属重试回执丢失重放：同 submission 再重试返回原关联，不重复推进版本", async () => {
+  it("★9 专属重试回执丢失重放：同 submission 再重试返回同一新 job，不重复推进版本", async () => {
     const created = await createMixJob(binding(S8, "mix-node", 0), S8);
     const jobId = created.data!.job_id!;
     await markJobFailed(jobId);
     const first = await mixes.retry(USER_ID, PROJECT_ID, jobId, S9, undefined, binding(S9, "mix-node", 1));
+    const firstRetryJobId = first.data!.job_id!;
     expect(first).toMatchObject({ code: 200, data: { replayed: false, canvas_binding: { submission_id: S9 } } });
+    expect(firstRetryJobId).not.toBe(jobId);
 
     const replay = await mixes.retry(USER_ID, PROJECT_ID, jobId, S9, undefined, binding(S9, "mix-node", 1));
-    expect(replay).toMatchObject({ code: 200, data: { job_id: jobId, replayed: true, canvas_binding: { submission_id: S9 } } });
-    const job = await prisma.generation_jobs.findUniqueOrThrow({ where: { id: BigInt(jobId) } });
-    expect(job.retry_count).toBe(1);
+    expect(replay).toMatchObject({ code: 200, data: { job_id: firstRetryJobId, replayed: true, canvas_binding: { submission_id: S9 } } });
+    const original = await prisma.generation_jobs.findUniqueOrThrow({ where: { id: BigInt(jobId) } });
+    expect(original.status).toBe("failed");
+    const retryJob = await prisma.generation_jobs.findUniqueOrThrow({ where: { id: BigInt(firstRetryJobId) } });
+    expect(retryJob).toMatchObject({ status: "queued", retry_count: 0, retry_of_job_id: BigInt(jobId) });
     expect(await prisma.generation_canvas_submissions.count({ where: { project_id: BigInt(PROJECT_ID) } })).toBe(2);
     const owner = await prisma.generation_canvas_node_owners.findUniqueOrThrow({
       where: { project_id_node_id: { project_id: BigInt(PROJECT_ID), node_id: "mix-node" } },

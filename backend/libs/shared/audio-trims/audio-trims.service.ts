@@ -1,25 +1,28 @@
+import type { Prisma } from "@prisma/client";
 import { Injectable } from "@nestjs/common";
 import {
+  ASSET_UNAVAILABLE_CODE,
   AUDIO_TRIM_INPUT_KEYS,
   AUDIO_TRIM_JOB_TYPE,
   AUDIO_TRIM_OUTPUT_FORMATS,
   AUDIO_TRIM_SOURCE,
   FAILURE_CODE,
-  IDEMPOTENCY_CONFLICT_CODE,
   PARAM_MISSING_CODE,
   RESOURCE_NOT_FOUND_CODE,
   audioTrimInputSchema,
   defaultAudioTrimOutputFormat,
   fail,
-  ok,
   type AudioTrimOutputFormat,
 } from "@lib/contracts";
-import { createGenerationCommandRepo } from "@lib/shared/persistence/index.js";
 import {
-  createMediaToolJobWithRecovery,
   replayAcceptedMediaTool,
   stripCanvasBinding,
 } from "@lib/shared/generation/media-tool-recovery.js";
+import { enqueueAudioTrimJob } from "@lib/shared/generation/generation-queue.js";
+import { submitMediaToolJob } from "@lib/shared/media-tools/media-tool-submission.js";
+import { resolveSourceDuration } from "@lib/shared/media-tools/source-duration.js";
+import { MediaToolBillingService } from "@lib/shared/media-tool-pricing/media-tool-billing.service.js";
+import { AssetStorageService } from "@lib/shared/assets/storage.service.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";
 import { AssetService } from "@lib/shared/assets/assets.service.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
@@ -39,6 +42,8 @@ export class AudioTrimsService {
     private readonly prisma: PrismaService,
     private readonly project: ProjectService,
     private readonly assets: AssetService,
+    private readonly storage: AssetStorageService,
+    private readonly billing: MediaToolBillingService,
   ) {}
 
   async create(
@@ -112,10 +117,38 @@ export class AudioTrimsService {
       return fail(PARAM_MISSING_CODE, parsed.error.issues[0]?.message ?? "音频截取参数非法");
     }
 
-    const outcome = await createMediaToolJobWithRecovery(
-      this.prisma.client,
+    const duration = await resolveSourceDuration({
+      prisma: this.prisma.client,
+      storage: this.storage,
+      asset: {
+        id: sourceAssetId,
+        storage_key: asset.storage_key,
+        duration_ms: asset.duration_ms,
+      },
+    });
+    if (duration === null) {
+      return fail(
+        ASSET_UNAVAILABLE_CODE,
+        "源音频时长读取失败，请稍后重试或更换素材",
+        { code: "asset_unavailable" },
+      );
+    }
+    const start = parsed.data.start_time ?? 0;
+    const end = Math.min(parsed.data.end_time ?? duration.seconds, duration.seconds);
+    const selectedSeconds = Math.ceil(end - start);
+    if (selectedSeconds <= 0) {
+      return fail(PARAM_MISSING_CODE, "截取区间超出源音频时长");
+    }
+    const frozenInput = { ...parsed.data, duration: selectedSeconds } as Prisma.InputJsonObject;
+
+    return submitMediaToolJob({
+      prisma: this.prisma.client,
+      billing: this.billing,
+      toolType: AUDIO_TRIM_JOB_TYPE,
+      userId,
+      input: frozenInput,
       recovery,
-      async (db) => {
+      createJob: async (db) => {
         const job = await db.generation_jobs.create({
           data: {
             user_id: BigInt(userId),
@@ -124,37 +157,13 @@ export class AudioTrimsService {
             source: AUDIO_TRIM_SOURCE,
             status: "queued",
             progress: 0,
-            input: {
-              ...parsed.data,
-            },
+            input: frozenInput,
             next_action_at: new Date(Date.now() - 60_000),
           },
         });
         return { jobId: job.id.toString(), status: "queued" };
       },
-    );
-    if (outcome.kind === "envelope") return outcome.envelope;
-    if (outcome.kind === "idempotency_conflict") {
-      return fail(IDEMPOTENCY_CONFLICT_CODE, "幂等键冲突：同键异载荷");
-    }
-    return ok({
-      job_id: outcome.jobId,
-      status: outcome.status,
-      ...(outcome.bindingView ? { canvas_binding: outcome.bindingView } : {}),
+      enqueue: enqueueAudioTrimJob,
     });
-  }
-
-  async markFailed(
-    jobId: string,
-    code: string,
-    message: string,
-    details?: Record<string, unknown>,
-  ): Promise<void> {
-    await createGenerationCommandRepo(this.prisma.client).markFailedQueued(
-      jobId,
-      code,
-      message,
-      details,
-    );
   }
 }

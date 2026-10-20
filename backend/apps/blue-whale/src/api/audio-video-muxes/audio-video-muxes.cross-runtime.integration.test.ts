@@ -106,7 +106,7 @@ describe.skipIf(process.env.IKIHPJ_CROSS_RUNTIME !== "1")("audio_video_mux cross
         return bytes ? { size: bytes.length, mime: key.endsWith(".mp4") ? "video/mp4" : "audio/mpeg", publicUrl: `${inputBase}/${key}` } : null;
       } } } as unknown as AssetStorageService;
       const assets = new AssetService(prisma, storage);
-      const muxes = new AudioVideoMuxesService(prisma, projects, assets, storage);
+      const muxes = new AudioVideoMuxesService(prisma, projects, assets, storage, { jobBilling: async () => undefined, release: async () => {} } as never);
       Reflect.defineMetadata("design:paramtypes", [AudioVideoMuxesService], AudioVideoMuxesController);
       Reflect.defineMetadata("design:paramtypes", [JobsService], JobsController);
       Reflect.defineMetadata("design:paramtypes", [AssetService], AssetsController);

@@ -41,7 +41,13 @@ describe("audio mix create idempotency", () => {
     })) };
     const storage = { uploads: { inspectObject: vi.fn(async (key: string) => ({ size: 10, publicUrl: `https://store.test/${key}` })) } };
     vi.stubGlobal("fetch", vi.fn(async () => new Response("x", { status: 206 })));
-    const service = new AudioMixesService({ client } as never, project as never, assets as never, storage as never);
+    const service = new AudioMixesService(
+      { client } as never,
+      project as never,
+      assets as never,
+      storage as never,
+      { jobBilling: vi.fn().mockResolvedValue(undefined), release: vi.fn() } as never,
+    );
 
     const first = await service.create("9", "5", payload, { idempotencyKey: "one-click" });
     const again = await service.create("9", "5", payload, { idempotencyKey: "one-click" });

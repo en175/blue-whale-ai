@@ -1,7 +1,8 @@
+import type { Prisma } from "@prisma/client";
 import { Injectable } from "@nestjs/common";
 import {
+  ASSET_UNAVAILABLE_CODE,
   FAILURE_CODE,
-  IDEMPOTENCY_CONFLICT_CODE,
   MEDIA_EXTRACT_DEFAULT_OUTPUT_FORMAT,
   MEDIA_EXTRACT_INPUT_KEYS,
   MEDIA_EXTRACT_JOB_TYPE,
@@ -10,15 +11,17 @@ import {
   PARAM_MISSING_CODE,
   RESOURCE_NOT_FOUND_CODE,
   fail,
-  ok,
   type MediaExtractOutputFormat,
 } from "@lib/contracts";
-import { createGenerationCommandRepo } from "@lib/shared/persistence/index.js";
 import {
-  createMediaToolJobWithRecovery,
   replayAcceptedMediaTool,
   stripCanvasBinding,
 } from "@lib/shared/generation/media-tool-recovery.js";
+import { enqueueMediaExtractJob } from "@lib/shared/generation/generation-queue.js";
+import { submitMediaToolJob } from "@lib/shared/media-tools/media-tool-submission.js";
+import { resolveSourceDuration } from "@lib/shared/media-tools/source-duration.js";
+import { MediaToolBillingService } from "@lib/shared/media-tool-pricing/media-tool-billing.service.js";
+import { AssetStorageService } from "@lib/shared/assets/storage.service.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";
 import { AssetService } from "@lib/shared/assets/assets.service.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
@@ -38,6 +41,8 @@ export class MediaExtractionsService {
     private readonly prisma: PrismaService,
     private readonly project: ProjectService,
     private readonly assets: AssetService,
+    private readonly storage: AssetStorageService,
+    private readonly billing: MediaToolBillingService,
   ) {}
 
   async create(
@@ -89,10 +94,36 @@ export class MediaExtractionsService {
       return fail(FAILURE_CODE, "仅支持从视频资产提取音频");
     }
 
-    const outcome = await createMediaToolJobWithRecovery(
-      this.prisma.client,
+    const duration = await resolveSourceDuration({
+      prisma: this.prisma.client,
+      storage: this.storage,
+      asset: {
+        id: sourceAssetId,
+        storage_key: asset.storage_key,
+        duration_ms: asset.duration_ms,
+      },
+    });
+    if (duration === null) {
+      return fail(
+        ASSET_UNAVAILABLE_CODE,
+        "源视频时长读取失败，请稍后重试或更换素材",
+        { code: "asset_unavailable" },
+      );
+    }
+    const frozenInput = {
+      [MEDIA_EXTRACT_INPUT_KEYS.sourceAssetId]: sourceAssetId,
+      [MEDIA_EXTRACT_INPUT_KEYS.outputFormat]: outputFormat,
+      duration: duration.seconds,
+    } as Prisma.InputJsonObject;
+
+    return submitMediaToolJob({
+      prisma: this.prisma.client,
+      billing: this.billing,
+      toolType: MEDIA_EXTRACT_JOB_TYPE,
+      userId,
+      input: frozenInput,
       recovery,
-      async (db) => {
+      createJob: async (db) => {
         const job = await db.generation_jobs.create({
           data: {
             user_id: BigInt(userId),
@@ -101,38 +132,13 @@ export class MediaExtractionsService {
             source: MEDIA_EXTRACT_SOURCE,
             status: "queued",
             progress: 0,
-            input: {
-              [MEDIA_EXTRACT_INPUT_KEYS.sourceAssetId]: sourceAssetId,
-              [MEDIA_EXTRACT_INPUT_KEYS.outputFormat]: outputFormat,
-            },
+            input: frozenInput,
             next_action_at: new Date(Date.now() - 60_000),
           },
         });
         return { jobId: job.id.toString(), status: "queued" };
       },
-    );
-    if (outcome.kind === "envelope") return outcome.envelope;
-    if (outcome.kind === "idempotency_conflict") {
-      return fail(IDEMPOTENCY_CONFLICT_CODE, "幂等键冲突：同键异载荷");
-    }
-    return ok({
-      job_id: outcome.jobId,
-      status: outcome.status,
-      ...(outcome.bindingView ? { canvas_binding: outcome.bindingView } : {}),
+      enqueue: enqueueMediaExtractJob,
     });
-  }
-
-  async markFailed(
-    jobId: string,
-    code: string,
-    message: string,
-    details?: Record<string, unknown>,
-  ): Promise<void> {
-    await createGenerationCommandRepo(this.prisma.client).markFailedQueued(
-      jobId,
-      code,
-      message,
-      details,
-    );
   }
 }

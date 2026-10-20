@@ -12,6 +12,10 @@ vi.mock("@lib/shared/persistence/index.js", async (importOriginal) => {
   };
 });
 
+vi.mock("@lib/shared/persistence/generation-command-repo.js", () => ({
+  createGenerationCommandRepo: () => ({ markFailedQueued }),
+}));
+
 vi.mock("@lib/infra/logging/blue-whale-logger.js", () => ({
   logger: { error: vi.fn(), warn: vi.fn() },
 }));

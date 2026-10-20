@@ -225,18 +225,18 @@ describe('创建请求（canvas_binding 受理契约）', () => {
   });
 });
 
-describe('专属重试（同 jobId ≠ 同提交意图）', () => {
-  it('混合重试复用 jobId、携 canvas_binding（第 5 参）与幂等键；返回同 jobId + 绑定视图', async () => {
-    api.retryAudioMix.mockResolvedValue({ job_id: '73', status: 'queued', replayed: false, canvas_binding: BINDING_VIEW('sub-9', 'audio-mix-1', '73', 2) });
+describe('专属重试（同卡新 job）', () => {
+  it('混合重试返回新 jobId、携 canvas_binding（第 5 参）与幂等键', async () => {
+    api.retryAudioMix.mockResolvedValue({ job_id: '95', status: 'queued', replayed: false, canvas_binding: BINDING_VIEW('sub-9', 'audio-mix-1', '95', 2) });
     const outcome = await audioMixTask.retry!('p1', '73', { nodeId: 'audio-mix-1', nodeData: {} }, { protocol_version: 1, submission_id: 'sub-9' } as never, 'sub-9');
     expect(api.retryAudioMix).toHaveBeenCalledWith('p1', '73', 'sub-9', { silent: true }, { protocol_version: 1, submission_id: 'sub-9' });
-    expect(outcome).toMatchObject({ jobId: '73', canvasBinding: { submission_id: 'sub-9', binding_revision: 2 } });
+    expect(outcome).toMatchObject({ jobId: '95', canvasBinding: { submission_id: 'sub-9', binding_revision: 2 } });
   });
 
-  it('合成重试端点与载荷形状同混合；协议破坏（换 jobId）抛错不收敛', async () => {
+  it('合成重试端点与载荷形状同混合；接受新 jobId', async () => {
     api.retryAudioVideoMux.mockResolvedValue({ job_id: '80', status: 'queued', replayed: false });
-    await expect(audioVideoMuxTask.retry!('p1', '79', { nodeId: 'audio-video-mux-1', nodeData: {} }, null, 'sub-x'))
-      .rejects.toThrow('重试任务身份不一致');
+    const outcome = await audioVideoMuxTask.retry!('p1', '79', { nodeId: 'audio-video-mux-1', nodeData: {} }, null, 'sub-x');
+    expect(outcome).toMatchObject({ jobId: '80' });
     expect(api.retryAudioVideoMux).toHaveBeenCalledWith('p1', '79', 'sub-x', { silent: true }, undefined);
   });
 
@@ -248,7 +248,7 @@ describe('专属重试（同 jobId ≠ 同提交意图）', () => {
   });
 });
 
-describe('运行时接入：同 jobId 重试的操作轮次隔离', () => {
+describe('运行时接入：重试新 job 的操作轮次隔离', () => {
   it('失败卡重试生成新 submission_id、携当前承接版本；旧执行响应不覆盖新轮次', async () => {
     const { fake, clock, runtime } = setup();
     fake.nodes.set('audio-mix-1', mixPlaceholder('audio-mix-1'));
@@ -265,9 +265,10 @@ describe('运行时接入：同 jobId 重试的操作轮次隔离', () => {
     expect(runtime.statusOf('audio-mix-1')).toBeNull();
 
     api.fetchJobStatus.mockResolvedValue({ status: 'succeeded', asset: { id: 'a-9', url: 'ok.mp3', type: 'audio' }, output_assets: [{ id: 'a-9' }] });
-    api.retryAudioMix.mockResolvedValue({ job_id: '73', status: 'queued', replayed: false, canvas_binding: BINDING_VIEW('sub-2', 'audio-mix-1', '73', 2) });
+    api.retryAudioMix.mockResolvedValue({ job_id: '74', status: 'queued', replayed: false, canvas_binding: BINDING_VIEW('sub-2', 'audio-mix-1', '74', 2) });
     expect(runtime.retry('audio-mix-1')).toBe(true);
     await flushMicrotasks();
+    expect(fake.nodes.get('audio-mix-1')?.data.jobId).toBe('74');
     const retryCall = api.retryAudioMix.mock.calls[0];
     expect(retryCall[0]).toBe('p1');
     expect(retryCall[1]).toBe('73');
@@ -295,11 +296,12 @@ describe('运行时接入：同 jobId 重试的操作轮次隔离', () => {
   it('历史卡（无受理关联）重试不带 canvas_binding，走原协议路径', async () => {
     const { fake, runtime } = setup();
     fake.nodes.set('audio-mix-73', { ...mixPlaceholder('audio-mix-73'), data: { ...mixPlaceholder('audio-mix-73').data, genStatus: 'failed', errorText: '旧失败' } });
-    api.retryAudioMix.mockResolvedValue({ job_id: '73', status: 'queued', replayed: false });
+    api.retryAudioMix.mockResolvedValue({ job_id: '74', status: 'queued', replayed: false });
     expect(runtime.retry('audio-mix-73')).toBe(true);
     await flushMicrotasks();
     expect(api.retryAudioMix).toHaveBeenCalledWith('p1', '73', expect.any(String), { silent: true }, undefined);
     expect(fake.nodes.get('audio-mix-73')?.data.genStatus).toBe('generating');
+    expect(fake.nodes.get('audio-mix-73')?.data.jobId).toBe('74');
   });
 });
 

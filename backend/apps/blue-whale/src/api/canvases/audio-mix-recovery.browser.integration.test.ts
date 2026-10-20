@@ -136,7 +136,7 @@ describe.skipIf(process.env.IKI697_BROWSER !== "1")(
         size: wav.length, mime: "audio/wav", publicUrl: `https://mix-object.test/${key}`,
       }) } } as unknown as AssetStorageService;
       const assets = new AssetService(prisma, storage);
-      const mixes = new AudioMixesService(prisma, projects, assets, storage);
+      const mixes = new AudioMixesService(prisma, projects, assets, storage, { jobBilling: async () => undefined, release: async () => {} } as never);
       Reflect.defineMetadata("design:paramtypes", [CanvasService], CanvasesController);
       Reflect.defineMetadata("design:paramtypes", [ProjectService, CanvasService, SnapshotService, PrismaService], ProjectsController);
       Reflect.defineMetadata("design:paramtypes", [JobsService], JobsController);
@@ -273,13 +273,13 @@ describe.skipIf(process.env.IKI697_BROWSER !== "1")(
         await result.waitFor();
         expect(await result.locator("audio").count()).toBe(0);
         const initialInput = (await prisma.client.generation_jobs.findUniqueOrThrow({ where: { id: BigInt(jobId) } })).input;
-        const runWorker = async (phase: "fail" | "succeed") => {
+        const runWorker = async (phase: "fail" | "succeed", targetJobId: string = jobId) => {
           const worker = spawn("docker", ["run", "--rm", "-e", "IKI68N_CROSS_RUNTIME=1",
             "-e", `IKI68N_DB_GUARD_TOKEN=${guardToken}`,
             "-e", `IKI68N_CROSS_RUNTIME_PHASE=${phase}`,
             "-e", "IKI68N_CROSS_RUNTIME_AUDIO_FILE=/fixture/result.mp3",
             "-e", `IKI68N_EXTERNAL_DB_URL=jdbc:mysql://host.docker.internal:${mysqlPort}/${databaseName}?allowPublicKeyRetrieval=true&useSSL=false`,
-            "-e", `IKI68N_CROSS_RUNTIME_JOB_ID=${jobId}`,
+            "-e", `IKI68N_CROSS_RUNTIME_JOB_ID=${targetJobId}`,
             "-e", `IKI68N_STORAGE_UPLOAD_URL=http://host.docker.internal:${(mediaServer.address() as { port: number }).port}/stored/out.mp3`,
             "-e", `IKI68N_STORAGE_PUBLIC_URL=${mediaBase}/stored/out.mp3`,
             "-v", `${repo}:/workspace`, "-w", "/workspace/server",
@@ -309,14 +309,23 @@ describe.skipIf(process.env.IKI697_BROWSER !== "1")(
         });
         await vi.waitFor(async () => {
           expect(retryRequests).toHaveLength(1);
-          expect((await prisma.client.generation_jobs.findUniqueOrThrow({ where: { id: BigInt(jobId) } })).status).toBe("queued");
+          const retryJob = await prisma.client.generation_jobs.findFirstOrThrow({
+            where: { retry_of_job_id: BigInt(jobId) },
+            orderBy: { id: "desc" },
+          });
+          expect(retryJob.status).toBe("queued");
+          expect(retryJob.input).toEqual(initialInput);
         }, { timeout: 10_000 });
-        expect((await prisma.client.generation_jobs.findUniqueOrThrow({ where: { id: BigInt(jobId) } })).input).toEqual(initialInput);
+        const retryJob = await prisma.client.generation_jobs.findFirstOrThrow({
+          where: { retry_of_job_id: BigInt(jobId) },
+          orderBy: { id: "desc" },
+        });
+        expect((await prisma.client.generation_jobs.findUniqueOrThrow({ where: { id: BigInt(jobId) } })).status).toBe("failed");
         await page.reload();
         await result.waitFor();
         expect(await result.locator("audio").count()).toBe(0);
         expect(await page.locator(`.react-flow__node-mediaNode[data-id="${nodeId}"]`).count()).toBe(1);
-        await runWorker("succeed");
+        await runWorker("succeed", String(retryJob.id));
         await result.locator("audio").waitFor({ state: "attached", timeout: 15_000 });
         expect(storedOutput).toEqual(expectedOutput);
         await page.reload();
@@ -327,7 +336,7 @@ describe.skipIf(process.env.IKI697_BROWSER !== "1")(
           audio.pause();
         });
         expect(servedOutputHashes).toContain(hash(storedOutput!));
-        expect(await prisma.client.assets.count({ where: { generation_job_id: BigInt(jobId) } })).toBe(1);
+        expect(await prisma.client.assets.count({ where: { generation_job_id: retryJob.id } })).toBe(1);
         await page.locator('.react-flow__node-mediaNode[data-id="source"]').click();
         await page.keyboard.press("Delete");
         await vi.waitFor(async () => {

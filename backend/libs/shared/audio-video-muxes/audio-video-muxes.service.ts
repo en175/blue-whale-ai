@@ -6,7 +6,10 @@ import { AssetStorageService } from "@lib/shared/assets/storage.service.js";
 import { loadTosStorageConfig } from "@lib/shared/assets/tos-storage.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";
-import { createGenerationCommandRepo } from "@lib/shared/persistence/index.js";
+import { markFailedQueuedAndNotifyBilling } from "@lib/shared/persistence/index.js";
+import { withBillingCompensation } from "@lib/shared/persistence/job-billing.js";
+import { resolveSourceDuration } from "@lib/shared/media-tools/source-duration.js";
+import { MediaToolBillingService } from "@lib/shared/media-tool-pricing/media-tool-billing.service.js";
 import {
   RecoveryContractError,
   canvasBindingView,
@@ -16,13 +19,13 @@ import {
 } from "@lib/shared/persistence/generation-canvas-recovery-repo.js";
 import type { CanvasRecoveryPlan } from "@lib/shared/persistence/generation-canvas-recovery-repo.js";
 import {
+  ASSET_UNAVAILABLE_CODE,
   AUDIO_VIDEO_MUX_JOB_TYPE,
   AUDIO_VIDEO_MUX_SOURCE,
   PARAM_MISSING_CODE,
   RECOVERY_REASONS,
   RESOURCE_NOT_FOUND_CODE,
   FAILURE_CODE,
-  ERROR_ENQUEUE_FAILED,
   DomainError,
   audioVideoMuxCreateSchema,
   canvasBindingSchema,
@@ -41,6 +44,7 @@ export class AudioVideoMuxesService {
     private readonly project: ProjectService,
     private readonly assets: AssetService,
     private readonly storage: AssetStorageService,
+    private readonly billing: MediaToolBillingService,
   ) {}
 
   async create(
@@ -77,20 +81,10 @@ export class AudioVideoMuxesService {
       }
       const job = await this.prisma.client.generation_jobs.findFirst({
         where: { id: existing.generation_job_id, project_id: BigInt(projectId), user_id: BigInt(userId), type: AUDIO_VIDEO_MUX_JOB_TYPE },
-        select: { id: true, status: true, version: true, error: true },
+        select: { id: true, status: true },
       });
       if (!job) throw new DomainError(RESOURCE_NOT_FOUND_CODE);
-      const error = job.error;
-      if (job.status === "failed" && error && typeof error === "object" && !Array.isArray(error)
-          && "code" in error && error.code === ERROR_ENQUEUE_FAILED) {
-        const resumed = await this.prisma.client.generation_jobs.updateMany({
-          where: { id: job.id, status: "failed", version: job.version },
-          data: { status: "queued", error: Prisma.DbNull, next_action_at: new Date(Date.now() - 60_000), version: { increment: 1 } },
-        });
-        if (resumed.count === 1) return ok({ job_id: job.id.toString(), status: "queued", replayed: true, enqueue_required: true });
-      }
-      const latest = await this.prisma.client.generation_jobs.findUniqueOrThrow({ where: { id: job.id }, select: { status: true } });
-      return ok({ job_id: job.id.toString(), status: latest.status, replayed: true, enqueue_required: false });
+      return ok({ job_id: job.id.toString(), status: job.status, replayed: true, enqueue_required: false });
     };
     const previous = await replay();
     if (previous) return this.withBindingView(previous, projectId, canvasBinding);
@@ -114,7 +108,12 @@ export class AudioVideoMuxesService {
     const resolveSlot = async (
       input: { assetId: string; nodeId?: string | undefined },
       expectedType: "audio" | "video",
-    ): Promise<{ frozen: FrozenMuxInput; durationMs: number | null }> => {
+    ): Promise<{
+      frozen: FrozenMuxInput;
+      durationMs: number;
+      width: number | null;
+      height: number | null;
+    }> => {
       const label = expectedType === "audio" ? "音频" : "视频";
       const asset = await this.assets.findOwnedSource(input.assetId, userId);
       if (!asset) throw new DomainError(RESOURCE_NOT_FOUND_CODE);
@@ -156,19 +155,49 @@ export class AudioVideoMuxesService {
       } catch {
         throw new DomainError(FAILURE_CODE, `${label}资产不可用`);
       }
+      const resolved = await resolveSourceDuration({
+        prisma: this.prisma.client,
+        storage: this.storage,
+        probeDimensions: expectedType === "video",
+        asset: {
+          id: input.assetId,
+          storage_key: storageKey,
+          duration_ms: asset.duration_ms,
+          width: asset.width,
+          height: asset.height,
+        },
+      });
+      if (resolved === null) {
+        throw new DomainError(
+          ASSET_UNAVAILABLE_CODE,
+          `${label}时长读取失败，请稍后重试或更换素材`,
+          503,
+        );
+      }
       return {
         frozen: {
           assetId: input.assetId,
           ...(input.nodeId ? { nodeId: input.nodeId } : {}),
           url: publicUrl,
         },
-        durationMs: asset.duration_ms == null || !Number.isFinite(asset.duration_ms) || asset.duration_ms < 0
-          ? null : asset.duration_ms,
+        durationMs: resolved.durationMs,
+        width: resolved.width ?? asset.width,
+        height: resolved.height ?? asset.height,
       };
     };
 
-    let audioSlot: { frozen: FrozenMuxInput; durationMs: number | null };
-    let videoSlot: { frozen: FrozenMuxInput; durationMs: number | null };
+    let audioSlot: {
+      frozen: FrozenMuxInput;
+      durationMs: number;
+      width: number | null;
+      height: number | null;
+    };
+    let videoSlot: {
+      frozen: FrozenMuxInput;
+      durationMs: number;
+      width: number | null;
+      height: number | null;
+    };
     try {
       [audioSlot, videoSlot] = await Promise.race([
         Promise.all([
@@ -183,7 +212,21 @@ export class AudioVideoMuxesService {
     } finally {
       clearTimeout(deadlineTimer);
     }
-    const estimatedDurationMs = videoSlot.durationMs;
+    const estimatedDurationMs = parsed.data.sync === "video"
+      ? videoSlot.durationMs
+      : parsed.data.sync === "audio"
+        ? audioSlot.durationMs
+        : Math.max(audioSlot.durationMs, videoSlot.durationMs);
+    const durationSeconds = Math.max(1, Math.ceil(estimatedDurationMs / 1000));
+    const longSide = Math.max(videoSlot.width ?? 0, videoSlot.height ?? 0);
+    if (longSide <= 0) {
+      throw new DomainError(
+        ASSET_UNAVAILABLE_CODE,
+        "视频分辨率读取失败，请稍后重试或更换素材",
+        503,
+      );
+    }
+    const resolution = longSide <= 1920 ? "1080p" : longSide <= 2560 ? "2k" : "4k";
 
     const data = {
       user_id: BigInt(userId),
@@ -198,19 +241,35 @@ export class AudioVideoMuxesService {
         is_audio_reserve: parsed.data.is_audio_reserve,
         sync: parsed.data.sync,
         estimated_duration_ms: estimatedDurationMs,
+        duration: durationSeconds,
+        resolution,
         submit_attempt: 1,
       },
       next_action_at: new Date(Date.now() - 60_000),
       execution_deadline_at: audioVideoMuxDeadline(estimatedDurationMs),
     };
+    const jobBilling = await this.billing.jobBilling(AUDIO_VIDEO_MUX_JOB_TYPE, userId, {
+      duration: durationSeconds,
+      resolution,
+    });
     if (!key) {
-      const job = await this.prisma.client.generation_jobs.create({ data });
+      const job = await withBillingCompensation(jobBilling, (billing) =>
+        this.prisma.client.$transaction(
+          async (tx) => {
+            const created = await tx.generation_jobs.create({ data });
+            await billing?.charge(Number(created.id));
+            return created;
+          },
+          { maxWait: 10_000, timeout: 30_000 },
+        ),
+      );
       return ok({ job_id: job.id.toString(), status: "queued", replayed: false, enqueue_required: true });
     }
     let jobIdOfCreated = "";
     let replayed = false;
     try {
-      const result = await this.prisma.client.$transaction(async (tx) => {
+      const result = await withBillingCompensation(jobBilling, (billing) =>
+        this.prisma.client.$transaction(async (tx) => {
         let plan: CanvasRecoveryPlan | null = null;
         if (canvasBinding) {
           const locked = await lockCanvasRecoveryForAcceptance(tx, {
@@ -225,12 +284,14 @@ export class AudioVideoMuxesService {
           plan = locked.plan;
         }
         const created = await tx.generation_jobs.create({ data });
+        await billing?.charge(Number(created.id));
         await tx.command_idempotency.create({
           data: { ...key, request_hash: hash, generation_job_id: created.id, accepted_cursor: 0n },
         });
         if (plan) await writeCanvasRecoveryRows(tx, plan, created.id);
         return { replayed: false, jobId: created.id.toString() };
-      });
+        }),
+      );
       replayed = result.replayed;
       jobIdOfCreated = result.jobId ?? "";
     } catch (error) {
@@ -267,9 +328,56 @@ export class AudioVideoMuxesService {
     const owned = await this.prisma.client.generation_jobs.findFirst({
       where: { id: jid, project_id: pid, user_id: BigInt(userId), type: AUDIO_VIDEO_MUX_JOB_TYPE,
         source: AUDIO_VIDEO_MUX_SOURCE, is_delete: false },
-      select: { id: true },
+      select: { id: true, input: true },
     });
     if (!owned) throw new DomainError(RESOURCE_NOT_FOUND_CODE);
+    const frozenOwned = owned.input as {
+      duration?: unknown;
+      estimated_duration_ms?: unknown;
+      resolution?: unknown;
+      submit_attempt?: unknown;
+      video?: { assetId?: unknown };
+    } | null;
+    const retrySeconds = typeof frozenOwned?.duration === "number"
+      ? frozenOwned.duration
+      : typeof frozenOwned?.estimated_duration_ms === "number"
+        ? Math.max(1, Math.ceil(frozenOwned.estimated_duration_ms / 1000))
+        : null;
+    let retryResolution = typeof frozenOwned?.resolution === "string" ? frozenOwned.resolution : null;
+    if (retryResolution === null) {
+      const videoAssetId = frozenOwned?.video?.assetId;
+      const video = typeof videoAssetId === "string"
+        ? await this.prisma.client.assets.findUnique({
+            where: { id: BigInt(videoAssetId) },
+            select: { width: true, height: true },
+          })
+        : null;
+      if (video?.width && video.height) {
+        const longSide = Math.max(video.width, video.height);
+        retryResolution = longSide <= 1920 ? "1080p" : longSide <= 2560 ? "2k" : "4k";
+      }
+    }
+    if (retrySeconds === null || retryResolution === null) {
+      throw new DomainError(FAILURE_CODE, "任务缺少计费时长或分辨率，无法重试");
+    }
+    const retryEstimatedMs = typeof frozenOwned?.estimated_duration_ms === "number"
+      ? frozenOwned.estimated_duration_ms
+      : retrySeconds * 1000;
+    const attempt = typeof frozenOwned?.submit_attempt === "number"
+      && Number.isInteger(frozenOwned.submit_attempt)
+      && frozenOwned.submit_attempt >= 1
+      ? frozenOwned.submit_attempt
+      : 1;
+    const retryInput = {
+      ...(frozenOwned ?? {}),
+      duration: retrySeconds,
+      resolution: retryResolution,
+      submit_attempt: attempt + 1,
+    };
+    const retryBilling = await this.billing.jobBilling(AUDIO_VIDEO_MUX_JOB_TYPE, userId, {
+      duration: retrySeconds,
+      resolution: retryResolution,
+    });
     const hash = createHash("sha256").update(
       `POST:audio_video_mux.retry:${projectId}:${jobId}${canvasBinding ? `:${JSON.stringify(canvasBinding)}` : ""}`,
     ).digest("hex");
@@ -279,25 +387,23 @@ export class AudioVideoMuxesService {
         where: { project_id_operation_idempotency_key: key },
       });
       if (!existing) return null;
-      if (existing.request_hash !== hash || existing.generation_job_id !== jid) {
+      if (existing.request_hash !== hash || !existing.generation_job_id) {
         throw new DomainError(409, "幂等键已用于另一项音视频合成重试");
       }
-      const current = await this.prisma.client.generation_jobs.findUniqueOrThrow({ where: { id: jid } });
-      const error = current.error;
-      if (current.status === "failed" && error && typeof error === "object" && !Array.isArray(error)
-          && "code" in error && error.code === ERROR_ENQUEUE_FAILED) {
-        const resumed = await this.prisma.client.generation_jobs.updateMany({
-          where: { id: jid, status: "failed", version: current.version },
-          data: { status: "queued", error: Prisma.DbNull, next_action_at: new Date(Date.now() - 60_000),
-            version: { increment: 1 } },
-        });
-        if (resumed.count === 1) return ok({ job_id: jobId, status: "queued", replayed: true, enqueue_required: true });
-      }
-      const latest = await this.prisma.client.generation_jobs.findUniqueOrThrow({ where: { id: jid }, select: { status: true } });
-      return ok({ job_id: jobId, status: latest.status, replayed: true, enqueue_required: false });
+      const current = await this.prisma.client.generation_jobs.findUniqueOrThrow({
+        where: { id: existing.generation_job_id },
+        select: { status: true },
+      });
+      return ok({
+        job_id: existing.generation_job_id.toString(),
+        status: current.status,
+        replayed: true,
+        enqueue_required: false,
+      });
     };
     try {
-      const result = await this.prisma.client.$transaction(async (tx) => {
+      const result = await withBillingCompensation(retryBilling, (billing) =>
+        this.prisma.client.$transaction(async (tx) => {
         let plan: CanvasRecoveryPlan | null = null;
         if (canvasBinding) {
           const locked = await lockCanvasRecoveryForRetry(tx, {
@@ -319,7 +425,7 @@ export class AudioVideoMuxesService {
             where: { project_id_operation_idempotency_key: key },
           });
           if (existing) {
-            if (existing.request_hash !== hash || existing.generation_job_id !== jid) {
+            if (existing.request_hash !== hash || !existing.generation_job_id) {
               throw new DomainError(409, "幂等键已用于另一项音视频合成重试");
             }
             return { replayed: true };
@@ -349,29 +455,32 @@ export class AudioVideoMuxesService {
           select: { id: true },
         });
         if (living.length !== 2) throw new DomainError(409, "输入资产已删除，无法重试音视频合成");
-        const duration = typeof frozen.estimated_duration_ms === "number" ? frozen.estimated_duration_ms : null;
-        const updated = await tx.generation_jobs.updateMany({
-          where: { id: jid, status: "failed", fencing_token: job.fencing_token },
+        const created = await tx.generation_jobs.create({
           data: {
-            status: "queued", progress: 0, error: Prisma.DbNull, output_asset_ids: Prisma.DbNull,
-            provider_task_id: null, poll_count: 0,
+            user_id: BigInt(userId),
+            project_id: pid,
+            type: AUDIO_VIDEO_MUX_JOB_TYPE,
+            source: AUDIO_VIDEO_MUX_SOURCE,
+            status: "queued",
+            progress: 0,
+            input: retryInput as Prisma.InputJsonValue,
+            retry_of_job_id: jid,
             next_action_at: new Date(Date.now() - 60_000),
-            execution_deadline_at: audioVideoMuxDeadline(duration),
-            lease_owner: null, lease_expires_at: null,
-            input: { ...frozen, submit_attempt: attempt + 1 } as Prisma.InputJsonValue,
-            fencing_token: { increment: 1 }, retry_count: { increment: 1 }, version: { increment: 1 },
+            execution_deadline_at: audioVideoMuxDeadline(retryEstimatedMs),
+            fencing_token: 0,
           },
         });
-        if (updated.count !== 1) throw new DomainError(409, "音视频合成任务正在重试");
+        await billing?.charge(Number(created.id));
         await tx.command_idempotency.create({
-          data: { ...key, request_hash: hash, generation_job_id: jid, accepted_cursor: 0n },
+          data: { ...key, request_hash: hash, generation_job_id: created.id, accepted_cursor: 0n },
         });
-        if (plan) await writeCanvasRecoveryRows(tx, plan, jid);
-        return { replayed: false };
-      });
+        if (plan) await writeCanvasRecoveryRows(tx, plan, created.id);
+        return { replayed: false, jobId: created.id.toString() };
+        }),
+      );
       if (result.replayed) return this.withBindingView((await replay())!, projectId, canvasBinding);
       return this.withBindingView(
-        ok({ job_id: jobId, status: "queued", replayed: false, enqueue_required: true }),
+        ok({ job_id: result.jobId, status: "queued", replayed: false, enqueue_required: true }),
         projectId, canvasBinding,
       );
     } catch (error) {
@@ -396,8 +505,14 @@ export class AudioVideoMuxesService {
     return { ...result, data: { ...data, canvas_binding: view } } as T;
   }
 
-  async markFailed(jobId: string, code: string, message: string): Promise<string> {
-    await createGenerationCommandRepo(this.prisma.client).markFailedQueued(jobId, code, message);
+  async markFailed(userId: string, jobId: string, code: string, message: string): Promise<string> {
+    await markFailedQueuedAndNotifyBilling({
+      prisma: this.prisma.client,
+      jobId,
+      code,
+      message,
+      release: (id) => this.billing.release(userId, id, message),
+    });
     const current = await this.prisma.client.generation_jobs.findUniqueOrThrow({
       where: { id: BigInt(jobId) }, select: { status: true },
     });
@@ -446,7 +561,7 @@ async function verifyDedicatedMuxRetryTarget(
   }
   if (trusted === targetNodeId) return null;
   return recoveryError(
-    422, "专属重试目标与原受理关联不符，不能改绑同 jobId 的承接目标",
+    422, "专属重试目标与原受理关联不符，不能改绑原任务的承接目标",
     RECOVERY_REASONS.documentMismatch,
   );
 }
