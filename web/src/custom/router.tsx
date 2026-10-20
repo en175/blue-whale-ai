@@ -7,7 +7,7 @@ import Assets from '@/custom/pages/Assets';
 import AccountCredits from '@/custom/pages/AccountCredits';
 import History from '@/custom/pages/History';
 import AuthSuccess from '@/custom/pages/AuthSuccess';
-import { adminRoutes } from '@/admin/router';
+import { adminRoutes } from '@/shared/router/adminRoutes';
 import { RequireAuth } from '@/shared/router/guards';
 
 const router = createBrowserRouter([

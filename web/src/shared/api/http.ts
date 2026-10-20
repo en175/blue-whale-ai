@@ -186,3 +186,25 @@ export const http = {
     }),
   del: <T>(path: string, init?: ApiRequestInit) => apiRequest<T>(path, { ...init, method: 'DELETE' }),
 };
+
+export interface PresignData {
+  storage_key: string;
+  upload_url: string;
+  headers: Record<string, string>;
+  expires_in: number;
+}
+
+export async function putToPresignedUrl(presign: PresignData, file: File) {
+  if (!presign.upload_url) throw new Error('预签名上传地址为空');
+
+  const uploadUrl = import.meta.env.DEV
+    ? `/__tos-upload?url=${encodeURIComponent(presign.upload_url)}`
+    : presign.upload_url;
+
+  const res = await fetch(uploadUrl, {
+    method: 'PUT',
+    headers: presign.headers,
+    body: file,
+  });
+  if (!res.ok) throw new Error(`直传对象存储失败（${res.status}）`);
+}

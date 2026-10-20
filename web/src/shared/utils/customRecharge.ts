@@ -1,9 +1,10 @@
-import type { RechargeCustomConfig } from '@/custom/api/recharge';
-
-export type CustomCreditsRule = Pick<
-  RechargeCustomConfig,
-  'min_credits' | 'max_credits' | 'default_credits' | 'step_credits' | 'credits_per_yuan'
->;
+export interface CustomCreditsRule {
+  min_credits: number;
+  max_credits: number;
+  default_credits: number;
+  step_credits: number;
+  credits_per_yuan: number;
+}
 
 export function customPriceFen(credits: number, creditsPerYuan: number): number {
   if (!Number.isFinite(credits) || !Number.isFinite(creditsPerYuan) || creditsPerYuan <= 0) {

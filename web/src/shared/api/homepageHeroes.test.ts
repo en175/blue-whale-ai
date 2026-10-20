@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { selectPlayableHeroSlides, uploadHomepageHeroFile, type HomepageHeroPublic } from './homepageHeroes';
-import { putToPresignedUrl } from '@/custom/api/assets';
-import { http } from './http';
+import { http, putToPresignedUrl } from './http';
 
-vi.mock('@/custom/api/assets', () => ({
-  putToPresignedUrl: vi.fn(),
-}));
+vi.mock('./http', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./http')>();
+  return { ...actual, putToPresignedUrl: vi.fn() };
+});
 
 function item(overrides: Partial<HomepageHeroPublic> = {}): HomepageHeroPublic {
   return {

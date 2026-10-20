@@ -1,6 +1,8 @@
 import { infiniteQueryOptions, queryOptions, skipToken, type QueryClient } from '@tanstack/react-query';
-import { apiRequest, silentInit, type ApiRequestInit } from '@/shared/api/http';
+import { apiRequest, putToPresignedUrl, silentInit, type ApiRequestInit, type PresignData } from '@/shared/api/http';
 import { type AssetType } from '@/custom/enums';
+
+export { putToPresignedUrl, type PresignData };
 
 export interface AssetRecord {
   id: number | string;
@@ -114,13 +116,6 @@ export const UPLOAD_SIZE_LIMIT: Record<AssetType, number> = {
   character: 20 * 1024 * 1024,
 };
 
-export interface PresignData {
-  storage_key: string;
-  upload_url: string;
-  headers: Record<string, string>;
-  expires_in: number;
-}
-
 export function fetchUploadPresign(
   params: { type: AssetType; mime: string; size: number },
   init?: { silent?: boolean },
@@ -130,21 +125,6 @@ export function fetchUploadPresign(
     body: JSON.stringify(params),
     ...silentInit(init),
   });
-}
-
-export async function putToPresignedUrl(presign: PresignData, file: File) {
-  if (!presign.upload_url) throw new Error('预签名上传地址为空');
-
-  const uploadUrl = import.meta.env.DEV
-    ? `/__tos-upload?url=${encodeURIComponent(presign.upload_url)}`
-    : presign.upload_url;
-
-  const res = await fetch(uploadUrl, {
-    method: 'PUT',
-    headers: presign.headers,
-    body: file,
-  });
-  if (!res.ok) throw new Error(`直传对象存储失败（${res.status}）`);
 }
 
 export interface UploadCompleteParams {

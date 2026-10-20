@@ -1,10 +1,1 @@
-import { http } from '@/shared/api/http';
-
-export interface AdminSessionData {
-  userId: number;
-  isAdmin: boolean;
-}
-
-export function fetchAdminSession() {
-  return http.get<AdminSessionData>('/api/admin/session', { silent: true });
-}
+export { fetchAdminSession, type AdminSessionData } from '@/shared/api/adminSession';
