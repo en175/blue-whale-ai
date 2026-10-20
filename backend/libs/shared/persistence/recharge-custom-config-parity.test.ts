@@ -10,7 +10,7 @@ const seedMigration = read(
   "../../../prisma/migrations/20261020120000_ikiugj_recharge_custom_to_system_settings/migration.sql",
 );
 const seedStandalone = read(
-  "../../../prisma/schema/069_ikiugj_recharge_custom_to_system_settings.sql",
+  "../../../prisma/schema/070_ikiugj_recharge_custom_to_system_settings.sql",
 );
 const seedSnapshot = read(
   "../../../../docs/sql/20261020_ikiugj_recharge_custom_to_system_settings.sql",
@@ -19,7 +19,7 @@ const seedSnapshot = read(
 const dropMigration = read(
   "../../../prisma/migrations/20261020130000_ikiugj_drop_recharge_custom_config/migration.sql",
 );
-const dropStandalone = read("../../../prisma/schema/070_ikiugj_drop_recharge_custom_config.sql");
+const dropStandalone = read("../../../prisma/schema/071_ikiugj_drop_recharge_custom_config.sql");
 const dropSnapshot = read("../../../../docs/sql/20261020_ikiugj_drop_recharge_custom_config.sql");
 
 const schemaPrisma = read("../../../prisma/schema.prisma");
