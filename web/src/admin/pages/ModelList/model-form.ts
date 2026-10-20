@@ -57,6 +57,24 @@ export const KNOWN_FEATURE_KEYS = [
 export const TASK_TYPE_KEYS = ['text2video', 'omni', 'image_reference', 'first_frame', 'first_last_frame', 'edit', 'extend'] as const;
 export type TaskTypeKey = (typeof TASK_TYPE_KEYS)[number];
 
+export type TaskTypeDurationStrategy = 'follow' | 'auto-or-specified' | 'specified';
+
+export const TASK_TYPE_DURATION_STRATEGY: Record<TaskTypeKey, TaskTypeDurationStrategy> = {
+  text2video: 'specified',
+  omni: 'specified',
+  image_reference: 'specified',
+  first_frame: 'specified',
+  first_last_frame: 'specified',
+  edit: 'follow',
+  extend: 'auto-or-specified',
+};
+
+export const TASK_TYPE_DURATION_LABEL: Record<TaskTypeDurationStrategy, string> = {
+  follow: '自动（跟随原视频）',
+  'auto-or-specified': '自动或指定秒数',
+  specified: '指定秒数',
+};
+
 export const DEFAULT_PROVIDER_ID = 'new-api';
 
 
@@ -735,31 +753,6 @@ export function pickTaskTypeRatios(features: Record<string, unknown> | undefined
   return out;
 }
 
-export function pickTaskTypeFollowDuration(features: Record<string, unknown> | undefined): Record<string, boolean> {
-  const raw = readFeature(features, 'task_types');
-  const map = raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
-  const out: Record<string, boolean> = {};
-  for (const taskType of TASK_TYPE_KEYS) {
-    const entry = map[taskType];
-    const durations =
-      entry && typeof entry === 'object' && !Array.isArray(entry)
-        ? (entry as Record<string, unknown>).allowed_durations
-        : undefined;
-    out[taskType] = Array.isArray(durations) && durations.length === 1 && durations[0] === -1;
-  }
-  return out;
-}
-
-export function pickTaskTypeAutoDuration(features: Record<string, unknown> | undefined): Record<string, boolean> {
-  const raw = readFeature(features, 'task_types');
-  const map = raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
-  return Object.fromEntries(TASK_TYPE_KEYS.map((key) => {
-    const entry = map[key];
-    return [key, !!entry && typeof entry === 'object' && !Array.isArray(entry)
-      && (entry as Record<string, unknown>).allow_auto_duration === true];
-  }));
-}
-
 export function pickTaskTypeEnabled(features: Record<string, unknown> | undefined): Record<string, boolean> {
   const raw = readFeature(features, 'task_types');
   const map = raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
@@ -770,12 +763,14 @@ export function pickTaskTypeEnabled(features: Record<string, unknown> | undefine
   return out;
 }
 
+export function taskTypeDurationLabel(taskType: string): string {
+  return TASK_TYPE_DURATION_LABEL[TASK_TYPE_DURATION_STRATEGY[taskType as TaskTypeKey] ?? 'specified'];
+}
+
 export function buildTaskTypes(
   base: Record<string, unknown>,
   ratios: Record<string, string[]>,
   enabled: Record<string, boolean>,
-  followDuration: Record<string, boolean>,
-  autoDuration: Record<string, boolean> = {},
 ): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const taskType of TASK_TYPE_KEYS) {
@@ -791,8 +786,9 @@ export function buildTaskTypes(
     delete rest.allow_auto_duration;
     const next: Record<string, unknown> = { ...rest };
     if (list.length) next.allowed_ratios = list;
-    if (followDuration[taskType]) next.allowed_durations = [-1];
-    else if (autoDuration[taskType]) next.allow_auto_duration = true;
+    const strategy = TASK_TYPE_DURATION_STRATEGY[taskType];
+    if (strategy === 'follow') next.allowed_durations = [-1];
+    else if (strategy === 'auto-or-specified') next.allow_auto_duration = true;
     out[taskType] = next;
   }
   return out;

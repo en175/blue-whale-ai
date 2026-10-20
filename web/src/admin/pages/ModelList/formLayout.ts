@@ -12,13 +12,6 @@ export const SIZE_ROW: CSSProperties = {
   alignItems: 'center',
   marginBottom: 8,
 };
-export const TASK_ROW: CSSProperties = {
-  display: 'grid',
-  gridTemplateColumns: '132px 180px 1fr 1fr auto',
-  gap: 10,
-  alignItems: 'center',
-  marginBottom: 8,
-};
 export const INLINE_ROW: CSSProperties = { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 };
 export const CHIP_LIST: CSSProperties = { display: 'flex', flexWrap: 'wrap', gap: 8 };
 export const FULL: CSSProperties = { width: '100%' };

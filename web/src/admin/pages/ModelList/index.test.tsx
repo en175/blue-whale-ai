@@ -644,61 +644,44 @@ describe('ModelList 定价 tab', () => {
 
 
 
-describe('ModelList 视频模式「仅自动时长」（IKK7QC）', () => {
-  const withEdit = {
+describe('ModelList 视频模式时长策略（IKLUVP）', () => {
+  const withModes = {
     ...videoPriced,
-    features: { task_types: { edit: { allowed_ratios: ['adaptive'] } } },
+    features: {
+      task_types: {
+        edit: { allowed_ratios: ['adaptive'] },
+        extend: { allowed_ratios: ['adaptive'] },
+      },
+    },
   };
 
-  function followBoxes(): HTMLElement[] {
-    return [...document.body.querySelectorAll<HTMLElement>('[role="checkbox"]')].filter((el) =>
-      el.closest('label')?.textContent?.includes('仅自动时长'),
-    );
-  }
-
-  it('IKLUVP 延长可选自动，其他模式不提供执行侧不支持的开关', async () => {
-    api.fetchAdminModels.mockResolvedValue([{
-      ...videoPriced,
-      features: { task_types: { extend: { allowed_ratios: ['adaptive'] } } },
-    }]);
+  it('时长策略按模式只读展示，不再提供手选开关', async () => {
+    api.fetchAdminModels.mockResolvedValue([withModes]);
     await renderPage();
     await openRowEdit('视频');
     await openTab('尺寸与素材');
-    const boxes = [...document.body.querySelectorAll<HTMLElement>('[role="checkbox"]')]
-      .filter((el) => el.closest('label')?.textContent?.includes('允许自动或指定秒数'));
-    expect(boxes).toHaveLength(2);
-    await click(boxes[1]);
-    await click(button('保存'));
-    expect(api.updateAdminModel.mock.calls[0]?.[1]).toMatchObject({ features: { task_types: {
-      extend: { allowed_ratios: ['adaptive'], allow_auto_duration: true },
-    } } });
+
+    expect(document.body.textContent).toContain('自动（跟随原视频）');
+    expect(document.body.textContent).toContain('自动或指定秒数');
+    expect(document.body.textContent).toContain('指定秒数');
+    const labels = [...document.body.querySelectorAll<HTMLElement>('[role="checkbox"]')]
+      .map((el) => el.closest('label')?.textContent ?? '');
+    expect(labels.some((text) => text.includes('仅自动时长'))).toBe(false);
+    expect(labels.some((text) => text.includes('允许自动或指定秒数'))).toBe(false);
   });
 
-  it('★ 勾上「仅自动时长」保存 → task_types 带 allowed_durations: [-1]', async () => {
-    api.fetchAdminModels.mockResolvedValue([withEdit]);
+  it('保存时按模式派生：编辑写 [-1]，延长写 allow_auto_duration', async () => {
+    api.fetchAdminModels.mockResolvedValue([withModes]);
     await renderPage();
     await openRowEdit('视频');
     await openTab('尺寸与素材');
-
-    expect(followBoxes()).toHaveLength(7);
-    await click(followBoxes()[5]);
     await click(button('保存'));
 
     const payload = api.updateAdminModel.mock.calls[0]?.[1] as { features: Record<string, unknown> };
     expect(payload.features.task_types).toEqual({
       edit: { allowed_ratios: ['adaptive'], allowed_durations: [-1] },
+      extend: { allowed_ratios: ['adaptive'], allow_auto_duration: true },
     });
-  });
-
-  it('未开放的模式上该勾选框置灰：勾了也会被整条删掉，不该让它看起来能勾', async () => {
-    api.fetchAdminModels.mockResolvedValue([withEdit]);
-    await renderPage();
-    await openRowEdit('视频');
-    await openTab('尺寸与素材');
-
-    const boxes = followBoxes();
-    expect(boxes[0]?.getAttribute('aria-disabled')).toBe('true');
-    expect(boxes[5]?.getAttribute('aria-disabled')).toBeNull();
   });
 });
 

@@ -14,12 +14,11 @@ import {
   mergeMatrix,
   parseGptMatrix,
   pickTaskTypeRatios,
-  pickTaskTypeFollowDuration,
-  pickTaskTypeAutoDuration,
   pickTaskTypeEnabled,
   ratiosFromModel,
   readFeature,
   sizesFromModel,
+  taskTypeDurationLabel,
   type FormSnapshot,
   type RatioForm,
 } from './model-form';
@@ -642,7 +641,7 @@ describe('task_types 结构化编辑（IKHBDO）', () => {
     const base = {
       first_frame: { allowed_ratios: ['1:1'], allowed_durations: [5, 10], note: 'x' },
     };
-    expect(buildTaskTypes(base, { first_frame: ['16:9'] }, { first_frame: true }, {})).toEqual({
+    expect(buildTaskTypes(base, { first_frame: ['16:9'] }, { first_frame: true })).toEqual({
       first_frame: { allowed_ratios: ['16:9'], note: 'x' },
     });
   });
@@ -652,43 +651,39 @@ describe('task_types 结构化编辑（IKHBDO）', () => {
       prolong: { allowed_ratios: ['adaptive'] },
       edit: { allowed_ratios: ['adaptive'] },
     };
-    expect(buildTaskTypes(base, { edit: ['adaptive'] }, { edit: true }, { edit: true })).toEqual({
+    expect(buildTaskTypes(base, { edit: ['adaptive'] }, { edit: true })).toEqual({
       edit: { allowed_ratios: ['adaptive'], allowed_durations: [-1] },
     });
   });
 
   it('未勾选已知模式：该键被移除（键不在 = 该模式不开放）', () => {
     expect(
-      buildTaskTypes({ text2video: { allowed_ratios: ['1:1'] } }, { text2video: [] }, {}, {}),
+      buildTaskTypes({ text2video: { allowed_ratios: ['1:1'] } }, { text2video: [] }, {}),
     ).toEqual({});
   });
 
-  it('时长跟随原视频：勾选写 [-1]，取消删该键', () => {
+  it('时长策略按模式派生：编辑写 [-1]，延长写 allow_auto_duration，其它模式清空两个键', () => {
     expect(
-      buildTaskTypes({ edit: { allowed_ratios: ['adaptive'] } }, { edit: ['adaptive'] }, { edit: true }, { edit: true }),
+      buildTaskTypes({ edit: { allowed_ratios: ['adaptive'], allow_auto_duration: true } }, { edit: ['adaptive'] }, { edit: true }),
     ).toEqual({ edit: { allowed_ratios: ['adaptive'], allowed_durations: [-1] } });
     expect(
-      buildTaskTypes({ edit: { allowed_durations: [-1] } }, { edit: [] }, { edit: true }, { edit: false }),
-    ).toEqual({ edit: {} });
+      buildTaskTypes({ extend: { allowed_ratios: ['adaptive'], allowed_durations: [-1] } }, { extend: ['adaptive'] }, { extend: true }),
+    ).toEqual({ extend: { allowed_ratios: ['adaptive'], allow_auto_duration: true } });
+    expect(
+      buildTaskTypes({ first_frame: { allowed_durations: [-1], allow_auto_duration: true } }, {}, { first_frame: true }),
+    ).toEqual({ first_frame: {} });
   });
 
-  it('读：allowed_durations 恰为 [-1] 才算「跟随原视频」，其它值一律不算', () => {
-    const flags = pickTaskTypeFollowDuration({
-      task_types: {
-        edit: { allowed_durations: [-1] },
-        extend: { allowed_durations: [5] },
-        omni: { allowed_durations: [-1, 5] },
-      },
-    });
-    expect(flags.edit).toBe(true);
-    expect(flags.extend).toBe(false);
-    expect(flags.omni).toBe(false);
-    expect(flags.text2video).toBe(false);
+  it('时长策略按模式固定展示', () => {
+    expect(taskTypeDurationLabel('edit')).toBe('自动（跟随原视频）');
+    expect(taskTypeDurationLabel('extend')).toBe('自动或指定秒数');
+    expect(taskTypeDurationLabel('first_frame')).toBe('指定秒数');
+    expect(taskTypeDurationLabel('unknown')).toBe('指定秒数');
   });
 
   it('勾选但比例留空 → 保留空对象（键在 = 开放且无额外约束）', () => {
     expect(
-      buildTaskTypes({}, { text2video: [] }, { text2video: true }, {}),
+      buildTaskTypes({}, { text2video: [] }, { text2video: true }),
     ).toEqual({ text2video: {} });
   });
 });
@@ -777,20 +772,15 @@ describe('音频 / 文本行（IKHBDO）', () => {
 });
 
 
-it('IKLUVP 管理端写入自动可选并保留比例和扩展配置', () => {
-  expect(buildTaskTypes({ extend: { extra: 7 } }, { extend: ['adaptive'] },
-    { extend: true }, {}, { extend: true })).toEqual({
+it('IKLUVP 时长策略由模式派生并保留扩展配置', () => {
+  expect(buildTaskTypes({ extend: { extra: 7 } }, { extend: ['adaptive'] }, { extend: true })).toEqual({
     extend: { extra: 7, allowed_ratios: ['adaptive'], allow_auto_duration: true },
   });
 });
 
 
-it('IKLUVP 管理端三种时长语义可往返与取消', () => {
+it('IKLUVP 归一后的配置保存往返保持不变', () => {
   const task_types = { extend: { allow_auto_duration: true }, edit: { allowed_durations: [-1] }, omni: {} };
   const features = { task_types };
-  expect(buildTaskTypes(task_types, {}, pickTaskTypeEnabled(features),
-    pickTaskTypeFollowDuration(features), pickTaskTypeAutoDuration(features))).toEqual(task_types);
-  expect(buildTaskTypes(task_types, {}, { extend: true }, {}, {})).toEqual({ extend: {} });
-  expect(buildTaskTypes(task_types, {}, { extend: true }, { extend: true }, { extend: true }))
-    .toEqual({ extend: { allowed_durations: [-1] } });
+  expect(buildTaskTypes(task_types, {}, pickTaskTypeEnabled(features))).toEqual(task_types);
 });
