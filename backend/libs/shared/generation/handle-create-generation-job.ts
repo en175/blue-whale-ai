@@ -22,6 +22,7 @@ import {
   type CanvasBinding,
   ERROR_INVALID_INPUT,
   ERROR_INVALID_REFERENCE,
+  ERROR_REFERENCE_ASSET_UNAVAILABLE,
   ERROR_INVALID_REFERENCE_TYPE,
   ERROR_MODEL_UNAVAILABLE,
   ERROR_UNSUPPORTED_INPUT,
@@ -97,6 +98,7 @@ import {
 import type { BillingCharge } from "@lib/shared/billing/billing-charge.js";
 import type { BillingRelease } from "@lib/shared/billing/billing-release.js";
 import type { BillingQuote } from "@lib/shared/billing/billing-quote.js";
+import type { AssetProbe } from "@lib/shared/assets/ports.js";
 import {
   countPromptCharacters,
   DURATION_BASIS_KEY,
@@ -1541,7 +1543,9 @@ interface GenerationDeps {
 
   canvas: Pick<CanvasRepo, "getByProject">;
 
-  assets: Pick<AssetOwnershipOps, "resolveInputAssets">;
+  assets: Pick<AssetOwnershipOps, "resolveInputAssets"> &
+    Partial<Pick<AssetOwnershipOps, "findStorageKeys" | "saveMediaInfo">>;
+  probe?: AssetProbe;
 
 
 
@@ -2052,11 +2056,19 @@ export async function handleCreateGenerationJob(
       userId,
       projectId,
       assets: deps.assets,
+      ...(deps.probe ? { probe: deps.probe } : {}),
     });
     if (ruling.kind === "shortfall") {
       return fail(errorCodeToNumeric(ERROR_INVALID_REFERENCE), "参考素材不存在或无权访问", {
         code: ERROR_INVALID_REFERENCE,
       });
+    }
+    if (ruling.kind === "probe_failed") {
+      return fail(
+        errorCodeToNumeric(ERROR_REFERENCE_ASSET_UNAVAILABLE),
+        "参考素材时长读取失败，请稍后重试",
+        { code: ERROR_REFERENCE_ASSET_UNAVAILABLE },
+      );
     }
 
 

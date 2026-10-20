@@ -3233,7 +3233,7 @@ describe("handleCreateGenerationJob 视频参考时长冻结（token 计费）",
     ]);
   });
 
-  it("资产拿不到时长 → 不写这个字段（宁可让 billing 拒绝，也不按 0 估）", async () => {
+  it("资产拿不到时长 → 拒绝提交（不按 0 估，也不放行）", async () => {
     const { deps, createJob } = buildVideoDeps();
     vi.mocked(deps.assets.resolveInputAssets).mockImplementation(async (ids: string[]) =>
       ids.map((id) => ({
@@ -3260,10 +3260,62 @@ describe("handleCreateGenerationJob 视频参考时长冻结（token 计费）",
       deps,
     );
 
+    expect(result.code).toBe(1006);
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("资产缺时长 → 探测一次、回填资产行并写进冻结引用", async () => {
+    const { deps, createJob } = buildVideoDeps();
+    const saveMediaInfo = vi.fn().mockResolvedValue(true);
+    deps.assets = {
+      resolveInputAssets: vi.fn(async (ids: string[]) =>
+        ids.map((id) => ({
+          id,
+          type: "video",
+          url: "https://tos.test/v.mp4",
+          mime: "video/mp4",
+          size: 100,
+          width: 1280,
+          height: 720,
+          duration: null,
+          material_id: null,
+        })),
+      ),
+      findStorageKeys: vi.fn().mockResolvedValue(
+        new Map([["12", "uploads/u1/video/a.mp4"]]),
+      ),
+      saveMediaInfo,
+    } as never;
+    deps.probe = vi.fn().mockResolvedValue({
+      sizeBytes: 100,
+      durationMs: 7500,
+      width: 1280,
+      height: 720,
+      codec: "h264",
+      container: "mp4",
+      fps: 30,
+    }) as never;
+
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      {
+        ...VIDEO_BODY,
+        references: [{ role: "reference", asset_id: "12", type: "video" }],
+      },
+      null,
+      deps,
+    );
+
     expect(result.code).toBe(200);
+    expect(deps.probe).toHaveBeenCalledWith("uploads/u1/video/a.mp4");
+    expect(saveMediaInfo).toHaveBeenCalledWith(
+      "12",
+      expect.objectContaining({ durationMs: 7500 }),
+    );
     const cmdArg = createJob.mock.calls[0]![0] as { input: Record<string, unknown> };
     expect(cmdArg.input.references).toEqual([
-      { role: "reference", type: "video", asset_id: "12" },
+      { role: "reference", type: "video", asset_id: "12", duration: 7.5 },
     ]);
   });
 

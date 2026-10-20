@@ -18,7 +18,7 @@ async function findLinkedAssetIds(
   return rows.map((r) => r.asset_id);
 }
 
-export function createAssetOwnershipOps(prisma: PrismaClient): Pick<AssetOwnershipOps, "resolveInputAssets"> {
+export function createAssetOwnershipOps(prisma: PrismaClient): AssetOwnershipOps {
   return {
     async resolveInputAssets(assetIds, userId, projectId) {
       if (assetIds.length === 0) return [];
@@ -67,6 +67,41 @@ export function createAssetOwnershipOps(prisma: PrismaClient): Pick<AssetOwnersh
             ]
           : [];
       });
+    },
+
+    async findStorageKeys(assetIds, userId) {
+      if (assetIds.length === 0) return new Map();
+      const rows = await prisma.assets.findMany({
+        where: {
+          id: { in: assetIds.map((id) => BigInt(id)) },
+          user_id: BigInt(userId),
+          status: "normal",
+          is_delete: false,
+          storage_key: { not: null },
+        },
+        select: { id: true, storage_key: true },
+      });
+      return new Map(
+        rows.flatMap((row) =>
+          row.storage_key === null
+            ? []
+            : [[row.id.toString(), row.storage_key] as const],
+        ),
+      );
+    },
+
+    async saveMediaInfo(assetId, info) {
+      const updated = await prisma.assets.updateMany({
+        where: { id: BigInt(assetId), is_delete: false },
+        data: {
+          duration_ms: info.durationMs,
+          ...(info.width === null ? {} : { width: info.width }),
+          ...(info.height === null ? {} : { height: info.height }),
+          gmt_modified: new Date(),
+          version: { increment: 1 },
+        },
+      });
+      return updated.count === 1;
     },
   };
 }

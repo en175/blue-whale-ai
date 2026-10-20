@@ -9,8 +9,18 @@ import {
 
 function fakeAssets(
   byId: Record<string, { type?: string; duration?: number | null }>,
-): { assets: { resolveInputAssets: (ids: string[]) => Promise<unknown[]> }; calls: string[][] } {
+  probeTargets: Record<string, string> = {},
+): {
+  assets: {
+    resolveInputAssets: (ids: string[]) => Promise<unknown[]>;
+    findStorageKeys: (ids: string[]) => Promise<Map<string, string>>;
+    saveMediaInfo: (id: string, info: unknown) => Promise<boolean>;
+  };
+  calls: string[][];
+  saved: Array<{ id: string; info: unknown }>;
+} {
   const calls: string[][] = [];
+  const saved: Array<{ id: string; info: unknown }> = [];
   const resolveInputAssets = vi.fn(async (ids: string[]) => {
     calls.push([...ids]);
     return ids.flatMap((id) =>
@@ -31,7 +41,22 @@ function fakeAssets(
         : [],
     );
   });
-  return { assets: { resolveInputAssets }, calls };
+  const findStorageKeys = vi.fn(async (ids: string[]) =>
+    new Map(
+      ids.flatMap((id) =>
+        id in probeTargets ? [[id, probeTargets[id]!] as const] : [],
+      ),
+    ),
+  );
+  const saveMediaInfo = vi.fn(async (id: string, info: unknown) => {
+    saved.push({ id, info });
+    return true;
+  });
+  return {
+    assets: { resolveInputAssets, findStorageKeys, saveMediaInfo },
+    calls,
+    saved,
+  };
 }
 
 describe("videoAssetIdsNeedingDuration（报价面筛选）", () => {
@@ -112,7 +137,7 @@ describe("resolveReferenceDurations（共享管线）", () => {
     expect(calls).toEqual([]);
   });
 
-  it("duration 为 null/非正数 → 不回填（宁可量不到也不按 0 估）", async () => {
+  it("duration 为 null/非正数且无探测能力 → probe_failed（不按 0 估，也不放行）", async () => {
     const refs2: ReferenceItemInput[] = [
       { role: "reference", type: "video", asset_id: "7" },
       { role: "reference", type: "video", asset_id: "8" },
@@ -125,9 +150,61 @@ describe("resolveReferenceDurations（共享管线）", () => {
       projectId: "1",
       assets,
     });
+    expect(result).toEqual({ kind: "probe_failed" });
+  });
+
+  it("缺时长 → 探测一次、回填资产行，并用探测结果计费", async () => {
+    const refs2: ReferenceItemInput[] = [
+      { role: "reference", type: "video", asset_id: "7" },
+    ];
+    const { assets, saved } = fakeAssets({ "7": { duration: null } }, {
+      "7": "uploads/42/video/a.mp4",
+    });
+    const probe = vi.fn().mockResolvedValue({
+      sizeBytes: 100,
+      durationMs: 6500,
+      width: 1080,
+      height: 1920,
+      codec: "h264",
+      container: "mp4",
+      fps: 30,
+    });
+    const result = await resolveReferenceDurations({
+      references: refs2,
+      assetIdsOf: videoAssetIdsNeedingDuration,
+      userId: "42",
+      projectId: "1",
+      assets,
+      probe,
+    });
+    expect(probe).toHaveBeenCalledWith("uploads/42/video/a.mp4");
+    expect(saved).toEqual([
+      {
+        id: "7",
+        info: expect.objectContaining({ durationMs: 6500, width: 1080 }),
+      },
+    ]);
     expect(result).toMatchObject({
       kind: "resolved",
-      references: refs2,
+      references: [{ role: "reference", type: "video", asset_id: "7", duration: 6.5 }],
     });
+  });
+
+  it("探测失败 → probe_failed，调用方拒绝提交", async () => {
+    const refs2: ReferenceItemInput[] = [
+      { role: "reference", type: "video", asset_id: "7" },
+    ];
+    const { assets } = fakeAssets({ "7": { duration: null } }, {
+      "7": "uploads/42/video/a.mp4",
+    });
+    const result = await resolveReferenceDurations({
+      references: refs2,
+      assetIdsOf: videoAssetIdsNeedingDuration,
+      userId: "42",
+      projectId: "1",
+      assets,
+      probe: vi.fn().mockRejectedValue(new Error("tos down")),
+    });
+    expect(result).toEqual({ kind: "probe_failed" });
   });
 });
