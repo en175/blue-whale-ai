@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
+import type { Prisma } from "@prisma/client";
 import { Injectable } from "@nestjs/common";
 import {
+  ASSET_UNAVAILABLE_CODE,
   CANVAS_RECOVERY_PROTOCOL_VERSION,
   FAILURE_CODE,
   IDEMPOTENCY_KEY_REUSED_CODE,
@@ -21,13 +23,20 @@ import {
 import {
   RecoveryContractError,
   canvasBindingView,
-  createGenerationCommandRepo,
   lockCanvasRecoveryForAcceptance,
   writeCanvasRecoveryRows,
   type CanvasRecoveryAcceptance,
   type CanvasRecoveryPlan,
 } from "@lib/shared/persistence/index.js";
+import { withBillingCompensation } from "@lib/shared/persistence/job-billing.js";
 import { transactionWithUniqueRetry } from "@lib/shared/persistence/conversation-repo.js";
+import { enqueueVideoSceneSplitJob } from "@lib/shared/generation/generation-queue.js";
+import {
+  enqueueMediaToolJob,
+} from "@lib/shared/media-tools/media-tool-submission.js";
+import { resolveSourceDurationSeconds } from "@lib/shared/media-tools/source-duration.js";
+import { MediaToolBillingService } from "@lib/shared/media-tool-pricing/media-tool-billing.service.js";
+import { AssetStorageService } from "@lib/shared/assets/storage.service.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";
 import { AssetService } from "@lib/shared/assets/assets.service.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
@@ -71,6 +80,8 @@ export class VideoSceneSplitsService {
     private readonly prisma: PrismaService,
     private readonly project: ProjectService,
     private readonly assets: AssetService,
+    private readonly storage: AssetStorageService,
+    private readonly billing: MediaToolBillingService,
   ) {}
 
   async create(
@@ -107,8 +118,10 @@ export class VideoSceneSplitsService {
     const project = await this.project.findOwnedById(projectId, userId);
     if (!project) return fail(RESOURCE_NOT_FOUND_CODE, "资源不存在");
 
+    let createdJobId: string | null = null;
     try {
-      return await transactionWithUniqueRetry(this.prisma.client, async (tx) => {
+      const result = await transactionWithUniqueRetry(this.prisma.client, async (tx) => {
+      createdJobId = null;
       let recoveryPlan: CanvasRecoveryPlan | null = null;
       if (canvasBinding) {
         const acceptance: CanvasRecoveryAcceptance = {
@@ -183,67 +196,90 @@ export class VideoSceneSplitsService {
         return fail(FAILURE_CODE, "暂支持 2 小时以内的视频场景切分");
       }
 
-      const frozenInput: VideoSceneSplitInput = { ...input };
+      const durationSeconds = await resolveSourceDurationSeconds({
+        prisma: this.prisma.client,
+        storage: this.storage,
+        asset: {
+          id: input[VIDEO_SCENE_SPLIT_INPUT_KEYS.sourceAssetId],
+          storage_key: asset.storage_key,
+          duration_ms: asset.duration_ms,
+        },
+      });
+      if (durationSeconds === null) {
+        return fail(
+          ASSET_UNAVAILABLE_CODE,
+          "源视频时长读取失败，请稍后重试或更换素材",
+          { code: "asset_unavailable" },
+        );
+      }
 
-      const job = await tx.generation_jobs.create({
-        data: {
-          user_id: BigInt(userId),
-          project_id: BigInt(projectId),
-          type: VIDEO_SCENE_SPLIT_JOB_TYPE,
-          source: VIDEO_SCENE_SPLIT_SOURCE,
-          status: "queued",
-          progress: 0,
-          input: frozenInput,
-          next_action_at: new Date(Date.now() - 60_000),
-        },
-      });
-      await tx.command_idempotency.create({
-        data: {
-          project_id: BigInt(projectId),
-          operation: IDEMPOTENCY_OPERATION,
-          idempotency_key: clientToken,
-          request_hash: requestHash,
-          generation_job_id: job.id,
-          accepted_cursor: 0n,
-        },
-      });
-      if (recoveryPlan && canvasBinding) {
-        await writeCanvasRecoveryRows(tx, recoveryPlan, job.id);
+      const frozenInput = { ...input, duration: durationSeconds } as Prisma.InputJsonObject;
+      const jobBilling = await this.billing.jobBilling(
+        VIDEO_SCENE_SPLIT_JOB_TYPE,
+        userId,
+        frozenInput,
+      );
+      return withBillingCompensation(jobBilling, async (billing) => {
+        const job = await tx.generation_jobs.create({
+          data: {
+            user_id: BigInt(userId),
+            project_id: BigInt(projectId),
+            type: VIDEO_SCENE_SPLIT_JOB_TYPE,
+            source: VIDEO_SCENE_SPLIT_SOURCE,
+            status: "queued",
+            progress: 0,
+            input: frozenInput,
+            next_action_at: new Date(Date.now() - 60_000),
+          },
+        });
+        await billing?.charge(Number(job.id));
+        createdJobId = job.id.toString();
+        await tx.command_idempotency.create({
+          data: {
+            project_id: BigInt(projectId),
+            operation: IDEMPOTENCY_OPERATION,
+            idempotency_key: clientToken,
+            request_hash: requestHash,
+            generation_job_id: job.id,
+            accepted_cursor: 0n,
+          },
+        });
+        if (recoveryPlan && canvasBinding) {
+          await writeCanvasRecoveryRows(tx, recoveryPlan, job.id);
+          return ok({
+            job_id: job.id.toString(),
+            status: "queued",
+            canvas_binding: {
+              protocol_version: CANVAS_RECOVERY_PROTOCOL_VERSION,
+              submission_id: canvasBinding.submission_id,
+              target_node_id: canvasBinding.target_node_id,
+              binding_revision: recoveryPlan.bindingRevision,
+              job_id: job.id.toString(),
+              is_current: true,
+            },
+          });
+        }
         return ok({
           job_id: job.id.toString(),
           status: "queued",
-          canvas_binding: {
-            protocol_version: CANVAS_RECOVERY_PROTOCOL_VERSION,
-            submission_id: canvasBinding.submission_id,
-            target_node_id: canvasBinding.target_node_id,
-            binding_revision: recoveryPlan.bindingRevision,
-            job_id: job.id.toString(),
-            is_current: true,
-          },
+        });
+      });
+      });
+      if (createdJobId !== null) {
+        await enqueueMediaToolJob({
+          prisma: this.prisma.client,
+          billing: this.billing,
+          userId,
+          toolType: VIDEO_SCENE_SPLIT_JOB_TYPE,
+          jobId: createdJobId,
+          enqueue: enqueueVideoSceneSplitJob,
+          releaseOnFailure: true,
         });
       }
-      return ok({
-        job_id: job.id.toString(),
-        status: "queued",
-      });
-      });
+      return result;
     } catch (error) {
       if (error instanceof RecoveryContractError) return error.envelope;
       throw error;
     }
-  }
-
-  async markFailed(
-    jobId: string,
-    code: string,
-    message: string,
-    details?: Record<string, unknown>,
-  ): Promise<void> {
-    await createGenerationCommandRepo(this.prisma.client).markFailedQueued(
-      jobId,
-      code,
-      message,
-      details,
-    );
   }
 }

@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
+const { enqueueVideoEnhanceJob } = vi.hoisted(() => ({ enqueueVideoEnhanceJob: vi.fn() }));
+vi.mock("@lib/shared/generation/generation-queue.js", () => ({ enqueueVideoEnhanceJob }));
+
 import { VideoEnhancementsService } from "./video-enhancements.service.js";
 
 const VALID_BODY = {
@@ -25,6 +28,7 @@ function makeService(overrides: {
   project?: unknown;
   assets?: unknown;
   createJob?: unknown;
+  billing?: unknown;
 } = {}) {
   const project = overrides.project ?? { findOwnedById: vi.fn().mockResolvedValue({ id: 55n }) };
   const assets =
@@ -41,7 +45,7 @@ function makeService(overrides: {
     },
   };
   return {
-    service: new VideoEnhancementsService(prisma as never, project as never, assets as never),
+    service: new VideoEnhancementsService(prisma as never, project as never, assets as never, { probe: null } as never, (overrides.billing ?? { jobBilling: async () => undefined, release: async () => {} }) as never),
     create,
     costCreate,
     assets,
@@ -189,7 +193,7 @@ describe("VideoEnhancementsService.create：输入门槛复核（短边 [360,108
     const { service } = makeService({
       assets: {
         findOwnedSource: vi.fn().mockResolvedValue(
-          makeVideoAsset({ width: null, height: null, duration_ms: null }),
+          makeVideoAsset({ width: null, height: null }),
         ),
       },
     });
@@ -221,7 +225,7 @@ describe("VideoEnhancementsService.create：落任务与免费口径", () => {
         status: "queued",
         user_id: 9n,
         project_id: 55n,
-        input: VALID_BODY,
+        input: { ...VALID_BODY, duration: 60 },
         next_action_at: expect.any(Date),
       }),
     });
@@ -234,5 +238,20 @@ describe("VideoEnhancementsService.create：落任务与免费口径", () => {
     expect(costCreate).not.toHaveBeenCalled();
     const data = create.mock.calls[0][0].data;
     expect(Object.keys(data)).not.toContain("provider");
+  });
+});
+
+describe("VideoEnhancementsService.create：计费输入", () => {
+  it("按 video_enhance 计价并入队", async () => {
+    const jobBilling = vi.fn().mockResolvedValue(undefined);
+    const { service } = makeService({ billing: { jobBilling, release: vi.fn() } });
+    const result = await service.create("9", "55", VALID_BODY);
+    expect(result.code).toBe(200);
+    expect(jobBilling).toHaveBeenCalledWith(
+      "video_enhance",
+      "9",
+      expect.objectContaining({ source_asset_id: "88", duration: 60 }),
+    );
+    expect(enqueueVideoEnhanceJob).toHaveBeenCalledWith("400");
   });
 });

@@ -1,6 +1,9 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 
+const { enqueueVideoSceneSplitJob } = vi.hoisted(() => ({ enqueueVideoSceneSplitJob: vi.fn() }));
+vi.mock("@lib/shared/generation/generation-queue.js", () => ({ enqueueVideoSceneSplitJob }));
+
 import { VideoSceneSplitsService } from "./video-scene-splits.service.js";
 
 const VALID_BODY = {
@@ -28,6 +31,7 @@ function makeService(overrides: {
   assets?: unknown;
   idemFindUnique?: unknown;
   jobCreate?: unknown;
+  billing?: unknown;
   replayedJob?: unknown;
 } = {}) {
   const project = overrides.project ?? { findOwnedById: vi.fn().mockResolvedValue({ id: 55n }) };
@@ -51,7 +55,7 @@ function makeService(overrides: {
   const client = { $transaction: vi.fn(async (operation: (t: unknown) => Promise<unknown>) => operation(tx)) };
   const prisma = { client };
   return {
-    service: new VideoSceneSplitsService(prisma as never, project as never, assets as never),
+    service: new VideoSceneSplitsService(prisma as never, project as never, assets as never, { probe: null } as never, (overrides.billing ?? { jobBilling: async () => undefined, release: async () => {} }) as never),
     tx,
     client,
     project,
@@ -199,12 +203,12 @@ describe("VideoSceneSplitsService.create：输入门槛复核（时长 ≤2 小�
     expect(result.code).toBe(200);
   });
 
-  it("lets a video without recorded duration pass to the supplier gate", async () => {
+  it("rejects a video without recorded duration", async () => {
     const { service } = makeService({
       assets: { findOwnedSource: vi.fn().mockResolvedValue(makeVideoAsset({ duration_ms: null })) },
     });
     const result = await service.create("9", "55", VALID_BODY);
-    expect(result.code).toBe(200);
+    expect(result.code).toBe(100202);
   });
 });
 
@@ -287,6 +291,7 @@ describe("VideoSceneSplitsService.create：任务与占位数据同事务落库"
           source_asset_id: "88",
           target_node_id: "node-1",
           granularity: "fine",
+          duration: 600,
         },
         next_action_at: expect.any(Date),
       }),
@@ -310,3 +315,18 @@ function hashFor(sourceAssetId: string, targetNodeId: string, granularity: strin
     )
     .digest("hex");
 }
+
+describe("VideoSceneSplitsService.create：计费输入", () => {
+  it("按 video_scene_split 计价并入队", async () => {
+    const jobBilling = vi.fn().mockResolvedValue(undefined);
+    const { service } = makeService({ billing: { jobBilling, release: vi.fn() } });
+    const result = await service.create("9", "55", VALID_BODY);
+    expect(result.code).toBe(200);
+    expect(jobBilling).toHaveBeenCalledWith(
+      "video_scene_split",
+      "9",
+      expect.objectContaining({ source_asset_id: "88", duration: 600 }),
+    );
+    expect(enqueueVideoSceneSplitJob).toHaveBeenCalledWith("400");
+  });
+});

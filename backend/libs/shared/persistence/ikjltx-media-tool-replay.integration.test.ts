@@ -50,6 +50,11 @@ vi.mock("@lib/shared/generation/generation-queue.js", async (importOriginal) => 
     enqueueImageCutoutJob: vi.fn(),
     enqueueImageOutpaintJob: vi.fn(),
     enqueueImageEnhanceJob: vi.fn(),
+    enqueueVideoEnhanceJob: vi.fn(),
+    enqueueVideoFrameInterpolationJob: vi.fn(),
+    enqueueVideoMattingJob: vi.fn(),
+    enqueueVideoSubtitleEraseJob: vi.fn(),
+    enqueueVideoSceneSplitJob: vi.fn(),
   };
 });
 
@@ -74,7 +79,7 @@ const TOOLS = [
     make: (c: unknown, assets: unknown) => new ImageErasuresService({ client: c } as never, { findOwnedById: async () => ({ id: 1n }) } as never, assets as never, { jobBilling: async () => undefined, release: async () => {} } as never),
     body: () => ({ source_asset_id: "88", target_node_id: "node-1", erase_scene: "full_screen_text_erase" }) },
   { name: "去字幕", op: "video_subtitle_erase.create", kind: "video" as const,
-    make: (c: unknown, assets: unknown) => new VideoSubtitleErasuresService({ client: c } as never, { findOwnedById: async () => ({ id: 1n }) } as never, assets as never),
+    make: (c: unknown, assets: unknown) => new VideoSubtitleErasuresService({ client: c } as never, { findOwnedById: async () => ({ id: 1n }) } as never, assets as never, { probe: null } as never, { jobBilling: async () => undefined, release: async () => {} } as never),
     body: () => ({ source_asset_id: "88", target_node_id: "node-1", detect_mode: "subtitle_smart", erase_boxes: [] }) },
   { name: "音视频分离", op: "media_extract.create", kind: "video" as const,
     make: (c: unknown, assets: unknown) => new MediaExtractionsService({ client: c } as never, { findOwnedById: async () => ({ id: 1n }) } as never, assets as never),
@@ -86,7 +91,7 @@ const TOOLS = [
     make: (c: unknown, assets: unknown) => new AudioSpeedsService({ client: c } as never, { findOwnedById: async () => ({ id: 1n }) } as never, assets as never),
     body: () => ({ source_asset_id: "88", speed: 1.5 }) },
   { name: "抠像", op: "video_matting.create", kind: "video" as const,
-    make: (c: unknown, assets: unknown) => new VideoMattingsService({ client: c } as never, { findOwnedById: async () => ({ id: 1n }) } as never, assets as never),
+    make: (c: unknown, assets: unknown) => new VideoMattingsService({ client: c } as never, { findOwnedById: async () => ({ id: 1n }) } as never, assets as never, { probe: null } as never, { jobBilling: async () => undefined, release: async () => {} } as never),
 
     body: (submissionId: string) => ({ source_asset_id: "88", target_node_id: "node-1", mode: "portrait", client_token: submissionId }) },
   { name: "抠图", op: "image_cutout.create", kind: "image" as const,
@@ -99,10 +104,10 @@ const TOOLS = [
     make: (c: unknown, assets: unknown) => new ImageEnhancementsService({ client: c } as never, { findOwnedById: async () => ({ id: 1n }) } as never, assets as never, { jobBilling: async () => undefined, release: async () => {} } as never),
     body: () => ({ source_asset_id: "88", target_node_id: "node-1", version_tier: "pro", multiple: 2, generative_enhance_mode: "generative_first", enable_correct_color: false }) },
   { name: "视频 HD", op: "video_enhance.create", kind: "video" as const,
-    make: (c: unknown, assets: unknown) => new VideoEnhancementsService({ client: c } as never, { findOwnedById: async () => ({ id: 1n }) } as never, assets as never),
+    make: (c: unknown, assets: unknown) => new VideoEnhancementsService({ client: c } as never, { findOwnedById: async () => ({ id: 1n }) } as never, assets as never, { probe: null } as never, { jobBilling: async () => undefined, release: async () => {} } as never),
     body: () => ({ source_asset_id: "88", target_node_id: "node-1", resolution: "1080p" }) },
   { name: "插帧", op: "video_frame_interpolation.create", kind: "video" as const,
-    make: (c: unknown, assets: unknown) => new VideoFrameInterpolationsService({ client: c } as never, { findOwnedById: async () => ({ id: 1n }) } as never, assets as never),
+    make: (c: unknown, assets: unknown) => new VideoFrameInterpolationsService({ client: c } as never, { findOwnedById: async () => ({ id: 1n }) } as never, assets as never, { probe: null } as never, { jobBilling: async () => undefined, release: async () => {} } as never),
     body: () => ({ source_asset_id: "88", target_node_id: "node-1" }) },
 ] as const;
 

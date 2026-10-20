@@ -96,4 +96,20 @@ describe("IKOSU3 media_tool_pricing 迁移：三轨", () => {
     expect(seed("image_erase")).toContain('"value":14000');
     expect(seed("image_cutout")).toContain('"value":1000');
   });
+
+  it("视频工具种子价与验收口径一致（mc）", () => {
+    const seed = (tool: string) =>
+      standaloneSql
+        .split("\n")
+        .find((line) => line.startsWith(`('${tool}',`)) ?? "";
+    expect(seed("video_enhance")).toContain('"resolution=1080p":4000');
+    expect(seed("video_enhance")).toContain('"resolution=2k":7000');
+    expect(seed("video_enhance")).toContain('"resolution=4k":15000');
+    expect(seed("video_frame_interpolation")).toContain('"fps=30":45000');
+    expect(seed("video_frame_interpolation")).toContain('"fps=60":90000');
+    expect(seed("video_frame_interpolation")).toContain('"fps=120":180000');
+    expect(seed("video_matting")).toContain('"value":200');
+    expect(seed("video_subtitle_erase")).toContain('"value":38000');
+    expect(seed("video_scene_split")).toContain('"value":1000');
+  });
 });
