@@ -388,7 +388,7 @@ const PRICING_KINDS = new Set(["const", "table", "unset"]);
 
 
 
-function pricingFieldErr(pricing: unknown, channel?: ChannelId): string | null {
+export function pricingFieldErr(pricing: unknown, channel?: ChannelId): string | null {
   if (pricing === undefined || pricing === null) return null;
   if (!isPlainObject(pricing)) return "计价规则(pricing)须为 JSON 对象或 null";
 
