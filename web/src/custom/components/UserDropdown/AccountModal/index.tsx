@@ -1,6 +1,5 @@
 import { useState } from 'react';
-import { createPortal } from 'react-dom';
-import { X } from 'lucide-react';
+import Modal from '@/custom/components/Modal';
 import styles from './index.module.css';
 import PasswordModal from '../PasswordModal';
 import AccountRecordsModal from '../AccountRecordsModal';
@@ -28,27 +27,28 @@ export default function AccountModal({
   const [showRecords, setShowRecords] = useState(false);
   const [showBindPhone, setShowBindPhone] = useState(false);
 
-  return createPortal(
-    <div className={styles.overlay} onClick={onClose}>
-      <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
-        <button className={styles.closeBtn} onClick={onClose} title="关闭">
-          <X size={16} strokeWidth={2} />
-        </button>
-        <h2 className={styles.title}>账号信息</h2>
-
-        {}
+  return (
+    <>
+      <Modal
+        open
+        title="账号信息"
+        footer={null}
+        onCancel={onClose}
+        width="min(640px, 92vw)"
+        classNames={{
+          container: styles.modal,
+          title: styles.title,
+        }}
+        styles={{ container: { padding: 0 } }}
+      >
         <div className={styles.row}>
           <span className={styles.label}>用户ID</span>
           <span className={styles.value}>{userId}</span>
         </div>
-
-        {}
         <div className={styles.row}>
           <span className={styles.label}>昵称</span>
           <span className={styles.value}>{nickname}</span>
         </div>
-
-        {}
         <div className={styles.row}>
           <span className={styles.label}>手机号</span>
           <div className={styles.rowRight}>
@@ -64,8 +64,6 @@ export default function AccountModal({
             )}
           </div>
         </div>
-
-        {}
         <div className={styles.row}>
           <span className={styles.label}>密码</span>
           <div className={styles.rowRight}>
@@ -75,8 +73,6 @@ export default function AccountModal({
             </button>
           </div>
         </div>
-
-        {}
         <div className={`${styles.row} ${styles.rowLast}`}>
           <span className={styles.label}>积分余额</span>
           <div className={styles.rowRight}>
@@ -88,9 +84,7 @@ export default function AccountModal({
             </button>
           </div>
         </div>
-      </div>
-
-      {}
+      </Modal>
       <PasswordModal
         open={showPassword}
         hasPassword={hasPassword}
@@ -100,16 +94,12 @@ export default function AccountModal({
           onClose();
         }}
       />
-      {}
-      {showBindPhone && (
-        <BindPhoneModal
-          onClose={() => setShowBindPhone(false)}
-          onBound={(bound) => updateUser({ phone: bound })}
-        />
-      )}
-      {}
-      {showRecords && <AccountRecordsModal onClose={() => setShowRecords(false)} />}
-    </div>,
-    document.body
+      <BindPhoneModal
+        open={showBindPhone}
+        onClose={() => setShowBindPhone(false)}
+        onBound={(bound) => updateUser({ phone: bound })}
+      />
+      <AccountRecordsModal open={showRecords} onClose={() => setShowRecords(false)} />
+    </>
   );
 }

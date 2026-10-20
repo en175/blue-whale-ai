@@ -1,3 +1,4 @@
+import * as CheckboxPrimitive from '@radix-ui/react-checkbox';
 import { Check } from 'lucide-react';
 import { joinClassNames } from '@/custom/utils/class-names';
 import styles from './index.module.css';
@@ -9,12 +10,20 @@ export interface CheckboxProps {
 
 export default function Checkbox({ checked, className }: CheckboxProps) {
   return (
-    <span
-      className={joinClassNames(styles.mark, className)}
-      data-selected={checked ? 'true' : 'false'}
+    <CheckboxPrimitive.Root
+      asChild
+      checked={checked}
       aria-hidden
+      tabIndex={-1}
     >
-      <Check size={14} strokeWidth={2} />
-    </span>
+      <span
+        className={joinClassNames(styles.mark, className)}
+        data-selected={checked ? 'true' : 'false'}
+      >
+        <CheckboxPrimitive.Indicator forceMount>
+          <Check size={14} strokeWidth={2} />
+        </CheckboxPrimitive.Indicator>
+      </span>
+    </CheckboxPrimitive.Root>
   );
 }

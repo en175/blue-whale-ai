@@ -21,6 +21,7 @@
   align-items: center;
   cursor: pointer;
   touch-action: none;
+  user-select: none;
 }
 
 .hit:focus-visible {
@@ -29,36 +30,31 @@
   border-radius: var(--radius-sm);
 }
 
-.hit[aria-disabled='true'] {
+.hit[data-disabled] {
   opacity: 0.4;
   cursor: not-allowed;
 }
 
 .track {
   position: relative;
-  width: 100%;
+  flex: 1;
   height: 3px;
   border-radius: var(--radius-full);
   background: #4a4a4a;
-  pointer-events: none;
 }
 
 .fill {
   position: absolute;
-  inset: 0 auto 0 0;
   height: 100%;
   border-radius: var(--radius-full);
   background: #c8c8c8;
 }
 
 .thumb {
-  position: absolute;
-  top: 50%;
+  display: block;
   width: 12px;
   height: 12px;
   border-radius: var(--radius-full);
   background: #fff;
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.25);
-  pointer-events: none;
-  transform: translate(-50%, -50%);
 }

@@ -58,7 +58,7 @@ describe('DurationSlider', () => {
     expect(slider.getAttribute('aria-valuenow')).toBe('14');
     expect(slider.getAttribute('aria-valuetext')).toBe('14s');
     expect(input.value).toBe('14');
-    expect(mountNode.querySelector('span')?.textContent).toBe('s');
+    expect([...mountNode.querySelectorAll('span')].some((node) => node.textContent === 's')).toBe(true);
   });
 
   it('commits a typed duration on blur', async () => {

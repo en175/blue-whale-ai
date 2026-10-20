@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
-import { X } from 'lucide-react';
+import Modal from '@/custom/components/Modal';
 import { bindPhone, sendCode } from '@/custom/api/auth';
 import { isApiError } from '@/shared/api/http';
 import styles from './index.module.css';
 
 interface BindPhoneModalProps {
+  open: boolean;
   onClose: () => void;
   onBound: (phone: string) => void;
 }
@@ -12,7 +13,7 @@ interface BindPhoneModalProps {
 const PHONE_RE = /^1[3-9]\d{9}$/;
 const SEND_CODE_COOLDOWN_SECONDS = 60;
 
-export default function BindPhoneModal({ onClose, onBound }: BindPhoneModalProps) {
+export default function BindPhoneModal({ open, onClose, onBound }: BindPhoneModalProps) {
   const [phone, setPhone] = useState('');
   const [code, setCode] = useState('');
   const [error, setError] = useState('');
@@ -62,59 +63,20 @@ export default function BindPhoneModal({ onClose, onBound }: BindPhoneModalProps
     cooldown > 0 ? `${cooldown} 秒后重发` : sending ? '发送中…' : '发送验证码';
 
   return (
-    <div className={styles.overlay} onClick={() => { if (!submitting) onClose(); }}>
-      <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
-        <div className={styles.header}>
-          <h3 className={styles.title}>绑定手机号</h3>
+    <Modal
+      open={open}
+      title="绑定手机号"
+      onCancel={() => {
+        if (!submitting) onClose();
+      }}
+      keyboard={!submitting}
+      mask={{ closable: !submitting }}
+      width="min(420px, calc(100vw - 48px))"
+      classNames={{ container: styles.modal }}
+      footer={
+        <>
           <button
-            className={styles.closeBtn}
-            onClick={() => { if (!submitting) onClose(); }}
-            title="关闭"
-          >
-            <X size={16} strokeWidth={2} />
-          </button>
-        </div>
-        <p className={styles.hint}>
-          绑定后可以用手机号验证码登录，忘记密码时也能自己进来。
-        </p>
-
-        <div className={styles.field}>
-          <input
-            className={styles.input}
-            placeholder="请输入手机号"
-            inputMode="numeric"
-            value={phone}
-            onChange={(e) => setPhone(e.target.value)}
-          />
-        </div>
-        <div className={styles.field}>
-          <div className={styles.codeRow}>
-            <input
-              className={styles.input}
-              placeholder="请输入验证码"
-              inputMode="numeric"
-              maxLength={6}
-              value={code}
-              onChange={(e) => setCode(e.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter') handleSubmit();
-              }}
-            />
-            <button
-              type="button"
-              className={styles.sendBtn}
-              disabled={!phoneValid || cooldown > 0 || sending}
-              onClick={handleSendCode}
-            >
-              {sendLabel}
-            </button>
-          </div>
-        </div>
-
-        {error && <div className={styles.errorMsg}>{error}</div>}
-
-        <div className={styles.footer}>
-          <button
+            type="button"
             className={styles.cancelBtn}
             onClick={onClose}
             disabled={submitting}
@@ -122,14 +84,52 @@ export default function BindPhoneModal({ onClose, onBound }: BindPhoneModalProps
             取消
           </button>
           <button
+            type="button"
             className={styles.submitBtn}
             onClick={handleSubmit}
             disabled={!canSubmit}
           >
             {submitting ? '绑定中…' : '绑定'}
           </button>
+        </>
+      }
+    >
+      <p className={styles.hint}>
+        绑定后可以用手机号验证码登录，忘记密码时也能自己进来。
+      </p>
+      <div className={styles.field}>
+        <input
+          className={styles.input}
+          placeholder="请输入手机号"
+          inputMode="numeric"
+          value={phone}
+          onChange={(e) => setPhone(e.target.value)}
+        />
+      </div>
+      <div className={styles.field}>
+        <div className={styles.codeRow}>
+          <input
+            className={styles.input}
+            placeholder="请输入验证码"
+            inputMode="numeric"
+            maxLength={6}
+            value={code}
+            onChange={(e) => setCode(e.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') handleSubmit();
+            }}
+          />
+          <button
+            type="button"
+            className={styles.sendBtn}
+            disabled={!phoneValid || cooldown > 0 || sending}
+            onClick={handleSendCode}
+          >
+            {sendLabel}
+          </button>
         </div>
       </div>
-    </div>
+      {error && <div className={styles.errorMsg}>{error}</div>}
+    </Modal>
   );
 }

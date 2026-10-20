@@ -18,7 +18,7 @@ async function renderModal() {
   document.body.appendChild(mountNode);
   root = createRoot(mountNode);
   await act(async () => {
-    root.render(createElement(AccountRecordsModal, { onClose: vi.fn() }));
+    root.render(createElement(AccountRecordsModal, { open: true, onClose: vi.fn() }));
   });
   await act(async () => {
     await Promise.resolve();

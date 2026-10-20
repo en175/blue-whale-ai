@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react';
-import { createPortal } from 'react-dom';
-import { X, Wallet, Wand2, ArrowDown, ArrowUp } from 'lucide-react';
+import { Wallet, Wand2, ArrowDown, ArrowUp } from 'lucide-react';
 import { fetchConsumptions, type ConsumptionRecord } from '@/custom/api/account';
 import Empty from '@/custom/components/Empty';
+import Modal from '@/custom/components/Modal';
 import Tabs from '@/custom/components/Tabs';
 import styles from './index.module.css';
 
 interface AccountRecordsModalProps {
+  open: boolean;
   onClose: () => void;
 }
 
@@ -28,7 +29,7 @@ function fmtCredits(n: number): string {
   return fixed.replace(/\.?0+$/, '');
 }
 
-export default function AccountRecordsModal({ onClose }: AccountRecordsModalProps) {
+export default function AccountRecordsModal({ open, onClose }: AccountRecordsModalProps) {
   const [tab, setTab] = useState<'recharge' | 'consume'>('recharge');
   const [records, setRecords] = useState<ConsumptionRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -37,6 +38,7 @@ export default function AccountRecordsModal({ onClose }: AccountRecordsModalProp
   const typeFilter = tab === 'recharge' ? 'recharge' : 'consume';
 
   useEffect(() => {
+    if (!open) return undefined;
     let alive = true;
     setLoading(true);
     setError('');
@@ -53,89 +55,86 @@ export default function AccountRecordsModal({ onClose }: AccountRecordsModalProp
     return () => {
       alive = false;
     };
-  }, [typeFilter]);
+  }, [open, typeFilter]);
 
-  return createPortal(
-    <div className={styles.overlay} onClick={onClose}>
-      <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
-        <button className={styles.closeBtn} onClick={onClose} title="关闭">
-          <X size={16} strokeWidth={2} />
-        </button>
-        <h2 className={styles.title}>账户记录</h2>
-
-        {}
-        <Tabs
-          className={styles.tabs}
-          triggerClassName={styles.tab}
-          activeTriggerClassName={styles.tabActive}
-          value={tab}
-          onChange={setTab}
-          items={[
-            {
-              key: 'recharge',
-              label: (
-                <>
-                  <Wallet size={16} strokeWidth={2} />
-                  <span>充值记录</span>
-                </>
-              ),
-            },
-            {
-              key: 'consume',
-              label: (
-                <>
-                  <Wand2 size={16} strokeWidth={2} />
-                  <span>消费记录</span>
-                </>
-              ),
-            },
-          ]}
-        />
-
-        {}
-        <div className={styles.list}>
-          {loading ? (
-            <div className={styles.empty}>记录加载中…</div>
-          ) : error ? (
-            <div className={styles.empty}>{error}</div>
-          ) : records.length === 0 ? (
-            <Empty
-              className={styles.empty}
-              title={tab === 'recharge' ? '暂无充值记录' : '暂无消费记录'}
-            />
-          ) : (
-            records.map((r) => {
-              const isIn = r.direction === 'in';
-              return (
-                <div className={styles.item} key={r.id}>
-                  {isIn ? (
-                    <ArrowDown size={18} strokeWidth={2} className={styles.iconDown} />
-                  ) : (
-                    <ArrowUp size={18} strokeWidth={2} className={styles.iconUp} />
-                  )}
-                  <div className={styles.main}>
-                    <div className={styles.itemTitle}>
-                      {isIn ? '+' : '-'}
-                      {fmtCredits(r.credits)} 积分
-                    </div>
-                    <div className={styles.sub}>
-                      <span>
-                        {r.title || '内容生成'}
-                        {}
-                        {r.status === 'pending' ? ' · 处理中' : ''}
-                      </span>
-                    </div>
+  return (
+    <Modal
+      open={open}
+      title="账户记录"
+      footer={null}
+      onCancel={onClose}
+      width="min(660px, 92vw)"
+      classNames={{
+        container: styles.modal,
+        title: styles.title,
+      }}
+    >
+      <Tabs
+        className={styles.tabs}
+        triggerClassName={styles.tab}
+        activeTriggerClassName={styles.tabActive}
+        value={tab}
+        onChange={setTab}
+        items={[
+          {
+            key: 'recharge',
+            label: (
+              <>
+                <Wallet size={16} strokeWidth={2} />
+                <span>充值记录</span>
+              </>
+            ),
+          },
+          {
+            key: 'consume',
+            label: (
+              <>
+                <Wand2 size={16} strokeWidth={2} />
+                <span>消费记录</span>
+              </>
+            ),
+          },
+        ]}
+      />
+      <div className={styles.list}>
+        {loading ? (
+          <div className={styles.empty}>记录加载中…</div>
+        ) : error ? (
+          <div className={styles.empty}>{error}</div>
+        ) : records.length === 0 ? (
+          <Empty
+            className={styles.empty}
+            title={tab === 'recharge' ? '暂无充值记录' : '暂无消费记录'}
+          />
+        ) : (
+          records.map((r) => {
+            const isIn = r.direction === 'in';
+            return (
+              <div className={styles.item} key={r.id}>
+                {isIn ? (
+                  <ArrowDown size={18} strokeWidth={2} className={styles.iconDown} />
+                ) : (
+                  <ArrowUp size={18} strokeWidth={2} className={styles.iconUp} />
+                )}
+                <div className={styles.main}>
+                  <div className={styles.itemTitle}>
+                    {isIn ? '+' : '-'}
+                    {fmtCredits(r.credits)} 积分
                   </div>
-                  <span className={styles.time}>{fmtRelativeTime(r.created_at)}</span>
+                  <div className={styles.sub}>
+                    <span>
+                      {r.title || '内容生成'}
+                      {r.status === 'pending' ? ' · 处理中' : ''}
+                    </span>
+                  </div>
                 </div>
-              );
-            })
-          )}
-        </div>
-
-        <div className={styles.note}>记录按时间倒序排列</div>
+                <span className={styles.time}>{fmtRelativeTime(r.created_at)}</span>
+              </div>
+            );
+          })
+        )}
       </div>
-    </div>,
-    document.body
+      <div className={styles.note}>记录按时间倒序排列</div>
+    </Modal>
   );
 }
