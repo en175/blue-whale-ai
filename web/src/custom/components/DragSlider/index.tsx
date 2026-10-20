@@ -31,14 +31,17 @@ export default function DragSlider({
   className,
   onKeyDown,
 }: DragSliderProps) {
+  const sliderMax = max < min ? min : max;
+  const sliderValue = snapValue(value, min, sliderMax, step);
+
   const commit = useCallback(
     (raw: number) => {
       if (disabled) return;
-      const next = snapValue(raw, min, max, step);
+      const next = snapValue(raw, min, sliderMax, step);
       if (next === value) return;
       onChange(next);
     },
-    [disabled, max, min, onChange, step, value],
+    [disabled, min, onChange, sliderMax, step, value],
   );
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLElement>) => {
@@ -51,9 +54,9 @@ export default function DragSlider({
         type="range"
         className={styles.native}
         min={min}
-        max={max}
+        max={sliderMax}
         step={step}
-        value={value}
+        value={sliderValue}
         disabled={disabled}
         tabIndex={-1}
         aria-hidden="true"
@@ -64,11 +67,15 @@ export default function DragSlider({
       <Slider.Root
         className={styles.hit}
         min={min}
-        max={max}
+        max={sliderMax}
         step={step}
-        value={[value]}
+        value={[sliderValue]}
         disabled={disabled}
-        onValueChange={(next) => commit(next[0] ?? value)}
+        onValueChange={(next) => {
+          const raw = next[0];
+          if (raw == null || raw === sliderValue) return;
+          commit(raw);
+        }}
         onKeyDown={handleKeyDown}
       >
         <Slider.Track className={styles.track}>
