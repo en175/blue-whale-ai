@@ -5,10 +5,10 @@ import { fileURLToPath } from "node:url";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const { getPrismaClient } = await import(
-  resolve(scriptDir, "../backend/dist/libs/shared/persistence/db.js")
+  resolve(scriptDir, "../dist/libs/shared/persistence/db.js")
 );
 const { createTosStorage, loadTosStorageConfig } = await import(
-  resolve(scriptDir, "../backend/dist/libs/shared/assets/tos-storage.js")
+  resolve(scriptDir, "../dist/libs/shared/assets/tos-storage.js")
 );
 
 const APPLY = process.argv.includes("--apply");
@@ -20,7 +20,7 @@ function fail(msg) {
 
 if (!process.env.DATABASE_URL) {
   fail(
-    "缺少 DATABASE_URL 环境变量。用法：DATABASE_URL=... node scripts/backfill-asset-duration.mjs [--apply]",
+    "缺少 DATABASE_URL 环境变量。用法：DATABASE_URL=... node backend/scripts/backfill-asset-duration.mjs [--apply]",
   );
 }
 const config = loadTosStorageConfig();
