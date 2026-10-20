@@ -15,11 +15,11 @@
   --admin-text-faint: #7d8694;
   --admin-text-disabled: #aab3be;
 
-  --admin-accent: #2f45c0;
-  --admin-accent-hover: #26379e;
-  --admin-accent-soft: #eef1fc;
-  --admin-accent-border: #dce2f7;
-  --admin-accent-ring: rgb(47 69 192 / 0.12);
+  --admin-accent: #409eff;
+  --admin-accent-hover: #337ecc;
+  --admin-accent-soft: #ecf5ff;
+  --admin-accent-border: #d9ecff;
+  --admin-accent-ring: rgb(64 158 255 / 0.12);
 
   --admin-success: #047857;
   --admin-success-soft: #ecfdf5;
