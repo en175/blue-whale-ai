@@ -37,7 +37,7 @@ describe.skipIf(!databaseUrl)("audio video mux create idempotency in an isolated
       size: 16, mime: "video/mp4", publicUrl: `https://mux.test/${key}`,
     }) } };
     const assets = new AssetService(prisma, storage as never);
-    const service = new AudioVideoMuxesService(prisma, projects, assets, storage as never);
+    const service = new AudioVideoMuxesService(prisma, projects, assets, storage as never, { jobBilling: async () => undefined, release: async () => {} } as never);
     Reflect.defineMetadata("design:paramtypes", [AudioVideoMuxesService], AudioVideoMuxesController);
     class HarnessModule {}
     Module({ controllers: [AudioVideoMuxesController], providers: [
@@ -66,10 +66,12 @@ describe.skipIf(!databaseUrl)("audio video mux create idempotency in an isolated
     const video = await prisma.client.assets.create({ data: {
       user_id: 9n, project_id: project.id, type: "video", source: "uploaded", status: "normal",
       storage_key: "uploads/9/video/source.mp4", url: "https://mux.test/video.mp4", duration_ms: 7_200_000,
+      width: 1920, height: 1080,
     } });
     const foreign = await prisma.client.assets.create({ data: {
       user_id: 9n, project_id: 999_999n, type: "video", source: "uploaded", status: "normal",
       storage_key: "uploads/9/video/foreign.mp4", url: "https://mux.test/foreign.mp4", duration_ms: 33_000,
+      width: 1920, height: 1080,
     } });
     audioId = audio.id;
     videoId = video.id;

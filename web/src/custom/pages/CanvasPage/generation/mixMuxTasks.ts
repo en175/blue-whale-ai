@@ -56,10 +56,7 @@ function signalCreateOutcome(
   signalAccepted(nodeId, jobId, watcher);
 }
 
-function dedicatedRetryOutcome(retried: DedicatedRetryCreatedData, jobId: string | number): CreateJobOutcome {
-  if (String(retried.job_id) !== String(jobId)) {
-    throw new Error('重试任务身份不一致');
-  }
+function dedicatedRetryOutcome(retried: DedicatedRetryCreatedData): CreateJobOutcome {
   return { jobId: retried.job_id, canvasBinding: retried.canvas_binding ?? null };
 }
 
@@ -167,7 +164,7 @@ export const audioMixTask: GenerationTaskDefinition<AudioMixCreate> = {
 
   async retry(projectId, jobId, _nodeData, binding, key) {
     const retried = await retryAudioMix(projectId, jobId, key, { silent: true }, binding ?? undefined);
-    return dedicatedRetryOutcome(retried, jobId);
+    return dedicatedRetryOutcome(retried);
   },
 
   async cancel(projectId, jobId) {
@@ -238,7 +235,7 @@ export const audioVideoMuxTask: GenerationTaskDefinition<CreateAudioVideoMuxPayl
 
   async retry(projectId, jobId, _nodeData, binding, key) {
     const retried = await retryAudioVideoMux(projectId, jobId, key, { silent: true }, binding ?? undefined);
-    return dedicatedRetryOutcome(retried, jobId);
+    return dedicatedRetryOutcome(retried);
   },
 
   async cancel(projectId, jobId) {

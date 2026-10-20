@@ -54,7 +54,7 @@ describe("audio video mux create idempotency", () => {
     expect(legacy.data).toMatchObject({ job_id: "71", enqueue_required: true });
   });
 
-  it("resumes a failed enqueue once with the same key and never spawns a second job", async () => {
+  it("create replay does not resume a failed enqueue; a retry must create a new job", async () => {
     const job = { id: 70n, status: "queued", version: 0, error: null as object | null, input: { duration: 1, resolution: "1080p" } };
     let command: { request_hash: string; generation_job_id: bigint } | null = null;
     const client = {
@@ -69,11 +69,7 @@ describe("audio video mux create idempotency", () => {
         create: vi.fn(async () => job),
         findFirst: vi.fn(async () => job),
         findUniqueOrThrow: vi.fn(async () => job),
-        updateMany: vi.fn(async ({ where, data }: { where: { version: number }; data: { status: string } }) => {
-          if (job.status !== "failed" || where.version !== job.version) return { count: 0 };
-          Object.assign(job, { status: data.status, version: job.version + 1 });
-          return { count: 1 };
-        }),
+        updateMany: vi.fn(async () => ({ count: 1 })),
       },
       $transaction: vi.fn(async (fn: (tx: unknown) => Promise<unknown>) => fn(client)),
     };
@@ -89,12 +85,10 @@ describe("audio video mux create idempotency", () => {
     const first = await service.create("9", "5", payload, { idempotencyKey: "recover-key" });
     expect(first.data).toMatchObject({ job_id: "70", replayed: false, enqueue_required: true });
     Object.assign(job, { status: "failed", version: 1, error: { code: "enqueue_failed", message: "任务入队失败" } });
-    const recovered = await service.create("9", "5", payload, { idempotencyKey: "recover-key" });
-    expect(recovered.data).toMatchObject({ job_id: "70", status: "queued", replayed: true, enqueue_required: true });
-    const replay = await service.create("9", "5", payload, { idempotencyKey: "recover-key" });
-    expect(replay.data).toMatchObject({ job_id: "70", status: "queued", replayed: true, enqueue_required: false });
+    const replayed = await service.create("9", "5", payload, { idempotencyKey: "recover-key" });
+    expect(replayed.data).toMatchObject({ job_id: "70", status: "failed", replayed: true, enqueue_required: false });
     expect(client.generation_jobs.create).toHaveBeenCalledOnce();
-    expect(client.generation_jobs.updateMany).toHaveBeenCalledOnce();
+    expect(client.generation_jobs.updateMany).not.toHaveBeenCalled();
   });
 
   it.each([

@@ -119,7 +119,7 @@ describe.skipIf(process.env.IKI68W_BROWSER !== "1")(
         size: wav.length, mime: "audio/wav", publicUrl: `https://mix-object.test/${key}`,
       }) } } as unknown as AssetStorageService;
       const assets = new AssetService(prisma, storage);
-      const mixes = new AudioMixesService(prisma, projects, assets, storage);
+      const mixes = new AudioMixesService(prisma, projects, assets, storage, { jobBilling: async () => undefined, release: async () => {} } as never);
       Reflect.defineMetadata("design:paramtypes", [CanvasService], CanvasesController);
       Reflect.defineMetadata("design:paramtypes", [ProjectService, CanvasService, SnapshotService, PrismaService], ProjectsController);
       Reflect.defineMetadata("design:paramtypes", [JobsService], JobsController);

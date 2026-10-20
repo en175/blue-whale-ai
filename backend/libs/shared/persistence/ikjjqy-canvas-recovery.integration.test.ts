@@ -268,7 +268,9 @@ describe.skipIf(!databaseUrl)("多结果任务逐项恢复与删除（IKJJQY）"
     const service = new VocalSplitsService(
       { client: prisma } as never,
       { findOwnedById: async () => ({}) } as never,
-      { findOwnedSource: async () => ({ type: "video" }) } as never,
+      { findOwnedSource: async () => ({ type: "video", duration_ms: 60_000, storage_key: null }) } as never,
+      { probe: null } as never,
+      { jobBilling: async () => undefined, release: async () => {} } as never,
     );
     const first = await service.create(USER_ID, PROJECT_ID, {
       source_asset_id: "88", scene: "drama", output_format: "aac",

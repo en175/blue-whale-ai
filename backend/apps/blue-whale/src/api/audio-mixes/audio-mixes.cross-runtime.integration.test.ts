@@ -106,7 +106,7 @@ describe.skipIf(process.env.IKI68N_CROSS_RUNTIME !== "1")("audio_mix cross runti
         return bytes ? { size: bytes.length, mime: "audio/mpeg", publicUrl: `${inputBase}/${key}` } : null;
       } } } as unknown as AssetStorageService;
       const assets = new AssetService(prisma, storage);
-      const audioMixes = new AudioMixesService(prisma, projects, assets, storage);
+      const audioMixes = new AudioMixesService(prisma, projects, assets, storage, { jobBilling: async () => undefined, release: async () => {} } as never);
       Reflect.defineMetadata("design:paramtypes", [AudioMixesService], AudioMixesController);
       Reflect.defineMetadata("design:paramtypes", [JobsService], JobsController);
       Reflect.defineMetadata("design:paramtypes", [AssetService], AssetsController);

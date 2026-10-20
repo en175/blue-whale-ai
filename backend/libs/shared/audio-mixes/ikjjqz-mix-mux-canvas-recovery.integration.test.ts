@@ -149,8 +149,8 @@ describe.skipIf(!databaseUrl)("混合/合成提交归属真库验证（IKJJQZ）
     };
     const storage = { uploads: { inspectObject: vi.fn(async (key: string) => ({ size: 10, publicUrl: `https://store.test/${key}` })) } };
     vi.stubGlobal("fetch", vi.fn(async () => new Response("x", { status: 206 })));
-    mixes = new AudioMixesService(prismaService, project as never, mixAssets as never, storage as never);
-    muxes = new AudioVideoMuxesService(prismaService, project as never, muxAssets as never, storage as never);
+    mixes = new AudioMixesService(prismaService, project as never, mixAssets as never, storage as never, { jobBilling: async () => undefined, release: async () => {} } as never);
+    muxes = new AudioVideoMuxesService(prismaService, project as never, muxAssets as never, storage as never, { jobBilling: async () => undefined, release: async () => {} } as never);
   });
 
   afterAll(async () => {
