@@ -4,7 +4,7 @@ vi.mock("@lib/infra/logging/blue-whale-logger.js", () => ({
   logger: { warn: vi.fn(), error: vi.fn() },
 }));
 
-import { resolveSourceDurationSeconds } from "./source-duration.js";
+import { resolveSourceDuration } from "./source-duration.js";
 
 function makeArgs(overrides: Record<string, unknown> = {}) {
   const updateMany = vi.fn().mockResolvedValue({ count: 1 });
@@ -22,12 +22,17 @@ function makeArgs(overrides: Record<string, unknown> = {}) {
   };
 }
 
-describe("resolveSourceDurationSeconds", () => {
+describe("resolveSourceDuration", () => {
   it("库里有值 → 四舍五入到秒，不探测", async () => {
     const { args, storage } = makeArgs({
       asset: { id: "88", storage_key: "k", duration_ms: 10_600 },
     });
-    await expect(resolveSourceDurationSeconds(args as never)).resolves.toBe(11);
+    await expect(resolveSourceDuration(args as never)).resolves.toEqual({
+      seconds: 11,
+      durationMs: 10_600,
+      width: null,
+      height: null,
+    });
     expect(storage.probe).not.toHaveBeenCalled();
   });
 
@@ -38,7 +43,12 @@ describe("resolveSourceDurationSeconds", () => {
       width: 1080,
       height: 1920,
     });
-    await expect(resolveSourceDurationSeconds(args as never)).resolves.toBe(65);
+    await expect(resolveSourceDuration(args as never)).resolves.toEqual({
+      seconds: 65,
+      durationMs: 65_000,
+      width: 1080,
+      height: 1920,
+    });
     expect(storage.probe).toHaveBeenCalledWith("uploads/9/video/a.mp4");
     expect(updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -47,23 +57,35 @@ describe("resolveSourceDurationSeconds", () => {
     );
   });
 
+  it("不足 1 秒按 1 秒计", async () => {
+    const { args } = makeArgs({
+      asset: { id: "88", storage_key: "k", duration_ms: 400 },
+    });
+    await expect(resolveSourceDuration(args as never)).resolves.toEqual({
+      seconds: 1,
+      durationMs: 400,
+      width: null,
+      height: null,
+    });
+  });
+
   it("没有存储键或探测失败 → null（调用方拒绝提交）", async () => {
     const { args, storage } = makeArgs({
       asset: { id: "88", storage_key: null, duration_ms: null },
     });
-    await expect(resolveSourceDurationSeconds(args as never)).resolves.toBeNull();
+    await expect(resolveSourceDuration(args as never)).resolves.toBeNull();
     expect(storage.probe).not.toHaveBeenCalled();
 
     const second = makeArgs();
     second.storage.probe.mockRejectedValue(new Error("tos down"));
     await expect(
-      resolveSourceDurationSeconds(second.args as never),
+      resolveSourceDuration(second.args as never),
     ).resolves.toBeNull();
   });
 
   it("探测不到有效时长 → null", async () => {
     const { args, storage } = makeArgs();
     storage.probe.mockResolvedValue({ durationMs: 0, width: null, height: null });
-    await expect(resolveSourceDurationSeconds(args as never)).resolves.toBeNull();
+    await expect(resolveSourceDuration(args as never)).resolves.toBeNull();
   });
 });

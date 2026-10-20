@@ -43,7 +43,6 @@ async function releaseEnqueueFailure(
     prisma: PrismaClient;
     billing: MediaToolBillingService;
     userId: string;
-    toolType: string;
   },
   jobId: string,
   billed: boolean,

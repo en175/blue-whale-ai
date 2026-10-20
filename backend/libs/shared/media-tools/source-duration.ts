@@ -1,5 +1,6 @@
 import type { PrismaClient } from "@prisma/client";
 import { logger } from "@lib/infra/logging/blue-whale-logger.js";
+import { createAssetOwnershipOps } from "../persistence/asset-ownership-repo.js";
 import type { AssetStorageService } from "../assets/storage.service.js";
 
 export interface SourceAssetDurationFields {
@@ -8,14 +9,30 @@ export interface SourceAssetDurationFields {
   duration_ms?: number | null | undefined;
 }
 
-export async function resolveSourceDurationSeconds(args: {
+export interface ResolvedSourceDuration {
+  seconds: number;
+  durationMs: number;
+  width: number | null;
+  height: number | null;
+}
+
+function toSeconds(durationMs: number): number {
+  return Math.max(1, Math.round(durationMs / 1000));
+}
+
+export async function resolveSourceDuration(args: {
   prisma: PrismaClient;
   storage: AssetStorageService;
   asset: SourceAssetDurationFields;
-}): Promise<number | null> {
+}): Promise<ResolvedSourceDuration | null> {
   const { asset } = args;
   if (typeof asset.duration_ms === "number" && asset.duration_ms > 0) {
-    return Math.round(asset.duration_ms / 1000);
+    return {
+      seconds: toSeconds(asset.duration_ms),
+      durationMs: asset.duration_ms,
+      width: null,
+      height: null,
+    };
   }
   const probe = args.storage.probe;
   if (!probe || !asset.storage_key) return null;
@@ -32,15 +49,10 @@ export async function resolveSourceDurationSeconds(args: {
   }
   if (info.durationMs === null || info.durationMs <= 0) return null;
   try {
-    await args.prisma.assets.updateMany({
-      where: { id: BigInt(asset.id), is_delete: false },
-      data: {
-        duration_ms: info.durationMs,
-        ...(info.width === null ? {} : { width: info.width }),
-        ...(info.height === null ? {} : { height: info.height }),
-        gmt_modified: new Date(),
-        version: { increment: 1 },
-      },
+    await createAssetOwnershipOps(args.prisma).saveMediaInfo(asset.id, {
+      durationMs: info.durationMs,
+      width: info.width,
+      height: info.height,
     });
   } catch (error) {
     logger.warn(
@@ -49,5 +61,10 @@ export async function resolveSourceDurationSeconds(args: {
       }`,
     );
   }
-  return Math.round(info.durationMs / 1000);
+  return {
+    seconds: toSeconds(info.durationMs),
+    durationMs: info.durationMs,
+    width: info.width,
+    height: info.height,
+  };
 }

@@ -63,6 +63,7 @@ function makeService(overrides: {
   jobCreate?: unknown;
   billing?: unknown;
   replayedJob?: unknown;
+  storage?: unknown;
 } = {}) {
   const project = overrides.project ?? { findOwnedById: vi.fn().mockResolvedValue({ id: 55n }) };
   const assets =
@@ -83,6 +84,7 @@ function makeService(overrides: {
     cost_reservations: { create: vi.fn() },
   };
   const client = {
+    assets: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
     command_idempotency: tx.command_idempotency,
     generation_jobs: tx.generation_jobs,
     cost_reservations: tx.cost_reservations,
@@ -90,7 +92,7 @@ function makeService(overrides: {
   };
   const prisma = { client };
   return {
-    service: new VideoMattingsService(prisma as never, project as never, assets as never, { probe: null } as never, (overrides.billing ?? { jobBilling: async () => undefined, release: async () => {} }) as never),
+    service: new VideoMattingsService(prisma as never, project as never, assets as never, (overrides.storage ?? { probe: null }) as never, (overrides.billing ?? { jobBilling: async () => undefined, release: async () => {} }) as never),
     tx,
     client,
     project,
@@ -299,6 +301,23 @@ describe("VideoMattingsService.create：输入门槛复核（时长 ≤10 分钟
     });
     const result = await service.create("9", "55", VALID_BODY);
     expect(result.code).toBe(100202);
+  });
+
+  it("probes a legacy video and rejects when the probe exceeds 10 minutes", async () => {
+    const { service, tx } = makeService({
+      assets: { findOwnedSource: vi.fn().mockResolvedValue(makeVideoAsset({ duration_ms: null })) },
+      storage: {
+        probe: vi.fn().mockResolvedValue({
+          durationMs: 10 * 60_000 + 1,
+          width: 1920,
+          height: 1080,
+        }),
+      },
+    });
+    const result = await service.create("9", "55", VALID_BODY);
+    expect(result.code).not.toBe(200);
+    expect(result.msg).toContain("10 分钟");
+    expect(tx.generation_jobs.create).not.toHaveBeenCalled();
   });
 });
 

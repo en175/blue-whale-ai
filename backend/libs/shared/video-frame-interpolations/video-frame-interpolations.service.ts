@@ -23,7 +23,7 @@ import {
 } from "@lib/shared/generation/media-tool-recovery.js";
 import { enqueueVideoFrameInterpolationJob } from "@lib/shared/generation/generation-queue.js";
 import { submitMediaToolJob } from "@lib/shared/media-tools/media-tool-submission.js";
-import { resolveSourceDurationSeconds } from "@lib/shared/media-tools/source-duration.js";
+import { resolveSourceDuration } from "@lib/shared/media-tools/source-duration.js";
 import { MediaToolBillingService } from "@lib/shared/media-tool-pricing/media-tool-billing.service.js";
 import { AssetStorageService } from "@lib/shared/assets/storage.service.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";
@@ -101,7 +101,7 @@ export class VideoFrameInterpolationsService {
     }
 
 
-    const durationSeconds = await resolveSourceDurationSeconds({
+    const duration = await resolveSourceDuration({
       prisma: this.prisma.client,
       storage: this.storage,
       asset: {
@@ -110,7 +110,7 @@ export class VideoFrameInterpolationsService {
         duration_ms: asset.duration_ms,
       },
     });
-    if (durationSeconds === null) {
+    if (duration === null) {
       return fail(
         ASSET_UNAVAILABLE_CODE,
         "源视频时长读取失败，请稍后重试或更换素材",
@@ -118,7 +118,7 @@ export class VideoFrameInterpolationsService {
       );
     }
 
-    const frozenInput = { ...input, duration: durationSeconds } as Prisma.InputJsonObject;
+    const frozenInput = { ...input, duration: duration.seconds } as Prisma.InputJsonObject;
 
     return submitMediaToolJob({
       prisma: this.prisma.client,

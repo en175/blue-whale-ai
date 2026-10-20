@@ -21,7 +21,7 @@ import {
 } from "@lib/shared/generation/media-tool-recovery.js";
 import { enqueueVideoEnhanceJob } from "@lib/shared/generation/generation-queue.js";
 import { submitMediaToolJob } from "@lib/shared/media-tools/media-tool-submission.js";
-import { resolveSourceDurationSeconds } from "@lib/shared/media-tools/source-duration.js";
+import { resolveSourceDuration } from "@lib/shared/media-tools/source-duration.js";
 import { MediaToolBillingService } from "@lib/shared/media-tool-pricing/media-tool-billing.service.js";
 import { AssetStorageService } from "@lib/shared/assets/storage.service.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";
@@ -96,9 +96,28 @@ export class VideoEnhancementsService {
       return fail(FAILURE_CODE, "仅支持对视频资产发起 HD 高清");
     }
 
-    if (asset.width != null && asset.height != null) {
-      const longSide = Math.max(asset.width, asset.height);
-      const shortSide = Math.min(asset.width, asset.height);
+    const duration = await resolveSourceDuration({
+      prisma: this.prisma.client,
+      storage: this.storage,
+      asset: {
+        id: input[VIDEO_ENHANCE_INPUT_KEYS.sourceAssetId],
+        storage_key: asset.storage_key,
+        duration_ms: asset.duration_ms,
+      },
+    });
+    if (duration === null) {
+      return fail(
+        ASSET_UNAVAILABLE_CODE,
+        "源视频时长读取失败，请稍后重试或更换素材",
+        { code: "asset_unavailable" },
+      );
+    }
+
+    const width = asset.width ?? duration.width;
+    const height = asset.height ?? duration.height;
+    if (width != null && height != null) {
+      const longSide = Math.max(width, height);
+      const shortSide = Math.min(width, height);
       if (
         shortSide < VIDEO_ENHANCE_MIN_INPUT_SHORT_SIDE_PX ||
         shortSide > VIDEO_ENHANCE_MAX_INPUT_SHORT_SIDE_PX ||
@@ -111,24 +130,7 @@ export class VideoEnhancementsService {
       }
     }
 
-    const durationSeconds = await resolveSourceDurationSeconds({
-      prisma: this.prisma.client,
-      storage: this.storage,
-      asset: {
-        id: input[VIDEO_ENHANCE_INPUT_KEYS.sourceAssetId],
-        storage_key: asset.storage_key,
-        duration_ms: asset.duration_ms,
-      },
-    });
-    if (durationSeconds === null) {
-      return fail(
-        ASSET_UNAVAILABLE_CODE,
-        "源视频时长读取失败，请稍后重试或更换素材",
-        { code: "asset_unavailable" },
-      );
-    }
-
-    const frozenInput = { ...input, duration: durationSeconds } as Prisma.InputJsonObject;
+    const frozenInput = { ...input, duration: duration.seconds } as Prisma.InputJsonObject;
 
     return submitMediaToolJob({
       prisma: this.prisma.client,

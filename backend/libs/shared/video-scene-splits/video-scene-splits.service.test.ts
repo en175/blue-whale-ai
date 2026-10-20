@@ -33,6 +33,7 @@ function makeService(overrides: {
   jobCreate?: unknown;
   billing?: unknown;
   replayedJob?: unknown;
+  storage?: unknown;
 } = {}) {
   const project = overrides.project ?? { findOwnedById: vi.fn().mockResolvedValue({ id: 55n }) };
   const assets =
@@ -49,13 +50,25 @@ function makeService(overrides: {
     generation_jobs: {
       create: overrides.jobCreate ?? vi.fn().mockResolvedValue({ id: 400n }),
       findUnique: overrides.replayedJob ?? vi.fn(),
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      findUniqueOrThrow: vi.fn().mockResolvedValue({ user_id: 9n }),
     },
+    generation_outbox: { create: vi.fn() },
     cost_reservations: { create: vi.fn() },
   };
-  const client = { $transaction: vi.fn(async (operation: (t: unknown) => Promise<unknown>) => operation(tx)) };
+  const client = {
+    assets: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
+    command_idempotency: {
+      findUnique: overrides.idemFindUnique ?? vi.fn().mockResolvedValue(null),
+    },
+    generation_jobs: {
+      findUnique: overrides.replayedJob ?? vi.fn(),
+    },
+    $transaction: vi.fn(async (operation: (t: unknown) => Promise<unknown>) => operation(tx)),
+  };
   const prisma = { client };
   return {
-    service: new VideoSceneSplitsService(prisma as never, project as never, assets as never, { probe: null } as never, (overrides.billing ?? { jobBilling: async () => undefined, release: async () => {} }) as never),
+    service: new VideoSceneSplitsService(prisma as never, project as never, assets as never, (overrides.storage ?? { probe: null }) as never, (overrides.billing ?? { jobBilling: async () => undefined, release: async () => {} }) as never),
     tx,
     client,
     project,
@@ -210,6 +223,23 @@ describe("VideoSceneSplitsService.create：输入门槛复核（时长 ≤2 小�
     const result = await service.create("9", "55", VALID_BODY);
     expect(result.code).toBe(100202);
   });
+
+  it("probes a legacy video and rejects when the probe exceeds 2 hours", async () => {
+    const { service, tx } = makeService({
+      assets: { findOwnedSource: vi.fn().mockResolvedValue(makeVideoAsset({ duration_ms: null })) },
+      storage: {
+        probe: vi.fn().mockResolvedValue({
+          durationMs: 2 * 60 * 60 * 1000 + 1,
+          width: 1920,
+          height: 1080,
+        }),
+      },
+    });
+    const result = await service.create("9", "55", VALID_BODY);
+    expect(result.code).not.toBe(200);
+    expect(result.msg).toContain("2 小时");
+    expect(tx.generation_jobs.create).not.toHaveBeenCalled();
+  });
 });
 
 describe("VideoSceneSplitsService.create：client_token 幂等三态", () => {
@@ -328,5 +358,34 @@ describe("VideoSceneSplitsService.create：计费输入", () => {
       expect.objectContaining({ source_asset_id: "88", duration: 600 }),
     );
     expect(enqueueVideoSceneSplitJob).toHaveBeenCalledWith("400");
+  });
+
+  it("releases the charge when enqueue fails for a paid tool", async () => {
+    const release = vi.fn();
+    const { service } = makeService({
+      billing: {
+        jobBilling: vi.fn().mockResolvedValue({ charge: vi.fn(), release: vi.fn() }),
+        release,
+      },
+    });
+    enqueueVideoSceneSplitJob.mockRejectedValueOnce(new Error("rocketmq down"));
+
+    const result = await service.create("9", "55", VALID_BODY);
+
+    expect(result.code).toBe(200);
+    expect(release).toHaveBeenCalledWith("9", 400, "任务入队失败");
+  });
+
+  it("does not release for a free tool when enqueue fails", async () => {
+    const release = vi.fn();
+    const { service } = makeService({
+      billing: { jobBilling: vi.fn().mockResolvedValue(undefined), release },
+    });
+    enqueueVideoSceneSplitJob.mockRejectedValueOnce(new Error("rocketmq down"));
+
+    const result = await service.create("9", "55", VALID_BODY);
+
+    expect(result.code).toBe(200);
+    expect(release).not.toHaveBeenCalled();
   });
 });

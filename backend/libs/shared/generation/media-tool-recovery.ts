@@ -229,9 +229,12 @@ export async function createMediaToolJobWithRecovery(
         key,
       });
   if (replayed) return replayed;
+  let chargedJobId: number | null = null;
+  let callbackCompleted = false;
   const runTx = () =>
-    transactionWithUniqueRetry(prisma, (tx) =>
-      withBillingCompensation(billing, async (jobBilling) => {
+    transactionWithUniqueRetry(prisma, (tx) => {
+      callbackCompleted = false;
+      return withBillingCompensation(billing, async (jobBilling) => {
         if (recovery) {
           const acceptance: CanvasRecoveryAcceptance = {
             projectId: recovery.projectId,
@@ -246,7 +249,10 @@ export async function createMediaToolJobWithRecovery(
           if (locked.kind === "idempotency_conflict") return { conflict: true } as const;
           if (locked.kind === "replay") return { replayJobId: locked.result.generation_job_id } as const;
           const created = await createJob(tx);
-          await jobBilling?.charge(Number(created.jobId));
+          if (jobBilling) {
+            await jobBilling.charge(Number(created.jobId));
+            chargedJobId = Number(created.jobId);
+          }
           await writeCanvasRecoveryRows(tx, locked.plan, BigInt(created.jobId));
           await writeCreateIdempotency(
             tx,
@@ -271,7 +277,10 @@ export async function createMediaToolJobWithRecovery(
           return { replayJobId: existing.generation_job_id } as const;
         }
         const created = await createJob(tx);
-        await jobBilling?.charge(Number(created.jobId));
+        if (jobBilling) {
+          await jobBilling.charge(Number(created.jobId));
+          chargedJobId = Number(created.jobId);
+        }
         await writeCreateIdempotency(
           tx,
           { projectId, jobId: BigInt(created.jobId), acceptedCursor: "0" },
@@ -279,12 +288,25 @@ export async function createMediaToolJobWithRecovery(
           operation,
         );
         return { created } as const;
-      }),
-    );
+      }).then((result) => {
+        callbackCompleted = true;
+        return result;
+      });
+    });
   let outcome: Awaited<ReturnType<typeof runTx>>;
   try {
     outcome = await runTx();
   } catch (error) {
+    if (callbackCompleted && chargedJobId !== null && billing) {
+      const jobId = chargedJobId;
+      chargedJobId = null;
+      await billing
+        .release(
+          jobId,
+          error instanceof Error ? error.message : String(error),
+        )
+        .catch(() => undefined);
+    }
     if (error instanceof RecoveryContractError) {
       return { kind: "envelope", envelope: error.envelope };
     }

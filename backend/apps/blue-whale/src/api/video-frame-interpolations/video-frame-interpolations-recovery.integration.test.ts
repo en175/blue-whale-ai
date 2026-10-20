@@ -13,6 +13,8 @@ import { json } from "express";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { VideoFrameInterpolationsController } from "./video-frame-interpolations.controller.js";
 import { AssetService } from "@lib/shared/assets/assets.service.js";
+import { AssetStorageService } from "@lib/shared/assets/storage.service.js";
+import { MediaToolBillingService } from "@lib/shared/media-tool-pricing/media-tool-billing.service.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";
 import { VideoFrameInterpolationsService } from "@lib/shared/video-frame-interpolations/video-frame-interpolations.service.js";
@@ -44,9 +46,13 @@ describe.skipIf(!process.env.IKHSFE_DATABASE_URL)(
       process.env.DATABASE_URL = process.env.IKHSFE_DATABASE_URL;
       vi.mocked(enqueueVideoFrameInterpolationJob).mockResolvedValue(undefined);
       const assets = new AssetService(prisma, {} as never);
+      const storage = { probe: vi.fn() } as unknown as AssetStorageService;
+      const billing = {
+        jobBilling: vi.fn().mockResolvedValue(undefined),
+      } as unknown as MediaToolBillingService;
       Reflect.defineMetadata(
         "design:paramtypes",
-        [PrismaService, ProjectService, AssetService],
+        [PrismaService, ProjectService, AssetService, AssetStorageService, MediaToolBillingService],
         VideoFrameInterpolationsService,
       );
       Reflect.defineMetadata(
@@ -61,7 +67,7 @@ describe.skipIf(!process.env.IKHSFE_DATABASE_URL)(
           { provide: PrismaService, useValue: prisma },
           { provide: ProjectService, useValue: projects },
           { provide: AssetService, useValue: assets },
-          { provide: VideoFrameInterpolationsService, useValue: new VideoFrameInterpolationsService(prisma, projects, assets) },
+          { provide: VideoFrameInterpolationsService, useValue: new VideoFrameInterpolationsService(prisma, projects, assets, storage, billing) },
         ],
       })(HarnessModule);
       app = await NestFactory.create(HarnessModule, { logger: false, bodyParser: false });
@@ -94,6 +100,7 @@ describe.skipIf(!process.env.IKHSFE_DATABASE_URL)(
           url: "https://example.com/ikhsfe-src.mp4",
           width: 1920,
           height: 1080,
+          duration_ms: 10_000,
           size: BigInt(2048),
         },
       });
