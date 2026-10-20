@@ -41,6 +41,10 @@ export default function DragSlider({
     [disabled, max, min, onChange, step, value],
   );
 
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLElement>) => {
+    onKeyDown?.(event);
+  };
+
   return (
     <div className={joinClassNames(styles.root, className)}>
       <input
@@ -55,6 +59,7 @@ export default function DragSlider({
         aria-hidden="true"
         data-testid={testId}
         onChange={(event) => commit(Number(event.target.value))}
+        onKeyDown={handleKeyDown}
       />
       <Slider.Root
         className={styles.hit}
@@ -64,7 +69,7 @@ export default function DragSlider({
         value={[value]}
         disabled={disabled}
         onValueChange={(next) => commit(next[0] ?? value)}
-        onKeyDown={onKeyDown}
+        onKeyDown={handleKeyDown}
       >
         <Slider.Track className={styles.track}>
           <Slider.Range className={styles.fill} />
