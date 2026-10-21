@@ -1,10 +1,3 @@
-import {
-  getStartedRocketMqProducer,
-  loadRocketMqConfig,
-} from "@lib/infra/mq/rocketmq-producer.js";
-
-export const BILLING_JOB_TERMINAL_TOPIC = "generation-job-terminal";
-
 export interface BillingReleaseContext {
   userId: string;
   jobId: number;
@@ -13,32 +6,18 @@ export interface BillingReleaseContext {
 
 export type BillingRelease = (ctx: BillingReleaseContext) => Promise<void>;
 
-export interface BillingJobTerminalEvent {
-  jobId: number;
-  userId: number;
-  status: string;
-  reason: string;
-  refund: boolean;
-}
-
 export interface BillingReleaseDeps {
-  publish: (event: BillingJobTerminalEvent) => Promise<void>;
+  enqueue: (ctx: BillingReleaseContext) => Promise<void>;
   logger?: { error: (message: string) => void };
 }
 
 export function createBillingRelease(deps: BillingReleaseDeps): BillingRelease {
   return async (ctx) => {
     try {
-      await deps.publish({
-        jobId: ctx.jobId,
-        userId: Number(ctx.userId),
-        status: "failed",
-        reason: ctx.reason,
-        refund: true,
-      });
+      await deps.enqueue(ctx);
     } catch (error) {
       deps.logger?.error(
-        `[billing] 终态事件发布失败，这笔钱仍扣着：jobId=${ctx.jobId} status=failed 原因=${ctx.reason} ${
+        `[billing] 终态事件入队失败：jobId=${ctx.jobId} 原因=${ctx.reason} ${
           error instanceof Error ? error.message : String(error)
         }`,
       );
@@ -46,12 +25,30 @@ export function createBillingRelease(deps: BillingReleaseDeps): BillingRelease {
   };
 }
 
-export async function publishBillingJobTerminal(
-  event: BillingJobTerminalEvent,
-): Promise<void> {
-  const producer = await getStartedRocketMqProducer(loadRocketMqConfig());
-  await producer.send({
-    topic: BILLING_JOB_TERMINAL_TOPIC,
-    body: Buffer.from(JSON.stringify(event)),
-  });
+export interface TerminalOutboxClient {
+  generation_outbox: {
+    create(args: {
+      data: {
+        job_id: bigint;
+        user_id: bigint;
+        terminal_status: string;
+        reason: string;
+      };
+    }): Promise<unknown>;
+  };
+}
+
+export function createOutboxTerminalEnqueue(
+  prisma: TerminalOutboxClient,
+): (ctx: BillingReleaseContext) => Promise<void> {
+  return async (ctx) => {
+    await prisma.generation_outbox.create({
+      data: {
+        job_id: BigInt(ctx.jobId),
+        user_id: BigInt(ctx.userId),
+        terminal_status: "failed",
+        reason: ctx.reason.slice(0, 512),
+      },
+    });
+  };
 }
