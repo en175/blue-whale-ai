@@ -292,7 +292,7 @@ describe('★ 保存 = 白名单重建一份只有站点级字段的目录', () 
     await type(inputByLabel(RATE_LABEL), '20');
     await click(publishButton());
 
-    expect(lastPublishInput().note).toBe('系统设置·计费：换算率 15 → 20');
+    expect(lastPublishInput().note).toBe('通用设置·计费：换算率 15 → 20');
   });
 });
 
