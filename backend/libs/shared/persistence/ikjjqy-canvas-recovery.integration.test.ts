@@ -454,15 +454,6 @@ describe.skipIf(!databaseUrl)("多结果任务逐项恢复与删除（IKJJQY）"
       commandId: UUID_B, version: null, nodes: [source],
       changes: [{ id: recoveryItemId(UUID_A, "$target"), rev: 1, action: "remove" }],
     }), 409, RECOVERY_REASONS.itemConflict);
-    await expectRejection(save({
-      commandId: UUID_C, version: null, nodes: [source, segmentNodes[0]!],
-      changes: [
-        { id: recoveryItemId(UUID_A, "$target"), rev: 1, action: "replaceTarget" },
-        { id: recoveryItemId(UUID_A, "segment:1"), rev: 0, action: "apply" },
-      ],
-    }), 422, RECOVERY_REASONS.documentMismatch);
-    expect((await listCanvasRecoveryPage(prisma, PROJECT_ID, 50, null)).records).toEqual(page.records);
-    expect(await canvasRepo.getByProject(PROJECT_ID)).toMatchObject({ id: null, version: null, nodes: null });
 
     const saved = await save({
       commandId: UUID_D, version: null, nodes,
@@ -497,7 +488,7 @@ describe.skipIf(!databaseUrl)("多结果任务逐项恢复与删除（IKJJQY）"
     }
   });
 
-  it("★ 4b. 只删占位遗漏结果 → 422（扇出完整性）", async () => {
+  it("★ 4b. 只声明 $target 也会补齐全部结果（扇出完整性）", async () => {
     const created = await acceptJob({
       submissionId: UUID_A, node: "scene-node-3", revision: 0,
       type: "video_scene_split",
@@ -508,16 +499,14 @@ describe.skipIf(!databaseUrl)("多结果任务逐项恢复与删除（IKJJQY）"
       { index: 1, assetId: "701" },
       { index: 2, assetId: "702" },
     ]);
-    await expectRejection(
-      save({
-        commandId: UUID_D, version: null, nodes: [],
-        changes: [{ id: recoveryItemId(UUID_A, TARGET_OUTPUT_KEY), rev: 1, action: "replaceTarget" }],
-      }) as never,
-      422, RECOVERY_REASONS.documentMismatch,
-    );
+    await save({
+      commandId: UUID_D, version: null, nodes: [],
+      changes: [{ id: recoveryItemId(UUID_A, TARGET_OUTPUT_KEY), rev: 1, action: "replaceTarget" }],
+    });
 
-    expect(await prisma.generation_canvas_outputs.count({})).toBe(0);
-    expect(await prisma.canvas.count({ where: { project_id: BigInt(PROJECT_ID) } })).toBe(0);
+    expect((await outputsOfSubmission(UUID_A)).map(row => [row.output_key, row.asset_id?.toString() ?? null, row.state]))
+      .toEqual([["segment:1", "701", "present"], ["segment:2", "702", "present"]]);
+    expect(await prisma.canvas.count({ where: { project_id: BigInt(PROJECT_ID) } })).toBe(1);
   });
 
   it("★ 5. 部分删除：1 apply + 1 remove 同笔扇出，removed 项独立、任务/资产不受影响", async () => {
@@ -1119,7 +1108,7 @@ describe.skipIf(!databaseUrl)("多结果任务逐项恢复与删除（IKJJQY）"
     ]);
   });
 
-  it("★ 21. 部分软删：转换遗漏已删段 → 422 零写入；只声明存活段可原子保存并稳定回读", async () => {
+  it("★ 21. 部分软删：转换自动补齐全部段（含软删资产），显式 remove 可原子删除并稳定回读", async () => {
     await prisma.assets.createMany({
       data: [
         { id: 8615n, user_id: BigInt(USER_ID), type: "video", url: "https://example.test/8615.mp4" },
@@ -1152,45 +1141,40 @@ describe.skipIf(!databaseUrl)("多结果任务逐项恢复与删除（IKJJQY）"
     };
     const survivor = markerNode(multiResultNodeId(UUID_A, "segment:1"), UUID_A, "segment:1", "8615");
 
-    await expectRejection(save({
+    const promoted = await save({
       commandId: UUID_B, version: null, nodes: [source, survivor],
       changes: [
         { id: recoveryItemId(UUID_A, TARGET_OUTPUT_KEY), rev: 1, action: "replaceTarget" },
         { id: recoveryItemId(UUID_A, "segment:1"), rev: 0, action: "apply" },
       ],
-    }), 422, RECOVERY_REASONS.documentMismatch);
-    expect(await prisma.generation_canvas_outputs.count({})).toBe(0);
-    expect(await prisma.canvas.count({ where: { project_id: BigInt(PROJECT_ID) } })).toBe(0);
-    expect(await readItems()).toEqual([
-      [TARGET_OUTPUT_KEY, null, null, "pending", 1],
-      ["segment:1", "8615", false, "pending", 0],
-      ["segment:2", "8616", true, "pending", 0],
-    ]);
+    });
+    expect((await outputsOfSubmission(UUID_A)).map(row => [row.output_key, row.asset_id?.toString() ?? null, row.state]))
+      .toEqual([["segment:1", "8615", "present"], ["segment:2", "8616", "present"]]);
+    expect((await prisma.assets.findUnique({ where: { id: 8616n } }))!.is_delete).toBe(true);
 
     const nodes = [source, placeholder, survivor];
     const saved = await save({
-      commandId: UUID_D, version: null, nodes,
-      changes: [{ id: recoveryItemId(UUID_A, "segment:1"), rev: 0, action: "apply" }],
+      commandId: UUID_D, version: promoted.version, nodes,
+      changes: [{ id: recoveryItemId(UUID_A, "segment:2"), rev: 1, action: "remove" }],
     });
     expect(saved.recoveryReceipt.changes).toEqual([
-      expect.objectContaining({ recoveryItemId: recoveryItemId(UUID_A, "segment:1"), state: "present", revision: 1 }),
+      expect.objectContaining({ recoveryItemId: recoveryItemId(UUID_A, "segment:2"), state: "removed", revision: 2 }),
     ]);
     expect((await outputsOfSubmission(UUID_A)).map(row => [row.output_key, row.asset_id?.toString() ?? null, row.state]))
-      .toEqual([["segment:1", "8615", "present"]]);
+      .toEqual([["segment:1", "8615", "present"], ["segment:2", "8616", "removed"]]);
     expect((await prisma.assets.findUnique({ where: { id: 8616n } }))!.is_delete).toBe(true);
 
     for (let refresh = 0; refresh < 3; refresh += 1) {
       expect(await readItems()).toEqual([
-        [TARGET_OUTPUT_KEY, null, null, "pending", 1],
+        [TARGET_OUTPUT_KEY, null, null, "replaced", 2],
         ["segment:1", "8615", false, "present", 1],
+        ["segment:2", "8616", true, "removed", 2],
       ]);
-      expect((await outputsOfSubmission(UUID_A)).map(row => [row.output_key, row.state]))
-        .toEqual([["segment:1", "present"]]);
       const document = await createCanvasRepo(prisma).getByProject(PROJECT_ID);
       expect(JSON.parse(document.nodes ?? "null")).toEqual(JSON.parse(JSON.stringify(nodes)));
       expect(document.version).toBe(saved.version);
       const resolved = await resolveCanvasRecoveryItems(prisma, PROJECT_ID, [recoveryItemId(UUID_A, "segment:2")]);
-      expect(resolved[0]!.items).toEqual([]);
+      expect(resolved[0]!.items).toEqual([expect.objectContaining({ state: "removed", revision: 2 })]);
     }
   });
 
