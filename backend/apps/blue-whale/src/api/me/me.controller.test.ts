@@ -481,6 +481,7 @@ describe("MeController 换绑手机号（IKPC9E）", () => {
     const out = await controller.rebindPhone(
       { rebind_token: "pa_x", phone: "13700000000", code: "123456" },
       USER,
+      RES,
     );
 
     expect(out).toMatchObject({ error_code: "rebind_token_invalid" });
@@ -497,6 +498,7 @@ describe("MeController 换绑手机号（IKPC9E）", () => {
     const out = await controller.rebindPhone(
       { rebind_token: "pa_ok", phone: "13700000000", code: "123456" },
       USER,
+      RES,
     );
 
     expect(identity.commitRebind).toHaveBeenCalledWith("42", {
@@ -524,6 +526,7 @@ describe("MeController 换绑手机号（IKPC9E）", () => {
     const out = await controller.rebindPhone(
       { rebind_token: "pa_ok", phone: "13800001234", code: "123456" },
       USER,
+      RES,
     );
 
     expect(out).toMatchObject({ error_code: "rebind_same_phone" });
@@ -548,5 +551,55 @@ describe("MeController 昵称（IKPC9E）", () => {
     const out = await controller.updateNickname({ nickname: "小 明" }, USER);
     expect(out).toMatchObject({ error_code: "nickname_invalid" });
     expect(identity.updateNickname).toHaveBeenCalled();
+  });
+});
+
+describe("MeController 换绑重试（评审整改）", () => {
+  it("★ 同 request_id 已成功重试：直接返回原号码，不重新提交", async () => {
+    const { controller, identity, phoneActions, operations } = createController();
+    operations.begin.mockResolvedValue({
+      operation: {
+        id: "op_done",
+        type: "rebind",
+        userId: 42,
+        status: "succeeded",
+        result: { phone: "13700000000" },
+        errorCode: null,
+        phone: "13700000000",
+        createdAt: 1,
+        updatedAt: 2,
+      },
+      duplicate: true,
+    });
+
+    const out = await controller.rebindPhone(
+      { rebind_token: "pa_dead", phone: "13700000000", code: "123456", request_id: "r1" },
+      USER,
+      RES,
+    );
+
+    expect(out).toMatchObject({
+      code: 200,
+      data: { operation_id: "op_done", phone: "13700000000", relogin_required: true },
+    });
+    expect(phoneActions.resolve).not.toHaveBeenCalled();
+    expect(identity.commitRebind).not.toHaveBeenCalled();
+  });
+
+  it("换绑成功清掉当前浏览器会话 cookie", async () => {
+    const { controller, phoneActions } = createController();
+    phoneActions.resolve.mockResolvedValue({
+      kind: "rebind",
+      userId: 42,
+      phone: "13800001234",
+    });
+
+    await controller.rebindPhone(
+      { rebind_token: "pa_ok", phone: "13700000000", code: "123456" },
+      USER,
+      RES,
+    );
+
+    expect(RES.clearCookie).toHaveBeenCalled();
   });
 });

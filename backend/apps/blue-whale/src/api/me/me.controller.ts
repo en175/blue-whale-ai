@@ -20,6 +20,7 @@ import { projectAccountError } from "@lib/shared/account/change-password-error.j
 import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
 import {
   IdentityService,
+  InvalidCredentialsError,
   NicknameInvalidError,
   PhoneActionService,
   PhoneAlreadyBoundError,
@@ -149,6 +150,9 @@ export class MeController {
       if (error instanceof PhoneNotBoundError) {
         return fail(FAILURE_CODE, error.message, null, ACCOUNT_ERROR_PHONE_NOT_BOUND);
       }
+      if (error instanceof InvalidCredentialsError) {
+        throw new NewApiError("登录已过期，请重新验证", 401, "unauthorized");
+      }
       throw error;
     }
   }
@@ -157,6 +161,7 @@ export class MeController {
   async rebindPhone(
     @Body() body: RebindDto,
     @CurrentUser() user: AuthenticatedUser | undefined,
+    @Res({ passthrough: true }) res: Response,
   ) {
     const userId = user?.userId;
     if (userId == null) {
@@ -170,26 +175,8 @@ export class MeController {
         ? body.request_id.trim()
         : undefined;
 
-    if (!token) {
-      return fail(
-        FAILURE_CODE,
-        "原手机号验证已过期，请重新验证",
-        null,
-        ACCOUNT_ERROR_REBIND_TOKEN_EXPIRED,
-      );
-    }
     if (!isValidPhone(phone) || !code) {
       return fail(FAILURE_CODE, "手机号和验证码不能为空");
-    }
-
-    const action = await this.phoneActions.resolve("rebind", token);
-    if (!action || action.userId !== Number(userId) || !action.phone) {
-      return fail(
-        FAILURE_CODE,
-        "换绑凭证无效，请重新验证原手机号",
-        null,
-        ACCOUNT_ERROR_REBIND_TOKEN_INVALID,
-      );
     }
 
     const started = await this.beginOperation({
@@ -199,33 +186,42 @@ export class MeController {
       phone,
     });
     if (started.duplicate && started.operation.status === "succeeded") {
-      return ok({ operation_id: started.operation.id });
+      const storedPhone = started.operation.result?.phone;
+      return ok({
+        operation_id: started.operation.id,
+        phone: typeof storedPhone === "string" ? storedPhone : phone,
+        revoked_sessions: 0,
+        relogin_required: true,
+      });
     }
 
+    if (!token) {
+      await this.operations.fail(started.operation.id, ACCOUNT_ERROR_REBIND_TOKEN_EXPIRED);
+      return fail(
+        FAILURE_CODE,
+        "原手机号验证已过期，请重新验证",
+        null,
+        ACCOUNT_ERROR_REBIND_TOKEN_EXPIRED,
+      );
+    }
+    const action = await this.phoneActions.resolve("rebind", token);
+    if (!action || action.userId !== Number(userId) || !action.phone) {
+      await this.operations.fail(started.operation.id, ACCOUNT_ERROR_REBIND_TOKEN_INVALID);
+      return fail(
+        FAILURE_CODE,
+        "换绑凭证无效，请重新验证原手机号",
+        null,
+        ACCOUNT_ERROR_REBIND_TOKEN_INVALID,
+      );
+    }
+
+    let newPhone: string;
     try {
-      const { phone: newPhone } = await this.identity.commitRebind(userId, {
+      ({ phone: newPhone } = await this.identity.commitRebind(userId, {
         oldPhone: action.phone,
         phone,
         code,
-      });
-      await this.phoneActions.revoke(token);
-      await this.operations.succeed(started.operation.id, { phone: newPhone });
-      let revokedSessions = 0;
-      try {
-        revokedSessions = await this.sessions.revokeAllForUser(Number(userId));
-      } catch (error) {
-        this.logger.error(
-          `换绑成功但撤销会话失败（userId=${userId}）：${
-            error instanceof Error ? error.message : String(error)
-          }`,
-        );
-      }
-      return ok({
-        operation_id: started.operation.id,
-        phone: newPhone,
-        revoked_sessions: revokedSessions,
-        relogin_required: true,
-      });
+      }));
     } catch (error) {
       const failure = projectPhoneCodeError(error);
       if (failure) {
@@ -257,9 +253,44 @@ export class MeController {
           ACCOUNT_ERROR_REBIND_BINDING_CHANGED,
         );
       }
+      if (error instanceof InvalidCredentialsError) {
+        await this.operations.fail(started.operation.id, "unauthorized");
+        throw new NewApiError("登录已过期，请重新验证", 401, "unauthorized");
+      }
       await this.operations.fail(started.operation.id, "unknown");
       throw error;
     }
+
+    let revokedSessions = 0;
+    try {
+      await this.phoneActions.revoke(token);
+      await this.operations.succeed(started.operation.id, { phone: newPhone });
+    } catch (error) {
+      this.logger.error(
+        `换绑成功但记录收尾失败（userId=${userId}）：${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+    try {
+      revokedSessions = await this.sessions.revokeAllForUser(Number(userId));
+    } catch (error) {
+      this.logger.error(
+        `换绑成功但撤销会话失败（userId=${userId}）：${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+    res.clearCookie(SESSION_COOKIE_NAME, {
+      ...sessionCookieOptions(),
+      maxAge: undefined,
+    });
+    return ok({
+      operation_id: started.operation.id,
+      phone: newPhone,
+      revoked_sessions: revokedSessions,
+      relogin_required: true,
+    });
   }
 
   @Patch("me/nickname")
@@ -301,6 +332,10 @@ export class MeController {
           null,
           "nickname_invalid",
         );
+      }
+      if (error instanceof InvalidCredentialsError) {
+        await this.operations.fail(started.operation.id, "unauthorized");
+        throw new NewApiError("登录已过期，请重新验证", 401, "unauthorized");
       }
       await this.operations.fail(started.operation.id, "unknown");
       throw error;

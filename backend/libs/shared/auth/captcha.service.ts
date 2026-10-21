@@ -65,6 +65,32 @@ function backgroundSvg(): string {
   </svg>`;
 }
 
+function holeSvg(x: number, y: number): string {
+  const size = CAPTCHA_PIECE_SIZE;
+  const jitter = () => randomInt(-6, 7);
+  const points = [
+    `${x},${y}`,
+    `${x + size / 2},${y + jitter()}`,
+    `${x + size},${y + jitter()}`,
+    `${x + size + jitter()},${y + size / 2}`,
+    `${x + size},${y + size + jitter()}`,
+    `${x + size / 2},${y + size + jitter()}`,
+    `${x + jitter()},${y + size}`,
+    `${x + jitter()},${y + size / 2}`,
+  ].join(" ");
+  const noise = Array.from({ length: 4 }, () => {
+    const x1 = x + randomInt(0, size);
+    const y1 = y + randomInt(0, size);
+    const x2 = x + randomInt(0, size);
+    const y2 = y + randomInt(0, size);
+    return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="rgba(255,255,255,0.35)" stroke-width="1"/>`;
+  }).join("");
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${CAPTCHA_WIDTH}" height="${CAPTCHA_HEIGHT}">
+    <polygon points="${points}" fill="rgba(0,0,0,0.55)" stroke="rgba(255,255,255,0.45)" stroke-width="1"/>
+    ${noise}
+  </svg>`;
+}
+
 @Injectable()
 export class CaptchaService implements OnModuleDestroy {
   private readonly redis: Redis;
@@ -90,12 +116,7 @@ export class CaptchaService implements OnModuleDestroy {
       .extract({ left: x, top: y, width: CAPTCHA_PIECE_SIZE, height: CAPTCHA_PIECE_SIZE })
       .png()
       .toBuffer();
-    const hole = Buffer.from(
-      `<svg xmlns="http://www.w3.org/2000/svg" width="${CAPTCHA_WIDTH}" height="${CAPTCHA_HEIGHT}">
-        <rect x="${x}" y="${y}" width="${CAPTCHA_PIECE_SIZE}" height="${CAPTCHA_PIECE_SIZE}" rx="6"
-          fill="rgba(0,0,0,0.62)" stroke="rgba(255,255,255,0.75)" stroke-width="1.5"/>
-      </svg>`,
-    );
+    const hole = Buffer.from(holeSvg(x, y));
     const background = await sharp(base)
       .composite([{ input: hole, left: 0, top: 0 }])
       .png()

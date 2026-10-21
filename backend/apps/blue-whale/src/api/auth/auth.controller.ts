@@ -25,10 +25,13 @@ import {
   ACCOUNT_ERROR_OPERATION_NOT_FOUND,
   ACCOUNT_ERROR_OPERATION_PENDING,
   ACCOUNT_ERROR_PHONE_TAKEN,
+  ACCOUNT_ERROR_QUERY_TOKEN_EXPIRED,
+  ACCOUNT_ERROR_SESSION_EXPIRED,
   ACCOUNT_ERROR_TERMS_REQUIRED,
   ACCOUNT_LOCKED,
   FAILURE_CODE,
   LEGACY_VERIFICATION_PURPOSE,
+  RATE_LIMITED,
   fail,
   isVerificationPurpose,
   ok,
@@ -139,10 +142,13 @@ function authRateLimit(
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+const SMS_PHONE_BUCKETS = [
+  { scope: "send_code_phone_minute", limit: 1, windowMs: 60_000 },
+  { scope: "send_code_phone_day", limit: 10, windowMs: DAY_MS },
+] as const;
+
 const SMS_CODE_RATE_LIMIT = RateLimit({
   buckets: [
-    { scope: "send_code_phone_minute", key: "phone" as const, limit: 1, windowMs: 60_000 },
-    { scope: "send_code_phone_day", key: "phone" as const, limit: 10, windowMs: DAY_MS },
     { scope: "send_code_ip_minute", key: "ip" as const, limit: 5, windowMs: 60_000 },
     { scope: "send_code_ip_day", key: "ip" as const, limit: 50, windowMs: DAY_MS },
   ],
@@ -211,6 +217,7 @@ export class AuthController {
       request_id?: unknown;
     },
     @Headers("x-forwarded-for") forwardedFor?: string,
+    @Res({ passthrough: true }) res?: Response,
   ) {
     const ip = forwardedFor?.split(",")[0]?.trim() ?? "unknown";
     const phone = typeof body?.phone === "string" ? body.phone.trim() : "";
@@ -279,6 +286,20 @@ export class AuthController {
         400,
         ACCOUNT_ERROR_CAPTCHA_INVALID,
       );
+    }
+
+    for (const bucket of SMS_PHONE_BUCKETS) {
+      const hit = await this.limiter.take({
+        scope: bucket.scope,
+        key: phone,
+        limit: bucket.limit,
+        windowMs: bucket.windowMs,
+      });
+      if (!hit.allowed) {
+        await this.operations.fail(started.operation.id, "rate_limited");
+        res?.setHeader("Retry-After", String(hit.retryAfter ?? 1));
+        throw new NewApiError("操作过于频繁，请稍后再试", 429, RATE_LIMITED);
+      }
     }
 
     const result = await handleSendCode(
@@ -421,13 +442,21 @@ export class AuthController {
     if (started.duplicate && started.operation.status === "succeeded") {
       const storedUserId = started.operation.result?.user_id;
       if (typeof storedUserId === "number") {
-        const result = await this.identity.getLoginResult(storedUserId);
-        const sessionToken = await this.establishSession(result, clientId);
-        res.cookie(SESSION_COOKIE_NAME, sessionToken, sessionCookieOptions());
-        return ok({
-          ...loginData(result, false, sessionToken),
-          operation_id: started.operation.id,
-        });
+        try {
+          const result = await this.identity.getLoginResult(storedUserId);
+          const sessionToken = await this.establishSession(result, clientId);
+          res.cookie(SESSION_COOKIE_NAME, sessionToken, sessionCookieOptions());
+          return ok({
+            ...loginData(result, false, sessionToken),
+            operation_id: started.operation.id,
+          });
+        } catch {
+          throw new NewApiError(
+            "登录已过期，请重新验证",
+            401,
+            ACCOUNT_ERROR_SESSION_EXPIRED,
+          );
+        }
       }
     }
 
@@ -611,8 +640,31 @@ export class AuthController {
       );
     }
 
+    const started = await this.beginOperation({
+      type: "migration",
+      requestId,
+      phone,
+    });
+    if (started.duplicate && started.operation.status === "succeeded") {
+      const storedUserId = started.operation.result?.user_id;
+      if (typeof storedUserId === "number") {
+        const result = await this.identity.getLoginResult(storedUserId);
+        const sessionToken = await this.establishSession(result, clientId);
+        await this.sessions.revokeAllForUser(storedUserId, sessionToken);
+        res.cookie(SESSION_COOKIE_NAME, sessionToken, sessionCookieOptions());
+        return ok({
+          ...loginData(result, false, sessionToken),
+          operation_id: started.operation.id,
+        });
+      }
+    }
+
     const action = await this.phoneActions.resolve("migration", token);
     if (!action) {
+      await this.operations.fail(
+        started.operation.id,
+        ACCOUNT_ERROR_MIGRATION_TOKEN_EXPIRED,
+      );
       throw new NewApiError(
         "原账号验证已过期，请重新验证",
         400,
@@ -620,60 +672,37 @@ export class AuthController {
       );
     }
 
-    const started = await this.beginOperation({
-      type: "migration",
-      userId: action.userId,
-      requestId,
-      phone,
-    });
-
+    let user: { id: string; username: string };
     try {
-      const user = await this.identity.commitMigrationBind(action.userId, {
+      user = await this.identity.commitMigrationBind(action.userId, {
         phone,
         code,
       });
-      await this.phoneActions.revoke(token);
-      await this.operations.succeed(started.operation.id, {
-        user_id: user.id,
-      });
-
-      let sessionToken: string;
-      try {
-        const result = await this.identity.getLoginResult(user.id);
-        sessionToken = await this.establishSession(result, clientId);
-        await this.sessions.revokeAllForUser(Number(user.id), sessionToken);
-        res.cookie(SESSION_COOKIE_NAME, sessionToken, sessionCookieOptions());
-        await this.recordLogin({
-          userId: String(user.id),
-          username: user.username,
-          ip,
-          userAgent,
-          success: true,
-        });
-        return ok({
-          ...loginData(result, false, sessionToken),
-          operation_id: started.operation.id,
-        });
-      } catch (error) {
-        logger.error(
-          `迁移补绑成功但登录失败（userId=${user.id}）：${
-            error instanceof Error ? error.message : String(error)
-          }`,
-        );
-        throw new NewApiError(
-          "手机号已绑定，请重新登录",
-          500,
-          ACCOUNT_ERROR_BIND_SUCCEEDED_LOGIN_FAILED,
-        );
-      }
     } catch (error) {
       const failure = phoneCodeFailure(error);
       if (failure) {
-        await this.operations.fail(started.operation.id, String(failure.code ?? "code_error"));
+        await this.operations.fail(
+          started.operation.id,
+          String(failure.code ?? "code_error"),
+        );
+        await this.recordLogin({
+          username: phone,
+          ip,
+          userAgent,
+          success: false,
+          reason: `迁移补绑失败：${failure.message}`,
+        });
         throw failure;
       }
       if (error instanceof PhoneTakenError) {
         await this.operations.fail(started.operation.id, ACCOUNT_ERROR_PHONE_TAKEN);
+        await this.recordLogin({
+          username: phone,
+          ip,
+          userAgent,
+          success: false,
+          reason: "迁移补绑失败：号码已占用",
+        });
         return fail(
           FAILURE_CODE,
           error.message,
@@ -686,15 +715,61 @@ export class AuthController {
           started.operation.id,
           ACCOUNT_ERROR_MIGRATION_INELIGIBLE,
         );
+        await this.recordLogin({
+          username: phone,
+          ip,
+          userAgent,
+          success: false,
+          reason: "迁移补绑失败：资格不符",
+        });
         throw new NewApiError(
           error.message,
           400,
           ACCOUNT_ERROR_MIGRATION_INELIGIBLE,
         );
       }
-      if (error instanceof NewApiError) throw error;
       await this.operations.fail(started.operation.id, "unknown");
       throw toAuthError(error);
+    }
+
+    await this.operations.succeed(started.operation.id, { user_id: user.id });
+    try {
+      await this.phoneActions.revoke(token);
+    } catch (error) {
+      logger.error(
+        `迁移补绑成功后作废迁移凭证失败（userId=${user.id}）：${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+
+    try {
+      const result = await this.identity.getLoginResult(user.id);
+      const sessionToken = await this.establishSession(result, clientId);
+      await this.sessions.revokeAllForUser(Number(user.id), sessionToken);
+      res.cookie(SESSION_COOKIE_NAME, sessionToken, sessionCookieOptions());
+      await this.recordLogin({
+        userId: String(user.id),
+        username: user.username,
+        ip,
+        userAgent,
+        success: true,
+      });
+      return ok({
+        ...loginData(result, false, sessionToken),
+        operation_id: started.operation.id,
+      });
+    } catch (error) {
+      logger.error(
+        `迁移补绑成功但登录失败（userId=${user.id}）：${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      throw new NewApiError(
+        "手机号已绑定，请重新登录",
+        500,
+        ACCOUNT_ERROR_BIND_SUCCEEDED_LOGIN_FAILED,
+      );
     }
   }
 
@@ -723,10 +798,19 @@ export class AuthController {
         operation.userId != null &&
         session.userId === operation.userId;
     }
+    let queryRejected = false;
     if (!allowed && queryToken) {
       allowed = await this.operations.verifyQueryToken(queryToken, id);
+      queryRejected = !allowed;
     }
     if (!allowed) {
+      if (queryRejected) {
+        throw new NewApiError(
+          "查询授权已过期，请验证身份后继续确认原操作",
+          403,
+          ACCOUNT_ERROR_QUERY_TOKEN_EXPIRED,
+        );
+      }
       throw new NewApiError(
         "无权查询该操作记录",
         403,
@@ -734,11 +818,17 @@ export class AuthController {
       );
     }
 
+    const storedPhone =
+      operation.result && typeof operation.result.phone === "string"
+        ? operation.result.phone
+        : null;
     return ok({
       id: operation.id,
       type: operation.type,
       status: operation.status satisfies AuthOperationStatus,
-      result: operation.result,
+      result: storedPhone
+        ? { ...operation.result, phone: maskPhone(storedPhone) }
+        : operation.result,
       error_code: operation.errorCode,
       phone_masked: maskPhone(operation.phone),
       created_at: operation.createdAt,
@@ -785,7 +875,8 @@ export class AuthController {
     return ok({ query_token: queryToken, expires_in: 7 * 24 * 60 * 60 });
   }
 
-  private async recordLogin(entry: {    userId?: string | null | undefined;
+  private async recordLogin(entry: {
+    userId?: string | null | undefined;
     username: string;
     ip: string;
     userAgent?: string | undefined;

@@ -77,3 +77,24 @@ describe("AuthOperationService", () => {
     expect(maskPhone(null)).toBe("");
   });
 });
+
+describe("AuthOperationService 请求键隔离", () => {
+  it("★ 同 request_id 不同手机号视为不同请求（防止拿到别人的会话）", async () => {
+    const service = new AuthOperationService();
+    const first = await service.begin({
+      type: "login",
+      requestId: "req-shared",
+      phone: "13800001234",
+    });
+    const other = await service.begin({
+      type: "login",
+      requestId: "req-shared",
+      phone: "13900000000",
+    });
+
+    expect(first.duplicate).toBe(false);
+    expect(other.duplicate).toBe(false);
+    expect(other.operation.id).not.toBe(first.operation.id);
+    await service.onModuleDestroy();
+  });
+});

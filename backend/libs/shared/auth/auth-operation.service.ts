@@ -30,6 +30,7 @@ export interface AuthOperationView {
 const PENDING_TTL_MS = 24 * 60 * 60 * 1000;
 const TERMINAL_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const QUERY_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+export const QUERY_TTL_SECONDS = 7 * 24 * 60 * 60;
 
 function newOperationId(): string {
   return `op_${randomBytes(12).toString("base64url")}`;
@@ -55,12 +56,25 @@ export class AuthOperationService implements OnModuleDestroy {
     return `auth_op:${id}`;
   }
 
-  private requestKey(type: AuthOperationType, requestId: string): string {
-    return `auth_op_req:${type}:${hash(requestId)}`;
+  private requestKey(
+    type: AuthOperationType,
+    requestId: string,
+    scope: string,
+  ): string {
+    return `auth_op_req:${type}:${scope}:${hash(requestId)}`;
   }
 
   private queryKey(token: string): string {
     return `auth_query:${hash(token)}`;
+  }
+
+  private requestScope(input: {
+    userId?: number | null;
+    phone?: string | undefined;
+  }): string {
+    if (input.phone) return `phone:${hash(input.phone).slice(0, 16)}`;
+    if (input.userId != null) return `user:${input.userId}`;
+    return "anon";
   }
 
   async begin(input: {
@@ -69,24 +83,26 @@ export class AuthOperationService implements OnModuleDestroy {
     requestId?: string | undefined;
     phone?: string | undefined;
   }): Promise<{ operation: AuthOperationView; duplicate: boolean }> {
+    const scope = this.requestScope(input);
     if (input.requestId) {
+      const requestKey = this.requestKey(input.type, input.requestId, scope);
       const acquired = await this.redis.set(
-        this.requestKey(input.type, input.requestId),
+        requestKey,
         "pending",
         "PX",
-        TERMINAL_TTL_MS,
+        PENDING_TTL_MS,
         "NX",
       );
       if (acquired === null) {
-        const existingId = await this.redis.get(
-          this.requestKey(input.type, input.requestId),
-        );
+        const existingId = await this.redis.get(requestKey);
         if (existingId && existingId !== "pending") {
           const existing = await this.get(existingId);
           if (existing) return { operation: existing, duplicate: true };
+          await this.redis.del(requestKey);
+        } else if (existingId === "pending") {
+          const pending = this.pendingRecord(input);
+          return { operation: pending, duplicate: true };
         }
-        const pending = this.pendingRecord(input);
-        return { operation: pending, duplicate: true };
       }
     }
 
@@ -110,7 +126,7 @@ export class AuthOperationService implements OnModuleDestroy {
     );
     if (input.requestId) {
       await this.redis.set(
-        this.requestKey(input.type, input.requestId),
+        this.requestKey(input.type, input.requestId, scope),
         operation.id,
         "PX",
         TERMINAL_TTL_MS,
@@ -157,6 +173,11 @@ export class AuthOperationService implements OnModuleDestroy {
     if (!current) return;
     const updated: AuthOperationView = {
       ...current,
+      userId:
+        current.userId ??
+        (result != null && typeof result.user_id === "number"
+          ? result.user_id
+          : null),
       status,
       result,
       errorCode,

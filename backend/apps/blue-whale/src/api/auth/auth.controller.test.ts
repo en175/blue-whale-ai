@@ -319,11 +319,11 @@ describe("AuthController 限流声明（IKDR4J）", () => {
     expect(buckets.some((b) => b.key === "account")).toBe(false);
   });
 
-  it("send-code 声明短信四个桶：号/分、号/天、IP/分、IP/天", () => {
+  it("send-code 装饰器只声明 IP 两桶；号码两桶移到拼图校验之后（防止刷错拼图锁死别人号码）", () => {
     const buckets = bucketsOf(
       AuthController.prototype.sendCode as (...args: never[]) => unknown,
     );
-    expect(buckets.filter((b) => b.key === "phone")).toHaveLength(2);
+    expect(buckets.filter((b) => b.key === "phone")).toHaveLength(0);
     expect(buckets.filter((b) => b.key === "ip")).toHaveLength(2);
     expect(Math.max(...buckets.map((b) => b.windowMs))).toBe(86_400_000);
   });
@@ -745,7 +745,7 @@ describe("AuthController 操作单查询（IKPC9E）", () => {
         id: "op_1",
         status: "succeeded",
         phone_masked: "138****1234",
-        result: { phone: "13900001234" },
+        result: { phone: "139****1234" },
       },
     });
   });
@@ -836,5 +836,134 @@ describe("AuthController 拼图验证（发码前）", () => {
     );
 
     expect(out).toMatchObject({ code: 200, data: { operation_id: "op_done" } });
+  });
+});
+
+describe("AuthController 评审整改：幂等与查询授权", () => {
+  function succeededOperation(over: Record<string, unknown> = {}) {
+    return {
+      id: "op_1",
+      type: "login",
+      userId: 42,
+      status: "succeeded",
+      result: { user_id: 42 },
+      errorCode: null,
+      phone: "13800001234",
+      createdAt: 1,
+      updatedAt: 2,
+      ...over,
+    };
+  }
+
+  it("★ 本人会话可读自己的登录操作（不消耗短信恢复）", async () => {
+    const { controller, operations, sessions } = setup();
+    operations.get.mockResolvedValue(succeededOperation());
+    sessions.resolveSession.mockResolvedValue({
+      userId: 42,
+      username: "alice",
+      role: 1,
+      status: 1,
+      email: null,
+      needsRecheck: false,
+    });
+
+    const out = await controller.getOperation(
+      "op_1",
+      undefined,
+      { cookies: { bw_session: "t" }, headers: {} } as never,
+    );
+
+    expect(out).toMatchObject({ code: 200, data: { id: "op_1" } });
+  });
+
+  it("查询令牌无效 → query_token_expired（区分于“无权”）", async () => {
+    const { controller, operations, sessions } = setup();
+    operations.get.mockResolvedValue(succeededOperation());
+    operations.verifyQueryToken.mockResolvedValue(false);
+    sessions.resolveSession.mockResolvedValue(null);
+
+    await expect(
+      controller.getOperation(
+        "op_1",
+        "qry_expired",
+        { cookies: {}, headers: {} } as never,
+      ),
+    ).rejects.toMatchObject({ status: 403, code: "query_token_expired" });
+  });
+
+  it("★ 查询结果里的 phone 字段脱敏", async () => {
+    const { controller, operations, sessions } = setup();
+    operations.get.mockResolvedValue(
+      succeededOperation({ type: "rebind", result: { phone: "13900001234" } }),
+    );
+    sessions.resolveSession.mockResolvedValue({
+      userId: 42,
+      username: "alice",
+      role: 1,
+      status: 1,
+      email: null,
+      needsRecheck: false,
+    });
+
+    const out = await controller.getOperation(
+      "op_1",
+      undefined,
+      { cookies: { bw_session: "t" }, headers: {} } as never,
+    );
+
+    expect(out).toMatchObject({ data: { result: { phone: "139****1234" } } });
+  });
+
+  it("★ 迁移补绑重试（同 request_id 已成功）：直接返回会话，不再要求迁移凭证", async () => {
+    const { controller, identity, phoneActions, operations, sessions, res } = setup();
+    operations.begin.mockResolvedValue({
+      operation: succeededOperation({
+        type: "migration",
+        result: { user_id: 42 },
+      }),
+      duplicate: true,
+    });
+    identity.getLoginResult.mockResolvedValue({
+      ...loginResult(),
+      phone: "13800001234",
+    });
+
+    const out = await controller.bindPhoneForMigration(
+      {
+        migration_token: "pa_already_revoked",
+        phone: "13800001234",
+        code: "123456",
+        agreed_terms: true,
+      },
+      res,
+    );
+
+    expect(out).toMatchObject({ code: 200, data: { user_id: 42 } });
+    expect(phoneActions.resolve).not.toHaveBeenCalled();
+    expect(identity.commitMigrationBind).not.toHaveBeenCalled();
+    expect(sessions.revokeAllForUser).toHaveBeenCalledWith(42, "jwt-token");
+  });
+
+  it("迁移补绑失败写登录日志（审计）", async () => {
+    const { controller, identity, phoneActions, res } = setup();
+    phoneActions.resolve.mockResolvedValue({ kind: "migration", userId: 42 });
+    const { CodeExpiredError } = await import("@lib/shared/identity/index.js");
+    identity.commitMigrationBind.mockRejectedValue(new CodeExpiredError());
+
+    await expect(
+      controller.bindPhoneForMigration(
+        {
+          migration_token: "pa_ok",
+          phone: "13800001234",
+          code: "000000",
+          agreed_terms: true,
+        },
+        res,
+      ),
+    ).rejects.toMatchObject({ status: 400 });
+
+    expect(identity.recordLogin).toHaveBeenCalledWith(
+      expect.objectContaining({ success: false, username: "13800001234" }),
+    );
   });
 });
