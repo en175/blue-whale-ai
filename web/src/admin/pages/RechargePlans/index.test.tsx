@@ -109,9 +109,12 @@ async function fillInput(ariaLabel: string, value: string) {
 
 async function selectOption(ariaLabel: string, optionText: string) {
   await act(async () => {
-    document.body
-      .querySelector<HTMLButtonElement>(`button[aria-label="${ariaLabel}"]`)
-      ?.click();
+    const trigger = document.body.querySelector<HTMLButtonElement>(`button[aria-label="${ariaLabel}"]`);
+    if (!trigger) return;
+    const event = new MouseEvent('pointerdown', { bubbles: true, cancelable: true, button: 0 });
+    Object.defineProperty(event, 'pointerType', { value: 'mouse' });
+    Object.defineProperty(event, 'pointerId', { value: 1 });
+    trigger.dispatchEvent(event);
   });
   await act(async () => {
     [...document.body.querySelectorAll<HTMLElement>('[role="option"]')]

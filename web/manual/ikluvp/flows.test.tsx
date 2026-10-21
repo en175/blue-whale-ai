@@ -30,6 +30,13 @@ it.each(['C3', 'C4', 'C5', 'H1', 'A1'])('验收场景 %s 可操作并生成证�
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 120)); });
   const button = (label: string) => [...document.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent === label)!;
   const click = async (node: HTMLElement | undefined | null) => { expect(node).toBeTruthy(); await act(async () => node!.click()); };
+  const pressTab = async (node: HTMLElement | undefined | null) => {
+    expect(node).toBeTruthy();
+    await act(async () => {
+      node!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0 }));
+    });
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
+  };
   if (caseId === 'C3') {
     expect(document.body.textContent).toContain('自动');
     await click(button('重开面板'));
@@ -44,7 +51,7 @@ it.each(['C3', 'C4', 'C5', 'H1', 'A1'])('验收场景 %s 可操作并生成证�
     await vi.waitFor(() => expect(events.some(event => event.kind === '提交结果'), JSON.stringify(events)).toBe(true));
     expect(events.find(event => event.kind === '提交结果').data.response.code).toBe(200);
   } else if (caseId === 'A1') {
-    await click(button('打开模型配置')); await click(button('尺寸与素材'));
+    await click(button('打开模型配置')); await pressTab(button('尺寸与素材'));
     const omni = document.querySelector<HTMLElement>('[role="group"][aria-label="omni 时长策略"]');
     expect(omni).not.toBeNull();
     const auto = [...omni!.querySelectorAll<HTMLButtonElement>('button')]

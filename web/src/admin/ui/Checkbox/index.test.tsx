@@ -37,7 +37,7 @@ async function click(el: Element): Promise<void> {
 describe('Checkbox', () => {
   it('★ 不用原生 input —— 原生控件跟随系统深色模式，会渲染成突兀的深色方块', async () => {
     const el = await render({ checked: false, onChange: vi.fn() });
-    expect(el.tagName).toBe('SPAN');
+    expect(el.tagName).toBe('BUTTON');
     expect(el.querySelector('input')).toBeNull();
   });
 
@@ -80,16 +80,24 @@ describe('Checkbox', () => {
   it('★ indeterminate 走 aria-checked=mixed，而不是 checked=true', async () => {
     const el = await render({ checked: false, indeterminate: true, onChange: vi.fn() });
     expect(el.getAttribute('aria-checked')).toBe('mixed');
+    expect(el.getAttribute('data-state')).toBe('indeterminate');
+  });
+
+  it('indeterminate 点击后回调 true', async () => {
+    const onChange = vi.fn();
+    const el = await render({ checked: false, indeterminate: true, onChange });
+    await click(el);
+    expect(onChange).toHaveBeenCalledWith(true);
   });
 
   it('有 label 时整行可点，无 label 时只点方框', async () => {
     const withLabel = await render({ checked: false, onChange: vi.fn(), label: '全选' });
-    expect(withLabel.tagName).toBe('LABEL');
+    expect(withLabel.tagName).toBe('BUTTON');
     expect(withLabel.textContent).toContain('全选');
     await act(async () => root.unmount());
     root = createRoot(mountNode);
     const noLabel = await render({ checked: false, onChange: vi.fn(), 'aria-label': '选这一行' });
-    expect(noLabel.tagName).toBe('SPAN');
+    expect(noLabel.tagName).toBe('BUTTON');
     expect(noLabel.getAttribute('aria-label')).toBe('选这一行');
   });
 
@@ -104,7 +112,7 @@ describe('Checkbox', () => {
   it('★ 点方框只切换一次（不能因为冒泡到 label 而切两次）', async () => {
     const onChange = vi.fn();
     const el = await render({ checked: false, onChange, label: '周一' });
-    await click(el.querySelector('[role="checkbox"]') as Element);
+    await click(el);
     expect(onChange).toHaveBeenCalledTimes(1);
   });
 });

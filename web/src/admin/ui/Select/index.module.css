@@ -1,14 +1,8 @@
-.root {
-  position: relative;
-  display: inline-block;
-}
-
 .trigger {
   display: inline-flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  width: 100%;
   min-width: 140px;
   height: 32px;
   padding: 0 10px;
@@ -37,13 +31,7 @@
   cursor: not-allowed;
 }
 
-.label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.placeholder {
+.trigger[data-placeholder] {
   color: var(--admin-text-faint);
 }
 
@@ -53,20 +41,21 @@
 }
 
 .menu {
-  position: absolute;
+  position: relative;
   z-index: 300;
-  top: calc(100% + 4px);
-  left: 0;
-  min-width: 100%;
+  min-width: var(--radix-select-trigger-width);
   max-height: 260px;
-  overflow-y: auto;
-  margin: 0;
-  padding: 4px;
-  list-style: none;
+  overflow: hidden;
   background: var(--admin-surface);
   border: 1px solid var(--admin-border);
   border-radius: var(--admin-radius-pop);
   box-shadow: var(--admin-shadow-pop);
+  color: var(--admin-text);
+}
+
+.viewport {
+  padding: 4px;
+  overflow-y: auto;
 }
 
 .option {
@@ -78,7 +67,7 @@
   cursor: pointer;
 }
 
-.option:hover {
+.option[data-highlighted] {
   background: var(--admin-row-hover);
 }
 

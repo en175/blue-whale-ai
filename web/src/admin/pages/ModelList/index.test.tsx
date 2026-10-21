@@ -253,13 +253,32 @@ async function click(el: HTMLElement | undefined | null) {
   await settle();
 }
 
+async function mouseActivate(el: HTMLElement | undefined | null) {
+  if (!el) throw new Error('要点的元素不存在');
+  await act(async () => {
+    el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0 }));
+  });
+  await settle();
+}
+
+async function openSelect(trigger: HTMLElement | null) {
+  if (!trigger) throw new Error('没有找到下拉框');
+  await act(async () => {
+    const event = new MouseEvent('pointerdown', { bubbles: true, cancelable: true, button: 0 });
+    Object.defineProperty(event, 'pointerType', { value: 'mouse' });
+    Object.defineProperty(event, 'pointerId', { value: 1 });
+    trigger.dispatchEvent(event);
+  });
+  await settle();
+}
+
 
 async function openTab(label: string) {
   const tab = [...document.body.querySelectorAll<HTMLButtonElement>('button[role="tab"]')].find(
     (b) => b.textContent?.trim() === label,
   );
   if (!tab) throw new Error(`没有找到页签：${label}`);
-  await click(tab);
+  await mouseActivate(tab);
 }
 
 async function openCreateModal() {
@@ -318,7 +337,7 @@ function shownMatrix(): 'gpt' | 'banana' | 'seedream' | null {
 
 
 async function openRowEdit(typeLabel: string) {
-  await click(adminTab(typeLabel));
+  await openTab(typeLabel);
   await openEditModal();
 }
 
@@ -346,8 +365,8 @@ async function pickFromSelect(ariaLabel: string, optionLabel: string) {
   const trigger = document.body.querySelector<HTMLButtonElement>(`button[aria-label="${ariaLabel}"]`);
   expect(trigger).not.toBeNull();
   if (!trigger) throw new Error(`没有找到下拉框：${ariaLabel}`);
-  await click(trigger);
-  const option = [...document.body.querySelectorAll<HTMLLIElement>('li[role="option"]')].find(
+  await openSelect(trigger);
+  const option = [...document.body.querySelectorAll<HTMLElement>('[role="option"]')].find(
     (li) => li.textContent === optionLabel,
   );
   expect(option).toBeTruthy();
@@ -366,9 +385,6 @@ function matrixTable(): HTMLTableElement | undefined {
 function matrixCells(): (string | undefined)[] {
   return [...(matrixTable()?.querySelectorAll('tbody td') ?? [])].map((td) => td.textContent?.trim());
 }
-
-const adminTab = (label: string) =>
-  [...mountNode!.querySelectorAll('button')].find((btn) => btn.textContent === label);
 
 beforeEach(() => {
   notifyManager.setScheduler((cb) => cb());
@@ -390,7 +406,7 @@ describe('ModelList 按类型分表单', () => {
   it('展示音频 tab，并能看到 seed-audio-1.0', async () => {
     api.fetchAdminModels.mockResolvedValue([audio]);
     await renderPage();
-    await click(adminTab('音频'));
+    await openTab('音频');
     expect(mountNode?.textContent).toContain('seed-audio-1.0');
   });
 
@@ -711,7 +727,7 @@ describe('ModelList 维度绝对加价 dimPrices', () => {
 
   function checkboxByLabel(label: string): HTMLElement {
     const box = [...document.body.querySelectorAll<HTMLElement>('[role="checkbox"]')].find((el) =>
-      el.closest('label')?.textContent?.includes(label),
+      el.textContent?.includes(label),
     );
     if (!box) throw new Error(`没有找到复选框：${label}`);
     return box;
