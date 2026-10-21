@@ -49,7 +49,7 @@ Gitee 的两类标识符是脱节的，这是最易踩的陷阱：
   - **父工单正文的标题前缀（如「改造/维护/优化/修复」）不覆盖本条**：若父项要求分类前缀，仍在已确认的版本号后标明「端」（`V版本号【前端】/【后端】`），分类写进 body；不要为了迁就父项格式把 `issue_type` 改成需求型。
 - **读取**：`get_enterprise_issue_detail` 取详情；`list_enterprise_issue_comments(enterprise_id, issue_id)` 取评论。
 - **列出**：`list_enterprise_issues`，`state` 过滤（open/closed/rejected/progressing），`label_ids` 过滤（数字 ID）。
-- **查子工单（按父找子）**：list 无 parent_id 参数；`search=<父单号>` 查不到子工单——子工单标题是 `V版本号【前端|后端】<标题>`，不含父单号，空搜索结果不代表无子；父单详情 `parent_id=0` 只说明它无父，推不出无子。正确姿势：`list_enterprise_issues(project_id, state="open", per_page=100, sort="created_at", direction="desc")` 客户端筛 `parent_id == <父单数字 id>`（工单详情返回的 `id` 字段）。接手规格父单（implement-spec / implement / triage 认领）第一步必查：子工单即任务图节点，按其 body 的 `Blocked by` 声明定串行依赖与 frontier，不按父单正文自行切阶段（IKH3ZE 实证：search 空结果误判无子票开工，实际已切三票）。
+- **查子工单（按父找子）**：list 无 parent_id 参数；`search=<父单号>` 查不到子工单——子工单标题是 `V版本号【前端|后端】<标题>`，不含父单号，空搜索结果不代表无子；父单详情 `parent_id=0` 只说明它无父，推不出无子。正确姿势：`list_enterprise_issues(project_id, state="open", per_page=100, sort="created_at", direction="desc")` 客户端筛 `parent_id == <父单数字 id>`（工单详情返回的 `id` 字段）。接手规格父单（implement-spec / implement / triage）第一步必查；已有子任务不得重复创建，无对应子任务时由开发依据已评审 PRD 自行拆分并创建、关联业务父需求并明确负责人、版本、依赖与提测计划。子工单即任务图节点，按其 body 的 `Blocked by` 声明定串行依赖与 frontier，已有任务拆分时不绕过任务图自行切阶段（IKH3ZE 实证：search 空结果误判无子票开工，实际已切三票）。
 - **评论**：`comment_enterprise_issue(enterprise_id, issue_id, body)`。
 - **标签**：`update_enterprise_issue(label_ids=...)`，数字 ID。Triage 五标签：needs-triage / needs-info / ready-for-agent / ready-for-human / wontfix，详见 `docs/agents/triage-labels.md`。
 - **创建 PR**：`create_enterprise_repo_pull` **必传数字 `project_id`**——工具描述写「Project ID or PathWithNamespace」，**实际传 PathWithNamespace（如 `hangzhou-xuanfu_1/blue-whale-ai`）会 404「仓库不存在」**，勿被误导。
@@ -62,7 +62,7 @@ Gitee 的两类标识符是脱节的，这是最易踩的陷阱：
 
 | 节点 | 状态与责任 |
 | --- | --- |
-| 开始执行 | 需求／任务进入开发中，缺陷进入修复中；须已具备规格、认领和当前操作授权 |
+| 开始执行 | 需求／任务进入开发中，缺陷进入修复中；须已具备规格、明确负责人和当前操作授权；业务开发由开发自行创建子任务并挂业务父需求，缺陷按缺陷关联规则处理 |
 | 提交、创建或合并 PR | 不自动置完成态；按仓库约定更新审查标签，不能代替部署与验收 |
 | 实际候选部署到测试环境 | 有部署证据后可按授权提测，进入测试-待测试 |
 | 测试及发布前验收通过 | 测试确认后进入待发布；随父需求一起测的子任务也必须有对应测试结论 |
@@ -99,6 +99,6 @@ Gitee 的两类标识符是脱节的，这是最易踩的陷阱：
 - **Map**：`create_enterprise_issue(title=<map 名>, project_id=<仓库 id>, program_id=<项目 id>)`，紧跟 `update_enterprise_issue(label_ids=<wayfinder-map 数字 id>)`（labels 静默忽略）。body 填 Destination / Notes / Decisions-so-far / Not yet specified / Out of scope（模板见 `/wayfinder` SKILL.md）。
 - **Child ticket**：`create_enterprise_issue(parent_id=<map issue id>, project_id=<继承 map>, program_id=<继承 map>, issue_type_id=<任务 1292680>)`，紧跟 `update_enterprise_issue(label_ids=<对应 type 标签数字 id>)`。`<type>` ∈ research / prototype / grilling / task。继承流程见上「创建子 issue」。
 - **Blocking**：Gitee MCP 无 native dependencies——`create_enterprise_issue` 的 `link_issue_id`（创建时传入，无 update 对等项）只建弱关联（UI 可见，非阻塞）。回退 body 约定：ticket body 顶部写 `Blocked by: <标题> (<ident>)`，每行一个。unblocked 以各 blocker 的约定交付物和接收结论为准（逐个读取细状态及证据）；粗状态 closed 不足以证明依赖就绪。`link_issue_id` 可选辅助：创建子 ticket 时传 `link_issue_id=<blocker ident>`。
-- **Frontier query**：按父查子（查询姿势见「操作约定·查子工单」），剔除有 `assignee`（已认领）+ body 含未闭环 `Blocked by:` 的；按创建顺序取首个。
-- **Claim**：`update_enterprise_issue(issue_id=<ticket>, assignee_id=<自己 user id>)`。user id 用 `list_enterprise_members` 查。开放未分配 = 未认领。**实质工作前先 claim**，避并发抢同一 ticket。
+- **Frontier query**：按父查子（查询姿势见「操作约定·查子工单」），剔除有 `assignee`（已明确负责人）+ body 含未闭环 `Blocked by:` 的；按创建顺序取首个。
+- **已有任务接手／交接（Claim）**：`update_enterprise_issue(issue_id=<ticket>, assignee_id=<自己 user id>)`。user id 用 `list_enterprise_members` 查。开发自行创建任务时明确负责人；仅接手已有未分配任务时，按当前授权先确认负责人，避免并发处理同一 ticket，不将认领当成常规任务创建流程。
 - **Resolve**：① `comment_enterprise_issue(issue_id=<ticket>, body=<answer>)` 发结论；② 依实际目标、当前合法状态及操作授权处理任务状态，不自动关闭业务父需求；③ 往 map body 的 `## Decisions so far` 追加 `- [<标题>](<url>) — <gist>`——先回读最新正文及编辑模式，按“正文格式保护”增量更新；富文本不得经普通 `description` 拼接后整体写回。
