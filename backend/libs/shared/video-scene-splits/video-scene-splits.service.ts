@@ -28,21 +28,16 @@ import { logger } from "@lib/infra/logging/blue-whale-logger.js";
 import {
   RecoveryContractError,
   canvasBindingView,
-  lockCanvasRecoveryForAcceptance,
-  writeCanvasRecoveryRows,
-  type CanvasRecoveryAcceptance,
-  type CanvasRecoveryPlan,
 } from "@lib/shared/persistence/index.js";
 import {
   jobExistenceProbe,
   releaseUnlessJobCommitted,
-  withBillingCompensation,
 } from "@lib/shared/persistence/job-billing.js";
-import { transactionWithUniqueRetry } from "@lib/shared/persistence/conversation-repo.js";
 import { enqueueVideoSceneSplitJob } from "@lib/shared/generation/generation-queue.js";
 import {
   enqueueMediaToolJob,
 } from "@lib/shared/media-tools/media-tool-submission.js";
+import { acceptDedicatedToolJob, DedicatedToolConflictError } from "@lib/shared/media-tools/dedicated-tool-acceptance.js";
 import { resolveSourceDuration } from "@lib/shared/media-tools/source-duration.js";
 import { MediaToolBillingService } from "@lib/shared/media-tool-pricing/media-tool-billing.service.js";
 import { AssetStorageService } from "@lib/shared/assets/storage.service.js";
@@ -193,118 +188,100 @@ export class VideoSceneSplitsService {
       userId,
       frozenInput,
     );
+    const acceptanceBilling = jobBilling
+      ? {
+          charge: (jobId: number) => jobBilling.charge(jobId),
+          release: (jobId: number, reason: string) =>
+            this.billing.release(userId, jobId, reason),
+        }
+      : undefined;
 
-    let createdJobId: string | null = null;
-    try {
-      const result = await transactionWithUniqueRetry(this.prisma.client, async (tx) => {
-      createdJobId = null;
-      let recoveryPlan: CanvasRecoveryPlan | null = null;
-      if (canvasBinding) {
-        const acceptance: CanvasRecoveryAcceptance = {
-          projectId,
-          userId,
-          binding: canvasBinding,
-          operation: IDEMPOTENCY_OPERATION,
-          requestHash,
-          idempotencyKey: clientToken,
-          taskType: VIDEO_SCENE_SPLIT_JOB_TYPE,
-        };
-        const locked = await lockCanvasRecoveryForAcceptance(tx, acceptance);
-        if (locked.kind === "replay") {
-          const replayed = await tx.generation_jobs.findUnique({
-            where: { id: BigInt(locked.result.generation_job_id) },
-            select: { status: true },
-          });
-          return ok({
-            job_id: locked.result.generation_job_id,
-            status: replayed?.status ?? "queued",
-            canvas_binding: await canvasBindingView(
-              this.prisma.client, projectId, canvasBinding.submission_id,
-            ),
-          });
-        }
-        if (locked.kind === "idempotency_conflict") {
-          return fail(IDEMPOTENCY_KEY_REUSED_CODE, "client_token 已被使用（同 token 仅可重放相同参数）");
-        }
-        recoveryPlan = locked.plan;
-      } else {
-        const existing = await tx.command_idempotency.findUnique({
-          where: {
-            project_id_operation_idempotency_key: {
-              project_id: BigInt(projectId),
-              operation: IDEMPOTENCY_OPERATION,
-              idempotency_key: clientToken,
-            },
-          },
-          select: { request_hash: true, generation_job_id: true },
-        });
-        if (existing) {
-          if (existing.request_hash !== requestHash) {
-            return fail(IDEMPOTENCY_KEY_REUSED_CODE, "client_token 已被使用（同 token 仅可重放相同参数）");
-          }
-          if (existing.generation_job_id === null) {
-            return fail(IDEMPOTENCY_KEY_REUSED_CODE, "client_token 已被使用（同 token 仅可重放相同参数）");
-          }
-          const replayed = await tx.generation_jobs.findUnique({
-            where: { id: existing.generation_job_id },
-            select: { status: true },
-          });
-          if (!replayed) {
-            return fail(IDEMPOTENCY_KEY_REUSED_CODE, "client_token 已被使用（同 token 仅可重放相同参数）");
-          }
-          return ok({
-            job_id: existing.generation_job_id.toString(),
-            status: replayed.status,
-          });
-        }
-      }
-
-      return withBillingCompensation(jobBilling, async (billing) => {
-        const job = await tx.generation_jobs.create({
-          data: {
-            user_id: BigInt(userId),
-            project_id: BigInt(projectId),
-            type: VIDEO_SCENE_SPLIT_JOB_TYPE,
-            source: VIDEO_SCENE_SPLIT_SOURCE,
-            status: "queued",
-            progress: 0,
-            input: frozenInput,
-            next_action_at: new Date(Date.now() - 60_000),
-          },
-        });
-        await billing?.charge(Number(job.id));
-        createdJobId = job.id.toString();
-        await tx.command_idempotency.create({
-          data: {
+    const replayStored = async () => {
+      if (canvasBinding) return null;
+      const existing = await this.prisma.client.command_idempotency.findUnique({
+        where: {
+          project_id_operation_idempotency_key: {
             project_id: BigInt(projectId),
             operation: IDEMPOTENCY_OPERATION,
             idempotency_key: clientToken,
-            request_hash: requestHash,
-            generation_job_id: job.id,
-            accepted_cursor: 0n,
           },
-        });
-        if (recoveryPlan && canvasBinding) {
-          await writeCanvasRecoveryRows(tx, recoveryPlan, job.id);
-          return ok({
-            job_id: job.id.toString(),
-            status: "queued",
-            canvas_binding: {
-              protocol_version: CANVAS_RECOVERY_PROTOCOL_VERSION,
-              submission_id: canvasBinding.submission_id,
-              target_node_id: canvasBinding.target_node_id,
-              binding_revision: recoveryPlan.bindingRevision,
-              job_id: job.id.toString(),
-              is_current: true,
-            },
-          });
-        }
-        return ok({
-          job_id: job.id.toString(),
-          status: "queued",
-        });
-      }, jobExistenceProbe(this.prisma.client));
+        },
+        select: { request_hash: true, generation_job_id: true },
       });
+      if (!existing) return null;
+      if (existing.request_hash !== requestHash || existing.generation_job_id === null) {
+        return fail(IDEMPOTENCY_KEY_REUSED_CODE, "client_token 已被使用（同 token 仅可重放相同参数）");
+      }
+      const replayed = await this.prisma.client.generation_jobs.findUnique({
+        where: { id: existing.generation_job_id },
+        select: { status: true },
+      });
+      if (!replayed) {
+        return fail(IDEMPOTENCY_KEY_REUSED_CODE, "client_token 已被使用（同 token 仅可重放相同参数）");
+      }
+      return ok({
+        job_id: existing.generation_job_id.toString(),
+        status: replayed.status,
+      });
+    };
+
+    let createdJobId: string | null = null;
+    let conflictEnvelope: ReturnType<typeof fail> | null = null;
+    try {
+      const previous = await replayStored();
+      if (previous) return previous;
+      const accepted = await acceptDedicatedToolJob({
+        prisma: this.prisma.client,
+        jobBilling: acceptanceBilling,
+        userId,
+        projectId,
+        toolType: VIDEO_SCENE_SPLIT_JOB_TYPE,
+        operation: IDEMPOTENCY_OPERATION,
+        requestHash,
+        idempotencyKey: clientToken,
+        canvasBinding,
+        conflictMessage: "client_token 已被使用（同 token 仅可重放相同参数）",
+        onConflict: () => {
+          conflictEnvelope = fail(
+            IDEMPOTENCY_KEY_REUSED_CODE,
+            "client_token 已被使用（同 token 仅可重放相同参数）",
+          );
+          throw new DedicatedToolConflictError();
+        },
+        createData: {
+          user_id: BigInt(userId),
+          project_id: BigInt(projectId),
+          type: VIDEO_SCENE_SPLIT_JOB_TYPE,
+          source: VIDEO_SCENE_SPLIT_SOURCE,
+          status: "queued",
+          progress: 0,
+          input: frozenInput,
+          next_action_at: new Date(Date.now() - 60_000),
+        },
+      });
+      if (accepted.replayed) {
+        const jobId = accepted.jobId ?? "";
+        const replayed = jobId
+          ? await this.prisma.client.generation_jobs.findUnique({
+              where: { id: BigInt(jobId) },
+              select: { status: true },
+            })
+          : null;
+        return ok({
+          job_id: jobId,
+          status: replayed?.status ?? "queued",
+          ...(canvasBinding
+            ? {
+                canvas_binding: await canvasBindingView(
+                  this.prisma.client,
+                  projectId,
+                  canvasBinding.submission_id,
+                ),
+              }
+            : {}),
+        });
+      }
+      createdJobId = accepted.jobId;
       if (createdJobId !== null) {
         await enqueueMediaToolJob({
           prisma: this.prisma.client,
@@ -315,15 +292,29 @@ export class VideoSceneSplitsService {
           enqueue: enqueueVideoSceneSplitJob,
         });
       }
-      return result;
-    } catch (error) {
-      await releaseUnlessJobCommitted({
-        release: (jobId, reason) => this.billing.release(userId, jobId, reason),
-        jobId: createdJobId === null ? null : Number(createdJobId),
-        probe: jobExistenceProbe(this.prisma.client),
-        reason: error instanceof Error ? error.message : String(error),
+      return ok({
+        job_id: createdJobId ?? "",
+        status: "queued",
+        ...(canvasBinding
+          ? {
+              canvas_binding: {
+                protocol_version: CANVAS_RECOVERY_PROTOCOL_VERSION,
+                submission_id: canvasBinding.submission_id,
+                target_node_id: canvasBinding.target_node_id,
+                binding_revision: accepted.bindingRevision ?? 0,
+                job_id: createdJobId ?? "",
+                is_current: true,
+              },
+            }
+          : {}),
       });
+    } catch (error) {
+      if (error instanceof DedicatedToolConflictError && conflictEnvelope) {
+        return conflictEnvelope;
+      }
       if (error instanceof RecoveryContractError) return error.envelope;
+      const replayed = await replayStored();
+      if (replayed) return replayed;
       throw error;
     }
   }

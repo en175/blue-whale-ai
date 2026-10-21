@@ -13,6 +13,10 @@ import {
   type JobBilling,
 } from "@lib/shared/persistence/job-billing.js";
 import { resolveSourceDuration } from "@lib/shared/media-tools/source-duration.js";
+import {
+  acceptDedicatedToolJob,
+  acceptDedicatedToolJobWithoutKey,
+} from "@lib/shared/media-tools/dedicated-tool-acceptance.js";
 import { MediaToolBillingService } from "@lib/shared/media-tool-pricing/media-tool-billing.service.js";
 import {
   RecoveryContractError,
@@ -231,45 +235,29 @@ export class AudioMixesService {
       duration: durationSeconds,
     });
     if (!key) {
-      const job = await this.withCompensation(jobBilling, (billing) =>
-        this.prisma.client.$transaction(
-          async (tx) => {
-            const created = await tx.generation_jobs.create({ data });
-            await billing?.charge(Number(created.id));
-            return created;
-          },
-          { maxWait: 10_000, timeout: 30_000 },
-        ),
-      );
+      const job = await acceptDedicatedToolJobWithoutKey({
+        prisma: this.prisma.client,
+        jobBilling,
+        createData: data,
+      });
       return ok({ job_id: job.id.toString(), status: "queued", replayed: false, enqueue_required: true });
     }
-    let job;
+    let job: string | null;
     let replayed = false;
     try {
-      const result = await this.withCompensation(jobBilling, (billing) =>
-        this.prisma.client.$transaction(async (tx) => {
-        let plan: CanvasRecoveryPlan | null = null;
-        if (canvasBinding) {
-          const locked = await lockCanvasRecoveryForAcceptance(tx, {
-            projectId, userId, binding: canvasBinding,
-            operation: "audio_mix.create", requestHash: hash,
-            idempotencyKey, taskType: AUDIO_MIX_JOB_TYPE,
-          });
-          if (locked.kind === "replay") return { replayed: true, jobId: null as string | null };
-          if (locked.kind === "idempotency_conflict") {
-            throw new DomainError(409, "幂等键已用于另一项音频混合创建");
-          }
-          plan = locked.plan;
-        }
-        const created = await tx.generation_jobs.create({ data });
-        await billing?.charge(Number(created.id));
-        await tx.command_idempotency.create({
-          data: { ...key, request_hash: hash, generation_job_id: created.id, accepted_cursor: 0n },
-        });
-        if (plan) await writeCanvasRecoveryRows(tx, plan, created.id);
-        return { replayed: false, jobId: created.id.toString() as string | null };
-        }),
-      );
+      const result = await acceptDedicatedToolJob({
+        prisma: this.prisma.client,
+        jobBilling,
+        userId,
+        projectId,
+        toolType: AUDIO_MIX_JOB_TYPE,
+        operation: "audio_mix.create",
+        requestHash: hash,
+        idempotencyKey: key.idempotency_key,
+        canvasBinding,
+        conflictMessage: "幂等键已用于另一项音频混合创建",
+        createData: data,
+      });
       replayed = result.replayed;
       job = result.jobId;
     } catch (error) {
