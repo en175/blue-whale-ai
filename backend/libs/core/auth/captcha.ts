@@ -1,10 +1,14 @@
 export const CAPTCHA_TTL_MS = 60_000;
-export const CAPTCHA_TOLERANCE_PX = 5;
-export const CAPTCHA_WIDTH = 320;
-export const CAPTCHA_HEIGHT = 160;
-export const CAPTCHA_PIECE_SIZE = 56;
+export const CAPTCHA_CODE_LENGTH = 4;
+export const CAPTCHA_WIDTH = 120;
+export const CAPTCHA_HEIGHT = 44;
+export const CAPTCHA_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
 
-export function isCaptchaAligned(actualX: unknown, expectedX: number): boolean {
-  if (typeof actualX !== "number" || !Number.isFinite(actualX)) return false;
-  return Math.abs(actualX - expectedX) <= CAPTCHA_TOLERANCE_PX;
+export function normalizeCaptchaAnswer(raw: unknown): string {
+  return typeof raw === "string" ? raw.trim().toUpperCase() : "";
+}
+
+export function isCaptchaAnswerCorrect(actual: unknown, expected: string): boolean {
+  const normalized = normalizeCaptchaAnswer(actual);
+  return normalized.length > 0 && normalized === expected.toUpperCase();
 }

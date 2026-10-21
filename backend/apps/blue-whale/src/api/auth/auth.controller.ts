@@ -213,7 +213,7 @@ export class AuthController {
       phone?: unknown;
       purpose?: unknown;
       captcha_id?: unknown;
-      captcha_x?: unknown;
+      captcha_answer?: unknown;
       request_id?: unknown;
     },
     @Headers("x-forwarded-for") forwardedFor?: string,
@@ -255,19 +255,13 @@ export class AuthController {
 
     const captchaId =
       typeof body?.captcha_id === "string" ? body.captcha_id.trim() : "";
-    const captchaX =
-      typeof body?.captcha_x === "number"
-        ? body.captcha_x
-        : typeof body?.captcha_x === "string"
-          ? Number(body.captcha_x)
-          : Number.NaN;
     if (!captchaId) {
       await this.operations.fail(started.operation.id, ACCOUNT_ERROR_CAPTCHA_REQUIRED);
       throw new NewApiError("请先完成拼图验证", 400, ACCOUNT_ERROR_CAPTCHA_REQUIRED);
     }
     const verdict = await this.captcha.verify({
       id: captchaId,
-      x: captchaX,
+      answer: body?.captcha_answer,
       phone,
       purpose,
     });
@@ -282,7 +276,7 @@ export class AuthController {
     if (verdict === "invalid") {
       await this.operations.fail(started.operation.id, ACCOUNT_ERROR_CAPTCHA_INVALID);
       throw new NewApiError(
-        "拼图未对准，已换新图，请重新拖动",
+        "验证码错误，已换新图，请重新输入",
         400,
         ACCOUNT_ERROR_CAPTCHA_INVALID,
       );

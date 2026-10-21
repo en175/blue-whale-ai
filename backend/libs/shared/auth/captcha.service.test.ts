@@ -36,31 +36,29 @@ async function issued(service: CaptchaService, phone = "13800001234", purpose = 
     (service as unknown as { redis: InstanceType<typeof FakeRedis> }).redis.store.get(
       `captcha:${challenge.id}`,
     )!,
-  ) as { x: number };
-  return { challenge, expectedX: stored.x };
+  ) as { code: string };
+  return { challenge, code: stored.code };
 }
 
 describe("CaptchaService", () => {
-  it("签发返回背景/拼图/纵坐标，挑战只存缺口横坐标", async () => {
+  it("签发返回 PNG 图片与 60 秒有效期，响应不含答案", async () => {
     const service = new CaptchaService();
     const challenge = await service.issue("13800001234", "login");
 
-    expect(challenge.background.startsWith("data:image/png;base64,")).toBe(true);
-    expect(challenge.piece.startsWith("data:image/png;base64,")).toBe(true);
-    expect(challenge.piece_y).toBeGreaterThanOrEqual(0);
+    expect(challenge.image.startsWith("data:image/png;base64,")).toBe(true);
     expect(challenge.expires_in).toBe(60);
-    expect(challenge).not.toHaveProperty("x");
+    expect(challenge).not.toHaveProperty("code");
     await service.onModuleDestroy();
   });
 
-  it("对准通过，且挑战一次使用", async () => {
+  it("答案正确通过，且挑战一次使用", async () => {
     const service = new CaptchaService();
-    const { challenge, expectedX } = await issued(service);
+    const { challenge, code } = await issued(service);
 
     await expect(
       service.verify({
         id: challenge.id,
-        x: expectedX,
+        answer: code.toLowerCase(),
         phone: "13800001234",
         purpose: "login",
       }),
@@ -68,7 +66,7 @@ describe("CaptchaService", () => {
     await expect(
       service.verify({
         id: challenge.id,
-        x: expectedX,
+        answer: code,
         phone: "13800001234",
         purpose: "login",
       }),
@@ -76,13 +74,13 @@ describe("CaptchaService", () => {
     await service.onModuleDestroy();
   });
 
-  it("拖偏判失败", async () => {
+  it("答案错误判失败", async () => {
     const service = new CaptchaService();
-    const { challenge, expectedX } = await issued(service);
+    const { challenge } = await issued(service);
     await expect(
       service.verify({
         id: challenge.id,
-        x: expectedX + 30,
+        answer: "ZZZZ",
         phone: "13800001234",
         purpose: "login",
       }),
@@ -96,7 +94,7 @@ describe("CaptchaService", () => {
     await expect(
       service.verify({
         id: first.challenge.id,
-        x: first.expectedX,
+        answer: first.code,
         phone: "13900000000",
         purpose: "login",
       }),
@@ -106,7 +104,7 @@ describe("CaptchaService", () => {
     await expect(
       service.verify({
         id: second.challenge.id,
-        x: second.expectedX,
+        answer: second.code,
         phone: "13800001234",
         purpose: "bind",
       }),
@@ -119,7 +117,7 @@ describe("CaptchaService", () => {
     await expect(
       service.verify({
         id: "cap_unknown",
-        x: 100,
+        answer: "ABCD",
         phone: "13800001234",
         purpose: "login",
       }),

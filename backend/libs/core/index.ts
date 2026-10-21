@@ -65,11 +65,12 @@ export {
 export { PHONE_RE, isValidPhone } from "./auth/phone.js";
 export {
   CAPTCHA_TTL_MS,
-  CAPTCHA_TOLERANCE_PX,
+  CAPTCHA_CODE_LENGTH,
   CAPTCHA_WIDTH,
   CAPTCHA_HEIGHT,
-  CAPTCHA_PIECE_SIZE,
-  isCaptchaAligned,
+  CAPTCHA_ALPHABET,
+  normalizeCaptchaAnswer,
+  isCaptchaAnswerCorrect,
 } from "./auth/captcha.js";
 export {
   normalizeNickname,

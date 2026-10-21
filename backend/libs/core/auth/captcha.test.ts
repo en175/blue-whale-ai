@@ -1,22 +1,21 @@
 import { describe, expect, it } from "vitest";
 
-import { CAPTCHA_TOLERANCE_PX, isCaptchaAligned } from "./captcha.js";
+import { isCaptchaAnswerCorrect, normalizeCaptchaAnswer } from "./captcha.js";
 
-describe("isCaptchaAligned", () => {
-  it("误差在 5px 内算对", () => {
-    expect(isCaptchaAligned(100, 100)).toBe(true);
-    expect(isCaptchaAligned(105, 100)).toBe(true);
-    expect(isCaptchaAligned(95, 100)).toBe(true);
+describe("验证码答案比对", () => {
+  it("忽略大小写和首尾空白", () => {
+    expect(isCaptchaAnswerCorrect(" AB2C ", "AB2C")).toBe(true);
+    expect(isCaptchaAnswerCorrect("ab2c", "AB2C")).toBe(true);
   });
 
-  it("超过容差判失败", () => {
-    expect(isCaptchaAligned(100 + CAPTCHA_TOLERANCE_PX + 1, 100)).toBe(false);
-    expect(isCaptchaAligned(100 - CAPTCHA_TOLERANCE_PX - 1, 100)).toBe(false);
+  it("错误答案/空值判失败", () => {
+    expect(isCaptchaAnswerCorrect("AB2D", "AB2C")).toBe(false);
+    expect(isCaptchaAnswerCorrect("", "AB2C")).toBe(false);
+    expect(isCaptchaAnswerCorrect(undefined, "AB2C")).toBe(false);
   });
 
-  it("非数字/NaN 一律失败", () => {
-    expect(isCaptchaAligned("100", 100)).toBe(false);
-    expect(isCaptchaAligned(Number.NaN, 100)).toBe(false);
-    expect(isCaptchaAligned(undefined, 100)).toBe(false);
+  it("归一化：非字符串回空串", () => {
+    expect(normalizeCaptchaAnswer(123)).toBe("");
+    expect(normalizeCaptchaAnswer(" ab2c ")).toBe("AB2C");
   });
 });

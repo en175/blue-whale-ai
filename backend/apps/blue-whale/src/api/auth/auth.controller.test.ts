@@ -162,12 +162,7 @@ function setup() {
   const captcha = {
     issue: vi.fn(async () => ({
       id: "cap_test",
-      background: "data:image/png;base64,AA==",
-      piece: "data:image/png;base64,AA==",
-      piece_y: 20,
-      piece_size: 56,
-      width: 320,
-      height: 160,
+      image: "data:image/png;base64,AA==",
       expires_in: 60,
     })),
     verify: vi.fn(async () => "ok"),
@@ -778,7 +773,7 @@ describe("AuthController 拼图验证（发码前）", () => {
     expect(operations.succeed).not.toHaveBeenCalled();
   });
 
-  it("拼图未对准 → captcha_invalid", async () => {
+  it("验证码答案错误 → captcha_invalid", async () => {
     const { controller, captcha, operations } = setup();
     captcha.verify.mockResolvedValue("invalid");
 
@@ -788,7 +783,7 @@ describe("AuthController 拼图验证（发码前）", () => {
           phone: "13800001234",
           purpose: "login",
           captcha_id: "cap_test",
-          captcha_x: 10,
+          captcha_answer: "AB2C",
         },
         "1.2.3.4",
       ),
@@ -806,7 +801,7 @@ describe("AuthController 拼图验证（发码前）", () => {
           phone: "13800001234",
           purpose: "login",
           captcha_id: "cap_test",
-          captcha_x: 10,
+          captcha_answer: "AB2C",
         },
         "1.2.3.4",
       ),
