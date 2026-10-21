@@ -4,6 +4,7 @@ export const RechargePlans = lazy(() => import('./pages/RechargePlans'));
 export const RechargeCustomConfig = lazy(() => import('./pages/RechargeCustomConfig'));
 export const Promotions = lazy(() => import('./pages/Promotions'));
 export const MemberDiscounts = lazy(() => import('./pages/MemberDiscounts'));
+export const ToolPricing = lazy(() => import('./pages/ToolPricing'));
 export const RechargeRecords = lazy(() => import('./pages/RechargeRecords'));
 export const ConsumptionRecords = lazy(() => import('./pages/ConsumptionRecords'));
 export const JobRecords = lazy(() => import('./pages/JobRecords'));
