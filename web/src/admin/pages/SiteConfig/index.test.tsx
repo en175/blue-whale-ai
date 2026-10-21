@@ -24,9 +24,9 @@ vi.mock('@/shared/api/homepageHeroes', async (importOriginal) => {
     deleteHomepageHero: api.deleteHomepageHero,
     sortHomepageHero: api.sortHomepageHero,
     uploadHomepageHeroFile: api.uploadHomepageHeroFile,
-    adminHomepageHeroesOptions: () => ({
-      queryKey: actual.homepageHeroKeys.admin(),
-      queryFn: () => api.fetchAdminHomepageHeroes(),
+    adminHomepageHeroesOptions: (scene = 'homepage') => ({
+      queryKey: [...actual.homepageHeroKeys.admin(), scene],
+      queryFn: () => api.fetchAdminHomepageHeroes(scene),
     }),
   };
 });
@@ -38,6 +38,7 @@ let mountNode: HTMLDivElement;
 
 const sample = {
   id: '11',
+  scene: 'homepage' as const,
   media_type: 'video' as const,
   media_url: 'https://cdn.example.com/hero.mp4',
   poster_url: 'https://cdn.example.com/hero.jpg',
@@ -121,6 +122,38 @@ describe('SiteConfig 站点设置', () => {
     expect(document.body.textContent).toContain('首页默认兜底背景');
     expect(document.querySelector('img[alt="首页默认兜底背景"]')).not.toBeNull();
     expect(document.querySelector('thead th')?.textContent).toBe('拖拽排序');
+  });
+
+  it('切换到登录弹窗场景按 scene=auth 拉取，空态与新建均归属该场景', async () => {
+    api.fetchAdminHomepageHeroes.mockResolvedValue([]);
+    await renderPage();
+    expect(api.fetchAdminHomepageHeroes).toHaveBeenCalledWith('homepage');
+
+    await act(async () => {
+      buttons()
+        .find((btn) => btn.textContent === '登录弹窗')
+        ?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0 }));
+    });
+    await settle();
+    expect(api.fetchAdminHomepageHeroes).toHaveBeenCalledWith('auth');
+    expect(document.body.textContent).toContain('暂无登录弹窗背景条目');
+    expect(document.body.textContent).toContain('登录弹窗读取');
+
+    await act(async () => {
+      buttons().find((btn) => btn.textContent?.includes('新建条目'))?.click();
+    });
+    const cover = document.body.querySelector<HTMLInputElement>('[data-testid="hero-cover-upload"]');
+    if (!cover) throw new Error('封面图上传控件未渲染');
+    api.uploadHomepageHeroFile.mockResolvedValueOnce('https://cdn.example.com/auth.png');
+    await upload(cover, new File(['image'], 'auth.png', { type: 'image/png' }));
+    await act(async () => {
+      buttons().find((btn) => btn.textContent === '保存')?.click();
+    });
+    await settle();
+    expect(api.createHomepageHero).toHaveBeenCalledWith(
+      expect.objectContaining({ scene: 'auth', media_type: 'image' }),
+      { silent: true },
+    );
   });
 
   it('视频未配封面图不能保存', async () => {
