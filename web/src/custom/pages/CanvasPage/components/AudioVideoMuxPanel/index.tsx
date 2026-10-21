@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { ArrowUp, Film, Video, X } from 'lucide-react';
 import { assetPageQueryOptions } from '@/custom/api/assets';
-import type { MediaToolQuoteInput } from '@/custom/api/mediaToolQuote';
+import type { MediaToolQuoteParams } from '@/custom/api/mediaToolQuote';
 import { resolveMediaSrc } from '@/shared/utils/remoteImageCors';
 import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../agent/followDialog';
 import { useDismissOnOutside } from '../../hooks/shared/useDismissOnOutside';
@@ -21,7 +21,7 @@ interface AudioVideoMuxPanelProps {
   onUnbind: () => void;
   wireBinding: boolean;
   onSend: () => void;
-  quoteInput?: MediaToolQuoteInput | null;
+  quoteParams?: MediaToolQuoteParams | null;
   followAnchor: FollowDialogAnchor | null;
   dragHidden?: boolean;
 }
@@ -92,7 +92,7 @@ export default function AudioVideoMuxPanel({
   onUnbind,
   wireBinding,
   onSend,
-  quoteInput,
+  quoteParams,
   followAnchor, dragHidden,
 }: AudioVideoMuxPanelProps) {
   const [libraryOpen, setLibraryOpen] = useState(false);
@@ -229,7 +229,7 @@ export default function AudioVideoMuxPanel({
         <div className={styles.bottomBar}>
           <MediaToolQuoteBadge
             toolType="audio_video_mux"
-            input={quoteInput}
+            params={quoteParams}
             variant="hint"
             testId="audio-video-mux-quote"
           />

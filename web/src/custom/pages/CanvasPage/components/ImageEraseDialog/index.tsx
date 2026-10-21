@@ -170,7 +170,7 @@ export default function ImageEraseDialog({
       >
         <MediaToolQuoteBadge
           toolType="image_erase"
-          input={{}}
+          params={{}}
           variant="hint"
           testId="image-erase-quote"
         />

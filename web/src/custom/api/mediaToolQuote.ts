@@ -3,12 +3,7 @@ import { useEffect, useState } from 'react';
 import { apiRequest } from '@/shared/api/http';
 import { useAuthStore } from '@/shared/stores/auth';
 
-export interface MediaToolQuoteInput {
-  duration?: number;
-  resolution?: string;
-  fps?: number;
-  multiple?: number;
-}
+export type MediaToolQuoteParams = Record<string, unknown>;
 
 export interface MediaToolQuote {
   credits: number | null;
@@ -17,19 +12,19 @@ export interface MediaToolQuote {
 
 export const mediaToolQuoteKeys = {
   all: ['media-tool-quote'] as const,
-  one: (toolType: string, input: MediaToolQuoteInput, userId: number | null = null) =>
-    [...mediaToolQuoteKeys.all, toolType, userId, input] as const,
+  one: (toolType: string, params: MediaToolQuoteParams, userId: number | null = null) =>
+    [...mediaToolQuoteKeys.all, toolType, userId, params] as const,
 };
 
 export function fetchMediaToolQuote(
   toolType: string,
-  input: MediaToolQuoteInput,
+  params: MediaToolQuoteParams,
 ): Promise<MediaToolQuote> {
   return apiRequest<MediaToolQuote>(
     `/api/media-tools/${encodeURIComponent(toolType)}/quote`,
     {
       method: 'POST',
-      body: JSON.stringify({ input }),
+      body: JSON.stringify(params),
       silent: true,
     },
   );
@@ -37,32 +32,34 @@ export function fetchMediaToolQuote(
 
 export function mediaToolQuoteOptions(
   toolType: string,
-  input: MediaToolQuoteInput,
+  params: MediaToolQuoteParams,
   userId: number | null = null,
 ) {
   return queryOptions({
-    queryKey: mediaToolQuoteKeys.one(toolType, input, userId),
-    queryFn: () => fetchMediaToolQuote(toolType, input),
+    queryKey: mediaToolQuoteKeys.one(toolType, params, userId),
+    queryFn: () => fetchMediaToolQuote(toolType, params),
     staleTime: 30_000,
     placeholderData: keepPreviousData,
   });
 }
 
-function useDebouncedSerialized(input: MediaToolQuoteInput | null): MediaToolQuoteInput | null {
-  const serialized = input === null ? null : JSON.stringify(input);
+function useDebouncedSerialized(
+  params: MediaToolQuoteParams | null,
+): MediaToolQuoteParams | null {
+  const serialized = params === null ? null : JSON.stringify(params);
   const [debounced, setDebounced] = useState(serialized);
   useEffect(() => {
     const timer = setTimeout(() => setDebounced(serialized), 300);
     return () => clearTimeout(timer);
   }, [serialized]);
-  return debounced === null ? null : (JSON.parse(debounced) as MediaToolQuoteInput);
+  return debounced === null ? null : (JSON.parse(debounced) as MediaToolQuoteParams);
 }
 
 export function useMediaToolQuote(
   toolType: string,
-  input: MediaToolQuoteInput | null,
+  params: MediaToolQuoteParams | null,
 ) {
-  const debounced = useDebouncedSerialized(input);
+  const debounced = useDebouncedSerialized(params);
   const userId = useAuthStore((state) => state.user?.userId ?? null);
   const query = useQuery({
     ...mediaToolQuoteOptions(toolType, debounced ?? {}, userId),

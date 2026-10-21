@@ -198,7 +198,7 @@ export default function CutoutToolbar({
 
         <MediaToolQuoteBadge
           toolType="image_cutout"
-          input={{}}
+          params={{}}
           variant="hint"
           testId="image-cutout-quote"
         />

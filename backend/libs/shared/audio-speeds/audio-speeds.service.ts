@@ -14,6 +14,7 @@ import {
 } from "@lib/shared/generation/media-tool-recovery.js";
 import { enqueueAudioSpeedJob } from "@lib/shared/generation/generation-queue.js";
 import { submitMediaToolJob } from "@lib/shared/media-tools/media-tool-submission.js";
+import { speedChargeSeconds } from "@lib/shared/media-tool-pricing/tool-quote-input.js";
 import {
   requireOwnedProject,
   resolveOwnedMediaSource,
@@ -104,7 +105,7 @@ export class AudioSpeedsService {
     }
 
     const speed = parsed.data.speed ?? 1;
-    const outputSeconds = Math.max(1, Math.ceil(duration.seconds / speed));
+    const outputSeconds = speedChargeSeconds(duration.seconds, speed);
     const frozenInput = { ...parsed.data, duration: outputSeconds } as Prisma.InputJsonObject;
 
     return submitMediaToolJob({

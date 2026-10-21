@@ -139,7 +139,7 @@ export default function OutpaintDialog({
 
         <MediaToolQuoteBadge
           toolType="image_outpaint"
-          input={{}}
+          params={{}}
           variant="hint"
           testId="image-outpaint-quote"
         />

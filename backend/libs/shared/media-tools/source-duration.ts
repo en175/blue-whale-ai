@@ -2,6 +2,7 @@ import type { PrismaClient } from "@prisma/client";
 import { logger } from "@lib/infra/logging/blue-whale-logger.js";
 import { createAssetOwnershipOps } from "../persistence/asset-ownership-repo.js";
 import type { AssetStorageService } from "../assets/storage.service.js";
+import { loadTosStorageConfig } from "../assets/tos-storage.js";
 
 export interface SourceAssetDurationFields {
   id: string;
@@ -20,6 +21,25 @@ export interface ResolvedSourceDuration {
 
 function toSeconds(durationMs: number): number {
   return Math.max(1, Math.round(durationMs / 1000));
+}
+
+export function storageKeyOfAsset(asset: {
+  storage_key: string | null;
+  url: string;
+}): string | null {
+  if (asset.storage_key) return asset.storage_key;
+  const config = loadTosStorageConfig();
+  const endpoint = config?.endpoint.replace(/^https?:\/\//, "").replace(/\/$/, "");
+  const origin = config ? `https://${config.bucket}.${endpoint}` : null;
+  try {
+    const url = new URL(asset.url);
+    if (!origin || url.origin !== origin || !url.pathname || url.pathname === "/" || url.search) {
+      return null;
+    }
+    return decodeURIComponent(url.pathname.slice(1));
+  } catch {
+    return null;
+  }
 }
 
 export async function resolveSourceDuration(args: {

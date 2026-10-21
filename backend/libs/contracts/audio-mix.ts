@@ -3,6 +3,8 @@ import { canvasBindingSchema } from "./canvas-recovery.js";
 
 export const AUDIO_MIX_JOB_TYPE = "audio_mix";
 export const AUDIO_MIX_SOURCE = "dock";
+export const AUDIO_MIX_MIN_INPUTS = 2;
+export const AUDIO_MIX_MAX_INPUTS = 100;
 export const AUDIO_MIX_OUTPUT_FORMATS = ["mp3", "m4a", "ogg", "flac", "wav"] as const;
 export const AUDIO_MIX_DEFAULT_OUTPUT_FORMAT = "mp3";
 export const AUDIO_MIX_SUBMIT_PATH = "/v1/mediakit/mix-audio";
@@ -15,7 +17,7 @@ const inputIdentitySchema = z.object({
 
 export const audioMixCreateSchema = z.object({
   source_node_id: z.string().min(1),
-  inputs: z.array(inputIdentitySchema).min(2).max(100),
+  inputs: z.array(inputIdentitySchema).min(AUDIO_MIX_MIN_INPUTS).max(AUDIO_MIX_MAX_INPUTS),
   output_format: z.enum(AUDIO_MIX_OUTPUT_FORMATS).default(AUDIO_MIX_DEFAULT_OUTPUT_FORMAT),
   canvas_binding: canvasBindingSchema.optional(),
 }).strict().superRefine((value, context) => {

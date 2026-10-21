@@ -187,7 +187,7 @@ export default function ImageEnhanceDialog({
         <div className={styles.bottomBar}>
           <MediaToolQuoteBadge
             toolType="image_enhance"
-            input={{ multiple: Number(multiple) }}
+            params={{ multiple: Number(multiple) }}
             variant="hint"
             testId="image-enhance-quote"
           />

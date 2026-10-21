@@ -17,6 +17,7 @@ import {
 } from "@lib/shared/generation/media-tool-recovery.js";
 import { enqueueAudioTrimJob } from "@lib/shared/generation/generation-queue.js";
 import { submitMediaToolJob } from "@lib/shared/media-tools/media-tool-submission.js";
+import { trimChargeSeconds } from "@lib/shared/media-tool-pricing/tool-quote-input.js";
 import {
   requireOwnedProject,
   resolveOwnedMediaSource,
@@ -129,9 +130,11 @@ export class AudioTrimsService {
       return fail(PARAM_MISSING_CODE, parsed.error.issues[0]?.message ?? "音频截取参数非法");
     }
 
-    const start = parsed.data.start_time ?? 0;
-    const end = Math.min(parsed.data.end_time ?? duration.seconds, duration.seconds);
-    const selectedSeconds = Math.ceil(end - start);
+    const selectedSeconds = trimChargeSeconds(
+      parsed.data.start_time,
+      parsed.data.end_time,
+      duration.seconds,
+    );
     if (selectedSeconds <= 0) {
       return fail(PARAM_MISSING_CODE, "截取区间超出源音频时长");
     }

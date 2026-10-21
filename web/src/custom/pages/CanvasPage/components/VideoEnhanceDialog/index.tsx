@@ -12,7 +12,7 @@ interface VideoEnhanceDialogProps {
   onSend: (resolution: VideoEnhanceResolution) => boolean | Promise<boolean>;
   onParamsChange: (resolution: VideoEnhanceResolution) => void;
   initialResolution?: VideoEnhanceResolution | null;
-  quoteDuration?: number | null;
+  sourceAssetId?: string | null;
   generating?: boolean;
   submitting?: boolean;
   followAnchor?: FollowDialogAnchor | null;
@@ -24,7 +24,7 @@ export default function VideoEnhanceDialog({
   onSend,
   onParamsChange,
   initialResolution,
-  quoteDuration,
+  sourceAssetId,
   generating,
   submitting,
   followAnchor, dragHidden,
@@ -91,10 +91,8 @@ export default function VideoEnhanceDialog({
         <div className={styles.bottomBar}>
           <MediaToolQuoteBadge
             toolType="video_enhance"
-            input={
-              quoteDuration
-                ? { duration: Math.round(quoteDuration), resolution }
-                : null
+            params={
+              sourceAssetId ? { source_asset_id: sourceAssetId, resolution } : null
             }
             variant="hint"
             testId="video-enhance-quote"

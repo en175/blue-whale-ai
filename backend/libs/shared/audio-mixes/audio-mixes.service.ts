@@ -18,6 +18,7 @@ import {
   acceptDedicatedToolJobWithoutKey,
 } from "@lib/shared/media-tools/dedicated-tool-acceptance.js";
 import { MediaToolBillingService } from "@lib/shared/media-tool-pricing/media-tool-billing.service.js";
+import { mixChargeSeconds } from "@lib/shared/media-tool-pricing/tool-quote-input.js";
 import {
   RecoveryContractError,
   canvasBindingView,
@@ -211,7 +212,7 @@ export class AudioMixesService {
       );
     }
     const estimatedDurationMs = Math.max(...(durations as number[]));
-    const durationSeconds = Math.max(1, Math.ceil(estimatedDurationMs / 1000));
+    const durationSeconds = mixChargeSeconds(durations as number[]);
 
     const data = {
       user_id: BigInt(userId),

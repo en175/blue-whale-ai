@@ -2,12 +2,12 @@ import { useContext } from 'react';
 import { QueryClientContext } from '@tanstack/react-query';
 import { Zap } from 'lucide-react';
 import { useAuthStore } from '@/shared/stores/auth';
-import { useMediaToolQuote, type MediaToolQuoteInput } from '@/custom/api/mediaToolQuote';
+import { useMediaToolQuote, type MediaToolQuoteParams } from '@/custom/api/mediaToolQuote';
 import styles from './index.module.css';
 
 interface MediaToolQuoteBadgeProps {
   toolType: string;
-  input?: MediaToolQuoteInput | null;
+  params?: MediaToolQuoteParams | null;
   variant?: 'pill' | 'hint';
   testId?: string;
 }
@@ -20,17 +20,17 @@ export default function MediaToolQuoteBadge(props: MediaToolQuoteBadgeProps) {
 
 function QuoteBadge({
   toolType,
-  input,
+  params,
   variant = 'pill',
   testId,
 }: MediaToolQuoteBadgeProps) {
   const { credits, hasData, isFetching, isError } = useMediaToolQuote(
     toolType,
-    input ?? null,
+    params ?? null,
   );
   const balance = useAuthStore((state) => state.credits);
 
-  if (input === undefined || input === null) return null;
+  if (params === undefined || params === null) return null;
 
   const base = variant === 'pill' ? styles.pill : styles.hint;
   const iconSize = variant === 'pill' ? 10 : 11;
