@@ -45,7 +45,7 @@ export class AdminMediaToolPricingController {
     @Param("toolType") toolType: string,
     @Body() body: unknown,
   ) {
-    const parsed = parseMediaToolPricingUpdate(body);
+    const parsed = parseMediaToolPricingUpdate(body, toolType);
     if (!parsed.ok) throw new AdminException(400, parsed.error);
     try {
       const row = await this.service.update(toolType, parsed.value);

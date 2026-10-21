@@ -27,8 +27,62 @@ export type ParseMediaToolPricingUpdateResult =
   | { ok: true; value: UpdateMediaToolPricingInput }
   | { ok: false; error: string };
 
+const TOOL_PRICING_CONTRACT: Record<
+  string,
+  { baseUnit: string; axes: readonly string[] }
+> = {
+  audio_mix: { baseUnit: "usage.seconds", axes: [] },
+  audio_speed: { baseUnit: "usage.seconds", axes: [] },
+  audio_trim: { baseUnit: "usage.seconds", axes: [] },
+  audio_video_mux: { baseUnit: "usage.seconds", axes: ["resolution"] },
+  image_cutout: { baseUnit: "constant:1", axes: [] },
+  image_enhance: { baseUnit: "constant:1", axes: ["multiple"] },
+  image_erase: { baseUnit: "constant:1", axes: [] },
+  image_outpaint: { baseUnit: "constant:1", axes: [] },
+  media_extract: { baseUnit: "usage.seconds", axes: [] },
+  video_enhance: { baseUnit: "usage.seconds", axes: ["resolution"] },
+  video_frame_interpolation: { baseUnit: "usage.seconds", axes: ["fps"] },
+  video_matting: { baseUnit: "usage.seconds", axes: [] },
+  video_scene_split: { baseUnit: "usage.seconds", axes: [] },
+  video_subtitle_erase: { baseUnit: "usage.seconds", axes: [] },
+  vocal_split: { baseUnit: "usage.seconds", axes: [] },
+};
+
+export function mediaToolPricingContractError(
+  toolType: string,
+  pricing: unknown,
+): string | null {
+  const contract = TOOL_PRICING_CONTRACT[toolType];
+  if (!contract) return `未知工具类型：${toolType}`;
+  const root = pricing as Record<string, unknown>;
+  if (root.baseUnit !== contract.baseUnit) {
+    return `baseUnit 须为 ${contract.baseUnit}`;
+  }
+  const basePrice = root.basePrice;
+  if (basePrice === null || typeof basePrice !== "object" || Array.isArray(basePrice)) {
+    return "basePrice 缺失或格式非法";
+  }
+  const price = basePrice as Record<string, unknown>;
+  if (contract.axes.length === 0) {
+    return price.kind === "const"
+      ? null
+      : "该工具只支持固定单价（basePrice.kind=const）";
+  }
+  if (price.kind !== "table") {
+    return `该工具必须使用分档价（basePrice.kind=table，按 ${contract.axes.join("、")}）`;
+  }
+  const by = Array.isArray(price.by)
+    ? price.by.filter((axis): axis is string => typeof axis === "string")
+    : [];
+  const axesMatch =
+    by.length === contract.axes.length &&
+    contract.axes.every((axis) => by.includes(axis));
+  return axesMatch ? null : `分档维度须为 ${contract.axes.join("、")}`;
+}
+
 export function parseMediaToolPricingUpdate(
   body: unknown,
+  toolType: string,
 ): ParseMediaToolPricingUpdateResult {
   if (typeof body !== "object" || body === null || Array.isArray(body)) {
     return { ok: false, error: "请求体须为对象" };
@@ -51,6 +105,10 @@ export function parseMediaToolPricingUpdate(
     const error = pricingFieldErr(raw.pricing);
     if (error !== null) {
       return { ok: false, error };
+    }
+    const contractError = mediaToolPricingContractError(toolType, raw.pricing);
+    if (contractError !== null) {
+      return { ok: false, error: contractError };
     }
     value.pricing = raw.pricing as Prisma.InputJsonValue;
   }
