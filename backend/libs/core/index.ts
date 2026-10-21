@@ -63,6 +63,12 @@ export {
   type VerificationCodeRecord,
 } from "./auth/request-sms-code.js";
 export { PHONE_RE, isValidPhone } from "./auth/phone.js";
+export {
+  normalizeNickname,
+  NICKNAME_MIN_LENGTH,
+  NICKNAME_MAX_LENGTH,
+  type NicknameValidation,
+} from "./auth/nickname.js";
 export { parseSkillMd, serializeSkillMd } from "./skills/skill-md.js";
 export {
   acceptConversationMessage,

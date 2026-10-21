@@ -3,4 +3,5 @@ export interface LoginByCodeDto {
   code?: unknown;
   agreed_terms?: unknown;
   client_id?: unknown;
+  request_id?: unknown;
 }

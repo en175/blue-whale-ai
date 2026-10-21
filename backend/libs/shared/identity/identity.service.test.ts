@@ -44,6 +44,11 @@ import {
   CodeWrongError,
   IdentityService,
   InvalidCredentialsError,
+  MigrationIneligibleError,
+  NicknameInvalidError,
+  PhoneNotBoundError,
+  RebindBindingChangedError,
+  RebindSamePhoneError,
 } from "./identity.service.js";
 import type { IdentityUserRow } from "@lib/shared/persistence/identity-user-repo.js";
 
@@ -297,5 +302,176 @@ describe("IdentityService.loginWithPhoneCode", () => {
     const out = await service.loginWithPhoneCode({ phone: "13800001234", code: "123456" });
     expect(out.isNewUser).toBe(false);
     expect(roles.grant).not.toHaveBeenCalled();
+  });
+});
+
+describe("IdentityService 换绑 / 迁移 / 昵称", () => {
+  function build(config: {
+    user?: Partial<IdentityUserRow> | null;
+    code?: { id: string; code: string; attempts: number; purpose: string } | null;
+    attempts?: number;
+    consumed?: boolean;
+  }) {
+    const users = {
+      findById: vi.fn().mockResolvedValue(config.user === null ? null : userRow(config.user ?? {})),
+      findByLoginName: vi.fn().mockResolvedValue(
+        config.user === null ? null : userRow(config.user ?? {}),
+      ),
+      updatePhone: vi.fn().mockResolvedValue(undefined),
+      updateNickname: vi.fn().mockResolvedValue(undefined),
+    };
+    const authCodes = {
+      findActiveCode: vi.fn().mockResolvedValue(config.code ?? null),
+      incrementAttempts: vi.fn().mockResolvedValue(config.attempts ?? 1),
+      consumeCode: vi.fn().mockResolvedValue(config.consumed ?? true),
+      findByPhone: vi.fn(),
+      upsertUser: vi.fn(),
+    };
+    repos.createIdentityUserRepo.mockReturnValue(users);
+    repos.createIdentityRoleRepo.mockReturnValue({ listRoleCodes: vi.fn().mockResolvedValue([]) });
+    repos.createIdentityMembershipRepo.mockReturnValue({});
+    repos.createIdentityLoginLogRepo.mockReturnValue({});
+    repos.createAdminUserQuery.mockReturnValue({});
+    repos.createAuthRepo.mockReturnValue(authCodes);
+    return { service: new IdentityService({ client: {} } as never), users, authCodes };
+  }
+
+  const code = { id: "9", code: "123456", attempts: 0, purpose: "bind" };
+
+  it("未绑手机号时不能走换绑", async () => {
+    const { service } = build({ user: { phone: null } });
+    await expect(service.rebindVerifyCurrent("42", "123456")).rejects.toBeInstanceOf(
+      PhoneNotBoundError,
+    );
+  });
+
+  it("验证旧号成功返回旧号码并消费验证码", async () => {
+    const { service, authCodes } = build({ user: { phone: "13800001234" }, code });
+    await expect(service.rebindVerifyCurrent("42", "123456")).resolves.toEqual({
+      oldPhone: "13800001234",
+    });
+    expect(authCodes.consumeCode).toHaveBeenCalledWith("9");
+    expect(authCodes.findActiveCode).toHaveBeenCalledWith("13800001234", ["rebind_old"]);
+  });
+
+  it("旧号验证码错误 → CodeWrongError", async () => {
+    const { service } = build({
+      user: { phone: "13800001234" },
+      code: { ...code, code: "000000" },
+      attempts: 2,
+    });
+    await expect(service.rebindVerifyCurrent("42", "123456")).rejects.toMatchObject({
+      remaining: 3,
+    });
+  });
+
+  it("提交换绑：原绑定已变化 → RebindBindingChangedError，不改库", async () => {
+    const { service, users } = build({
+      user: { phone: "13900000000" },
+      code,
+    });
+    await expect(
+      service.commitRebind("42", {
+        oldPhone: "13800001234",
+        phone: "13700000000",
+        code: "123456",
+      }),
+    ).rejects.toBeInstanceOf(RebindBindingChangedError);
+    expect(users.updatePhone).not.toHaveBeenCalled();
+  });
+
+  it("提交换绑：新旧同号 → RebindSamePhoneError，不发码", async () => {
+    const { service, authCodes } = build({ user: { phone: "13800001234" }, code });
+    await expect(
+      service.commitRebind("42", {
+        oldPhone: "13800001234",
+        phone: "13800001234",
+        code: "123456",
+      }),
+    ).rejects.toBeInstanceOf(RebindSamePhoneError);
+    expect(authCodes.findActiveCode).not.toHaveBeenCalled();
+  });
+
+  it("提交换绑成功：只改 phone，不动其他字段", async () => {
+    const { service, users } = build({ user: { phone: "13800001234" }, code });
+    await expect(
+      service.commitRebind("42", {
+        oldPhone: "13800001234",
+        phone: "13700000000",
+        code: "123456",
+      }),
+    ).resolves.toEqual({ phone: "13700000000" });
+    expect(users.updatePhone).toHaveBeenCalledWith("42", "13700000000");
+  });
+
+  it("迁移验证：账号不存在/无口令 → 统一 InvalidCredentialsError", async () => {
+    const { service } = build({ user: null });
+    await expect(
+      service.verifyMigrationCandidate({ username: "ghost", password: "x" }),
+    ).rejects.toBeInstanceOf(InvalidCredentialsError);
+  });
+
+  it("迁移验证：密码正确且未绑号 → 返回用户 id", async () => {
+    const { service } = build({
+      user: { id: "42", username: "alice", password: await hashPassword("OldPass123") },
+    });
+    await expect(
+      service.verifyMigrationCandidate({ username: "alice", password: "OldPass123" }),
+    ).resolves.toEqual({ userId: "42" });
+  });
+
+  it("迁移验证：已绑号 → 不可迁移（与密码错误分开）", async () => {
+    const { service } = build({
+      user: {
+        id: "42",
+        username: "alice",
+        phone: "13800001234",
+        password: await hashPassword("OldPass123"),
+      },
+    });
+    await expect(
+      service.verifyMigrationCandidate({ username: "alice", password: "OldPass123" }),
+    ).rejects.toBeInstanceOf(MigrationIneligibleError);
+  });
+
+  it("迁移补绑：绑号后回读用户", async () => {
+    const { service, users } = build({
+      user: { id: "42", username: "alice", password: await hashPassword("OldPass123") },
+      code,
+    });
+    users.findById
+      .mockResolvedValueOnce(userRow({ id: "42", username: "alice" }))
+      .mockResolvedValueOnce(userRow({ id: "42", username: "alice", phone: "13800001234" }));
+
+    await expect(
+      service.commitMigrationBind("42", { phone: "13800001234", code: "123456" }),
+    ).resolves.toMatchObject({ id: "42", phone: "13800001234" });
+    expect(users.updatePhone).toHaveBeenCalledWith("42", "13800001234");
+  });
+
+  it("昵称非法 → NicknameInvalidError，不写库", async () => {
+    const { service, users } = build({ user: {} });
+    await expect(service.updateNickname("42", "小 明")).rejects.toBeInstanceOf(
+      NicknameInvalidError,
+    );
+    expect(users.updateNickname).not.toHaveBeenCalled();
+  });
+
+  it("昵称相同 → changed=false，不写库", async () => {
+    const { service, users } = build({ user: { nickname: "小明" } });
+    await expect(service.updateNickname("42", " 小明 ")).resolves.toEqual({
+      nickname: "小明",
+      changed: false,
+    });
+    expect(users.updateNickname).not.toHaveBeenCalled();
+  });
+
+  it("昵称修改成功 → 写库并返回新值", async () => {
+    const { service, users } = build({ user: { nickname: "小明" } });
+    await expect(service.updateNickname("42", "小红")).resolves.toEqual({
+      nickname: "小红",
+      changed: true,
+    });
+    expect(users.updateNickname).toHaveBeenCalledWith("42", "小红");
   });
 });

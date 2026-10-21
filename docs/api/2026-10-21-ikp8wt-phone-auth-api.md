@@ -1,8 +1,8 @@
 # 手机号注册登录改造：后端对接文档（IKP8WT / IKPC9D）
 
 > 需求：IKP8WT「V1.2.0 账号与认证：手机号注册登录及内部老账号过渡」。
-> 本文件对应后端子任务 **IKPC9D（账号主线）**，基线 `release/2026.09.29`。
-> 后续子任务：IKPC9E（换绑 + 昵称编辑 + 操作单）、IKPC9F（内部老账号迁移），接口以各自文档为准。
+> 本文件覆盖后端子任务 **IKPC9D（账号主线）+ IKPC9E（换绑 / 昵称 / 操作单）+ IKPC9F（内部账号迁移）**，基线 `release/2026.09.29`，计划同一个 PR 交付。
+> 前端按本文件一次性对接即可。
 
 ---
 
@@ -12,10 +12,12 @@
 
 前端需要改的只有四处：
 
-1. 发码请求加 `purpose`
-2. 登录请求加 `agreed_terms`、`client_id`
-3. 登录态失效时按 `error_code` 区分「过期 / 被挤出」
+1. 发码请求加 `purpose`；登录请求加 `agreed_terms`、`client_id`
+2. 写操作带 `request_id`，用它查/重试（弱网恢复）
+3. 登录态失效按 `error_code` 区分「过期 / 被挤出」
 4. 账号信息改读 `nickname`（缺省回退 `username`）
+5. 新增：换绑手机号（两步）、昵称编辑、内部老账号迁移（两步）、操作结果查询
+6. 所有写接口返回 `operation_id`；轮询/恢复统一走 `GET /api/auth/operations/:id`
 
 ---
 
@@ -49,7 +51,20 @@
 | `session_expired` | 401 | 登录已过期，请重新验证 | 关闭业务操作，弹登录框 |
 | `session_evicted` | 401 | 登录已失效，账号已在其他浏览器登录，请重新验证 | 同上，文案取 `msg` |
 | `rate_limited` | 429 | 操作过于频繁，请稍后再试 | 按后端 `Retry-After` 倒计时 |
-| `account_locked` | 429 | 尝试次数过多，账号已锁定，请稍后再试 | 仅密码登录（管理员）路径 |
+| `account_locked` | 429 | 尝试次数过多，账号已锁定，请稍后再试 | 密码登录 / 迁移验证路径 |
+| `operation_pending` | 409 | 正在确认操作结果，请稍候 | 同 `request_id` 的写操作仍在执行；用 `operation_id` 查询 |
+| `operation_not_found` | 404 | 暂未找到本次操作记录，请重试核实 | 记录不存在或已过 7 天 |
+| `operation_forbidden` | 403 | 无权查询该操作记录 | 非本人操作且无有效查询令牌 |
+| `phone_not_bound` | 200（body.code=400） | 当前账号尚未绑定手机号 | 不能发起换绑 |
+| `rebind_token_expired` | 200（body.code=400） | 原手机号验证已过期，请重新验证 | 回到「验证原手机号」 |
+| `rebind_token_invalid` | 200（body.code=400） | 换绑凭证无效，请重新验证原手机号 | 同上 |
+| `rebind_same_phone` | 200（body.code=400） | 新手机号与当前手机号相同，无需更换 | 停留当前步骤 |
+| `rebind_binding_changed` | 200（body.code=400） | 账号绑定状态已变化，请重新登录 | 终止换绑，刷新账号信息 |
+| `nickname_invalid` | 200（body.code=400） | 昵称需为2—20个字符… | 原位提示，保留输入 |
+| `migration_ineligible` | 400 | 账号或密码不正确，或当前账号不可迁移 | 统一提示，不区分原因 |
+| `migration_token_expired` | 400 | 原账号验证已过期，请重新验证 | 回到「验证原账号」 |
+| `bind_succeeded_login_failed` | 500 | 手机号已绑定，请重新登录 | 绑定已生效，改走手机号登录 |
+| `query_token_expired` | 403 | 查询授权已过期，请验证身份后继续确认原操作 | 走恢复查询 |
 
 `error_code` 只会出现在失败信封里；成功信封没有该字段。
 
@@ -222,13 +237,129 @@
 
 ---
 
-## 9. 未包含在本迭代（IKPC9E / IKPC9F 交付）
+## 9. 写操作的幂等与恢复（所有写接口通用）
 
-| 能力 | 工单 | 预期接口 |
-|---|---|---|
-| 换绑手机号 | IKPC9E | `POST /api/me/phone/rebind/verify-current`、`POST /api/me/phone/rebind` |
-| 昵称编辑 | IKPC9E | `PATCH /api/me/nickname` |
-| 操作结果查询（弱网/超时恢复） | IKPC9E | `GET /api/auth/operations/:id` |
-| 内部老账号迁移 | IKPC9F | `POST /api/auth/migration/verify-password`、`/bind-phone` |
+所有会改状态的接口（`send-code`、`login-by-code`、`me/phone`、换绑、昵称、迁移补绑）都接受可选 `request_id`（前端生成的 UUID，重试时沿用同一个）：
 
-前端可先按本文件改登录主线；以上接口在后端合并后补充文档。
+- 服务端落一条操作单，响应里返回 `operation_id`
+- 同一 `request_id` 重试：
+  - 已成功 → 直接返回原结果（登录会重新签发会话），不会重复建号/换绑/保存
+  - 仍进行中 → HTTP 409 + `error_code: operation_pending`，前端用 `operation_id` 查询
+- 操作单终态保留 **7 天**；待确认期间不会被清理
+
+### 查询原操作
+
+`GET /api/auth/operations/:id?query_token=...`
+
+- 有当前会话且操作属于自己：只带登录态即可
+- 会话已失效：先用恢复流程拿 `query_token`（见下）
+
+```jsonc
+{
+  "code": 200,
+  "data": {
+    "id": "op_xxx",
+    "type": "login",                 // login | bind | rebind | nickname | sms | migration
+    "status": "succeeded",           // pending | succeeded | failed
+    "result": { "user_id": 42 },     // 成功时的结果；失败为 null
+    "error_code": null,              // 失败时的错误码
+    "phone_masked": "138****1234",   // 脱敏手机号
+    "created_at": 1761030000000,
+    "updated_at": 1761030002000
+  }
+}
+```
+
+### 恢复查询授权（会话失效时）
+
+1. `POST /api/auth/send-code` `{ phone, purpose: "recovery" }`（手机号须是操作关联号码）
+2. `POST /api/auth/operations/:id/recovery` `{ code }` → 返回 `{ query_token, expires_in: 604800 }`
+3. 带 `query_token` 调用查询接口
+
+`query_token` 只对签发时的那条操作有效，7 天过期；只读，不授予登录或业务权限。
+
+---
+
+## 10. 换绑手机号（两步）
+
+前置：已登录、当前账号已绑手机号。验证码用途 `rebind_old` / `rebind_new`。
+
+### 10.1 验证原手机号
+
+`POST /api/me/phone/rebind/verify-current` `{ code }`
+
+成功：`{ rebind_token, expires_in: 600 }`（10 分钟，绑定当前账号与原号）
+
+### 10.2 提交换绑
+
+`POST /api/me/phone/rebind` `{ rebind_token, phone, code }`
+
+服务端复核：账号正常、原绑定未变、新号未占用、新号验证码（`rebind_new`）有效。
+
+成功：
+
+```jsonc
+{
+  "code": 200,
+  "data": {
+    "operation_id": "op_xxx",
+    "phone": "13700000000",
+    "revoked_sessions": 3,
+    "relogin_required": true
+  }
+}
+```
+
+成功后**全部会话已撤销**，前端必须关闭账号弹窗、跳登录框，提示「所有浏览器的登录状态已失效，请使用新手机号重新登录」。旧号立即释放，可注册新账号，但无法再访问原账号数据。
+
+---
+
+## 11. 昵称编辑
+
+`PATCH /api/me/nickname` `{ nickname }`
+
+- 去首尾空白后 2–20 个字符（扩展汉字计 1 个）
+- 仅允许中文、英文大小写字母、数字、下划线、短横线；内部空格、换行、Emoji 一律拒绝
+- 超长不截断，原样拒绝
+- 与当前值相同 → `changed: false`，不写库
+
+成功：`{ nickname, changed, operation_id }`
+失败：`error_code: nickname_invalid`，`msg` 直接展示
+
+---
+
+## 12. 内部老账号迁移（两步）
+
+资格：手机号为空、未删除、状态正常的内部账号。已绑号账号一律走手机号登录。
+
+### 12.1 验证原账号
+
+`POST /api/auth/migration/verify-password` `{ username, password }`
+
+成功：`{ migration_token, expires_in: 600 }`
+失败：统一返回 401「账号或密码不正确，或当前账号不可迁移」，不泄露账号是否存在、是否有资格。
+
+风控：同 IP 20 次/分、同账号 5 次/分；同账号 15 分钟内错 5 次锁 15 分钟。
+
+### 12.2 补绑手机号并登录
+
+`POST /api/auth/migration/bind-phone`
+`{ migration_token, phone, code, agreed_terms: true, client_id? }`
+
+- 验证码用途 `bind`（先 `send-code` 带上 `purpose: "bind"`）
+- 只更新原账号 ID 的手机号，不建新号、不发新人权益
+- 成功后直接用本次认证登录，返回结构与手机号登录一致（含 `token` / `user_id` / `nickname` / `operation_id`）
+- 成功后撤销该账号旧会话
+
+特殊情况：绑定已成功但会话签发失败 → HTTP 500 + `error_code: bind_succeeded_login_failed`，文案「手机号已绑定，请重新登录」；此时不要再提交迁移，改用手机号登录。
+
+---
+
+## 13. 不在本 PR 的能力
+
+| 能力 | 说明 |
+|---|---|
+| 滑块拼图验证 | 火山 WAF 承担，运维配置，前端按 WAF 返回处理 |
+| 管理端迁移/必保清单界面 | 本期资格规则为「未绑手机号即可迁移」，不设清单 |
+| 移动端适配、海外区号、第三方登录 | PRD 明确不纳入本期 |
+| 密码登录/注册入口 | 接口保留，前端隐藏入口 |

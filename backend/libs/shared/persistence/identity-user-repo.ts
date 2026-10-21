@@ -30,6 +30,7 @@ export interface IdentityUserRepo {
     mustChangePassword: boolean,
   ): Promise<void>;
   updatePhone(id: string, phone: string): Promise<void>;
+  updateNickname(id: string, nickname: string): Promise<void>;
   updateStatus(id: string, status: IdentityUserStatus): Promise<boolean>;
 }
 
@@ -140,6 +141,13 @@ export function createIdentityUserRepo(prisma: PrismaClient): IdentityUserRepo {
         if (isUniqueViolation(error)) throw new PhoneTakenError();
         throw error;
       }
+    },
+
+    async updateNickname(id, nickname) {
+      await prisma.bw_users.update({
+        where: { id: BigInt(id) },
+        data: { nickname, gmt_modified: new Date() },
+      });
     },
 
     async updateStatus(id, status) {

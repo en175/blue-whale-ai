@@ -19,6 +19,8 @@ import { SystemSettingsModule } from "@lib/shared/system-settings/index.js";
 import { ProjectModule } from "@lib/shared/project/project.module.js";
 import { SceneCardModule } from "@lib/shared/scene-card/scene-card.module.js";
 import { SessionModule } from "@lib/shared/session/session.module.js";
+import { AuthOperationModule } from "@lib/shared/auth/auth-operation.module.js";
+import { PhoneActionModule } from "@lib/shared/identity/phone-action.module.js";
 import { RateLimitModule } from "@lib/shared/rate-limit/rate-limit.module.js";
 import { RateLimitGuard } from "@lib/shared/rate-limit/rate-limit.guard.js";
 import { SharedAssetsModule } from "@lib/shared/shared-assets/shared-assets.module.js";
@@ -86,6 +88,8 @@ import { IdentityModule } from "@lib/shared/identity/index.js";
     SharedAssetsModule,
     SnapshotModule,
     SessionModule,
+    AuthOperationModule,
+    PhoneActionModule,
     RateLimitModule,
     AuthModule,
     AccountApiModule,
