@@ -1,3 +1,4 @@
+import * as CheckboxPrimitive from '@radix-ui/react-checkbox';
 import type { ReactNode } from 'react';
 import styles from './index.module.css';
 
@@ -18,48 +19,22 @@ export default function Checkbox({
   indeterminate = false,
   'aria-label': ariaLabel,
 }: CheckboxProps) {
-  const toggle = () => {
-    if (disabled) return;
-    onChange(!checked);
-  };
-
-  const box = (
-    <span
-      role="checkbox"
-      aria-checked={indeterminate ? 'mixed' : checked}
-      aria-label={label === undefined ? ariaLabel : undefined}
-      aria-disabled={disabled || undefined}
-      tabIndex={disabled ? -1 : 0}
-      className={`${styles.box} ${checked || indeterminate ? styles.on : ''} ${
-        indeterminate ? styles.mixed : ''
-      }`}
-      onClick={(e) => {
-        e.preventDefault();
-        if (label === undefined) toggle();
-      }}
-      onKeyDown={(e) => {
-        if (e.key === ' ' || e.key === 'Enter') {
-          e.preventDefault();
-          toggle();
-        }
-      }}
-    >
-      {}
-    </span>
-  );
-
-  if (label === undefined) return box;
-
   return (
-    <label
-      className={`${styles.row} ${disabled ? styles.disabled : ''}`}
-      onClick={(e) => {
-        e.preventDefault();
-        toggle();
+    <CheckboxPrimitive.Root
+      checked={indeterminate ? 'indeterminate' : checked}
+      onCheckedChange={(next) => onChange(next === true)}
+      onKeyDown={(event) => {
+        if (event.key !== ' ' && event.key !== 'Enter') return;
+        event.preventDefault();
+        onChange(indeterminate ? true : !checked);
       }}
+      disabled={disabled}
+      aria-disabled={disabled || undefined}
+      aria-label={label === undefined ? ariaLabel : undefined}
+      className={`${styles.row} ${disabled ? styles.disabled : ''}`}
     >
-      {box}
-      <span className={styles.label}>{label}</span>
-    </label>
+      <span className={styles.box} />
+      {label !== undefined && <span className={styles.label}>{label}</span>}
+    </CheckboxPrimitive.Root>
   );
 }

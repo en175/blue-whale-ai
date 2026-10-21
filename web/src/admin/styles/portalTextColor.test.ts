@@ -28,26 +28,42 @@ function ruleBlockOf(css: string, className: string): string | null {
   return match ? match[1] : null;
 }
 
+type PortalSource = 'createPortal' | 'dialog' | 'popover';
+
 interface Portal {
   file: string;
   rootClass: string;
   cssPath: string;
 }
 
+const PORTAL_ROOT_PATTERNS: Record<PortalSource, RegExp> = {
+  createPortal: /className=\{styles\.([A-Za-z0-9_]+)\}/,
+  dialog: /<DialogPrimitive\.Overlay\b[^>]*className=\{styles\.([A-Za-z0-9_]+)\}/,
+  popover: /<PopoverPrimitive\.Content\b[^>]*className=\{styles\.([A-Za-z0-9_]+)\}/,
+};
+
+function portalSourceOf(source: string): PortalSource | null {
+  if (source.includes('createPortal(')) return 'createPortal';
+  if (/<DialogPrimitive\.Overlay\b/.test(source)) return 'dialog';
+  if (/<PopoverPrimitive\.Portal\b/.test(source)) return 'popover';
+  return null;
+}
+
 function findPortals(): Portal[] {
   const portals: Portal[] = [];
   for (const tsx of collectTsx(ADMIN_DIR)) {
     const source = readFileSync(tsx, 'utf-8');
-    if (!source.includes('createPortal(')) continue;
+    const kind = portalSourceOf(source);
+    if (kind === null) continue;
 
     const cssImport = source.match(/from\s+'(\.\/[^']+\.module\.css)'/);
     if (!cssImport) {
-      throw new Error(`${relative(ADMIN_DIR, tsx)} 用了 createPortal 但没有引入 .module.css`);
+      throw new Error(`${relative(ADMIN_DIR, tsx)} 用了 portal 但没有引入 .module.css`);
     }
     const cssPath = join(tsx, '..', cssImport[1]);
 
-    const afterPortal = source.slice(source.indexOf('createPortal('));
-    const root = afterPortal.match(/className=\{styles\.([A-Za-z0-9_]+)\}/);
+    const scoped = kind === 'createPortal' ? source.slice(source.indexOf('createPortal(')) : source;
+    const root = scoped.match(PORTAL_ROOT_PATTERNS[kind]);
     if (!root) {
       throw new Error(`${relative(ADMIN_DIR, tsx)} 的门户根元素上没有 styles.* 类名`);
     }

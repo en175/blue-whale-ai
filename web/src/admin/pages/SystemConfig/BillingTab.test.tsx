@@ -158,10 +158,20 @@ function publishButton(): HTMLButtonElement {
   return found;
 }
 
+async function openSelect(trigger: HTMLElement) {
+  await act(async () => {
+    const event = new MouseEvent('pointerdown', { bubbles: true, cancelable: true, button: 0 });
+    Object.defineProperty(event, 'pointerType', { value: 'mouse' });
+    Object.defineProperty(event, 'pointerId', { value: 1 });
+    trigger.dispatchEvent(event);
+  });
+  await settle();
+}
+
 async function choose(label: string, optionIncludes: string) {
   const trigger = document.body.querySelector<HTMLElement>(`[aria-label="${label}"]`);
   if (!trigger) throw new Error(`没有找到下拉框：${label}`);
-  await click(trigger);
+  await openSelect(trigger);
   const option = [...document.querySelectorAll<HTMLElement>('[role="option"]')].find((o) =>
     o.textContent?.includes(optionIncludes),
   );

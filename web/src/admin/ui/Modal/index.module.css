@@ -6,11 +6,11 @@
   align-items: center;
   justify-content: center;
   background: rgb(17 24 39 / 0.45);
-
   color: var(--admin-text);
 }
 
 .modal {
+  outline: none;
   background: var(--admin-surface);
   border: 1px solid var(--admin-border);
   border-radius: var(--admin-radius-pop);

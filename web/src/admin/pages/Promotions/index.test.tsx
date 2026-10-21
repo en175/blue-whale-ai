@@ -142,7 +142,7 @@ function inputByLabel(label: string): HTMLInputElement {
 
 async function check(label: string) {
   const box = [...document.body.querySelectorAll<HTMLElement>('[role="checkbox"]')].find((el) =>
-    el.closest('label')?.textContent?.includes(label),
+    el.textContent?.includes(label),
   );
   if (!box) throw new Error(`没有找到复选框：${label}`);
   await click(box);

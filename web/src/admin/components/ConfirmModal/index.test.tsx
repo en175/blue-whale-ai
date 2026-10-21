@@ -91,11 +91,31 @@ describe('ConfirmModal', () => {
   it('★ 点面板内部不关闭，点遮罩才关闭', async () => {
     const onClose = vi.fn();
     await render({ onClose });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
 
     await act(async () => (document.body.querySelector('p') as HTMLElement).click());
     expect(onClose).not.toHaveBeenCalled();
 
-    await act(async () => (dialog().parentElement as HTMLElement).click());
+    await act(async () => {
+      const overlay = dialog().parentElement as HTMLElement;
+      overlay.dispatchEvent(pointerDown());
+      overlay.dispatchEvent(new MouseEvent('click', { bubbles: true, button: 0 }));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 });
+
+function pointerDown(): MouseEvent {
+  const event = new MouseEvent('pointerdown', {
+    bubbles: true,
+    cancelable: true,
+    button: 0,
+    composed: true,
+  });
+  Object.defineProperty(event, 'pointerType', { value: 'mouse' });
+  Object.defineProperty(event, 'pointerId', { value: 1 });
+  return event;
+}

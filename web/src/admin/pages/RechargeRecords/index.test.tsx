@@ -90,7 +90,10 @@ async function openStatusFilter(): Promise<string[]> {
   const trigger = document.body.querySelector<HTMLElement>('[aria-label="订单状态"]');
   if (!trigger) throw new Error('没有找到状态筛选');
   await act(async () => {
-    trigger.click();
+    const event = new MouseEvent('pointerdown', { bubbles: true, cancelable: true, button: 0 });
+    Object.defineProperty(event, 'pointerType', { value: 'mouse' });
+    Object.defineProperty(event, 'pointerId', { value: 1 });
+    trigger.dispatchEvent(event);
   });
   await settle();
   return [...document.querySelectorAll<HTMLElement>('[role="option"]')].map(
