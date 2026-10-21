@@ -14,6 +14,14 @@ import { createImageEraseSession, createSubtitleEraseSession, beginEraseStroke, 
 import { createAudioMixSession, addAudioMixInput, createAudioVideoMuxSession, bindAudioVideoMuxWire, bindAudioVideoMuxVideo, unbindAudioVideoMux, editAudioVideoMuxParams, type AudioMixHost, type AudioVideoMuxHost } from '../tools/compound/compoundToolSessions';
 import { createImageEnhanceSession, createVideoEnhanceSession, createFrameInterpolationSession, type PanelToolHost } from '../tools/compound/panelToolSessions';
 import { mediaContentBox, MEDIA_CONTENT_TOP_OFFSET } from '../components/MediaNode/mediaContentSize';
+import { readAssetId } from '../media/mediaRefs';
+import {
+  mixQuoteInput,
+  muxQuoteInput,
+  speedQuoteInput,
+  trimQuoteInput,
+  videoToolQuoteInput,
+} from '../tools/mediaToolQuoteInputs';
 import { mediaCardToolbarVisible } from '../components/MediaNode/toolbarVisibility';
 import { computeFollowAnchor, FOLLOW_PAD, FOLLOW_GAP } from '../agent/followDialog';
 import { canUndoMaskEdit, canRedoMaskEdit, undoMaskEdit, redoMaskEdit } from '../tools/image/eraseMask';
@@ -111,6 +119,16 @@ function outpaintGeometry(node: Node) {
 export function createCanvasToolEntries(ctx: CanvasToolEntriesCtx) {
   const { runtime, getHosts, getView, getDeps } = ctx;
   const nodeOf = (id: string) => getView().nodes.find((node) => node.id === id);
+  const positiveSeconds = (value: unknown): number | null =>
+    typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null;
+  const nodeSeconds = (nodeId: string | null | undefined): number | null =>
+    nodeId ? positiveSeconds(nodeOf(nodeId)?.data.duration) : null;
+  const sourceSecondsByAssetId = (assetId: unknown): number | null => {
+    if (assetId === undefined || assetId === null) return null;
+    const id = String(assetId);
+    const source = getView().nodes.find((node) => readAssetId(node.data) === id);
+    return positiveSeconds(source?.data.duration);
+  };
   function centerAnchor(
     node: Node | undefined,
     halfWidth: number,
@@ -522,6 +540,11 @@ export function createCanvasToolEntries(ctx: CanvasToolEntriesCtx) {
               }
               boxLimitReached={!canAddSubtitleBox(s.boxes)}
               submitting={submitting}
+              quoteInput={
+                nodeSeconds(s.nodeId) !== null
+                  ? { duration: Math.round(nodeSeconds(s.nodeId)!) }
+                  : null
+              }
               sendBlockedReason={
                 s.mode === 'box' && s.boxes.boxes.length === 0
                   ? '请先拉框：在画面上拉矩形框圈出要擦除的字幕区域'
@@ -557,6 +580,7 @@ export function createCanvasToolEntries(ctx: CanvasToolEntriesCtx) {
                 }
                 onSend={h.send}
                 submitting={submitting}
+                quoteInput={videoToolQuoteInput(nodeSeconds(s.nodeId))}
                 sendBarAnchor={centerAnchor(nodeOf(s.nodeId), 130)}
                 dragHidden={dragHiddenOf(s.nodeId)}
               />
@@ -601,6 +625,11 @@ export function createCanvasToolEntries(ctx: CanvasToolEntriesCtx) {
                 }
                 onSend={h.send}
                 submitting={submitting}
+                quoteInput={trimQuoteInput(
+                  s.selection.start,
+                  s.selection.end,
+                  nodeSeconds(s.nodeId),
+                )}
                 anchor={centerAnchor(nodeOf(s.nodeId), 130)}
                 dragHidden={dragHiddenOf(s.nodeId)}
               />
@@ -653,6 +682,10 @@ export function createCanvasToolEntries(ctx: CanvasToolEntriesCtx) {
               onSend={h.send}
               onClose={h.close}
               submitting={submitting}
+              quoteInput={mixQuoteInput([
+                positiveSeconds(node.data.duration),
+                ...s.selectedInputs.map((input) => input.duration),
+              ])}
               anchor={centerAnchor(node, 170)}
               dragHidden={dragHiddenOf(s.sourceNodeId)}
             />
@@ -685,6 +718,7 @@ export function createCanvasToolEntries(ctx: CanvasToolEntriesCtx) {
                 }
                 onSend={h.send}
                 submitting={submitting}
+                quoteInput={speedQuoteInput(nodeSeconds(s.nodeId), s.speed)}
                 anchor={centerAnchor(nodeOf(s.nodeId), 130)}
                 dragHidden={dragHiddenOf(s.nodeId)}
               />
@@ -716,6 +750,7 @@ export function createCanvasToolEntries(ctx: CanvasToolEntriesCtx) {
                 }
                 onSend={h.send}
                 submitting={submitting}
+                quoteInput={videoToolQuoteInput(nodeSeconds(s.nodeId))}
                 sendBarAnchor={centerAnchor(nodeOf(s.nodeId), 130)}
                 dragHidden={dragHiddenOf(s.nodeId)}
               />
@@ -751,6 +786,7 @@ export function createCanvasToolEntries(ctx: CanvasToolEntriesCtx) {
                 }
                 onSend={h.send}
                 submitting={submitting}
+                quoteInput={videoToolQuoteInput(nodeSeconds(s.nodeId))}
                 sendBarAnchor={centerAnchor(nodeOf(s.nodeId), 130)}
                 dragHidden={dragHiddenOf(s.nodeId)}
               />
@@ -787,6 +823,7 @@ export function createCanvasToolEntries(ctx: CanvasToolEntriesCtx) {
                 }
                 onSend={h.send}
                 submitting={submitting}
+                quoteInput={videoToolQuoteInput(nodeSeconds(s.nodeId))}
                 sendBarAnchor={centerAnchor(nodeOf(s.nodeId), 170)}
                 dragHidden={dragHiddenOf(s.nodeId)}
               />
@@ -833,9 +870,17 @@ export function createCanvasToolEntries(ctx: CanvasToolEntriesCtx) {
           const s = h.getSnapshot().state;
           const node = s && nodeOf(s.draftId);
           if (!s || !node) return null;
+          const identity = audioVideoMuxIdentityOf(node)!;
+          const quoteInput = muxQuoteInput({
+            videoSeconds: identity.video?.duration,
+            audioSeconds: nodeSeconds(identity.sourceNodeId),
+            sync: identity.sync,
+            width: identity.video?.width,
+            height: identity.video?.height,
+          });
           return (
             <AudioVideoMuxPanel
-              identity={audioVideoMuxIdentityOf(node)!}
+              identity={identity}
               onClose={h.close}
               onReserveChange={(reserveAudio) =>
                 editAudioVideoMuxParams(getHosts().audioVideoMux!, node.id, {
@@ -859,6 +904,7 @@ export function createCanvasToolEntries(ctx: CanvasToolEntriesCtx) {
               }
               wireBinding={s.wireDragging}
               onSend={h.send}
+              quoteInput={quoteInput}
               followAnchor={panelAnchor(node)}
               dragHidden={dragHiddenOf(s.draftId)}
             />
@@ -912,6 +958,9 @@ export function createCanvasToolEntries(ctx: CanvasToolEntriesCtx) {
         render(h, actions) {
           const { state: s, visible, submitting } = h.getSnapshot();
           if (!visible || !s) return null;
+          const identity = nodeOf(s.nodeId)?.data.videoEnhance as
+            | { sourceAssetId?: string }
+            | undefined;
           return (
             <VideoEnhanceDialog
               key={s.seed.ts}
@@ -921,6 +970,7 @@ export function createCanvasToolEntries(ctx: CanvasToolEntriesCtx) {
                 actions?.updateDraft ? actions.updateDraft(s.nodeId, value) : getView().changeVideoParams(s.nodeId, value)
               }
               initialResolution={s.seed.initialResolution}
+              quoteDuration={sourceSecondsByAssetId(identity?.sourceAssetId)}
               generating={nodeOf(s.nodeId)?.data.genStatus === 'generating'}
               submitting={submitting}
               followAnchor={panelAnchor(nodeOf(s.nodeId))}
@@ -960,6 +1010,9 @@ export function createCanvasToolEntries(ctx: CanvasToolEntriesCtx) {
         render(h, actions) {
           const { state: s, visible, submitting } = h.getSnapshot();
           if (!visible || !s) return null;
+          const identity = nodeOf(s.nodeId)?.data.frameInterpolation as
+            | { sourceAssetId?: string }
+            | undefined;
           return (
             <FrameInterpolationDialog
               key={s.seed.ts}
@@ -969,6 +1022,7 @@ export function createCanvasToolEntries(ctx: CanvasToolEntriesCtx) {
                 actions?.updateDraft ? actions.updateDraft(s.nodeId, fps) : getView().changeFrameParams(s.nodeId, fps)
               }
               initialFps={s.seed.initialFps}
+              quoteDuration={sourceSecondsByAssetId(identity?.sourceAssetId)}
               generating={nodeOf(s.nodeId)?.data.genStatus === 'generating'}
               submitting={submitting || s.inFlight}
               followAnchor={panelAnchor(nodeOf(s.nodeId))}

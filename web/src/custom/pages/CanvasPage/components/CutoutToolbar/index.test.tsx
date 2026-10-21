@@ -80,11 +80,11 @@ afterEach(async () => {
 });
 
 describe('CutoutToolbar（抠图横条工具栏）', () => {
-  it('横条完整呈现：X、场景触发钮（显示当前场景）、本期免费、发送钮；无标题字', async () => {
+  it('横条完整呈现：X、场景触发钮（显示当前场景）、报价位、发送钮；无标题字', async () => {
     await renderToolbar();
     expect(btn('cutout-close')).toBeTruthy();
     expect(btn('cutout-scene-trigger').textContent).toContain('通用');
-    expect(el('cutout-toolbar').textContent).toContain('本期免费');
+    expect(el('cutout-toolbar').textContent).not.toContain('本期免费');
     expect(btn('cutout-send-btn')).toBeTruthy();
     expect(el('cutout-toolbar').textContent.startsWith('抠图')).toBe(false);
   });

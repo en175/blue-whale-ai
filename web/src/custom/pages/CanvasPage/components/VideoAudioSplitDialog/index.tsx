@@ -1,8 +1,10 @@
 import { useRef, useState } from 'react';
 import { ArrowUp, ChevronDown, X } from 'lucide-react';
+import type { MediaToolQuoteInput } from '@/custom/api/mediaToolQuote';
 import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../agent/followDialog';
 import { useDismissOnOutside } from '../../hooks/shared/useDismissOnOutside';
 import { AUDIO_VIDEO_SPLIT_FORMATS, type AudioVideoSplitFormat } from '../../tools/audio/audioVideoSplit';
+import MediaToolQuoteBadge from '../MediaToolQuoteBadge';
 import styles from './index.module.css';
 
 interface VideoAudioSplitDialogProps {
@@ -11,6 +13,7 @@ interface VideoAudioSplitDialogProps {
   onFormatChange: (format: AudioVideoSplitFormat) => void;
   onSend: () => void;
   submitting?: boolean;
+  quoteInput?: MediaToolQuoteInput | null;
   sendBarAnchor: FollowDialogAnchor | null;
   dragHidden?: boolean;
 }
@@ -21,6 +24,7 @@ export default function VideoAudioSplitDialog({
   onFormatChange,
   onSend,
   submitting,
+  quoteInput,
   sendBarAnchor, dragHidden,
 }: VideoAudioSplitDialogProps) {
   const readOnly = submitting === true;
@@ -94,7 +98,11 @@ export default function VideoAudioSplitDialog({
           </div>
         )}
       </div>
-      <span className={styles.freeHint}>本期免费</span>
+      <MediaToolQuoteBadge
+        toolType="media_extract"
+        input={quoteInput}
+        testId="media-extract-quote"
+      />
       <button
         type="button"
         className={`${styles.sendBtn} ${!readOnly ? styles.sendBtnActive : ''}`}

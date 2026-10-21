@@ -1,9 +1,11 @@
 import { SMART_MATTING_BACKGROUND_COLOR_LABELS, SMART_MATTING_FORMAT_LABELS, SMART_MATTING_MODE_LABELS } from '@/custom/enums';
 import { useRef, useState } from 'react';
-import { ArrowUp, ChevronDown, X, Zap } from 'lucide-react';
+import { ArrowUp, ChevronDown, X } from 'lucide-react';
+import type { MediaToolQuoteInput } from '@/custom/api/mediaToolQuote';
 import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../agent/followDialog';
 import { useDismissOnOutside } from '../../hooks/shared/useDismissOnOutside';
 import { SMART_MATTING_BACKGROUND_COLORS, SMART_MATTING_FORMATS, type SmartMattingBackgroundColor, type SmartMattingFormat, type SmartMattingMode } from '../../tools/image/smartMatting';
+import MediaToolQuoteBadge from '../MediaToolQuoteBadge';
 import styles from './index.module.css';
 
 interface SmartMattingDialogProps {
@@ -15,6 +17,7 @@ interface SmartMattingDialogProps {
   onBackgroundColorChange: (color: SmartMattingBackgroundColor) => void;
   onSend: () => void;
   submitting?: boolean;
+  quoteInput?: MediaToolQuoteInput | null;
   sendBarAnchor: FollowDialogAnchor | null;
   dragHidden?: boolean;
 }
@@ -28,6 +31,7 @@ export default function SmartMattingDialog({
   onBackgroundColorChange,
   onSend,
   submitting,
+  quoteInput,
   sendBarAnchor, dragHidden,
 }: SmartMattingDialogProps) {
   const readOnly = submitting === true;
@@ -128,10 +132,11 @@ export default function SmartMattingDialog({
           ))}
         </div>
       )}
-      <span className={styles.freeBadge} title="本期免费" data-testid="smart-matting-free-badge">
-        <Zap size={12} strokeWidth={2} />
-        <span>0</span>
-      </span>
+      <MediaToolQuoteBadge
+        toolType="video_matting"
+        input={quoteInput}
+        testId="smart-matting-quote"
+      />
       <button
         type="button"
         className={`${styles.sendBtn} ${!readOnly ? styles.sendBtnActive : ''}`}

@@ -1,6 +1,7 @@
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
-import { ArrowUp, X, Zap } from 'lucide-react';
+import { ArrowUp, X } from 'lucide-react';
 import DragSlider from '@/custom/components/DragSlider';
+import type { MediaToolQuoteInput } from '@/custom/api/mediaToolQuote';
 import {
   AUDIO_SPEED_MAX_SPEED,
   AUDIO_SPEED_MIN_SPEED,
@@ -13,6 +14,7 @@ import {
 } from '@lib/contracts/audio-speed';
 import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../agent/followDialog';
 import { audioSpeedLabel } from '../../tools/audio/audioSpeed';
+import MediaToolQuoteBadge from '../MediaToolQuoteBadge';
 import styles from './index.module.css';
 
 interface AudioSpeedBarProps {
@@ -21,6 +23,7 @@ interface AudioSpeedBarProps {
   onSpeedChange: (speed: number) => void;
   onSend: () => void;
   submitting?: boolean;
+  quoteInput?: MediaToolQuoteInput | null;
   anchor: FollowDialogAnchor | null;
   dragHidden?: boolean;
 }
@@ -39,6 +42,7 @@ export default function AudioSpeedBar({
   onSpeedChange,
   onSend,
   submitting,
+  quoteInput,
   anchor, dragHidden,
 }: AudioSpeedBarProps) {
   const readOnly = submitting === true;
@@ -122,10 +126,11 @@ export default function AudioSpeedBar({
         {audioSpeedLabel(speed)}
       </span>
       {}
-      <span className={styles.free} title="本期免费" data-testid="audio-speed-free">
-        <Zap size={11} fill="currentColor" strokeWidth={0} />
-        0
-      </span>
+      <MediaToolQuoteBadge
+        toolType="audio_speed"
+        input={quoteInput}
+        testId="audio-speed-quote"
+      />
       <button
         type="button"
         className={`${styles.sendBtn} ${canSend ? styles.sendBtnActive : ''}`}

@@ -10,6 +10,7 @@ import {
 import { freezeImageEnhanceParams, imageEnhanceTierAvailability, pickImageEnhanceTier, type ImageEnhancePanelParams } from '../../tools/image/imageEnhance';
 import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../agent/followDialog';
 import ProviderModelSelect from './ProviderModelSelect';
+import MediaToolQuoteBadge from '../MediaToolQuoteBadge';
 import styles from './index.module.css';
 
 interface ImageEnhanceDialogProps {
@@ -184,7 +185,12 @@ export default function ImageEnhanceDialog({
         {allTiersDisabled && <div role="alert" className={styles.allDisabledHint}>{allDisabledReason}</div>}
 
         <div className={styles.bottomBar}>
-          <span className={styles.freeHint}>本期免费</span>
+          <MediaToolQuoteBadge
+            toolType="image_enhance"
+            input={{ multiple: Number(multiple) }}
+            variant="hint"
+            testId="image-enhance-quote"
+          />
           <button
             type="button"
             className={`${styles.sendBtn} ${canSend ? styles.sendBtnActive : ''}`}

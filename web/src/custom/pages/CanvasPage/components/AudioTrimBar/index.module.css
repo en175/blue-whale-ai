@@ -121,17 +121,6 @@
   background-color: var(--color-accent-primary);
 }
 
-.free {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  font-size: var(--font-size-xs);
-  color: var(--color-text-secondary);
-  background-color: var(--color-bg-hover);
-  border-radius: var(--radius-sm);
-  padding: 4px 7px;
-}
-
 .sendBtn {
   width: 30px;
   height: 30px;

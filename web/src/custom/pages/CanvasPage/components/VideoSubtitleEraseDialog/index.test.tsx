@@ -67,7 +67,6 @@ describe('IKH3OU 单条两形态', () => {
     renderDialog({ mode: 'smart' });
     expect(btn('subtitle-erase-close')).toBeTruthy();
     expect(btn('subtitle-erase-title').textContent).toBe('智能擦除');
-    expect(btn('subtitle-erase-free-badge')).toBeTruthy();
     expect(btn('subtitle-erase-send-btn')).toBeTruthy();
     for (const id of ['subtitle-erase-help', 'subtitle-erase-tool-box', 'subtitle-erase-undo', 'subtitle-erase-redo', 'subtitle-erase-reset']) {
       expect(has(id), id).toBe(false);
@@ -89,7 +88,6 @@ describe('IKH3OU 单条两形态', () => {
       'subtitle-erase-undo',
       'subtitle-erase-redo',
       'subtitle-erase-reset',
-      'subtitle-erase-free-badge',
       'subtitle-erase-send-btn',
     ]);
   });
@@ -110,15 +108,6 @@ describe('IKH3OU 单条两形态', () => {
     expect(container!.querySelectorAll('[data-gen-panel-territory]').length).toBe(1);
     expect(sendBar().hasAttribute('data-gen-panel-territory')).toBe(true);
     expect(container!.textContent).not.toContain('全画面文字');
-  });
-
-  it('⚡0 徽标取代「本期免费」文字（免费语义转 title）；「输出最高 1080P」不再作条内文字', () => {
-    renderDialog({ mode: 'smart' });
-    const badge = sendBar().querySelector('[data-testid="subtitle-erase-free-badge"]')!;
-    expect(badge.textContent).toBe('0');
-    expect(badge.getAttribute('title')).toBe('本期免费');
-    expect(sendBar().textContent).not.toContain('本期免费');
-    expect(sendBar().textContent).not.toContain('输出最高 1080P');
   });
 
   it('发送钮 title 两模式各表发送语义且都含「输出最高 1080P」', () => {

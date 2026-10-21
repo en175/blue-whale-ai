@@ -281,7 +281,6 @@ describe('IKH3OU 两模式入会话与单条形态', () => {
     await enterErase('smart');
     expect(title()).toBe('智能擦除');
     expect(bodyBtn('subtitle-erase-close')).toBeTruthy();
-    expect(bodyBtn('subtitle-erase-free-badge')).toBeTruthy();
     expect(bodyBtn('subtitle-erase-send-btn')).toBeTruthy();
     for (const id of ['subtitle-erase-help', 'subtitle-erase-tool-box', 'subtitle-erase-undo', 'subtitle-erase-redo', 'subtitle-erase-reset']) {
       expect(hasBody(id), id).toBe(false);
@@ -295,7 +294,7 @@ describe('IKH3OU 两模式入会话与单条形态', () => {
     await renderPage();
     await enterErase('box');
     expect(title()).toBe('框选擦除');
-    for (const id of ['subtitle-erase-close', 'subtitle-erase-help', 'subtitle-erase-tool-box', 'subtitle-erase-undo', 'subtitle-erase-redo', 'subtitle-erase-reset', 'subtitle-erase-free-badge', 'subtitle-erase-send-btn']) {
+    for (const id of ['subtitle-erase-close', 'subtitle-erase-help', 'subtitle-erase-tool-box', 'subtitle-erase-undo', 'subtitle-erase-redo', 'subtitle-erase-reset', 'subtitle-erase-send-btn']) {
       expect(bodyBtn(id), id).toBeTruthy();
     }
     expect(editing()).toBeTruthy();

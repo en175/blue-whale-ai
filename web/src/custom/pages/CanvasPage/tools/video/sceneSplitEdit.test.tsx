@@ -295,7 +295,6 @@ describe('IKH8BR 编辑态呈现（进入不建任务）', () => {
     expect(bodyBtn('scene-split-granularity-fine')).toBeTruthy();
     expect(bodyBtn('scene-split-granularity-standard').getAttribute('aria-checked')).toBe('true');
     expect(bodyBtn('scene-split-granularity-coarse')).toBeTruthy();
-    expect(bodyBtn('scene-split-free-badge').textContent).toBe('0');
     expect(bodyBtn('scene-split-send-btn')).toBeTruthy();
     const bar = sendBar()!;
     const el = (testId: string) => bar.querySelector(`[data-testid="${testId}"]`)!;
@@ -303,8 +302,6 @@ describe('IKH8BR 编辑态呈现（进入不建任务）', () => {
       !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
     expect(before(el('scene-split-close'), el('scene-split-title'))).toBe(true);
     expect(before(el('scene-split-title'), el('scene-split-granularity-standard'))).toBe(true);
-    expect(before(el('scene-split-granularity-standard'), el('scene-split-free-badge'))).toBe(true);
-    expect(before(el('scene-split-free-badge'), el('scene-split-send-btn'))).toBe(true);
     expect(v1Data().splitEditing).toBe(true);
     expect(v1Data().soloToolbarHidden).toBe(true);
     expect(apiMocks.createVideoSceneSplit).not.toHaveBeenCalled();

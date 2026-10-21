@@ -1,8 +1,10 @@
-import { ArrowUp, ChevronDown, X, Zap } from 'lucide-react';
+import { ArrowUp, ChevronDown, X } from 'lucide-react';
 import DropdownMenu from '@/custom/components/DropdownMenu';
+import type { MediaToolQuoteInput } from '@/custom/api/mediaToolQuote';
 import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../agent/followDialog';
 import { AUDIO_TRIM_FORMATS, type AudioTrimFormat } from '../../tools/audio/audioTrim';
 import { audioTrimRangeLabel } from '../../tools/audio/audioTrimGeometry';
+import MediaToolQuoteBadge from '../MediaToolQuoteBadge';
 import styles from './index.module.css';
 
 interface AudioTrimBarProps {
@@ -13,6 +15,7 @@ interface AudioTrimBarProps {
   onFormatChange: (format: AudioTrimFormat) => void;
   onSend: () => void;
   submitting?: boolean;
+  quoteInput?: MediaToolQuoteInput | null;
   anchor: FollowDialogAnchor | null;
   dragHidden?: boolean;
 }
@@ -25,6 +28,7 @@ export default function AudioTrimBar({
   onFormatChange,
   onSend,
   submitting,
+  quoteInput,
   anchor, dragHidden,
 }: AudioTrimBarProps) {
   const readOnly = submitting === true;
@@ -83,10 +87,11 @@ export default function AudioTrimBar({
         }))}
       />
       {}
-      <span className={styles.free} title="本期免费" data-testid="audio-trim-free">
-        <Zap size={11} fill="currentColor" strokeWidth={0} />
-        0
-      </span>
+      <MediaToolQuoteBadge
+        toolType="audio_trim"
+        input={quoteInput}
+        testId="audio-trim-quote"
+      />
       <button
         type="button"
         className={`${styles.sendBtn} ${!readOnly ? styles.sendBtnActive : ''}`}

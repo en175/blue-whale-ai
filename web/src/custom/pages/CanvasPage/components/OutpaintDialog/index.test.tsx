@@ -61,12 +61,12 @@ afterEach(() => {
 });
 
 describe('工具栏骨架渲染', () => {
-  it('横条清单：关闭 X / 比例触发钮 / 1张 / 本期免费 / 发送钮；默认（零扩展）触发钮文案为原图比例', () => {
+  it('横条清单：关闭 X / 比例触发钮 / 1张 / 报价位 / 发送钮；默认（零扩展）触发钮文案为原图比例', () => {
     renderPanel({ expands: ZERO });
     expect(btn('outpaint-close')).toBeTruthy();
     expect(btn('outpaint-ratio-trigger').textContent).toBe('原图比例');
     expect(btn('outpaint-count').textContent).toBe('1张');
-    expect(container!.textContent).toContain('本期免费');
+    expect(container!.textContent).not.toContain('本期免费');
     expect(btn('outpaint-send-btn')).toBeTruthy();
     expect(container!.querySelector('[data-testid="outpaint-ratio-menu"]')).toBeNull();
   });
@@ -128,10 +128,9 @@ describe('字段矩阵（张数 / 免费文案 / 发送钮）', () => {
     expect(container!.textContent).not.toContain('4张');
   });
 
-  it('「本期免费」文案在工具栏；不渲染积分预估 / 分辨率 / 画质档位 / 提示词 / 参考栏', () => {
+  it('「报价位」区域在工具栏；不渲染分辨率 / 画质档位 / 提示词 / 参考栏', () => {
     renderPanel();
-    expect(container!.textContent).toContain('本期免费');
-    expect(container!.textContent).not.toContain('积分');
+    expect(container!.textContent).not.toContain('本期免费');
     expect(container!.textContent).not.toContain('分辨率');
     expect(container!.textContent).not.toContain('画质');
     expect(container!.querySelector('textarea')).toBeNull();

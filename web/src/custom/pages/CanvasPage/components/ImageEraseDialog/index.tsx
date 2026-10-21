@@ -2,6 +2,7 @@ import { Brush, Eraser, Square, TypeOutline, Undo2, Redo2, X, ArrowUp } from 'lu
 import DragSlider from '@/custom/components/DragSlider';
 import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../agent/followDialog';
 import type { MaskCoordinateSpace } from '../../tools/image/eraseMask';
+import MediaToolQuoteBadge from '../MediaToolQuoteBadge';
 import styles from './index.module.css';
 import { type EraseTool } from '@/custom/enums';
 
@@ -167,7 +168,12 @@ export default function ImageEraseDialog({
         data-gen-panel-territory
         data-testid="erase-send-bar"
       >
-        <span className={styles.freeHint}>本期免费</span>
+        <MediaToolQuoteBadge
+          toolType="image_erase"
+          input={{}}
+          variant="hint"
+          testId="image-erase-quote"
+        />
         <span className={styles.sendHint}>涂抹或框选区域后发送{readOnly ? '…' : ''}</span>
         <button
           type="button"

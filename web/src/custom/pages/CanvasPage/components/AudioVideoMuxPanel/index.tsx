@@ -1,13 +1,15 @@
 import { type AudioVideoMuxSync, AUDIO_VIDEO_MUX_RESERVE_OPTIONS, AUDIO_VIDEO_MUX_SYNC_OPTIONS } from '@/custom/enums';
 import { useEffect, useRef, useState } from 'react';
 import { useInfiniteQuery } from '@tanstack/react-query';
-import { ArrowUp, Film, Video, X, Zap } from 'lucide-react';
+import { ArrowUp, Film, Video, X } from 'lucide-react';
 import { assetPageQueryOptions } from '@/custom/api/assets';
+import type { MediaToolQuoteInput } from '@/custom/api/mediaToolQuote';
 import { resolveMediaSrc } from '@/shared/utils/remoteImageCors';
 import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../agent/followDialog';
 import { useDismissOnOutside } from '../../hooks/shared/useDismissOnOutside';
 import { AUDIO_VIDEO_MUX_TITLE, type AudioVideoMuxBoundVideo, type AudioVideoMuxIdentity } from '../../tools/audio/audioVideoMux';
 import Empty from '@/custom/components/Empty';
+import MediaToolQuoteBadge from '../MediaToolQuoteBadge';
 import styles from './index.module.css';
 
 interface AudioVideoMuxPanelProps {
@@ -19,6 +21,7 @@ interface AudioVideoMuxPanelProps {
   onUnbind: () => void;
   wireBinding: boolean;
   onSend: () => void;
+  quoteInput?: MediaToolQuoteInput | null;
   followAnchor: FollowDialogAnchor | null;
   dragHidden?: boolean;
 }
@@ -89,6 +92,7 @@ export default function AudioVideoMuxPanel({
   onUnbind,
   wireBinding,
   onSend,
+  quoteInput,
   followAnchor, dragHidden,
 }: AudioVideoMuxPanelProps) {
   const [libraryOpen, setLibraryOpen] = useState(false);
@@ -223,9 +227,12 @@ export default function AudioVideoMuxPanel({
         </div>
 
         <div className={styles.bottomBar}>
-          <span className={styles.freeHint} title="本期免费" data-testid="audio-video-mux-free">
-            <Zap size={11} fill="currentColor" strokeWidth={0} />0 本期免费
-          </span>
+          <MediaToolQuoteBadge
+            toolType="audio_video_mux"
+            input={quoteInput}
+            variant="hint"
+            testId="audio-video-mux-quote"
+          />
           {!canSend && <span className={styles.sendHint}>先选择视频</span>}
           <button
             type="button"

@@ -58,7 +58,6 @@ describe('五要素呈现', () => {
     const sendBar = container!.querySelector('[data-testid="audio-trim-send-bar"]')!;
     expect(sendBar.textContent).toContain('截取');
     expect(container!.querySelector('[data-testid="audio-trim-range"]')!.textContent).toBe('00:00 - 00:15');
-    expect(container!.querySelector('[data-testid="audio-trim-free"]')!.getAttribute('title')).toBe('本期免费');
     expect(btn('audio-trim-send-btn')).toBeTruthy();
     expect(sendBar.textContent).not.toContain('输出');
     expect(sendBar.textContent).not.toContain('格式说明');

@@ -288,7 +288,7 @@ describe('IKGXMT 进入抠图会话', () => {
     expect(toolbar()).toBeTruthy();
     expect(bodyBtn('cutout-scene-trigger').textContent).toContain('通用');
     expect(bodyBtn('cutout-send-btn')).toBeTruthy();
-    expect(toolbar()!.textContent).toContain('本期免费');
+    expect(toolbar()!.textContent).not.toContain('本期免费');
     expect(document.body.querySelector('[data-testid="cutout-contour-trigger"]')).toBeNull();
     expect(document.body.querySelector('[data-testid="cutout-crop-toggle"]')).toBeNull();
     expect((flowProps.current.mediaNodes as Node[]).filter((n) => n.type === 'mediaNode').length).toBe(1);

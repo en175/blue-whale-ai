@@ -1,7 +1,9 @@
 import { SCENE_SPLIT_GRANULARITY_LABELS } from '@/custom/enums';
-import { ArrowUp, X, Zap } from 'lucide-react';
+import { ArrowUp, X } from 'lucide-react';
+import type { MediaToolQuoteInput } from '@/custom/api/mediaToolQuote';
 import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../agent/followDialog';
 import { SCENE_SPLIT_GRANULARITIES, type SceneSplitGranularity } from '../../tools/video/sceneSplit';
+import MediaToolQuoteBadge from '../MediaToolQuoteBadge';
 import styles from './index.module.css';
 
 interface SceneSplitDialogProps {
@@ -10,6 +12,7 @@ interface SceneSplitDialogProps {
   onGranularityChange: (granularity: SceneSplitGranularity) => void;
   onSend: () => void;
   submitting?: boolean;
+  quoteInput?: MediaToolQuoteInput | null;
   sendBarAnchor: FollowDialogAnchor | null;
   dragHidden?: boolean;
 }
@@ -20,6 +23,7 @@ export default function SceneSplitDialog({
   onGranularityChange,
   onSend,
   submitting,
+  quoteInput,
   sendBarAnchor, dragHidden,
 }: SceneSplitDialogProps) {
   const readOnly = submitting === true;
@@ -72,10 +76,11 @@ export default function SceneSplitDialog({
           </button>
         ))}
       </div>
-      <span className={styles.freeBadge} title="本期免费" data-testid="scene-split-free-badge">
-        <Zap size={12} strokeWidth={2} />
-        <span>0</span>
-      </span>
+      <MediaToolQuoteBadge
+        toolType="video_scene_split"
+        input={quoteInput}
+        testId="scene-split-quote"
+      />
       <button
         type="button"
         className={`${styles.sendBtn} ${!readOnly ? styles.sendBtnActive : ''}`}

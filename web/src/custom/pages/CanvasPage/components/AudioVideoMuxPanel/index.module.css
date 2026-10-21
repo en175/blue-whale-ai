@@ -330,15 +330,6 @@
   gap: var(--spacing-sm);
 }
 
-.freeHint {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  font-size: 11px;
-  color: var(--color-text-tertiary);
-  user-select: none;
-}
-
 .sendHint {
   font-size: 11px;
   color: var(--color-text-tertiary);

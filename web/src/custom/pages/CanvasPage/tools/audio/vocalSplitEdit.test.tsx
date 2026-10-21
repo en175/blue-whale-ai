@@ -277,7 +277,7 @@ describe('IKHA2W 编辑态呈现（进入不建任务）', () => {
     expect(bar.querySelector('button')).toBe(close);
     expect(bodyBtn('vocal-split-scene-trigger').textContent).toBe('通用');
     expect(bodyBtn('vocal-split-format-trigger').textContent).toBe('AAC');
-    expect(bar.textContent).toContain('本期免费');
+    expect(bar.textContent).not.toContain('本期免费');
     expect(bodyBtn('vocal-split-send-btn')).toBeTruthy();
     expect(v1Data().splitEditing).toBe(true);
     expect(v1Data().soloToolbarHidden).toBe(true);

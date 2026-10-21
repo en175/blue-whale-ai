@@ -284,7 +284,6 @@ describe('IKHB7A 编辑态呈现（进入不建任务）', () => {
     expect(bodyBtn('audio-trim-close')).toBeTruthy();
     expect(document.querySelector('[data-testid="audio-trim-range"]')!.textContent).toBe('00:00 - 00:15');
     expect(bodyBtn('audio-trim-format-trigger').textContent).toBe('mp3');
-    expect(document.querySelector('[data-testid="audio-trim-free"]')!.getAttribute('title')).toBe('本期免费');
     expect(bodyBtn('audio-trim-send-btn')).toBeTruthy();
     expect(apiMocks.createAudioTrim).not.toHaveBeenCalled();
     expect((flowProps.current.mediaNodes as Node[]).length).toBe(2);

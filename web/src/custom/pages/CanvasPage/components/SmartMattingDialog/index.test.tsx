@@ -84,13 +84,6 @@ describe('单条呈现', () => {
     renderDialog({ mode: 'greenscreen' });
     expect(container!.querySelector('[data-testid="smart-matting-title"]')!.textContent).toBe('绿幕抠像');
   });
-
-  it('⚡0 免费徽标齐备（本期免费 title）', () => {
-    renderDialog();
-    const badge = container!.querySelector('[data-testid="smart-matting-free-badge"]')!;
-    expect(badge.textContent).toBe('0');
-    expect(badge.getAttribute('title')).toBe('本期免费');
-  });
 });
 
 describe('输出格式下拉（两档无 MOV）', () => {

@@ -182,13 +182,6 @@
   user-select: none;
 }
 
-.freeHint {
-  font-size: 11px;
-  color: var(--color-text-tertiary);
-  user-select: none;
-  white-space: nowrap;
-}
-
 .sendBtn {
   width: 32px;
   height: 32px;

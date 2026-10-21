@@ -4,6 +4,7 @@ import { X, ArrowUp } from 'lucide-react';
 import { VIDEO_ENHANCE_RESOLUTIONS, type VideoEnhanceResolution } from '@lib/contracts/video-enhance';
 
 import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../agent/followDialog';
+import MediaToolQuoteBadge from '../MediaToolQuoteBadge';
 import styles from './index.module.css';
 
 interface VideoEnhanceDialogProps {
@@ -11,6 +12,7 @@ interface VideoEnhanceDialogProps {
   onSend: (resolution: VideoEnhanceResolution) => boolean | Promise<boolean>;
   onParamsChange: (resolution: VideoEnhanceResolution) => void;
   initialResolution?: VideoEnhanceResolution | null;
+  quoteDuration?: number | null;
   generating?: boolean;
   submitting?: boolean;
   followAnchor?: FollowDialogAnchor | null;
@@ -22,6 +24,7 @@ export default function VideoEnhanceDialog({
   onSend,
   onParamsChange,
   initialResolution,
+  quoteDuration,
   generating,
   submitting,
   followAnchor, dragHidden,
@@ -86,7 +89,16 @@ export default function VideoEnhanceDialog({
         </div>
 
         <div className={styles.bottomBar}>
-          <span className={styles.freeHint}>本期免费</span>
+          <MediaToolQuoteBadge
+            toolType="video_enhance"
+            input={
+              quoteDuration
+                ? { duration: Math.round(quoteDuration), resolution }
+                : null
+            }
+            variant="hint"
+            testId="video-enhance-quote"
+          />
           <button
             type="button"
             className={`${styles.sendBtn} ${canSend ? styles.sendBtnActive : ''}`}

@@ -2,6 +2,8 @@ import { beforeEach, onTestFinished, vi } from 'vitest';
 
 type FetchRoute = readonly [method: string, path: string];
 
+const MEDIA_TOOL_QUOTE_PATH = /^\/api\/media-tools\/[a-z0-9_]+\/quote$/;
+
 export function createFetchGuard() {
   let handler: typeof fetch | undefined;
   let routes: readonly FetchRoute[] = [];
@@ -10,6 +12,13 @@ export function createFetchGuard() {
     const request = typeof input === 'object' && 'url' in input ? input : undefined;
     const url = request ? request.url : String(input);
     const method = (init?.method ?? request?.method ?? 'GET').toUpperCase();
+    const path = url.split('?')[0];
+    if (method === 'POST' && MEDIA_TOOL_QUOTE_PATH.test(path)) {
+      return new Response(
+        JSON.stringify({ code: 200, data: { credits: null, quote_revision: null } }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    }
     if (handler && routes.some(([allowedMethod, path]) => allowedMethod === method && path === url.split('?')[0])) {
       return handler(input, init);
     }

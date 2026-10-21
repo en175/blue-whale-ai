@@ -300,7 +300,7 @@ describe('IKGOTB 编辑态工具与遮罩编辑', () => {
     for (const id of ['erase-clear-text', 'erase-tool-brush', 'erase-tool-rect', 'erase-tool-eraser', 'erase-brush-size', 'erase-undo', 'erase-redo', 'erase-close']) {
       expect(bodyBtn(id), id).toBeTruthy();
     }
-    expect(document.body.querySelector('[data-testid="erase-send-bar"]')!.textContent).toContain('本期免费');
+    expect(document.body.querySelector('[data-testid="erase-send-bar"]')!.textContent).not.toContain('本期免费');
     expect(bodyBtn('erase-send-btn')).toBeTruthy();
   });
 
