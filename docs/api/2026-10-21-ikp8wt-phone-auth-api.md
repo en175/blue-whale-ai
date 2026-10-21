@@ -8,7 +8,7 @@
 
 ## 0. 本次后端改了什么（给前端的一句话）
 
-手机号验证码登录成为唯一 C 端登录方式：发码要带用途与滑块、登录要带协议勾选和浏览器标识；会话改成固定 7 天、每账号最多 3 个浏览器；`/api/me` 多返回一个昵称；所有业务失败多返回机器可读的 `error_code`。
+手机号验证码登录成为唯一 C 端登录方式：发码要带用途与图形验证码、登录要带协议勾选和浏览器标识；会话改成固定 7 天、每账号最多 3 个浏览器；`/api/me` 多返回一个昵称；所有业务失败多返回机器可读的 `error_code`。
 
 前端需要改的只有四处：
 
@@ -91,11 +91,11 @@
 |---|---|---|
 | `login` | 手机号登录 | ✅ IKPC9D |
 | `bind` | 首次补绑手机号 | ✅ IKPC9D（页面入口在 IKPC9F） |
-| `rebind_old` | 换绑：验证原手机号 | 契约预留，IKPC9E 启用 |
-| `rebind_new` | 换绑：验证新手机号 | 契约预留，IKPC9E 启用 |
-| `recovery` | 恢复查询授权 | 契约预留，IKPC9E 启用 |
+| `rebind_old` | 换绑：验证原手机号 | ✅ IKPC9E |
+| `rebind_new` | 换绑：验证新手机号 | ✅ IKPC9E |
+| `recovery` | 恢复查询授权 | ✅ IKPC9E |
 
-成功：`{ code: 200, data: null }`。失败：手机号格式错误返回 `code: 400`、无 `error_code`（历史行为），短信渠道异常返回 `msg: "短信发送失败"`。
+成功：`{ code: 200, data: { operation_id: "op_xxx" } }`。失败：手机号格式错误返回 `code: 400`、无 `error_code`（历史行为），短信渠道异常返回 `msg: "短信发送失败"`。
 
 **过渡兼容**：不传 `purpose` 时后端按内部用途 `legacy` 发码，登录与补绑都接受这种码。它只为「后端先上线、前端尚未升级」的窗口存在；前端升级后必须显式传用途，`legacy` 会在下一轮删除。
 
@@ -166,7 +166,8 @@
     "phone": "13800001234",
     "is_new_user": true,                // 本次是否自动建号
     "has_password": false,
-    "must_change_password": false
+    "must_change_password": false,
+    "operation_id": "op_xxx"            // 本次登录操作单，用于弱网查询
   }
 }
 ```
