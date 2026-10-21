@@ -18,6 +18,7 @@ import {
   acceptDedicatedToolJobWithoutKey,
 } from "@lib/shared/media-tools/dedicated-tool-acceptance.js";
 import { MediaToolBillingService } from "@lib/shared/media-tool-pricing/media-tool-billing.service.js";
+import { muxChargeInput } from "@lib/shared/media-tool-pricing/tool-quote-input.js";
 import {
   RecoveryContractError,
   canvasBindingView,
@@ -235,16 +236,21 @@ export class AudioVideoMuxesService {
       : parsed.data.sync === "audio"
         ? audioSlot.durationMs
         : Math.max(audioSlot.durationMs, videoSlot.durationMs);
-    const durationSeconds = Math.max(1, Math.ceil(estimatedDurationMs / 1000));
-    const longSide = Math.max(videoSlot.width ?? 0, videoSlot.height ?? 0);
-    if (longSide <= 0) {
+    const charged = muxChargeInput({
+      videoMs: videoSlot.durationMs,
+      audioMs: audioSlot.durationMs,
+      sync: parsed.data.sync,
+      width: videoSlot.width,
+      height: videoSlot.height,
+    });
+    if (charged === null) {
       throw new DomainError(
         ASSET_UNAVAILABLE_CODE,
         "视频分辨率读取失败，请稍后重试或更换素材",
         503,
       );
     }
-    const resolution = longSide <= 1920 ? "1080p" : longSide <= 2560 ? "2k" : "4k";
+    const { duration: durationSeconds, resolution } = charged;
 
     const data = {
       user_id: BigInt(userId),
