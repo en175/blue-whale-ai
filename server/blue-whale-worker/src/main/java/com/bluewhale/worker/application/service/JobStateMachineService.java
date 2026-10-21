@@ -80,6 +80,7 @@ public class JobStateMachineService {
         this.finalizer = finalizer;
     }
 
+    @Transactional
     public boolean cancelAudioMixIfRequested(String jobId, String workerId, long fencingToken) {
         boolean ok = jobMapper.cancelAudioMixIfRequested(Long.parseLong(jobId), workerId, fencingToken) == 1;
         if (ok) {
@@ -88,6 +89,7 @@ public class JobStateMachineService {
         return ok;
     }
 
+    @Transactional
     public boolean cancelAudioVideoMuxIfRequested(String jobId, String workerId, long fencingToken) {
         boolean ok = jobMapper.cancelAudioVideoMuxIfRequested(Long.parseLong(jobId), workerId, fencingToken) == 1;
         if (ok) {
@@ -134,6 +136,7 @@ public class JobStateMachineService {
             long fencingToken
     ) {}
 
+    @Transactional
     public boolean cancelVideoFrameInterpolation(String jobId, String workerId,
                                                  long fencingToken, String providerTaskId) {
         Long jobIdLong = Long.parseLong(jobId);

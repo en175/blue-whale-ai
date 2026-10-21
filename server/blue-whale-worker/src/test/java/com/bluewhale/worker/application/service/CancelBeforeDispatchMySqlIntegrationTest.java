@@ -11,6 +11,7 @@ import org.apache.ibatis.session.SqlSessionFactory;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mybatis.spring.annotation.MapperScan;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
@@ -123,8 +124,9 @@ class CancelBeforeDispatchMySqlIntegrationTest {
     @BeforeEach
     void clean() {
         jdbc.execute("DROP TRIGGER IF EXISTS ikm09u_reject_outbox");
+        jdbc.execute("DROP TRIGGER IF EXISTS ikp602_reject_project_event");
         for (String table : List.of("generation_outbox", "project_events", "generation_job_logs",
-                "generation_output_slots", "generation_jobs")) {
+                "generation_output_slots", "generation_jobs", "project")) {
             jdbc.update("DELETE FROM " + table);
         }
         context.getBean(ControlledPublisher.class).delivered.clear();
@@ -238,7 +240,59 @@ class CancelBeforeDispatchMySqlIntegrationTest {
                 .isEqualTo(1);
     }
 
+    @Test
+    @DisplayName("音频取消：项目事件写入失败时整笔回滚，恢复后可再次取消并写入退款 outbox")
+    void audioCancelRollsBackWhenProjectEventWriteFails() {
+        seedAudioMix(900905L, "owner", 1L);
+        jdbc.execute("""
+                CREATE TRIGGER ikp602_reject_project_event BEFORE INSERT ON project_events
+                FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'IKP602 injected project event failure'
+                """);
+
+        assertThatThrownBy(() -> service.cancelAudioMixIfRequested("900905", "owner", 1L))
+                .hasStackTraceContaining("IKP602 injected project event failure");
+        assertThat(jobs.selectById(900905L).getStatus()).isEqualTo("processing");
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM generation_outbox", Integer.class)).isZero();
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM project_events", Integer.class)).isZero();
+
+        jdbc.execute("DROP TRIGGER ikp602_reject_project_event");
+        assertThat(service.cancelAudioMixIfRequested("900905", "owner", 1L)).isTrue();
+        assertThat(jobs.selectById(900905L).getStatus()).isEqualTo("cancelled");
+        assertThat(jdbc.queryForObject("""
+                SELECT COUNT(*) FROM generation_outbox WHERE job_id=900905 AND send_state='pending'
+                """, Integer.class)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM project_events", Integer.class)).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("音频取消：同项目并发取消各自写入终态事件且游标不冲突")
+    void concurrentAudioCancelsKeepDistinctProjectEventCursors() throws Exception {
+        seedAudioMix(900906L, "owner", 1L);
+        seedAudioMix(900907L, "owner", 1L);
+        CountDownLatch start = new CountDownLatch(1);
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            var futures = java.util.stream.Stream.of("900906", "900907").map(jobId -> executor.submit(() -> {
+                start.await();
+                return service.cancelAudioMixIfRequested(jobId, "owner", 1L);
+            })).toList();
+            start.countDown();
+            for (var future : futures) {
+                assertThat(future.get(10, TimeUnit.SECONDS)).isTrue();
+            }
+        }
+        assertThat(jobs.selectById(900906L).getStatus()).isEqualTo("cancelled");
+        assertThat(jobs.selectById(900907L).getStatus()).isEqualTo("cancelled");
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM generation_outbox", Integer.class)).isEqualTo(2);
+        assertThat(jdbc.queryForObject("SELECT COUNT(DISTINCT `cursor`) FROM project_events", Integer.class))
+                .isEqualTo(2);
+    }
+
+    private void seedProject() {
+        jdbc.update("INSERT IGNORE INTO project(id,owner_id,name) VALUES (99,9009,'test')");
+    }
+
     private void seed(long jobId) {
+        seedProject();
         jdbc.update("""
                 INSERT INTO generation_jobs(id,user_id,project_id,type,source,status,cancel_requested_at,input)
                 VALUES (?,9009,99,'image','bottom_dock','queued',NOW(),'{}')
@@ -247,5 +301,15 @@ class CancelBeforeDispatchMySqlIntegrationTest {
                 INSERT INTO generation_output_slots(generation_job_id,project_id,slot_index,status)
                 VALUES (?,99,0,'pending')
                 """, jobId);
+    }
+
+    private void seedAudioMix(long jobId, String owner, long fencingToken) {
+        seedProject();
+        jdbc.update("""
+                INSERT INTO generation_jobs(id,user_id,project_id,type,source,status,cancel_requested_at,
+                    lease_owner,lease_expires_at,fencing_token,input)
+                VALUES (?,9009,99,'audio_mix','dock','processing',NOW(),?,
+                    DATE_ADD(NOW(), INTERVAL 1 MINUTE),?,'{}')
+                """, jobId, owner, fencingToken);
     }
 }
