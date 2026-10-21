@@ -90,9 +90,92 @@ class ImplementSpecChildMergeTest(unittest.TestCase):
         path.chmod(0o600)
         return path
 
-    def cleanup(self, snapshot, env=None):
-        return run(sys.executable, CLEANUP_SCRIPT, "--pr-snapshot", snapshot, "--json",
+    def cleanup(self, snapshot, env=None, equivalent=None):
+        extra = ["--equivalent-commit", equivalent] if equivalent else []
+        return run(sys.executable, CLEANUP_SCRIPT, "--pr-snapshot", snapshot, "--json", *extra,
                    cwd=self.child_one, check=False, env=env)
+
+    def equivalent_child(self):
+        inherited = self.commit(self.integration, "shared.txt", "context\nold\nend\n")
+        self.git(self.child_one, "merge", "--ff-only", inherited)
+        metadata_path = Path(self.git(self.child_one, "rev-parse", "--absolute-git-dir")) / "blue-whale" / "task-base.json"
+        data = json.loads(metadata_path.read_text())
+        data["inherited_sha"] = inherited
+        metadata_path.write_text(json.dumps(data))
+        self.commit(self.child_one, "shared.txt", "context\nnew\nend\n")
+        self.commit(self.integration, "shared.txt", "context\nold\nsafety\n")
+        equivalent = self.commit(self.integration, "shared.txt", "context\nnew\nsafety\n")
+        self.git(self.integration, "push", "origin", INTEGRATION)
+        return equivalent
+
+    def test_cleanup_accepts_exact_equivalent_with_changed_context_after_merge(self):
+        equivalent = self.equivalent_child()
+        snapshot = self.merged_snapshot_without_source(equivalent)
+        stopped = self.cleanup(snapshot)
+        self.assertNotEqual(stopped.returncode, 0)
+        result = self.cleanup(snapshot, equivalent=equivalent)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertFalse(self.child_one.exists())
+        self.assertNotEqual(run("git", "show-ref", "--verify", f"refs/heads/{CHILD_ONE}",
+                                cwd=self.main, check=False).returncode, 0)
+        self.assertEqual((self.main / "shared.txt").read_text(), "context\nnew\nsafety\n")
+
+    def test_cleanup_equivalent_rejects_different_or_shifted_patch(self):
+        equivalent = self.equivalent_child()
+        wrong = self.commit(self.integration, "shared.txt", "context\nwrong\nsafety\n")
+        shifted = self.commit(self.integration, "shared.txt", "context\nwrong\nnew\n")
+        self.git(self.integration, "push", "origin", INTEGRATION)
+        snapshot = self.merged_snapshot_without_source(shifted)
+        for candidate in (wrong, shifted, equivalent[:8]):
+            with self.subTest(candidate=candidate):
+                result = self.cleanup(snapshot, equivalent=candidate)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertTrue(self.child_one.exists())
+
+    def test_cleanup_equivalent_rejects_additional_child_work(self):
+        equivalent = self.equivalent_child()
+        self.commit(self.child_one, "extra.txt", "not delivered\n")
+        result = self.cleanup(self.merged_snapshot_without_source(equivalent), equivalent=equivalent)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertTrue((self.child_one / "extra.txt").exists())
+
+    def test_cleanup_equivalent_preserves_dirty_child_and_checks_full_tree(self):
+        equivalent = self.equivalent_child()
+        snapshot = self.merged_snapshot_without_source(equivalent)
+        unsaved = self.child_one / "unsaved.txt"
+        unsaved.write_text("preserve\n")
+        result = self.cleanup(snapshot, equivalent=equivalent)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("工作区不干净", result.stdout)
+        self.assertEqual(unsaved.read_text(), "preserve\n")
+        unsaved.unlink()
+        fake_bin = self.root / "fake-proof-git"
+        fake_bin.mkdir()
+        fake_git = fake_bin / "git"
+        fake_git.write_text(
+            '#!/bin/sh\ncase "$*" in *"write-tree"*) printf "%040d\\n" 0; exit 0;; esac\n'
+            'exec "$REAL_GIT" "$@"\n'
+        )
+        fake_git.chmod(0o755)
+        env = {**os.environ, "PATH": str(fake_bin) + os.pathsep + os.environ["PATH"],
+               "REAL_GIT": shutil.which("git")}
+        result = self.cleanup(snapshot, equivalent=equivalent, env=env)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("完整文件树不一致", result.stdout)
+        self.assertTrue(self.child_one.exists())
+
+    def test_cleanup_equivalent_rejects_commit_only_in_later_release(self):
+        equivalent = self.equivalent_child()
+        self.git(self.integration, "reset", "--soft", "HEAD^")
+        self.git(self.integration, "restore", "--staged", ".")
+        self.git(self.integration, "restore", "shared.txt")
+        source_head = self.git(self.integration, "rev-parse", "HEAD")
+        self.git(self.main, "switch", "release/test")
+        self.git(self.main, "merge", "--no-ff", "--no-edit", equivalent)
+        snapshot = self.merged_snapshot_without_source(source_head)
+        result = self.cleanup(snapshot, equivalent=equivalent)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertTrue(self.child_one.exists())
 
     def merged_release_start(self):
         self.git(self.main, "switch", "-c", "release-side")

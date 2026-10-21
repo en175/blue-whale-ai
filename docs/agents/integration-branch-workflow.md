@@ -127,7 +127,7 @@ python3 scripts/cleanup-implement-spec-child.py --pr-snapshot - --json
 
 将规范化快照通过标准输入传入，或继续使用 JSON 文件路径。入口核对远端 PR 源已包含该子任务的工作。普通快进路径要求子任务 HEAD 是远端 PR 源 HEAD 的祖先；集成分支合回后因发布线前进而 rebase 的，须先更新同一 PR、完成 Gitee 回读与同步事务 finalize，清理入口核对旧子提交、每次同步保留的原提交及合并文件树证明；已发布 PR 经 linearize 后，清理入口核对旧子提交属于改写前历史、改写前后文件树相同、新线性提交是远端 PR 源 HEAD 的祖先。入口删除前复核远端核验分支 HEAD 未变化；任一证明断链时保留该子 worktree。报告删除了哪些子 worktree、保留了哪些及原因。
 
-PR 已合并后也使用同一入口。入口从远端目标 release 确认快照中的 PR 源 HEAD 已合入，再检查子任务提交或保留的同步、线性化证明；不要求源分支或集成 worktree 仍存在。子任务 HEAD 若等于同步证明的原源 HEAD，可直接进入该证明的引用、文件树和远端回读校验。删除前复核远端目标 release 未变化。仅出现在后续 release 提交中的子任务改动，不能作为该 PR 的清理依据。
+PR 已合并后也使用同一入口。入口从远端目标 release 确认快照中的 PR 源 HEAD 已合入，再检查子任务提交或保留的同步、线性化证明；不要求源分支或集成 worktree 仍存在。子任务提交经移植进入 PR、原 SHA 已不是源 HEAD 祖先时，须显式传 `--equivalent-commit <完整 SHA>`：入口核验该提交属于 PR 源 HEAD、与子任务补丁逐字节一致，并在隔离索引中重放比对完整文件树。子任务 HEAD 若等于同步证明的原源 HEAD，可直接进入该证明的引用、文件树和远端回读校验。删除前复核远端目标 release 未变化。仅出现在后续 release 提交中的子任务改动，不能作为该 PR 的清理依据。
 
 集成 worktree 保留到 PR 合入目标 release 并核验之后（供评审期间的修订使用），再按通用入口 `scripts/cleanup-task-worktree.sh` 清理。
 

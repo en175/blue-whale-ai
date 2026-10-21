@@ -5,10 +5,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import runpy
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 from lib.task_metadata import read_task_metadata
@@ -118,7 +120,44 @@ def rebase_lineage_proves(root: Path, common_dir: Path, source_branch: str,
                    source_head, check=False).returncode == 0 for verified in proven)
 
 
-def cleanup(root: Path, snapshot_path: Path) -> dict[str, str]:
+def equivalent_commit_proves(root: Path, child: dict, child_head: str,
+                            source_head: str, equivalent: str) -> bool:
+    if not re.fullmatch(r"[0-9a-f]{40}", equivalent):
+        raise CleanupError("等价提交必须是完整 SHA，未清理。")
+    parents = output(root, "rev-list", "--parents", "-n", "1", child_head).split()
+    if len(parents) != 2 or child.get("inherited_sha") != parents[1]:
+        raise CleanupError("等价核验仅支持继承提交后的单个子任务提交，未清理。")
+    if git(root, "merge-base", "--is-ancestor", equivalent, source_head, check=False).returncode:
+        raise CleanupError("等价提交未进入该 PR 源 HEAD，未清理。")
+    target_parents = output(root, "rev-list", "--parents", "-n", "1", equivalent).split()
+    if len(target_parents) != 2:
+        raise CleanupError("等价提交必须是单父提交，未清理。")
+    patches = []
+    for parent, head in ((parents[1], child_head), (target_parents[1], equivalent)):
+        result = subprocess.run(["git", "-C", str(root), "diff", "--no-ext-diff",
+                                 "--no-textconv", "--no-renames", "--binary", "--full-index",
+                                 "--unified=0", parent, head], capture_output=True, check=True)
+        patches.append(result.stdout)
+    normalized = [b"\n".join(line for line in patch.split(b"\n")
+                              if not line.startswith(b"index ")) for patch in patches]
+    if not patches[0] or normalized[0] != normalized[1]:
+        raise CleanupError("等价提交的路径、位置或增删内容不同，未清理。")
+    with tempfile.TemporaryDirectory(prefix="child-cleanup-proof-") as directory:
+        env = {**os.environ, "GIT_INDEX_FILE": str(Path(directory) / "index")}
+        subprocess.run(["git", "-C", str(root), "read-tree", target_parents[1]],
+                       env=env, capture_output=True, check=True)
+        applied = subprocess.run(["git", "-C", str(root), "apply", "--cached", "--unidiff-zero"],
+                                 env=env, input=patches[0], capture_output=True)
+        if applied.returncode:
+            raise CleanupError("子任务补丁无法在等价提交父树精确重放，未清理。")
+        tree = subprocess.run(["git", "-C", str(root), "write-tree"], env=env,
+                              capture_output=True, text=True, check=True).stdout.strip()
+    if tree != output(root, "rev-parse", f"{equivalent}^{{tree}}"):
+        raise CleanupError("等价提交的完整文件树不一致，未清理。")
+    return True
+
+
+def cleanup(root: Path, snapshot_path: Path, equivalent: str | None = None) -> dict[str, str]:
     git_dir = Path(output(root, "rev-parse", "--absolute-git-dir")).resolve()
     common_dir = Path(output(root, "rev-parse", "--git-common-dir")).resolve()
     if git_dir == common_dir:
@@ -162,6 +201,10 @@ def cleanup(root: Path, snapshot_path: Path) -> dict[str, str]:
         raise CleanupError("PR 快照与远端源分支 HEAD 不一致，未清理。")
     direct_ancestor = git(root, "merge-base", "--is-ancestor", child_head, source_head,
                           check=False).returncode == 0
+    if equivalent is not None:
+        if not merged:
+            raise CleanupError("等价提交清理仅支持已合并 PR，未清理。")
+        direct_ancestor = equivalent_commit_proves(root, child, child_head, source_head, equivalent)
     if not direct_ancestor:
         if rebase_lineage_proves(root, common_dir, source_branch, target_branch,
                                  int(snapshot["pull_request_id"]), child_branch,
@@ -172,7 +215,9 @@ def cleanup(root: Path, snapshot_path: Path) -> dict[str, str]:
         lineage_file = common_dir / "blue-whale" / "implement-spec-lineage" / f"{slug}.json"
         lineage_ref = "refs/agent-implement-spec-lineage/" + slug
         if not lineage_file.is_file():
-            raise CleanupError("远端 PR 源分支尚未包含子任务提交，且无已核验的线性化记录，未清理。")
+            raise CleanupError("远端 PR 源分支尚未包含子任务提交，且无已核验的线性化记录，未清理。"
+                               + ("已合并 PR 的移植提交请显式传 --equivalent-commit <完整 SHA>。"
+                                  if merged else ""))
         lineage = load_record(lineage_file)
         child_heads = lineage.get("child_heads")
         if not isinstance(child_heads, dict):
@@ -217,6 +262,7 @@ def cleanup(root: Path, snapshot_path: Path) -> dict[str, str]:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--pr-snapshot", type=Path, required=True)
+    parser.add_argument("--equivalent-commit", help="已合并 PR 中与单个子任务补丁精确等价的完整提交 SHA")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
     for stream in (sys.stdout, sys.stderr):
@@ -225,9 +271,9 @@ def main() -> int:
             reconfigure(encoding="utf-8", errors="replace")
     try:
         root = Path(output(Path.cwd(), "rev-parse", "--show-toplevel")).resolve()
-        result = cleanup(root, args.pr_snapshot)
+        result = cleanup(root, args.pr_snapshot, args.equivalent_commit)
         code = 0
-    except (RuntimeError, OSError, ValueError) as exc:
+    except (RuntimeError, OSError, ValueError, subprocess.CalledProcessError) as exc:
         result = {"status": "CLEANUP_STOPPED", "detail": str(exc)}
         code = 1
     print(json.dumps(result, ensure_ascii=False, sort_keys=True))
