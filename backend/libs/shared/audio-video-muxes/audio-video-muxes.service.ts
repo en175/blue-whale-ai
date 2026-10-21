@@ -7,7 +7,11 @@ import { loadTosStorageConfig } from "@lib/shared/assets/tos-storage.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";
 import { markFailedQueuedAndNotifyBilling } from "@lib/shared/persistence/index.js";
-import { withBillingCompensation } from "@lib/shared/persistence/job-billing.js";
+import {
+  jobExistenceProbe,
+  withBillingCompensation,
+  type JobBilling,
+} from "@lib/shared/persistence/job-billing.js";
 import { resolveSourceDuration } from "@lib/shared/media-tools/source-duration.js";
 import { MediaToolBillingService } from "@lib/shared/media-tool-pricing/media-tool-billing.service.js";
 import {
@@ -46,6 +50,17 @@ export class AudioVideoMuxesService {
     private readonly storage: AssetStorageService,
     private readonly billing: MediaToolBillingService,
   ) {}
+
+  private withCompensation<T>(
+    billing: JobBilling | undefined,
+    run: (billing: JobBilling | undefined) => Promise<T>,
+  ): Promise<T> {
+    return withBillingCompensation(
+      billing,
+      run,
+      jobExistenceProbe(this.prisma.client),
+    );
+  }
 
   async create(
     userId: string,
@@ -253,7 +268,7 @@ export class AudioVideoMuxesService {
       resolution,
     });
     if (!key) {
-      const job = await withBillingCompensation(jobBilling, (billing) =>
+      const job = await this.withCompensation(jobBilling, (billing) =>
         this.prisma.client.$transaction(
           async (tx) => {
             const created = await tx.generation_jobs.create({ data });
@@ -268,7 +283,7 @@ export class AudioVideoMuxesService {
     let jobIdOfCreated = "";
     let replayed = false;
     try {
-      const result = await withBillingCompensation(jobBilling, (billing) =>
+      const result = await this.withCompensation(jobBilling, (billing) =>
         this.prisma.client.$transaction(async (tx) => {
         let plan: CanvasRecoveryPlan | null = null;
         if (canvasBinding) {
@@ -402,7 +417,7 @@ export class AudioVideoMuxesService {
       });
     };
     try {
-      const result = await withBillingCompensation(retryBilling, (billing) =>
+      const result = await this.withCompensation(retryBilling, (billing) =>
         this.prisma.client.$transaction(async (tx) => {
         let plan: CanvasRecoveryPlan | null = null;
         if (canvasBinding) {

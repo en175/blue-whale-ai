@@ -33,7 +33,11 @@ import {
   type CanvasRecoveryAcceptance,
   type CanvasRecoveryPlan,
 } from "@lib/shared/persistence/index.js";
-import { withBillingCompensation } from "@lib/shared/persistence/job-billing.js";
+import {
+  jobExistenceProbe,
+  releaseUnlessJobCommitted,
+  withBillingCompensation,
+} from "@lib/shared/persistence/job-billing.js";
 import { transactionWithUniqueRetry } from "@lib/shared/persistence/conversation-repo.js";
 import { enqueueVideoSceneSplitJob } from "@lib/shared/generation/generation-queue.js";
 import {
@@ -191,12 +195,9 @@ export class VideoSceneSplitsService {
     );
 
     let createdJobId: string | null = null;
-    let committed = false;
-    let callbackCompleted = false;
     try {
       const result = await transactionWithUniqueRetry(this.prisma.client, async (tx) => {
       createdJobId = null;
-      callbackCompleted = false;
       let recoveryPlan: CanvasRecoveryPlan | null = null;
       if (canvasBinding) {
         const acceptance: CanvasRecoveryAcceptance = {
@@ -302,12 +303,8 @@ export class VideoSceneSplitsService {
           job_id: job.id.toString(),
           status: "queued",
         });
-      }).then((result) => {
-        callbackCompleted = true;
-        return result;
+      }, jobExistenceProbe(this.prisma.client));
       });
-      });
-      committed = true;
       if (createdJobId !== null) {
         await enqueueMediaToolJob({
           prisma: this.prisma.client,
@@ -320,15 +317,12 @@ export class VideoSceneSplitsService {
       }
       return result;
     } catch (error) {
-      const failedJobId = !committed && callbackCompleted ? createdJobId : null;
-      if (failedJobId !== null) {
-        await this.billing
-          .release(
-            userId,
-            Number(failedJobId),
-            error instanceof Error ? error.message : String(error),
-          );
-      }
+      await releaseUnlessJobCommitted({
+        release: (jobId, reason) => this.billing.release(userId, jobId, reason),
+        jobId: createdJobId === null ? null : Number(createdJobId),
+        probe: jobExistenceProbe(this.prisma.client),
+        reason: error instanceof Error ? error.message : String(error),
+      });
       if (error instanceof RecoveryContractError) return error.envelope;
       throw error;
     }

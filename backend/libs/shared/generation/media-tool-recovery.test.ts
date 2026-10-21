@@ -72,10 +72,10 @@ const RECOVERY: MediaToolRecovery = {
   binding: BINDING,
 };
 
-function makePrisma(status = "queued") {
+function makePrisma(status = "queued", jobExists = true) {
   return {
     generation_jobs: {
-      findUnique: vi.fn().mockResolvedValue({ status }),
+      findUnique: vi.fn().mockResolvedValue(jobExists ? { status } : null),
     },
   } as never;
 }
@@ -357,7 +357,7 @@ describe("createMediaToolJobWithRecovery：计费补偿", () => {
   }
 
   it("扣款成功后写幂等失败 → 退款并上抛", async () => {
-    const prisma = makePrisma();
+    const prisma = makePrisma("queued", false);
     const charge = vi.fn().mockResolvedValue(undefined);
     const release = vi.fn().mockResolvedValue(undefined);
     readIdemMock.mockResolvedValue(null);
@@ -373,7 +373,7 @@ describe("createMediaToolJobWithRecovery：计费补偿", () => {
   });
 
   it("唯一键重试时先退回上一笔扣款，再按新任务扣一次", async () => {
-    const prisma = makePrisma();
+    const prisma = makePrisma("queued", false);
     const charge = vi.fn().mockResolvedValue(undefined);
     const release = vi.fn().mockResolvedValue(undefined);
     readIdemMock.mockResolvedValue(null);
@@ -395,7 +395,7 @@ describe("createMediaToolJobWithRecovery：计费补偿", () => {
   });
 
   it("事务提交失败 → 退回已扣款", async () => {
-    const prisma = makePrisma();
+    const prisma = makePrisma("queued", false);
     const charge = vi.fn().mockResolvedValue(undefined);
     const release = vi.fn().mockResolvedValue(undefined);
     readIdemMock.mockResolvedValue(null);

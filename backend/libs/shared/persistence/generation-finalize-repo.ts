@@ -1,5 +1,5 @@
 import { assertPureJobInput } from "./job-input-purity.js";
-import { withBillingCompensation, type JobBilling } from "./job-billing.js";
+import { jobExistenceProbe, withBillingCompensation, type JobBilling } from "./job-billing.js";
 import {
   SOURCE_BOTTOM_DOCK,
   VIDEO_STRATEGY_VERSION,
@@ -119,11 +119,14 @@ export async function createFinalizeJob(
       input.projectId,
       options?.idempotency,
       () =>
-        withBillingCompensation(options?.billing, (billing) =>
-          prisma.$transaction(
-            (tx) => createFinalizeJobWithinTx(tx, input, billing, options?.idempotency),
-            { maxWait: 10_000, timeout: 30_000 },
-          ),
+        withBillingCompensation(
+          options?.billing,
+          (billing) =>
+            prisma.$transaction(
+              (tx) => createFinalizeJobWithinTx(tx, input, billing, options?.idempotency),
+              { maxWait: 10_000, timeout: 30_000 },
+            ),
+          jobExistenceProbe(prisma),
         ),
       FINALIZE_GENERATION_JOB_OPERATION,
     );

@@ -423,6 +423,7 @@ describe("generation command repo retry", () => {
         async (callback: (client: typeof tx) => Promise<unknown>) =>
           callback(tx),
       ),
+      generation_jobs: { findUnique: vi.fn().mockResolvedValue(null) },
       generation_model_capability: capabilityDelegate([capabilityRow()]),
     };
     const repo = createGenerationCommandRepo(prisma as never);
@@ -505,6 +506,7 @@ describe("generation command repo retry", () => {
         async (callback: (client: typeof tx) => Promise<unknown>) =>
           callback(tx),
       ),
+      generation_jobs: { findUnique: vi.fn().mockResolvedValue(null) },
       generation_model_capability: capabilityDelegate([capabilityRow()]),
     };
     const repo = createGenerationCommandRepo(prisma as never);
@@ -1185,6 +1187,7 @@ describe("generation command repo billing（预扣与失败补偿）", () => {
       },
     };
     const prisma = {
+      generation_jobs: { findUnique: vi.fn().mockResolvedValue(null) },
       $transaction: vi.fn(
         async (callback: (client: typeof tx) => Promise<unknown>) =>
           callback(tx),
@@ -1328,6 +1331,11 @@ describe("建任务幂等：同一把 Idempotency-Key 只建一个 job、只扣�
     const billing = { charge, release };
 
     const prisma = {
+      generation_jobs: {
+        findUnique: vi.fn(async ({ where }: { where: { id: bigint } }) =>
+          committedJobIds.includes(where.id) ? { id: where.id } : null,
+        ),
+      },
       async $transaction(callback: (tx: unknown) => Promise<CreateJobResult>) {
         const pending = new Map<string, IdemRow>();
         const jobIds: bigint[] = [];
