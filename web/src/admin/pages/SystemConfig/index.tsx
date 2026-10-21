@@ -79,7 +79,7 @@ export default function SystemConfig() {
   return (
     <Page>
       <PageHeader
-        title="系统设置"
+        title="通用设置"
         subtitle="上游凭证 · 支付凭证安全配置 · 充值政策文案 · 限流参数"
       />
 

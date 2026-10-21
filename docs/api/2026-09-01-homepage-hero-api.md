@@ -1,8 +1,9 @@
 # 首页背景图/视频 后台动态配置 API 对接文档（前端）
 
 > 需求：IKCH01「首页背景图/视频支持后台动态配置」。后端任务：IKCH05【后端】。
-> 版本：v1（2026-09-01）。后端 `site-config/homepage-heroes` 模块（admin 管理端）+ `site/homepage-heroes`（公开读取）。
-> 前端消费方：Admin 通用配置页（子工单 IKCH0C）+ 首页 `HeroVideoCarousel` 轮播。
+> 版本：v2（2026-10-21）：新增 `scene` 场景字段，同一套配置承载**首页背景**与**登录弹窗背景**，两边素材与排序互不影响。
+> 后端 `site-config/homepage-heroes` 模块（admin 管理端）+ `site/homepage-heroes`（公开读取）。
+> 前端消费方：Admin 站点设置页（子工单 IKCH0C）+ 首页 `HeroVideoCarousel` 轮播 + 登录弹窗背景。
 
 ---
 
@@ -10,16 +11,26 @@
 
 | 用途 | 方法 | 路径 | 鉴权 |
 |---|---|---|---|
-| 管理端列表 | GET | `/api/admin/site-config/homepage-heroes` | admin |
+| 管理端列表 | GET | `/api/admin/site-config/homepage-heroes?scene=homepage\|auth` | admin |
 | 管理端新增 | POST | `/api/admin/site-config/homepage-heroes` | admin |
 | 管理端编辑 | PATCH | `/api/admin/site-config/homepage-heroes/:id` | admin |
 | 管理端删除 | DELETE | `/api/admin/site-config/homepage-heroes/:id` | admin |
 | 管理端调序 | PUT | `/api/admin/site-config/homepage-heroes/:id/sort` | admin |
 | 上传预签名 | POST | `/api/admin/site-config/uploads/presign` | admin |
 | 上传完成确认 | POST | `/api/admin/site-config/uploads/complete` | admin |
-| **公开读取（轮播）** | GET | `/api/site/homepage-heroes` | **免登录** |
+| **公开读取（首页轮播）** | GET | `/api/site/homepage-heroes?scene=homepage` | **免登录** |
+| **公开读取（登录弹窗）** | GET | `/api/site/homepage-heroes?scene=auth` | **免登录** |
 
 > 全局前缀 `/api`；管理端接口统一走 admin 鉴权（`Authorization: Bearer <登录token>`，角色需 admin），公开接口免鉴权。
+
+### 场景 `scene`
+
+| 值 | 用途 | 说明 |
+|---|---|---|
+| `homepage` | 首页背景轮播 | 缺省值；不传 `scene` 时按此场景读写 |
+| `auth` | 登录弹窗动态背景 | 与首页完全独立：独立素材、独立排序、独立启用上限 |
+
+两类场景各自最多 8 条启用条目，互不占用额度。`scene` 只在创建时指定，**编辑时不可修改**（传不同值返回 400）。
 
 ---
 
@@ -28,6 +39,7 @@
 | 字段（snake） | 接口字段（camel） | 类型 | 说明 |
 |---|---|---|---|
 | `id` | `id` | string（BigInt 序列化） | 主键 |
+| `scene` | `scene` | string | `homepage` / `auth`；创建后不可改 |
 | `media_type` | `media_type` | string | `image` / `video` |
 | `media_url` | `media_url` | string | 视频/图片资源 URL（可空，见 §7 迁移期） |
 | `poster_url` | `poster_url` | string \| null | 视频封面 URL；**视频必填**，图片可空 |
@@ -37,8 +49,8 @@
 | `gmt_modified` | `updated_at` | string（ISO） | 最后修改时间 |
 
 **产品规则（后端强校验）**：
-- 只有 `enabled=1` 且未软删的条目进公开轮播（`GET /api/site/homepage-heroes`）。
-- **启用条目上限 8 条**：新增即启用、或把已禁用条目改回启用时校验，超限返回 409。
+- 只有 `enabled=1` 且未软删的条目进公开读取，且只返回请求场景的条目。
+- **每个场景启用条目上限 8 条**：新增即启用、或把已禁用条目改回启用时校验，超限返回 409。
 - `media_type=video` 必须有 `poster_url`，否则创建/编辑均被拒（400）。
 - `media_type=image` 时 `poster_url` 可空（纯图背景）。
 - 删除为软删（`is_delete=1`），删除后从所有列表消失；**无恢复接口**，误删需重建。
@@ -51,20 +63,23 @@
 
 ### 2.1 列表 `GET`
 
-无请求体。返回全部存活条目（**含禁用**），按 `sort_order` 升序：
+查询参数 `scene`：`homepage`（缺省）/ `auth`；非法值返回 400。
+
+返回该场景全部存活条目（**含禁用**），按 `sort_order` 升序：
 
 ```json
-{ "success": true, "data": [ { "id": "1", "media_type": "video", "media_url": "https://...mp4", "poster_url": "https://...jpg", "sort_order": 0, "enabled": 1, "created_at": "...", "updated_at": "..." } ] }
+{ "success": true, "data": [ { "id": "1", "scene": "homepage", "media_type": "video", "media_url": "https://...mp4", "poster_url": "https://...jpg", "sort_order": 0, "enabled": 1, "created_at": "...", "updated_at": "..." } ] }
 ```
 
 ### 2.2 新增 `POST`
 
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
+| `scene` | string | 否 | `homepage`（缺省）/ `auth` |
 | `media_type` | string | 是 | `image` / `video` |
 | `media_url` | string | 否 | http(s):// URL；**可缺省/空串**（迁移期占位） |
 | `poster_url` | string \| null | 条件必填 | 视频必填；可传 `null` 清空 |
-| `sort_order` | number | 否 | 非负整数；缺省自动取当前最大值 +1 |
+| `sort_order` | number | 否 | 非负整数；缺省自动取**同场景**当前最大值 +1 |
 | `enabled` | number | 否 | 严格 0/1；缺省 1（默认启用） |
 
 ```json
@@ -80,7 +95,8 @@
 
 部分字段合入现条目后整体校验（保证「视频必须有封面」跨字段规则仍然成立——例如把图片改成视频但没给封面会被 400 拒绝）。
 
-请求体同 2.2（任意子集）。成功：`{ "success": true, "data": { "id": "1" } }`
+请求体同 2.2（任意子集）。`scene` 不可修改：传入与当前不同的值返回 400。
+成功：`{ "success": true, "data": { "id": "1" } }`
 失败：400 / 404（配置不存在）/ 409（改回启用超上限）。
 
 ### 2.4 删除 `DELETE /:id`
@@ -91,7 +107,7 @@
 
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
-| `direction` | string | 是 | `up`（上移）/ `down`（下移），与相邻条目交换后整体重排为连续 0..n |
+| `direction` | string | 是 | `up`（上移）/ `down`（下移），与**同场景**相邻条目交换后整体重排为连续 0..n |
 
 ```json
 { "direction": "up" }
@@ -142,17 +158,17 @@
 
 ---
 
-## 4. 公开读取（轮播）`GET /api/site/homepage-heroes`
+## 4. 公开读取 `GET /api/site/homepage-heroes`
 
-**免登录**，响应为产品统一信封 `{ code, msg, data }`：
+**免登录**。查询参数 `scene`：`homepage`（缺省，首页）/ `auth`（登录弹窗）；非法值返回 400。响应为产品统一信封 `{ code, msg, data }`：
 
 ```json
 { "code": 200, "msg": "ok", "data": [ { "id": "1", "media_type": "video", "media_url": "https://...mp4", "poster_url": "https://...jpg", "sort_order": 0 } ] }
 ```
 
-- 只返回 `enabled=1` 且未软删条目，按 `sort_order` 升序（同排序按 id）。
-- **不返回 `enabled` 字段**（公开面不暴露启停状态）。
-- 无任何启用条目时返回空数组 `{ "data": [] }`（HTTP 200，非错误）——首页轮播应降级为「无背景素材则不渲染轮播/用静态占位」。
+- 只返回请求场景下 `enabled=1` 且未软删条目，按 `sort_order` 升序（同排序按 id）。
+- **不返回 `enabled` / `scene` 字段**（公开面不暴露启停与场景）。
+- 无任何启用条目时返回空数组 `{ "data": [] }`（HTTP 200，非错误）——首页轮播应降级为「无背景素材则不渲染轮播/用静态占位」；登录弹窗应降级为静态占位背景。
 
 ---
 
@@ -195,6 +211,6 @@
 
 ## 8. 前端改动清单
 
-1. **Admin 通用配置页**（IKCH0C）：复用列表/新增/编辑/删除/调序五个管理端接口；上传走 §3 三段式（或直接用 URL 直填）。
+1. **Admin 站点设置页**（IKCH0C）：复用列表/新增/编辑/删除/调序五个管理端接口；上传走 §3 三段式（或直接用 URL 直填）。
 2. **首页轮播 `HeroVideoCarousel`**：把硬编码片源改为请求 `GET /api/site/homepage-heroes` 渲染；空列表 / 空 `media_url` 时降级处理；视频条目优先用 `poster_url` 做首帧占位。
 3. **素材不再进 `web/src/assets/home-hero/`**：资源统一经后台配置（TOS 公网 URL），前端目录不再内置片源。

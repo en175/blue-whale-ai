@@ -122,7 +122,7 @@ export default function SiteConfig() {
   return (
     <Page>
       <PageHeader
-        title="通用配置"
+        title="站点设置"
         subtitle={`首页封面图 / 视频（已启用 ${enabledCount}/${HOMEPAGE_HERO_MAX_ENABLED}）`}
         extra={
           <Button

@@ -12,8 +12,19 @@ export class HomepageHeroLimitError extends Error {
 
 export const HOMEPAGE_HERO_MAX_ENABLED = 8;
 
+export const HOMEPAGE_HERO_SCENES = ["homepage", "auth"] as const;
+export type HomepageHeroScene = (typeof HOMEPAGE_HERO_SCENES)[number];
+
+export function isHomepageHeroScene(value: unknown): value is HomepageHeroScene {
+  return (
+    typeof value === "string" &&
+    (HOMEPAGE_HERO_SCENES as readonly string[]).includes(value)
+  );
+}
+
 export interface HomepageHeroAdminView {
   id: string;
+  scene: string;
   media_type: string;
   media_url: string;
   poster_url: string | null;
@@ -32,6 +43,7 @@ export interface HomepageHeroPublicView {
 }
 
 export interface CreateHomepageHeroInput {
+  scene: HomepageHeroScene;
   media_type: string;
   media_url: string;
   poster_url?: string | null;
@@ -39,17 +51,17 @@ export interface CreateHomepageHeroInput {
   enabled?: number;
 }
 
-export type UpdateHomepageHeroInput = Partial<CreateHomepageHeroInput>;
+export type UpdateHomepageHeroInput = Partial<Omit<CreateHomepageHeroInput, "scene">>;
 
 export interface HomepageHeroRepo {
-  listAll(): Promise<HomepageHeroAdminView[]>;
-  listEnabled(): Promise<HomepageHeroPublicView[]>;
+  listAll(scene: HomepageHeroScene): Promise<HomepageHeroAdminView[]>;
+  listEnabled(scene: HomepageHeroScene): Promise<HomepageHeroPublicView[]>;
   getById(id: bigint): Promise<HomepageHeroAdminView | null>;
   create(input: CreateHomepageHeroInput): Promise<string>;
   update(id: bigint, input: UpdateHomepageHeroInput): Promise<boolean>;
   softDelete(id: bigint): Promise<boolean>;
   move(id: bigint, direction: MoveDirection): Promise<MoveResult>;
-  countEnabled(): Promise<number>;
+  countEnabled(scene: HomepageHeroScene): Promise<number>;
 }
 
 export interface MoveResult {
@@ -59,6 +71,7 @@ export interface MoveResult {
 
 function toAdminView(row: {
   id: bigint;
+  scene: string;
   media_type: string;
   media_url: string;
   poster_url: string | null;
@@ -69,6 +82,7 @@ function toAdminView(row: {
 }): HomepageHeroAdminView {
   return {
     id: row.id.toString(),
+    scene: row.scene,
     media_type: row.media_type,
     media_url: row.media_url,
     poster_url: row.poster_url,
@@ -81,17 +95,17 @@ function toAdminView(row: {
 
 export function createHomepageHeroRepo(prisma: PrismaClient): HomepageHeroRepo {
   return {
-    async listAll() {
+    async listAll(scene) {
       const rows = await prisma.homepage_hero.findMany({
-        where: { is_delete: 0 },
+        where: { is_delete: 0, scene },
         orderBy: [{ sort_order: "asc" }, { id: "asc" }],
       });
       return rows.map(toAdminView);
     },
 
-    async listEnabled() {
+    async listEnabled(scene) {
       const rows = await prisma.homepage_hero.findMany({
-        where: { is_delete: 0, enabled: 1 },
+        where: { is_delete: 0, enabled: 1, scene },
         orderBy: [{ sort_order: "asc" }, { id: "asc" }],
         select: {
           id: true,
@@ -122,7 +136,7 @@ export function createHomepageHeroRepo(prisma: PrismaClient): HomepageHeroRepo {
         const enabling = input.enabled ?? 1;
         if (enabling === 1) {
           const enabledCount = await tx.homepage_hero.count({
-            where: { is_delete: 0, enabled: 1 },
+            where: { is_delete: 0, enabled: 1, scene: input.scene },
           });
           if (enabledCount + 1 > HOMEPAGE_HERO_MAX_ENABLED) {
             throw new HomepageHeroLimitError(
@@ -133,7 +147,7 @@ export function createHomepageHeroRepo(prisma: PrismaClient): HomepageHeroRepo {
         let sortOrder = input.sort_order;
         if (sortOrder === undefined) {
           const agg = await tx.homepage_hero.aggregate({
-            where: { is_delete: 0 },
+            where: { is_delete: 0, scene: input.scene },
             _max: { sort_order: true },
           });
           sortOrder = (agg._max.sort_order ?? -1) + 1;
@@ -141,6 +155,7 @@ export function createHomepageHeroRepo(prisma: PrismaClient): HomepageHeroRepo {
         const now = new Date();
         const row = await tx.homepage_hero.create({
           data: {
+            scene: input.scene,
             media_type: input.media_type,
             media_url: input.media_url,
             poster_url: input.poster_url ?? null,
@@ -163,7 +178,7 @@ export function createHomepageHeroRepo(prisma: PrismaClient): HomepageHeroRepo {
         const targetEnabled = input.enabled ?? existing.enabled;
         if (existing.enabled === 0 && targetEnabled === 1) {
           const enabledCount = await tx.homepage_hero.count({
-            where: { is_delete: 0, enabled: 1 },
+            where: { is_delete: 0, enabled: 1, scene: existing.scene },
           });
           if (enabledCount + 1 > HOMEPAGE_HERO_MAX_ENABLED) {
             throw new HomepageHeroLimitError(
@@ -204,7 +219,7 @@ export function createHomepageHeroRepo(prisma: PrismaClient): HomepageHeroRepo {
         if (!target) return { ok: false, reason: "not_found" as const };
 
         const siblings = await tx.homepage_hero.findMany({
-          where: { is_delete: 0 },
+          where: { is_delete: 0, scene: target.scene },
           orderBy: [{ sort_order: "asc" }, { id: "asc" }],
         });
         const idx = siblings.findIndex((r) => r.id === id);
@@ -224,9 +239,9 @@ export function createHomepageHeroRepo(prisma: PrismaClient): HomepageHeroRepo {
       });
     },
 
-    async countEnabled() {
+    async countEnabled(scene) {
       return prisma.homepage_hero.count({
-        where: { is_delete: 0, enabled: 1 },
+        where: { is_delete: 0, enabled: 1, scene },
       });
     },
   };

@@ -108,13 +108,13 @@ afterEach(async () => {
   mountNode?.remove();
 });
 
-describe('SiteConfig 通用配置', () => {
+describe('SiteConfig 站点设置', () => {
   it('渲染列表预览、类型与待填地址', async () => {
     api.fetchAdminHomepageHeroes.mockResolvedValue([
       { ...sample, media_url: '', poster_url: null, media_type: 'image', enabled: 0 },
     ]);
     await renderPage();
-    expect(document.body.textContent).toContain('通用配置');
+    expect(document.body.textContent).toContain('站点设置');
     expect(document.body.textContent).toContain('图片');
     expect(document.body.textContent).toContain('待填地址');
     expect(document.body.textContent).toContain('停用');

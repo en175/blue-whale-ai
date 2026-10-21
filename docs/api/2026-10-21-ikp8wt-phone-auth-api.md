@@ -352,3 +352,34 @@
 | 管理端迁移/必保清单界面 | 本期资格规则为「未绑手机号即可迁移」，不设清单 |
 | 移动端适配、海外区号、第三方登录 | PRD 明确不纳入本期 |
 | 密码登录/注册入口 | 接口保留，前端隐藏入口 |
+
+---
+
+## 14. 登录弹窗动态背景（本次新增）
+
+登录弹窗左侧的图片/视频背景与首页背景**分开配置**，互不影响。复用首页背景接口，通过 `scene=auth` 区分。
+
+`GET /api/site/homepage-heroes?scene=auth`（免登录）
+
+```jsonc
+{
+  "code": 200,
+  "msg": "ok",
+  "data": [
+    {
+      "id": "7",
+      "media_type": "video",                 // image / video
+      "media_url": "https://...mp4",
+      "poster_url": "https://...jpg",        // video 必有封面
+      "sort_order": 0
+    }
+  ]
+}
+```
+
+- 只返回登录弹窗场景下已启用的条目，按 `sort_order` 升序
+- 弹窗取第一条渲染即可；为空时用前端静态占位背景
+- 不传 `scene` 仍是首页场景（老前端行为不变）
+- `scene` 只支持 `homepage` / `auth`，其他值返回 400
+
+运营在管理端同页切换场景维护，素材各自独立。管理端接口见 `docs/api/2026-09-01-homepage-hero-api.md`。
