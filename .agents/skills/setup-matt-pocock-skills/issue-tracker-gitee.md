@@ -62,4 +62,4 @@ Used by `/wayfinder`. The **map** is a single Gitee issue with **child** issues 
 - **Blocking**：MCP 没有原生阻塞端点时，在前置工单章节写编号、标题、链接与解锁要求，兼容旧 Blocked by。link_issue_id 仅是弱关联。同包工程前置、必须先独立入 release 的外部前置、验收或环境前置按仓库集成规则核验，不以粗状态 closed 统一解锁。
 - **Frontier query**: list the relevant repository issues with pagination, then filter by the parent's numeric `parent_id`; a parent-identifier text search does not enumerate children. Apply the repository's claim and blocking rules, then choose in creation order. Preserve existing repository criteria when seeding this section.
 - **Claim**: resolve the current token user through `get_user_info`, then use the repository's ownership and state-transition procedure. Preserve collaborators according to that policy and claim before starting real work.
-- **Resolve**：通过 MCP 发布结论和工程验证、交付指针，保持业务状态。依据状态权威判断部署、验收与收口，免业务测试也需满足本票交付条件。先读 map 正文再追加决策，单独整体写回 description 并核验；工程交付不授权 PR 发布、合并或父单验收。
+- **Resolve**：通过 MCP 发布结论和工程验证、交付指针，保持业务状态。依据状态权威判断部署、验收与收口，免业务测试也需满足本票交付条件。先读取最新 map 正文并核对编辑模式，按仓库正文保护规则增量修改、验证；无法同时满足富文本保护及 MCP 专用渠道时停止并报告。工程交付不授权 PR 发布、合并或父单验收。

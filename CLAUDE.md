@@ -66,3 +66,11 @@ URL 中的 `883843` 是项目路由 `program_id`，不能充当 `enterprise_id` 
 ### Domain docs
 
 见 `docs/agents/domain.md`。
+
+<!-- BLUEWHALE_SOP_ENTRY:START -->
+## 蓝鲸产研协作 SOP
+
+涉及需求、开发、测试、缺陷或交付时，先读 [蓝鲸产研协作规则](docs/agents/bluewhale-product-sop.md)，规范来源为 [IKP5VB](https://e.gitee.com/hangzhou-xuanfu_1/projects/883843/requirements/table?issue=IKP5VB)。执行前核对适用 PRD 及产品评审确认、业务父需求、目标版本和当前操作授权。原有技术、安全、代码审查及发布设定继续保留。
+<!-- BLUEWHALE_SOP_ENTRY:END -->
+
+同步版本、已处理差异和本仓保留设定见 [同步记录](docs/agents/bluewhale-product-sop.sync.json)。
