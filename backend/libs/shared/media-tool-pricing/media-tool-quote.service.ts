@@ -1,15 +1,32 @@
 import { Injectable } from "@nestjs/common";
 import {
   AUDIO_MIX_JOB_TYPE,
+  AUDIO_MIX_MAX_INPUTS,
+  AUDIO_MIX_MIN_INPUTS,
   AUDIO_SPEED_JOB_TYPE,
+  AUDIO_SPEED_MAX_SPEED,
+  AUDIO_SPEED_MIN_SPEED,
   AUDIO_TRIM_JOB_TYPE,
   AUDIO_VIDEO_MUX_JOB_TYPE,
+  MEDIA_EXTRACT_JOB_TYPE,
+  VIDEO_ENHANCE_JOB_TYPE,
+  VIDEO_FRAME_INTERPOLATION_JOB_TYPE,
+  VIDEO_MATTING_JOB_TYPE,
+  VIDEO_MATTING_MAX_DURATION_MS,
+  VIDEO_SCENE_SPLIT_JOB_TYPE,
+  VIDEO_SCENE_SPLIT_MAX_DURATION_MS,
+  VIDEO_SUBTITLE_ERASE_JOB_TYPE,
+  VIDEO_SUBTITLE_ERASE_MAX_DURATION_MS,
+  VOCAL_SPLIT_JOB_TYPE,
+  roundAudioSpeed,
+  roundAudioTrimSeconds,
 } from "@lib/contracts";
 import { logger } from "@lib/infra/logging/blue-whale-logger.js";
 import { AssetService } from "@lib/shared/assets/assets.service.js";
 import { AssetStorageService } from "@lib/shared/assets/storage.service.js";
 import {
   resolveSourceDuration,
+  storageKeyOfAsset,
   type ResolvedSourceDuration,
 } from "@lib/shared/media-tools/source-duration.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
@@ -31,6 +48,24 @@ import {
 const EMPTY_QUOTE: MediaToolQuote = { credits: null, quote_revision: null };
 const ASSET_ID_PATTERN = /^[1-9][0-9]*$/;
 
+const SINGLE_SOURCE_TYPES: Record<string, readonly string[]> = {
+  [MEDIA_EXTRACT_JOB_TYPE]: ["video"],
+  [VIDEO_ENHANCE_JOB_TYPE]: ["video"],
+  [VIDEO_FRAME_INTERPOLATION_JOB_TYPE]: ["video"],
+  [VIDEO_MATTING_JOB_TYPE]: ["video"],
+  [VIDEO_SCENE_SPLIT_JOB_TYPE]: ["video"],
+  [VIDEO_SUBTITLE_ERASE_JOB_TYPE]: ["video"],
+  [VOCAL_SPLIT_JOB_TYPE]: ["video", "audio"],
+  [AUDIO_TRIM_JOB_TYPE]: ["audio"],
+  [AUDIO_SPEED_JOB_TYPE]: ["audio"],
+};
+
+const MAX_DURATION_MS: Record<string, number> = {
+  [VIDEO_MATTING_JOB_TYPE]: VIDEO_MATTING_MAX_DURATION_MS,
+  [VIDEO_SCENE_SPLIT_JOB_TYPE]: VIDEO_SCENE_SPLIT_MAX_DURATION_MS,
+  [VIDEO_SUBTITLE_ERASE_JOB_TYPE]: VIDEO_SUBTITLE_ERASE_MAX_DURATION_MS,
+};
+
 function assetIdOf(value: unknown): string | null {
   return typeof value === "string" && ASSET_ID_PATTERN.test(value) ? value : null;
 }
@@ -38,6 +73,12 @@ function assetIdOf(value: unknown): string | null {
 function numberOrUndefined(value: unknown): number | undefined | null {
   if (value === undefined) return undefined;
   return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function trimTimeOrUndefined(value: unknown): number | undefined | null {
+  const number = numberOrUndefined(value);
+  if (number == null) return number;
+  return number >= 0 ? roundAudioTrimSeconds(number) : null;
 }
 
 @Injectable()
@@ -71,17 +112,19 @@ export class MediaToolQuoteService {
   private async source(
     userId: string,
     assetId: string | null,
+    expectedTypes: readonly string[],
+    maxDurationMs?: number,
     probeDimensions = false,
   ): Promise<ResolvedSourceDuration | null> {
     if (assetId === null) return null;
     const asset = await this.assets.findOwnedSource(assetId, userId);
-    if (!asset) return null;
+    if (!asset || !expectedTypes.includes(asset.type)) return null;
     const resolved = await resolveSourceDuration({
       prisma: this.prisma.client,
       storage: this.storage,
       asset: {
         id: assetId,
-        storage_key: asset.storage_key,
+        storage_key: storageKeyOfAsset(asset),
         duration_ms: asset.duration_ms,
         width: asset.width,
         height: asset.height,
@@ -89,6 +132,9 @@ export class MediaToolQuoteService {
       probeDimensions,
     });
     if (resolved === null) return null;
+    if (maxDurationMs !== undefined && resolved.durationMs > maxDurationMs) {
+      return null;
+    }
     return {
       ...resolved,
       width: resolved.width ?? asset.width,
@@ -103,7 +149,7 @@ export class MediaToolQuoteService {
   ): Promise<Record<string, unknown> | null> {
     if (CONSTANT_PRICING_TOOLS.has(toolType)) return raw;
     if (SINGLE_SOURCE_SECONDS_TOOLS.has(toolType)) {
-      return this.deriveSingleSource(userId, raw);
+      return this.deriveSingleSource(toolType, userId, raw);
     }
     switch (toolType) {
       case AUDIO_TRIM_JOB_TYPE:
@@ -115,15 +161,21 @@ export class MediaToolQuoteService {
       case AUDIO_VIDEO_MUX_JOB_TYPE:
         return this.deriveMux(userId, raw);
       default:
-        return raw;
+        return null;
     }
   }
 
   private async deriveSingleSource(
+    toolType: string,
     userId: string,
     raw: Record<string, unknown>,
   ): Promise<Record<string, unknown> | null> {
-    const resolved = await this.source(userId, assetIdOf(raw.source_asset_id));
+    const resolved = await this.source(
+      userId,
+      assetIdOf(raw.source_asset_id),
+      SINGLE_SOURCE_TYPES[toolType] ?? [],
+      MAX_DURATION_MS[toolType],
+    );
     return resolved === null ? null : { ...raw, duration: resolved.seconds };
   }
 
@@ -131,10 +183,15 @@ export class MediaToolQuoteService {
     userId: string,
     raw: Record<string, unknown>,
   ): Promise<Record<string, unknown> | null> {
-    const start = numberOrUndefined(raw.start_time);
-    const end = numberOrUndefined(raw.end_time);
+    const start = trimTimeOrUndefined(raw.start_time);
+    const end = trimTimeOrUndefined(raw.end_time);
     if (start === null || end === null) return null;
-    const resolved = await this.source(userId, assetIdOf(raw.source_asset_id));
+    if (start !== undefined && end !== undefined && start >= end) return null;
+    const resolved = await this.source(
+      userId,
+      assetIdOf(raw.source_asset_id),
+      SINGLE_SOURCE_TYPES[AUDIO_TRIM_JOB_TYPE]!,
+    );
     if (resolved === null) return null;
     const duration = trimChargeSeconds(start, end, resolved.seconds);
     return duration > 0 ? { ...raw, duration } : null;
@@ -145,8 +202,14 @@ export class MediaToolQuoteService {
     raw: Record<string, unknown>,
   ): Promise<Record<string, unknown> | null> {
     const speed = raw.speed === undefined ? 1 : numberOrUndefined(raw.speed);
-    if (speed === null || speed === undefined || speed <= 0) return null;
-    const resolved = await this.source(userId, assetIdOf(raw.source_asset_id));
+    if (speed === null || speed === undefined) return null;
+    if (speed < AUDIO_SPEED_MIN_SPEED || speed > AUDIO_SPEED_MAX_SPEED) return null;
+    if (roundAudioSpeed(speed) !== speed) return null;
+    const resolved = await this.source(
+      userId,
+      assetIdOf(raw.source_asset_id),
+      SINGLE_SOURCE_TYPES[AUDIO_SPEED_JOB_TYPE]!,
+    );
     return resolved === null
       ? null
       : { ...raw, duration: speedChargeSeconds(resolved.seconds, speed) };
@@ -156,7 +219,10 @@ export class MediaToolQuoteService {
     userId: string,
     raw: Record<string, unknown>,
   ): Promise<Record<string, unknown> | null> {
-    if (!Array.isArray(raw.inputs) || raw.inputs.length === 0) return null;
+    if (!Array.isArray(raw.inputs)) return null;
+    if (raw.inputs.length < AUDIO_MIX_MIN_INPUTS || raw.inputs.length > AUDIO_MIX_MAX_INPUTS) {
+      return null;
+    }
     const ids = raw.inputs.map((input) =>
       assetIdOf(
         typeof input === "object" && input !== null
@@ -165,8 +231,9 @@ export class MediaToolQuoteService {
       ),
     );
     if (ids.some((id) => id === null)) return null;
+    if (new Set(ids).size !== ids.length) return null;
     const resolved = await Promise.all(
-      ids.map((id) => this.source(userId, id)),
+      ids.map((id) => this.source(userId, id, ["audio"])),
     );
     if (resolved.some((item) => item === null)) return null;
     return {
@@ -194,8 +261,8 @@ export class MediaToolQuoteService {
     const sync = raw.sync === undefined ? "none" : raw.sync;
     if (!(MUX_SYNC_MODES as readonly unknown[]).includes(sync)) return null;
     const [audio, video] = await Promise.all([
-      this.source(userId, audioId),
-      this.source(userId, videoId, true),
+      this.source(userId, audioId, ["audio"]),
+      this.source(userId, videoId, ["video"], undefined, true),
     ]);
     if (audio === null || video === null) return null;
     const charged = muxChargeInput({

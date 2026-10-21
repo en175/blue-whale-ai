@@ -165,6 +165,108 @@ describe("MediaToolQuoteService：不报价与降级", () => {
     expect(findOwnedSource).not.toHaveBeenCalled();
   });
 
+  it("未知工具类型不采信客户端入参", async () => {
+    const service = makeService();
+    expect(
+      await service.quote("video_audio_split", "9", { duration: 60 }),
+    ).toEqual({ credits: null, quote_revision: null });
+    expect(quote).not.toHaveBeenCalled();
+  });
+
+  it("混合输入超上限、重复或非音频素材不报价", async () => {
+    const service = makeService();
+    const many = Array.from({ length: 101 }, (_, index) => ({
+      asset_id: String(index + 1),
+    }));
+    expect(await service.quote("audio_mix", "9", { inputs: many })).toEqual({
+      credits: null,
+      quote_revision: null,
+    });
+    expect(findOwnedSource).not.toHaveBeenCalled();
+
+    expect(
+      await service.quote("audio_mix", "9", {
+        inputs: [{ asset_id: "1" }, { asset_id: "1" }],
+      }),
+    ).toEqual({ credits: null, quote_revision: null });
+
+    expect(
+      await service.quote("audio_mix", "9", {
+        inputs: [{ asset_id: "1" }, { asset_id: "4" }],
+      }),
+    ).toEqual({ credits: null, quote_revision: null });
+  });
+
+  it("截取与调速入参不符合提交约束时不报价", async () => {
+    const service = makeService();
+    expect(
+      await service.quote("audio_trim", "9", {
+        source_asset_id: "1",
+        start_time: -1,
+        end_time: 10,
+      }),
+    ).toEqual({ credits: null, quote_revision: null });
+    expect(
+      await service.quote("audio_trim", "9", {
+        source_asset_id: "1",
+        start_time: 1.004,
+        end_time: 2.001,
+      }),
+    ).toMatchObject({ credits: 7 });
+    expect(quote).toHaveBeenLastCalledWith(
+      "audio_trim",
+      "9",
+      expect.objectContaining({ duration: 1 }),
+    );
+    expect(
+      await service.quote("audio_trim", "9", {
+        source_asset_id: "1",
+        start_time: 10,
+        end_time: 10,
+      }),
+    ).toEqual({ credits: null, quote_revision: null });
+    expect(
+      await service.quote("audio_speed", "9", { source_asset_id: "1", speed: 100 }),
+    ).toEqual({ credits: null, quote_revision: null });
+    expect(
+      await service.quote("audio_speed", "9", { source_asset_id: "1", speed: 1.234 }),
+    ).toEqual({ credits: null, quote_revision: null });
+  });
+
+  it("URL-only 老素材可借存储键探测时长后报价", async () => {
+    vi.stubEnv("VOLC_ACCESS_KEY_ID", "test");
+    vi.stubEnv("VOLC_SECRET_ACCESS_KEY", "test");
+    vi.stubEnv("VOLC_TOS_ENDPOINT", "tos.example");
+    vi.stubEnv("VOLC_TOS_BUCKET", "our-bucket");
+    vi.stubEnv("VOLC_TOS_REGION", "test");
+    findOwnedSource.mockResolvedValue(
+      assetRow({
+        storage_key: null,
+        url: "https://our-bucket.tos.example/media/a.mp3",
+        duration_ms: null,
+      }),
+    );
+    const probe = vi.fn().mockResolvedValue({
+      durationMs: 30_000,
+      width: null,
+      height: null,
+    });
+    const service = new MediaToolQuoteService(
+      { client: {} } as PrismaService,
+      { findOwnedSource } as unknown as AssetService,
+      { probe } as unknown as AssetStorageService,
+      { quote } as unknown as MediaToolBillingService,
+    );
+    await service.quote("audio_trim", "9", { source_asset_id: "1" });
+    expect(probe).toHaveBeenCalledWith("media/a.mp3");
+    expect(quote).toHaveBeenCalledWith(
+      "audio_trim",
+      "9",
+      expect.objectContaining({ duration: 30 }),
+    );
+    vi.unstubAllEnvs();
+  });
+
   it("计价服务异常时退化为不报价而不是冒泡", async () => {
     const service = makeService();
     quote.mockRejectedValue(new Error("billing down"));
