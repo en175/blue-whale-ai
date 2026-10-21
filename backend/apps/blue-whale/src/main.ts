@@ -12,18 +12,13 @@ import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 import { traceMiddleware } from "@lib/infra/middleware/trace.middleware.js";
 import { logger } from "@lib/infra/logging/blue-whale-logger.js";
 import { AppModule } from "./app.module.js";
-import {
-  assertAgentModelGatewayConfig,
-  drainAgentModelStreams,
-} from "./api/agent/agent-model-gateway.controller.js";
+import { drainAgentModelStreams } from "./api/agent/agent-model-gateway.controller.js";
 
 const port = Number.parseInt(process.env.PORT ?? "3100", 10);
 
 const APP_CLOSE_TIMEOUT_MS = Number(process.env.SHUTDOWN_APP_CLOSE_TIMEOUT_MS) || 10_000;
 
 async function bootstrap(): Promise<void> {
-  assertAgentModelGatewayConfig();
-
   const app = await NestFactory.create<NestExpressApplication>(AppModule, { bodyParser: false });
 
   app.use(traceMiddleware);

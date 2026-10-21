@@ -31,7 +31,7 @@ function newApiConfigured(): boolean {
 }
 import { Public } from "@lib/infra/decorators/public.decorator.js";
 import { BypassTransform } from "@lib/infra/decorators/bypass-transform.decorator.js";
-import { ProjectService } from "@lib/shared/project/project.service.js";
+import { SystemSettingsService } from "@lib/shared/system-settings/index.js";
 
 const UPSTREAM_IDLE_TIMEOUT_MS = Number(process.env.AGENT_MODEL_IDLE_TIMEOUT_MS) || 90_000;
 const DRAIN_TIMEOUT_MS = Number(process.env.AGENT_MODEL_DRAIN_TIMEOUT_MS) || 8_000;
@@ -52,57 +52,6 @@ const RUN_HEADER = "x-blue-whale-run-id";
 const SUBJECT_HEADER = "x-bw-subject-user-id";
 const UPSTREAM_RUN_HEADER = "x-bw-agent-run-id";
 
-const BILLING_TOKEN_PREFIX = "bwsvc_";
-
-export function assertAgentModelGatewayConfig(): void {
-  const token = process.env.NEW_API_AGENT_BILLING_TOKEN?.trim() ?? "";
-  if (!token) {
-    logger.warn(
-      "[internal/agent-model] NEW_API_AGENT_BILLING_TOKEN 未配置：模型网关会对每个请求返回 503，Agent 无法调用模型",
-    );
-    return;
-  }
-  if (!token.startsWith(BILLING_TOKEN_PREFIX)) {
-    throw new Error(
-      `NEW_API_AGENT_BILLING_TOKEN 必须以 ${BILLING_TOKEN_PREFIX} 开头：NewAPI relay 按前缀分流，` +
-        "不带前缀的凭证走不到网关分支，会以普通 401 静默失败",
-    );
-  }
-  logger.info("[internal/agent-model] 模型网关计费凭证已配置");
-}
-
-const OWNER_CACHE_TTL_MS = 60_000;
-const OWNER_MISS_TTL_MS = 5_000;
-const OWNER_CACHE_MAX_ENTRIES = 2_000;
-
-type OwnerCacheEntry = { ownerId: string | null; expiresAt: number };
-
-class OwnerCache {
-  private readonly entries = new Map<string, OwnerCacheEntry>();
-
-  get(projectId: string): OwnerCacheEntry | undefined {
-    const hit = this.entries.get(projectId);
-    if (!hit) return undefined;
-    if (hit.expiresAt <= Date.now()) {
-      this.entries.delete(projectId);
-      return undefined;
-    }
-    return hit;
-  }
-
-  set(projectId: string, ownerId: string | null): void {
-    this.entries.delete(projectId);
-    if (this.entries.size >= OWNER_CACHE_MAX_ENTRIES) {
-      const oldest = this.entries.keys().next();
-      if (!oldest.done) this.entries.delete(oldest.value);
-    }
-    this.entries.set(projectId, {
-      ownerId,
-      expiresAt: Date.now() + (ownerId === null ? OWNER_MISS_TTL_MS : OWNER_CACHE_TTL_MS),
-    });
-  }
-}
-
 function constantTimeEquals(expected: string | undefined, supplied: string | undefined): boolean {
   const want = expected?.trim();
   const got = supplied?.trim();
@@ -121,13 +70,11 @@ function authorizedAgentService(header: string | undefined): boolean {
 @BypassTransform()
 @Controller("internal/agent-model")
 export class AgentModelGatewayController implements BeforeApplicationShutdown {
-  private readonly ownerCache = new OwnerCache();
-
   async beforeApplicationShutdown(): Promise<void> {
     await drainAgentModelStreams();
   }
 
-  constructor(private readonly project: ProjectService) {}
+  constructor(private readonly settings: SystemSettingsService) {}
 
   @All("*path")
   async proxy(
@@ -145,48 +92,20 @@ export class AgentModelGatewayController implements BeforeApplicationShutdown {
         .json({ code: 503, msg: `模型网关未配置 ${NEW_API_BASE_URL_ENV}`, data: null });
       return;
     }
-    const billingToken = process.env.NEW_API_AGENT_BILLING_TOKEN?.trim();
-    if (!billingToken) {
-      res.status(503).json({
-        code: 503,
-        msg: "模型网关未配置 NEW_API_AGENT_BILLING_TOKEN",
-        data: null,
-      });
-      return;
-    }
-
     const projectId = readHeader(req, PROJECT_HEADER);
-    if (!projectId) {
-      res.status(400).json({
-        code: 400,
-        msg: "缺少计费归属上下文",
-        data: { reason: "project_context_required" },
-      });
-      return;
-    }
-
-    let subjectUserId: string | null;
+    let upstreamKey: string;
     try {
-      subjectUserId = await this.resolveSubject(projectId);
+      upstreamKey = await this.settings.requireUpstreamKey();
     } catch (error) {
       logger.error(
-        `[internal/agent-model] 归属解析失败 project=${projectId}: ${
+        `[internal/agent-model] 上游凭证不可用 project=${projectId || "-"}: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );
       res.status(503).json({
         code: 503,
-        msg: "归属服务暂不可用",
-        data: { reason: "attribution_unavailable" },
-      });
-      return;
-    }
-    if (!subjectUserId) {
-      logger.warn(`[internal/agent-model] 项目无法解出计费主体 project=${projectId}`);
-      res.status(403).json({
-        code: 403,
-        msg: "无法确定计费主体",
-        data: { reason: "attribution_unresolved" },
+        msg: "模型网关未配置上游凭证",
+        data: { reason: "upstream_credential_missing" },
       });
       return;
     }
@@ -214,8 +133,7 @@ export class AgentModelGatewayController implements BeforeApplicationShutdown {
       }
       headers[key] = Array.isArray(value) ? value.join(", ") : value;
     }
-    headers.authorization = `Bearer ${billingToken}`;
-    headers[SUBJECT_HEADER] = subjectUserId;
+    headers.authorization = `Bearer ${upstreamKey}`;
     const runId = readHeader(req, RUN_HEADER);
     if (runId) headers[UPSTREAM_RUN_HEADER] = runId;
     headers[TRACE_ID_HEADER] =
@@ -323,14 +241,6 @@ export class AgentModelGatewayController implements BeforeApplicationShutdown {
       unregister();
       res.end();
     }
-  }
-
-  private async resolveSubject(projectId: string): Promise<string | null> {
-    const hit = this.ownerCache.get(projectId);
-    if (hit) return hit.ownerId;
-    const ownerId = await this.project.findOwnerId(projectId);
-    this.ownerCache.set(projectId, ownerId);
-    return ownerId;
   }
 }
 
