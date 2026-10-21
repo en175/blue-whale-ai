@@ -64,6 +64,14 @@ export {
 } from "./auth/request-sms-code.js";
 export { PHONE_RE, isValidPhone } from "./auth/phone.js";
 export {
+  CAPTCHA_TTL_MS,
+  CAPTCHA_TOLERANCE_PX,
+  CAPTCHA_WIDTH,
+  CAPTCHA_HEIGHT,
+  CAPTCHA_PIECE_SIZE,
+  isCaptchaAligned,
+} from "./auth/captcha.js";
+export {
   normalizeNickname,
   NICKNAME_MIN_LENGTH,
   NICKNAME_MAX_LENGTH,

@@ -102,6 +102,9 @@ export const ACCOUNT_ERROR_MIGRATION_INELIGIBLE = "migration_ineligible";
 export const ACCOUNT_ERROR_MIGRATION_TOKEN_EXPIRED = "migration_token_expired";
 export const ACCOUNT_ERROR_BIND_SUCCEEDED_LOGIN_FAILED = "bind_succeeded_login_failed";
 export const ACCOUNT_ERROR_QUERY_TOKEN_EXPIRED = "query_token_expired";
+export const ACCOUNT_ERROR_CAPTCHA_REQUIRED = "captcha_required";
+export const ACCOUNT_ERROR_CAPTCHA_INVALID = "captcha_invalid";
+export const ACCOUNT_ERROR_CAPTCHA_EXPIRED = "captcha_expired";
 
 export const GENERATION_ERROR_UNKNOWN_NUMERIC_CODE = 1000;
 
@@ -201,6 +204,9 @@ export const ACCOUNT_ERROR_NUMERIC_CODES: Record<string, number> = {
   [ACCOUNT_ERROR_MIGRATION_TOKEN_EXPIRED]: 1124,
   [ACCOUNT_ERROR_BIND_SUCCEEDED_LOGIN_FAILED]: 1125,
   [ACCOUNT_ERROR_QUERY_TOKEN_EXPIRED]: 1126,
+  [ACCOUNT_ERROR_CAPTCHA_REQUIRED]: 1127,
+  [ACCOUNT_ERROR_CAPTCHA_INVALID]: 1128,
+  [ACCOUNT_ERROR_CAPTCHA_EXPIRED]: 1129,
 };
 
 export function accountErrorToNumeric(code: string): number {
@@ -429,6 +435,9 @@ export const ERROR_CODES: Record<number, string> = {
   1124: "原账号验证已过期，请重新验证",
   1125: "手机号已绑定，请重新登录",
   1126: "查询授权已过期，请验证身份后继续确认原操作",
+  1127: "请先完成拼图验证",
+  1128: "拼图未对准，已换新图，请重新拖动",
+  1129: "验证已超时，请换一张后重试",
   100000: "缺少幂等键",
   100100: "资源不存在",
   100202: "资源不可用",

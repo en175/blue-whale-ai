@@ -15,6 +15,10 @@ import {
   ACCOUNT_ERROR_ACCOUNT_DELETED,
   ACCOUNT_ERROR_ACCOUNT_DISABLED,
   ACCOUNT_ERROR_BIND_SUCCEEDED_LOGIN_FAILED,
+  ACCOUNT_ERROR_CAPTCHA_EXPIRED,
+  ACCOUNT_ERROR_CAPTCHA_INVALID,
+  ACCOUNT_ERROR_CAPTCHA_REQUIRED,
+  ACCOUNT_ERROR_INVALID_PURPOSE,
   ACCOUNT_ERROR_MIGRATION_INELIGIBLE,
   ACCOUNT_ERROR_MIGRATION_TOKEN_EXPIRED,
   ACCOUNT_ERROR_OPERATION_FORBIDDEN,
@@ -24,7 +28,9 @@ import {
   ACCOUNT_ERROR_TERMS_REQUIRED,
   ACCOUNT_LOCKED,
   FAILURE_CODE,
+  LEGACY_VERIFICATION_PURPOSE,
   fail,
+  isVerificationPurpose,
   ok,
 } from "@lib/contracts";
 import { createAuthRepo } from "@lib/shared/persistence/index.js";
@@ -40,6 +46,7 @@ import {
   type AuthOperationType,
 } from "@lib/shared/auth/auth-operation.service.js";
 import { projectPhoneCodeError } from "@lib/shared/auth/phone-code-error.js";
+import { CaptchaService } from "@lib/shared/auth/captcha.service.js";
 import {
   projectAccountBusinessFailure,
   toAuthError,
@@ -153,6 +160,7 @@ export class AuthController {
     private readonly identity: IdentityService,
     private readonly operations: AuthOperationService,
     private readonly phoneActions: PhoneActionService,
+    private readonly captcha: CaptchaService,
   ) {}
 
   private get sms(): SmsProvider {
@@ -161,13 +169,61 @@ export class AuthController {
   }
 
   @Public()
+  @Get("captcha")
+  @RateLimit({
+    buckets: [
+      {
+        scope: "captcha_ip",
+        key: "ip" as const,
+        limit: 20,
+        windowMs: 60_000,
+      },
+    ],
+  })
+  async getCaptcha(
+    @Query("phone") phoneRaw: string | undefined,
+    @Query("purpose") purposeRaw: string | undefined,
+  ) {
+    const phone = typeof phoneRaw === "string" ? phoneRaw.trim() : "";
+    const purpose =
+      purposeRaw === undefined || purposeRaw === "" || purposeRaw === null
+        ? LEGACY_VERIFICATION_PURPOSE
+        : purposeRaw;
+    if (!isValidPhone(phone)) {
+      return fail(FAILURE_CODE, "手机号格式不正确");
+    }
+    if (purpose !== LEGACY_VERIFICATION_PURPOSE && !isVerificationPurpose(purpose)) {
+      return fail(FAILURE_CODE, "验证码用途不正确", null, ACCOUNT_ERROR_INVALID_PURPOSE);
+    }
+    return ok(await this.captcha.issue(phone, purpose));
+  }
+
+  @Public()
   @Post("send-code")
   @SMS_CODE_RATE_LIMIT
   async sendCode(
-    @Body() body: { phone?: unknown; purpose?: unknown; request_id?: unknown },
+    @Body()
+    body: {
+      phone?: unknown;
+      purpose?: unknown;
+      captcha_id?: unknown;
+      captcha_x?: unknown;
+      request_id?: unknown;
+    },
     @Headers("x-forwarded-for") forwardedFor?: string,
   ) {
     const ip = forwardedFor?.split(",")[0]?.trim() ?? "unknown";
+    const phone = typeof body?.phone === "string" ? body.phone.trim() : "";
+    const purpose =
+      body?.purpose === undefined || body?.purpose === null || body?.purpose === ""
+        ? LEGACY_VERIFICATION_PURPOSE
+        : body.purpose;
+    if (!isValidPhone(phone)) {
+      return fail(FAILURE_CODE, "手机号格式不正确");
+    }
+    if (purpose !== LEGACY_VERIFICATION_PURPOSE && !isVerificationPurpose(purpose)) {
+      return fail(FAILURE_CODE, "验证码用途不正确", null, ACCOUNT_ERROR_INVALID_PURPOSE);
+    }
     const requestId =
       typeof body?.request_id === "string" && body.request_id.trim()
         ? body.request_id.trim()
@@ -175,7 +231,7 @@ export class AuthController {
     const started = await this.operations.begin({
       type: "sms",
       requestId,
-      phone: typeof body?.phone === "string" ? body.phone.trim() : undefined,
+      phone,
     });
     if (started.duplicate) {
       if (started.operation.status === "pending") {
@@ -189,8 +245,44 @@ export class AuthController {
         return ok({ operation_id: started.operation.id });
       }
     }
+
+    const captchaId =
+      typeof body?.captcha_id === "string" ? body.captcha_id.trim() : "";
+    const captchaX =
+      typeof body?.captcha_x === "number"
+        ? body.captcha_x
+        : typeof body?.captcha_x === "string"
+          ? Number(body.captcha_x)
+          : Number.NaN;
+    if (!captchaId) {
+      await this.operations.fail(started.operation.id, ACCOUNT_ERROR_CAPTCHA_REQUIRED);
+      throw new NewApiError("请先完成拼图验证", 400, ACCOUNT_ERROR_CAPTCHA_REQUIRED);
+    }
+    const verdict = await this.captcha.verify({
+      id: captchaId,
+      x: captchaX,
+      phone,
+      purpose,
+    });
+    if (verdict === "expired") {
+      await this.operations.fail(started.operation.id, ACCOUNT_ERROR_CAPTCHA_EXPIRED);
+      throw new NewApiError(
+        "验证已超时，请换一张后重试",
+        400,
+        ACCOUNT_ERROR_CAPTCHA_EXPIRED,
+      );
+    }
+    if (verdict === "invalid") {
+      await this.operations.fail(started.operation.id, ACCOUNT_ERROR_CAPTCHA_INVALID);
+      throw new NewApiError(
+        "拼图未对准，已换新图，请重新拖动",
+        400,
+        ACCOUNT_ERROR_CAPTCHA_INVALID,
+      );
+    }
+
     const result = await handleSendCode(
-      { phone: body?.phone, purpose: body?.purpose, ip },
+      { phone, purpose, ip },
       { db: createAuthRepo(this.prisma.client), sms: this.sms },
     );
     if (result.code === 200) {

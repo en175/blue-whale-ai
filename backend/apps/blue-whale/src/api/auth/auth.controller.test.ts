@@ -159,6 +159,19 @@ function setup() {
     resolve: vi.fn(async () => null),
     revoke: vi.fn(async () => undefined),
   };
+  const captcha = {
+    issue: vi.fn(async () => ({
+      id: "cap_test",
+      background: "data:image/png;base64,AA==",
+      piece: "data:image/png;base64,AA==",
+      piece_y: 20,
+      piece_size: 56,
+      width: 320,
+      height: 160,
+      expires_in: 60,
+    })),
+    verify: vi.fn(async () => "ok"),
+  };
   const controller = new AuthController(
     prisma as unknown as PrismaService,
     sessions as unknown as SessionService,
@@ -167,6 +180,7 @@ function setup() {
     identity as unknown as IdentityService,
     operations as never,
     phoneActions as never,
+    captcha as never,
   );
   const res = { cookie: vi.fn() } as unknown as Response;
   return {
@@ -179,6 +193,7 @@ function setup() {
     prisma,
     operations,
     phoneActions,
+    captcha,
   };
 }
 
@@ -744,5 +759,82 @@ describe("AuthController 操作单查询（IKPC9E）", () => {
 
     expect(identity.consumeRecoveryCode).toHaveBeenCalledWith("13800001234", "123456");
     expect(out).toMatchObject({ code: 200, data: { query_token: "qry_token" } });
+  });
+});
+
+describe("AuthController 拼图验证（发码前）", () => {
+  it("签发挑战：按号码 + 用途绑定", async () => {
+    const { controller, captcha } = setup();
+    const out = await controller.getCaptcha("13800001234", "login");
+    expect(captcha.issue).toHaveBeenCalledWith("13800001234", "login");
+    expect(out).toMatchObject({ code: 200, data: { id: "cap_test" } });
+  });
+
+  it("未带拼图 → captcha_required，不发短信", async () => {
+    const { controller, operations } = setup();
+    await expect(
+      controller.sendCode({ phone: "13800001234", purpose: "login" }, "1.2.3.4"),
+    ).rejects.toMatchObject({ status: 400, code: "captcha_required" });
+    expect(operations.succeed).not.toHaveBeenCalled();
+  });
+
+  it("拼图未对准 → captcha_invalid", async () => {
+    const { controller, captcha, operations } = setup();
+    captcha.verify.mockResolvedValue("invalid");
+
+    await expect(
+      controller.sendCode(
+        {
+          phone: "13800001234",
+          purpose: "login",
+          captcha_id: "cap_test",
+          captcha_x: 10,
+        },
+        "1.2.3.4",
+      ),
+    ).rejects.toMatchObject({ status: 400, code: "captcha_invalid" });
+    expect(operations.fail).toHaveBeenCalledWith("op_test", "captcha_invalid");
+  });
+
+  it("挑战过期 → captcha_expired", async () => {
+    const { controller, captcha } = setup();
+    captcha.verify.mockResolvedValue("expired");
+
+    await expect(
+      controller.sendCode(
+        {
+          phone: "13800001234",
+          purpose: "login",
+          captcha_id: "cap_test",
+          captcha_x: 10,
+        },
+        "1.2.3.4",
+      ),
+    ).rejects.toMatchObject({ status: 400, code: "captcha_expired" });
+  });
+
+  it("同一 request_id 已成功重试：直接返回，不再要求拼图", async () => {
+    const { controller, operations } = setup();
+    operations.begin.mockResolvedValue({
+      operation: {
+        id: "op_done",
+        type: "sms",
+        userId: null,
+        status: "succeeded",
+        result: {},
+        errorCode: null,
+        phone: "13800001234",
+        createdAt: 1,
+        updatedAt: 2,
+      },
+      duplicate: true,
+    });
+
+    const out = await controller.sendCode(
+      { phone: "13800001234", purpose: "login", request_id: "req-1" },
+      "1.2.3.4",
+    );
+
+    expect(out).toMatchObject({ code: 200, data: { operation_id: "op_done" } });
   });
 });
