@@ -19,6 +19,7 @@ import {
   ListChecks,
   Megaphone,
   BadgePercent,
+  Calculator,
 } from 'lucide-react';
 import { getCurrentUser, subscribe, updateUser } from '@/shared/utils/auth';
 import { fetchAdminSession } from '@/admin/api/adminSession';
@@ -32,6 +33,7 @@ const navItems = [
   { to: '/admin/recharge-custom-config', end: false, label: '自定义充值', icon: SlidersHorizontal },
   { to: '/admin/billing-promotions', end: false, label: '限时活动', icon: Megaphone },
   { to: '/admin/billing-member-discounts', end: false, label: '会员折扣', icon: BadgePercent },
+  { to: '/admin/tool-pricing', end: false, label: '工具计费', icon: Calculator },
   { to: '/admin/recharge-records', end: false, label: '充值记录', icon: Wallet },
   { to: '/admin/consumption-records', end: false, label: '积分记录', icon: History },
   { to: '/admin/job-records', end: false, label: '任务记录', icon: ListChecks },

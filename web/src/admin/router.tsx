@@ -1,4 +1,4 @@
-import { Dashboard, RechargePlans, RechargeCustomConfig, Promotions, MemberDiscounts, RechargeRecords, ConsumptionRecords, JobRecords, TemplateManage, SkillManage, ModelList, UserManage, OperationLog, SystemConfig, SiteConfig } from './lazyPages';
+import { Dashboard, RechargePlans, RechargeCustomConfig, Promotions, MemberDiscounts, ToolPricing, RechargeRecords, ConsumptionRecords, JobRecords, TemplateManage, SkillManage, ModelList, UserManage, OperationLog, SystemConfig, SiteConfig } from './lazyPages';
 import { LazyPage as L } from './LazyPage';
 import { Navigate } from 'react-router-dom';
 import RequireAdmin from '@/shared/router/guards';
@@ -17,6 +17,7 @@ export const adminRoutes = {
     { path: 'recharge-custom-config', element: <L><RechargeCustomConfig /></L> },
     { path: 'billing-promotions', element: <L><Promotions /></L> },
     { path: 'billing-member-discounts', element: <L><MemberDiscounts /></L> },
+    { path: 'tool-pricing', element: <L><ToolPricing /></L> },
     { path: 'recharge-records', element: <L><RechargeRecords /></L> },
     { path: 'consumption-records', element: <L><ConsumptionRecords /></L> },
     { path: 'job-records', element: <L><JobRecords /></L> },
