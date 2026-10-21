@@ -148,9 +148,9 @@ describe("VideoSceneSplitsService.create：client_token 幂等键校验（≤64 
   });
 
   it("looks the token up byte-exact (case-sensitive, no normalization)", async () => {
-    const { service, tx } = makeService();
+    const { service, client } = makeService();
     await service.create("9", "55", { ...VALID_BODY, client_token: "Tok-001" });
-    expect(tx.command_idempotency.findUnique).toHaveBeenCalledWith(
+    expect(client.command_idempotency.findUnique).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
           project_id_operation_idempotency_key: expect.objectContaining({
@@ -418,7 +418,7 @@ describe("VideoSceneSplitsService.create：计费输入", () => {
     expect(release).toHaveBeenCalledWith("9", 400, "commit failed");
   });
 
-  it("免费工具事务失败 → 仍上报失败，由 Billing 判定无扣款不退款", async () => {
+  it("免费工具事务失败 → 错误上抛，不触发释放", async () => {
     const release = vi.fn();
     const { service, client, tx } = makeService({
       billing: { jobBilling: vi.fn().mockResolvedValue(undefined), release },
@@ -431,6 +431,6 @@ describe("VideoSceneSplitsService.create：计费输入", () => {
     );
 
     await expect(service.create("9", "55", VALID_BODY)).rejects.toThrow("commit failed");
-    expect(release).toHaveBeenCalledWith("9", 400, "commit failed");
+    expect(release).not.toHaveBeenCalled();
   });
 });

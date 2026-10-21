@@ -72,10 +72,10 @@ const RECOVERY: MediaToolRecovery = {
   binding: BINDING,
 };
 
-function makePrisma(status = "queued") {
+function makePrisma(status = "queued", jobExists = true) {
   return {
     generation_jobs: {
-      findUnique: vi.fn().mockResolvedValue({ status }),
+      findUnique: vi.fn().mockResolvedValue(jobExists ? { status } : null),
     },
   } as never;
 }
@@ -357,7 +357,7 @@ describe("createMediaToolJobWithRecovery：计费补偿", () => {
   }
 
   it("扣款成功后写幂等失败 → 退款并上抛", async () => {
-    const prisma = makePrisma();
+    const prisma = makePrisma("queued", false);
     const charge = vi.fn().mockResolvedValue(undefined);
     const release = vi.fn().mockResolvedValue(undefined);
     readIdemMock.mockResolvedValue(null);
@@ -369,11 +369,12 @@ describe("createMediaToolJobWithRecovery：计费补偿", () => {
     ).rejects.toThrow("write failed");
 
     expect(charge).toHaveBeenCalledWith(400);
+    expect(release).toHaveBeenCalledTimes(1);
     expect(release).toHaveBeenCalledWith(400, "write failed");
   });
 
   it("唯一键重试时先退回上一笔扣款，再按新任务扣一次", async () => {
-    const prisma = makePrisma();
+    const prisma = makePrisma("queued", false);
     const charge = vi.fn().mockResolvedValue(undefined);
     const release = vi.fn().mockResolvedValue(undefined);
     readIdemMock.mockResolvedValue(null);
@@ -395,7 +396,7 @@ describe("createMediaToolJobWithRecovery：计费补偿", () => {
   });
 
   it("事务提交失败 → 退回已扣款", async () => {
-    const prisma = makePrisma();
+    const prisma = makePrisma("queued", false);
     const charge = vi.fn().mockResolvedValue(undefined);
     const release = vi.fn().mockResolvedValue(undefined);
     readIdemMock.mockResolvedValue(null);
@@ -408,7 +409,25 @@ describe("createMediaToolJobWithRecovery：计费补偿", () => {
     ).rejects.toThrow("commit failed");
 
     expect(charge).toHaveBeenCalledWith(400);
+    expect(release).toHaveBeenCalledTimes(1);
     expect(release).toHaveBeenCalledWith(400, "commit failed");
+  });
+
+  it("事务已落库但提交回执丢失 → 不退款", async () => {
+    const prisma = makePrisma("queued", true);
+    const charge = vi.fn().mockResolvedValue(undefined);
+    const release = vi.fn().mockResolvedValue(undefined);
+    readIdemMock.mockResolvedValue(null);
+    writeIdemMock.mockResolvedValue(undefined);
+    const createJob = vi.fn().mockResolvedValue({ jobId: "400", status: "queued" });
+    commitFail.value = true;
+
+    await expect(
+      createMediaToolJobWithRecovery(prisma, null, createJob, LEGACY, { charge, release }),
+    ).rejects.toThrow("commit failed");
+
+    expect(charge).toHaveBeenCalledWith(400);
+    expect(release).not.toHaveBeenCalled();
   });
 
   it("重放不受理新扣款", async () => {

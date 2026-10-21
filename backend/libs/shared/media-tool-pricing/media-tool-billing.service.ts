@@ -6,7 +6,7 @@ import { createBillingCharge, type BillingCharge } from "@lib/shared/billing/bil
 import { createBillingQuote, type BillingQuote } from "@lib/shared/billing/billing-quote.js";
 import {
   createBillingRelease,
-  publishBillingJobTerminal,
+  createOutboxTerminalEnqueue,
   type BillingRelease,
 } from "@lib/shared/billing/billing-release.js";
 import { quoteRevisionOf } from "@lib/shared/generation/handle-quote-generation-job.js";
@@ -119,7 +119,7 @@ export class MediaToolBillingService {
       this.deps = {
         charge: createBillingCharge({ client, resolveTier, logger }),
         release: createBillingRelease({
-          publish: publishBillingJobTerminal,
+          enqueue: createOutboxTerminalEnqueue(this.prisma.client),
           logger,
         }),
         quote: createBillingQuote({ client, resolveTier, logger }),

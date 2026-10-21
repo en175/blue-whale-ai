@@ -25,7 +25,12 @@ import {
   type CanvasRecoveryPlan,
 } from "./generation-canvas-recovery-repo.js";
 import { assertPureJobInput } from "./job-input-purity.js";
-import { withBillingCompensation, type JobBilling, type JobBillingSource } from "./job-billing.js";
+import {
+  jobExistenceProbe,
+  withBillingCompensation,
+  type JobBilling,
+  type JobBillingSource,
+} from "./job-billing.js";
 import { createModelCapabilityRepo, serializePricingRule } from "./model-capability-repo.js";
 import { createAssetOwnershipOps } from "./asset-ownership-repo.js";
 import { checkReferenceLimits } from "../generation-runtime/reference-limits.js";
@@ -307,17 +312,24 @@ export async function createJobWithinTx(
 export function createGenerationCommandRepo(
   prisma: PrismaClient,
 ): GenerationCommandRepo {
+  const compensate = <T>(
+    billing: JobBilling | undefined,
+    run: (billing: JobBilling | undefined) => Promise<T>,
+  ): Promise<T> =>
+    withBillingCompensation(billing, run, jobExistenceProbe(prisma));
   return {
     async createJob(input, options) {
       const idempotency = options?.idempotency;
       const run = () =>
-        withBillingCompensation(options?.billing, (billing) =>
-          options?.callerTx
-            ? createJobWithinTx(options.callerTx, input, billing, idempotency)
-            : prisma.$transaction(
-                (tx) => createJobWithinTx(tx, input, billing, idempotency),
-                { maxWait: 10_000, timeout: 30_000 },
-              ),
+        compensate(
+          options?.billing,
+          (billing) =>
+            options?.callerTx
+              ? createJobWithinTx(options.callerTx, input, billing, idempotency)
+              : prisma.$transaction(
+                  (tx) => createJobWithinTx(tx, input, billing, idempotency),
+                  { maxWait: 10_000, timeout: 30_000 },
+                ),
         );
       return options?.callerTx
         ? run()
@@ -393,7 +405,7 @@ export function createGenerationCommandRepo(
               billing.release({ userId, jobId, reason }),
           }
         : undefined;
-      return withBillingCompensation(jobBilling, (billing) =>
+      return compensate(jobBilling, (billing) =>
         transactionWithUniqueRetry(
         prisma,
         async (tx) => {

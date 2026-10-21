@@ -22,6 +22,8 @@ import {
 } from "@lib/shared/persistence/index.js";
 import { writeCreateIdempotency } from "@lib/shared/persistence/generation-job-idempotency.js";
 import {
+  jobExistenceProbe,
+  releaseUnlessJobCommitted,
   withBillingCompensation,
   type JobBilling,
 } from "@lib/shared/persistence/job-billing.js";
@@ -213,6 +215,7 @@ export async function createMediaToolJobWithRecovery(
             },
             { maxWait: 10_000, timeout: 30_000 },
           ),
+      jobExistenceProbe(prisma),
     );
     return { kind: "ok", ...created, bindingView: null };
   }
@@ -230,12 +233,12 @@ export async function createMediaToolJobWithRecovery(
       });
   if (replayed) return replayed;
   let chargedJobId: number | null = null;
-  let callbackCompleted = false;
   const runTx = () =>
     transactionWithUniqueRetry(prisma, (tx) => {
-      callbackCompleted = false;
       chargedJobId = null;
-      return withBillingCompensation(billing, async (jobBilling) => {
+      return withBillingCompensation(
+        billing,
+        async (jobBilling) => {
         if (recovery) {
           const acceptance: CanvasRecoveryAcceptance = {
             projectId: recovery.projectId,
@@ -289,25 +292,20 @@ export async function createMediaToolJobWithRecovery(
           operation,
         );
         return { created } as const;
-      }).then((result) => {
-        callbackCompleted = true;
-        return result;
+      }, jobExistenceProbe(prisma), () => {
+        chargedJobId = null;
       });
     });
   let outcome: Awaited<ReturnType<typeof runTx>>;
   try {
     outcome = await runTx();
   } catch (error) {
-    if (callbackCompleted && chargedJobId !== null && billing) {
-      const jobId = chargedJobId;
-      chargedJobId = null;
-      await billing
-        .release(
-          jobId,
-          error instanceof Error ? error.message : String(error),
-        )
-        .catch(() => undefined);
-    }
+    await releaseUnlessJobCommitted({
+      release: billing?.release,
+      jobId: chargedJobId,
+      probe: jobExistenceProbe(prisma),
+      reason: error instanceof Error ? error.message : String(error),
+    });
     if (error instanceof RecoveryContractError) {
       return { kind: "envelope", envelope: error.envelope };
     }

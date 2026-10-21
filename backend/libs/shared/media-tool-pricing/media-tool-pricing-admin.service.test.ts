@@ -68,7 +68,7 @@ describe("parseMediaToolPricingUpdate", () => {
         quantityStep: 5,
       },
       charge_enabled: false,
-    });
+    }, "audio_trim");
     expect(parsed.ok).toBe(true);
     if (parsed.ok) {
       expect(parsed.value.charge_enabled).toBe(false);
@@ -77,10 +77,58 @@ describe("parseMediaToolPricingUpdate", () => {
   });
 
   it("拒绝非法价目、非布尔收费状态和空更新", () => {
-    expect(parseMediaToolPricingUpdate({ pricing: { baseUnit: "usage.seconds" } }).ok).toBe(false);
-    expect(parseMediaToolPricingUpdate({ pricing: null }).ok).toBe(false);
-    expect(parseMediaToolPricingUpdate({ charge_enabled: "false" }).ok).toBe(false);
-    expect(parseMediaToolPricingUpdate({}).ok).toBe(false);
+    expect(parseMediaToolPricingUpdate({ pricing: { baseUnit: "usage.seconds" } }, "audio_trim").ok).toBe(false);
+    expect(parseMediaToolPricingUpdate({ pricing: null }, "audio_trim").ok).toBe(false);
+    expect(parseMediaToolPricingUpdate({ charge_enabled: "false" }, "audio_trim").ok).toBe(false);
+    expect(parseMediaToolPricingUpdate({}, "audio_trim").ok).toBe(false);
+  });
+
+  it("按工具契约校验 baseUnit 与分档维度", () => {
+    expect(
+      parseMediaToolPricingUpdate(
+        { pricing: { baseUnit: "constant:1", basePrice: { kind: "const", value: 1000 } } },
+        "audio_trim",
+      ).ok,
+    ).toBe(false);
+    expect(
+      parseMediaToolPricingUpdate(
+        { pricing: { baseUnit: "constant:1", basePrice: { kind: "const", value: 7000 } } },
+        "image_cutout",
+      ).ok,
+    ).toBe(true);
+    expect(
+      parseMediaToolPricingUpdate(
+        {
+          pricing: {
+            baseUnit: "usage.seconds",
+            basePrice: { kind: "table", by: ["resolution"], table: { "resolution=1080p": 3000 } },
+          },
+        },
+        "video_enhance",
+      ).ok,
+    ).toBe(true);
+    expect(
+      parseMediaToolPricingUpdate(
+        {
+          pricing: {
+            baseUnit: "usage.seconds",
+            basePrice: { kind: "table", by: ["fps"], table: { "fps=30": 45000 } },
+          },
+        },
+        "video_enhance",
+      ).ok,
+    ).toBe(false);
+    expect(
+      parseMediaToolPricingUpdate(
+        {
+          pricing: {
+            baseUnit: "constant:1",
+            basePrice: { kind: "table", by: ["multiple"], table: { "multiple=2": 15000 } },
+          },
+        },
+        "image_enhance",
+      ).ok,
+    ).toBe(true);
   });
 });
 

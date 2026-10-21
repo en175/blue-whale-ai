@@ -1,40 +1,53 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import {
-  BILLING_JOB_TERMINAL_TOPIC,
   createBillingRelease,
+  createOutboxTerminalEnqueue,
 } from './billing-release.js';
 
 describe('createBillingRelease', () => {
-  it('发一条 generation-job-terminal（status=failed）—— billing 按 job_id 幂等退款', async () => {
-    const publish = vi.fn(async () => {});
-    const release = createBillingRelease({ publish });
+  it('把退款意图写进持久 outbox，由 worker 统一投递', async () => {
+    const enqueue = vi.fn(async () => {});
+    const release = createBillingRelease({ enqueue });
 
     await release({ userId: '42', jobId: 501, reason: '写库失败' });
 
-    expect(publish).toHaveBeenCalledWith({
+    expect(enqueue).toHaveBeenCalledWith({
+      userId: '42',
       jobId: 501,
-      userId: 42,
-      status: 'failed',
       reason: '写库失败',
-      refund: true,
     });
   });
 
-  it('★ 发布失败不抛错，只记 ERROR —— 它跑在「事务已失败」的路径上，不能盖掉原始错误', async () => {
-    const publish = vi.fn().mockRejectedValue(new Error('MQ 挂了'));
+  it('★ 入队失败不抛错，只记 ERROR —— 它跑在「事务已失败」的路径上，不能盖掉原始错误', async () => {
+    const enqueue = vi.fn().mockRejectedValue(new Error('DB 挂了'));
     const error = vi.fn();
-    const release = createBillingRelease({ publish, logger: { error } });
+    const release = createBillingRelease({ enqueue, logger: { error } });
 
     await expect(
       release({ userId: '42', jobId: 501, reason: '写库失败' }),
     ).resolves.toBeUndefined();
 
     expect(error).toHaveBeenCalledWith(expect.stringContaining('jobId=501'));
-    expect(error).toHaveBeenCalledWith(expect.stringContaining('仍扣着'));
   });
+});
 
-  it('topic 是契约值（与 billing 的 topic-terminal / worker 的默认值同名）', () => {
-    expect(BILLING_JOB_TERMINAL_TOPIC).toBe('generation-job-terminal');
+describe('createOutboxTerminalEnqueue', () => {
+  it('写 generation_outbox 的 failed 行，退款由 worker 按状态推导', async () => {
+    const create = vi.fn(async () => ({}));
+    const enqueue = createOutboxTerminalEnqueue({
+      generation_outbox: { create },
+    });
+
+    await enqueue({ userId: '42', jobId: 501, reason: 'x'.repeat(600) });
+
+    expect(create).toHaveBeenCalledWith({
+      data: {
+        job_id: 501n,
+        user_id: 42n,
+        terminal_status: 'failed',
+        reason: 'x'.repeat(512),
+      },
+    });
   });
 });

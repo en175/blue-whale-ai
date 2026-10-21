@@ -10,7 +10,6 @@ import {
   IMAGE_ERASE_MIN_SIDE_PX,
   IMAGE_ERASE_SOURCE,
   PARAM_MISSING_CODE,
-  RESOURCE_NOT_FOUND_CODE,
   fail,
   imageEraseInputSchema,
   type ImageEraseInput,
@@ -25,6 +24,10 @@ import { MediaToolBillingService } from "@lib/shared/media-tool-pricing/media-to
 import { ProjectService } from "@lib/shared/project/project.service.js";
 import { AssetService } from "@lib/shared/assets/assets.service.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
+import {
+  requireOwnedProject,
+  resolveOwnedMediaSource,
+} from "@lib/shared/media-tools/owned-media-source.js";
 
 const IDEMPOTENCY_OPERATION = "image_erase.create";
 const REQUEST_PATH = "/image-erasures";
@@ -92,8 +95,12 @@ export class ImageErasuresService {
     }
     const input: ImageEraseInput = parsed.data;
 
-    const project = await this.project.findOwnedById(projectId, userId);
-    if (!project) return fail(RESOURCE_NOT_FOUND_CODE, "资源不存在");
+    const projectError = await requireOwnedProject({
+      projects: this.project,
+      projectId,
+      userId,
+    });
+    if (projectError) return projectError;
 
     const { recovery, replayed } = await replayAcceptedMediaTool(this.prisma.client, {
       projectId,
@@ -106,24 +113,27 @@ export class ImageErasuresService {
     });
     if (replayed) return replayed;
 
-    const asset = await this.assets.findOwnedSource(
-      input[IMAGE_ERASE_INPUT_KEYS.sourceAssetId],
+    const source = await resolveOwnedMediaSource({
+      prisma: this.prisma.client,
+      assets: this.assets,
       userId,
-    );
-    if (!asset) return fail(RESOURCE_NOT_FOUND_CODE, "资源不存在");
-    if (asset.type !== "image") {
-      return fail(FAILURE_CODE, "仅支持对图片资产发起擦除");
-    }
+      assetId: input[IMAGE_ERASE_INPUT_KEYS.sourceAssetId],
+      expectedTypes: ["image"],
+      wrongTypeMessage: "仅支持对图片资产发起擦除",
+    });
+    if (!source.ok) return source.envelope;
+    const asset = source.asset;
 
     if (input.erase_scene === "selected_area_erase") {
-      const mask = await this.assets.findOwnedSource(
-        input[IMAGE_ERASE_INPUT_KEYS.maskAssetId],
+      const mask = await resolveOwnedMediaSource({
+        prisma: this.prisma.client,
+        assets: this.assets,
         userId,
-      );
-      if (!mask) return fail(RESOURCE_NOT_FOUND_CODE, "资源不存在");
-      if (mask.type !== "image") {
-        return fail(FAILURE_CODE, "遮罩素材必须是图片资产");
-      }
+        assetId: input[IMAGE_ERASE_INPUT_KEYS.maskAssetId],
+        expectedTypes: ["image"],
+        wrongTypeMessage: "遮罩素材必须是图片资产",
+      });
+      if (!mask.ok) return mask.envelope;
     }
 
     if (asset.width != null && asset.height != null) {

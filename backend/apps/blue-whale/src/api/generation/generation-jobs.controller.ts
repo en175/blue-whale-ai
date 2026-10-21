@@ -2,11 +2,12 @@ import { sharedBillingClient } from "@lib/shared/billing/billing-client.js";
 import { createBillingCharge, type BillingCharge } from "@lib/shared/billing/billing-charge.js";
 import {
   createBillingRelease,
-  publishBillingJobTerminal,
+  createOutboxTerminalEnqueue,
   type BillingRelease,
 } from "@lib/shared/billing/billing-release.js";
 import { createBillingQuote, type BillingQuote } from "@lib/shared/billing/billing-quote.js";
 import { IdentityService } from "@lib/shared/identity/index.js";
+import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 import { Body, Controller, Headers, HttpCode, Param, Post, Res } from "@nestjs/common";
 import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
 import { DomainError, ok } from "@lib/contracts";
@@ -60,6 +61,7 @@ export class GenerationJobsController {
     private readonly assets: AssetService,
     private readonly storage: AssetStorageService,
     private readonly identity: IdentityService,
+    private readonly prisma: PrismaService,
   ) {}
 
   private billingDep?: { charge: BillingCharge; release: BillingRelease };
@@ -73,7 +75,7 @@ export class GenerationJobsController {
           logger,
         }),
         release: createBillingRelease({
-          publish: publishBillingJobTerminal,
+          enqueue: createOutboxTerminalEnqueue(this.prisma.client),
           logger,
         }),
       };

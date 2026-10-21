@@ -40,7 +40,7 @@ vi.mock("@lib/shared/billing/billing-client.js", async (importOriginal) => {
 });
 vi.mock("@lib/shared/billing/billing-release.js", () => ({
   createBillingRelease: () => vi.fn(async () => {}),
-  publishBillingJobTerminal: vi.fn(),
+  createOutboxTerminalEnqueue: () => vi.fn(async () => {}),
 }));
 vi.mock("@lib/infra/logging/blue-whale-logger.js", () => ({
   logger: { error: vi.fn(), warn: vi.fn(), info: vi.fn(), debug: vi.fn() },
@@ -74,6 +74,7 @@ function makeController() {
     { materialStatusRepo: {} } as never,
     {} as never,
     { probe: null } as never,
+    {} as never,
     {} as never,
   );
 }

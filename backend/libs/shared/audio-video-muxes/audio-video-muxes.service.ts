@@ -7,13 +7,20 @@ import { loadTosStorageConfig } from "@lib/shared/assets/tos-storage.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";
 import { markFailedQueuedAndNotifyBilling } from "@lib/shared/persistence/index.js";
-import { withBillingCompensation } from "@lib/shared/persistence/job-billing.js";
+import {
+  jobExistenceProbe,
+  withBillingCompensation,
+  type JobBilling,
+} from "@lib/shared/persistence/job-billing.js";
 import { resolveSourceDuration } from "@lib/shared/media-tools/source-duration.js";
+import {
+  acceptDedicatedToolJob,
+  acceptDedicatedToolJobWithoutKey,
+} from "@lib/shared/media-tools/dedicated-tool-acceptance.js";
 import { MediaToolBillingService } from "@lib/shared/media-tool-pricing/media-tool-billing.service.js";
 import {
   RecoveryContractError,
   canvasBindingView,
-  lockCanvasRecoveryForAcceptance,
   lockCanvasRecoveryForRetry,
   writeCanvasRecoveryRows,
 } from "@lib/shared/persistence/generation-canvas-recovery-repo.js";
@@ -46,6 +53,17 @@ export class AudioVideoMuxesService {
     private readonly storage: AssetStorageService,
     private readonly billing: MediaToolBillingService,
   ) {}
+
+  private withCompensation<T>(
+    billing: JobBilling | undefined,
+    run: (billing: JobBilling | undefined) => Promise<T>,
+  ): Promise<T> {
+    return withBillingCompensation(
+      billing,
+      run,
+      jobExistenceProbe(this.prisma.client),
+    );
+  }
 
   async create(
     userId: string,
@@ -253,45 +271,29 @@ export class AudioVideoMuxesService {
       resolution,
     });
     if (!key) {
-      const job = await withBillingCompensation(jobBilling, (billing) =>
-        this.prisma.client.$transaction(
-          async (tx) => {
-            const created = await tx.generation_jobs.create({ data });
-            await billing?.charge(Number(created.id));
-            return created;
-          },
-          { maxWait: 10_000, timeout: 30_000 },
-        ),
-      );
+      const job = await acceptDedicatedToolJobWithoutKey({
+        prisma: this.prisma.client,
+        jobBilling,
+        createData: data,
+      });
       return ok({ job_id: job.id.toString(), status: "queued", replayed: false, enqueue_required: true });
     }
     let jobIdOfCreated = "";
     let replayed = false;
     try {
-      const result = await withBillingCompensation(jobBilling, (billing) =>
-        this.prisma.client.$transaction(async (tx) => {
-        let plan: CanvasRecoveryPlan | null = null;
-        if (canvasBinding) {
-          const locked = await lockCanvasRecoveryForAcceptance(tx, {
-            projectId, userId, binding: canvasBinding,
-            operation: "audio_video_mux.create", requestHash: hash,
-            idempotencyKey, taskType: AUDIO_VIDEO_MUX_JOB_TYPE,
-          });
-          if (locked.kind === "replay") return { replayed: true, jobId: null };
-          if (locked.kind === "idempotency_conflict") {
-            throw new DomainError(409, "幂等键已用于另一项音视频合成创建");
-          }
-          plan = locked.plan;
-        }
-        const created = await tx.generation_jobs.create({ data });
-        await billing?.charge(Number(created.id));
-        await tx.command_idempotency.create({
-          data: { ...key, request_hash: hash, generation_job_id: created.id, accepted_cursor: 0n },
-        });
-        if (plan) await writeCanvasRecoveryRows(tx, plan, created.id);
-        return { replayed: false, jobId: created.id.toString() };
-        }),
-      );
+      const result = await acceptDedicatedToolJob({
+        prisma: this.prisma.client,
+        jobBilling,
+        userId,
+        projectId,
+        toolType: AUDIO_VIDEO_MUX_JOB_TYPE,
+        operation: "audio_video_mux.create",
+        requestHash: hash,
+        idempotencyKey: key.idempotency_key,
+        canvasBinding,
+        conflictMessage: "幂等键已用于另一项音视频合成创建",
+        createData: data,
+      });
       replayed = result.replayed;
       jobIdOfCreated = result.jobId ?? "";
     } catch (error) {
@@ -402,7 +404,7 @@ export class AudioVideoMuxesService {
       });
     };
     try {
-      const result = await withBillingCompensation(retryBilling, (billing) =>
+      const result = await this.withCompensation(retryBilling, (billing) =>
         this.prisma.client.$transaction(async (tx) => {
         let plan: CanvasRecoveryPlan | null = null;
         if (canvasBinding) {
