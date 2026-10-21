@@ -2,13 +2,10 @@ import { createHash } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import { Injectable } from "@nestjs/common";
 import {
-  ASSET_UNAVAILABLE_CODE,
   CANVAS_RECOVERY_PROTOCOL_VERSION,
-  FAILURE_CODE,
   IDEMPOTENCY_KEY_REUSED_CODE,
   PARAM_MISSING_CODE,
   RECOVERY_REASONS,
-  RESOURCE_NOT_FOUND_CODE,
   VIDEO_SCENE_SPLIT_INPUT_KEYS,
   VIDEO_SCENE_SPLIT_JOB_TYPE,
   VIDEO_SCENE_SPLIT_MAX_DURATION_MS,
@@ -30,8 +27,6 @@ import {
   canvasBindingView,
 } from "@lib/shared/persistence/index.js";
 import {
-  jobExistenceProbe,
-  releaseUnlessJobCommitted,
 } from "@lib/shared/persistence/job-billing.js";
 import { enqueueVideoSceneSplitJob } from "@lib/shared/generation/generation-queue.js";
 import {

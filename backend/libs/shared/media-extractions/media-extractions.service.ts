@@ -1,15 +1,12 @@
 import type { Prisma } from "@prisma/client";
 import { Injectable } from "@nestjs/common";
 import {
-  ASSET_UNAVAILABLE_CODE,
-  FAILURE_CODE,
   MEDIA_EXTRACT_DEFAULT_OUTPUT_FORMAT,
   MEDIA_EXTRACT_INPUT_KEYS,
   MEDIA_EXTRACT_JOB_TYPE,
   MEDIA_EXTRACT_OUTPUT_FORMATS,
   MEDIA_EXTRACT_SOURCE,
   PARAM_MISSING_CODE,
-  RESOURCE_NOT_FOUND_CODE,
   fail,
   type MediaExtractOutputFormat,
 } from "@lib/contracts";

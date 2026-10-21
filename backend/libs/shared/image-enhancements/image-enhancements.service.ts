@@ -7,7 +7,6 @@ import {
   IMAGE_ENHANCE_SOURCE,
   IMAGE_ENHANCE_TIER_CAPABILITY,
   PARAM_MISSING_CODE,
-  RESOURCE_NOT_FOUND_CODE,
   fail,
   imageEnhanceInputSchema,
   imageEnhanceTierSizeGate,

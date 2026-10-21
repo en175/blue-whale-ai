@@ -10,7 +10,6 @@ import {
   IMAGE_ERASE_MIN_SIDE_PX,
   IMAGE_ERASE_SOURCE,
   PARAM_MISSING_CODE,
-  RESOURCE_NOT_FOUND_CODE,
   fail,
   imageEraseInputSchema,
   type ImageEraseInput,

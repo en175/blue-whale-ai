@@ -369,6 +369,7 @@ describe("createMediaToolJobWithRecovery：计费补偿", () => {
     ).rejects.toThrow("write failed");
 
     expect(charge).toHaveBeenCalledWith(400);
+    expect(release).toHaveBeenCalledTimes(1);
     expect(release).toHaveBeenCalledWith(400, "write failed");
   });
 
@@ -408,7 +409,25 @@ describe("createMediaToolJobWithRecovery：计费补偿", () => {
     ).rejects.toThrow("commit failed");
 
     expect(charge).toHaveBeenCalledWith(400);
+    expect(release).toHaveBeenCalledTimes(1);
     expect(release).toHaveBeenCalledWith(400, "commit failed");
+  });
+
+  it("事务已落库但提交回执丢失 → 不退款", async () => {
+    const prisma = makePrisma("queued", true);
+    const charge = vi.fn().mockResolvedValue(undefined);
+    const release = vi.fn().mockResolvedValue(undefined);
+    readIdemMock.mockResolvedValue(null);
+    writeIdemMock.mockResolvedValue(undefined);
+    const createJob = vi.fn().mockResolvedValue({ jobId: "400", status: "queued" });
+    commitFail.value = true;
+
+    await expect(
+      createMediaToolJobWithRecovery(prisma, null, createJob, LEGACY, { charge, release }),
+    ).rejects.toThrow("commit failed");
+
+    expect(charge).toHaveBeenCalledWith(400);
+    expect(release).not.toHaveBeenCalled();
   });
 
   it("重放不受理新扣款", async () => {

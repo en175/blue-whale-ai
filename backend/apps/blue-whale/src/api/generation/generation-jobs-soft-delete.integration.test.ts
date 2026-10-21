@@ -79,7 +79,9 @@ describe.skipIf(!process.env.IKG57P_DATABASE_URL)(
           CanvasService,
           MaterialService,
           AssetService,
+          AssetStorageService,
           IdentityService,
+          PrismaService,
         ],
         GenerationJobsController,
       );

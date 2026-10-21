@@ -2,8 +2,6 @@ import { wallClockRfc3339 } from "@lib/core";
 import type { Prisma } from "@prisma/client";
 import { Injectable } from "@nestjs/common";
 import {
-  ASSET_UNAVAILABLE_CODE,
-  FAILURE_CODE,
   PARAM_MISSING_CODE,
   RESOURCE_NOT_FOUND_CODE,
   VIDEO_FRAME_INTERPOLATION_DEFAULT_FPS,

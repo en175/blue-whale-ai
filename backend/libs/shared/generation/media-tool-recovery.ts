@@ -236,7 +236,9 @@ export async function createMediaToolJobWithRecovery(
   const runTx = () =>
     transactionWithUniqueRetry(prisma, (tx) => {
       chargedJobId = null;
-      return withBillingCompensation(billing, async (jobBilling) => {
+      return withBillingCompensation(
+        billing,
+        async (jobBilling) => {
         if (recovery) {
           const acceptance: CanvasRecoveryAcceptance = {
             projectId: recovery.projectId,
@@ -290,7 +292,9 @@ export async function createMediaToolJobWithRecovery(
           operation,
         );
         return { created } as const;
-      }, jobExistenceProbe(prisma));
+      }, jobExistenceProbe(prisma), () => {
+        chargedJobId = null;
+      });
     });
   let outcome: Awaited<ReturnType<typeof runTx>>;
   try {

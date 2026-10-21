@@ -5,7 +5,6 @@ import {
   IMAGE_OUTPAINT_JOB_TYPE,
   IMAGE_OUTPAINT_SOURCE,
   PARAM_MISSING_CODE,
-  RESOURCE_NOT_FOUND_CODE,
   fail,
   imageOutpaintInputSchema,
   imageOutpaintSourceGate,

@@ -1,10 +1,8 @@
 import type { Prisma } from "@prisma/client";
 import { Injectable } from "@nestjs/common";
 import {
-  ASSET_UNAVAILABLE_CODE,
   FAILURE_CODE,
   PARAM_MISSING_CODE,
-  RESOURCE_NOT_FOUND_CODE,
   VIDEO_ENHANCE_INPUT_KEYS,
   VIDEO_ENHANCE_JOB_TYPE,
   VIDEO_ENHANCE_MAX_INPUT_LONG_SIDE_PX,

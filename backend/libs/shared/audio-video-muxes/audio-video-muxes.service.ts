@@ -21,7 +21,6 @@ import { MediaToolBillingService } from "@lib/shared/media-tool-pricing/media-to
 import {
   RecoveryContractError,
   canvasBindingView,
-  lockCanvasRecoveryForAcceptance,
   lockCanvasRecoveryForRetry,
   writeCanvasRecoveryRows,
 } from "@lib/shared/persistence/generation-canvas-recovery-repo.js";

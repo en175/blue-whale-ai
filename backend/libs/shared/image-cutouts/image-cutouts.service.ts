@@ -8,7 +8,6 @@ import {
   IMAGE_CUTOUT_SCENE_SIZE_LIMITS,
   IMAGE_CUTOUT_SOURCE,
   PARAM_MISSING_CODE,
-  RESOURCE_NOT_FOUND_CODE,
   fail,
   imageCutoutInputSchema,
   type ImageCutoutInput,

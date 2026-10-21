@@ -2,12 +2,9 @@ import { createHash } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import { Injectable } from "@nestjs/common";
 import {
-  ASSET_UNAVAILABLE_CODE,
-  FAILURE_CODE,
   IDEMPOTENCY_KEY_REUSED_CODE,
   PARAM_MISSING_CODE,
   RECOVERY_REASONS,
-  RESOURCE_NOT_FOUND_CODE,
   VOCAL_SPLIT_DEFAULT_OUTPUT_FORMAT,
   VOCAL_SPLIT_DEFAULT_SCENE,
   VOCAL_SPLIT_INPUT_KEYS,

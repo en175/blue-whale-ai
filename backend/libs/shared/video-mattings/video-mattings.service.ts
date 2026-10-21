@@ -2,11 +2,8 @@ import { createHash } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import { Injectable } from "@nestjs/common";
 import {
-  ASSET_UNAVAILABLE_CODE,
-  FAILURE_CODE,
   IDEMPOTENCY_KEY_REUSED_CODE,
   PARAM_MISSING_CODE,
-  RESOURCE_NOT_FOUND_CODE,
   VIDEO_MATTING_CLIENT_TOKEN_PATTERN,
   VIDEO_MATTING_DEFAULT_BACKGROUND_COLOR,
   VIDEO_MATTING_DEFAULT_FORMAT,
