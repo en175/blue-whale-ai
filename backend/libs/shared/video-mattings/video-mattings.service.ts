@@ -27,7 +27,10 @@ import {
 } from "@lib/shared/generation/media-tool-recovery.js";
 import { enqueueVideoMattingJob } from "@lib/shared/generation/generation-queue.js";
 import { submitMediaToolJob } from "@lib/shared/media-tools/media-tool-submission.js";
-import { resolveSourceDuration } from "@lib/shared/media-tools/source-duration.js";
+import {
+  requireOwnedProject,
+  resolveOwnedMediaSource,
+} from "@lib/shared/media-tools/owned-media-source.js";
 import { MediaToolBillingService } from "@lib/shared/media-tool-pricing/media-tool-billing.service.js";
 import { AssetStorageService } from "@lib/shared/assets/storage.service.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";
@@ -118,8 +121,12 @@ export class VideoMattingsService {
       ? mediaToolRequestHash(IDEMPOTENCY_OPERATION, projectId, REQUEST_PATH, body ?? {})
       : requestHashOf(projectId, input);
 
-    const project = await this.project.findOwnedById(projectId, userId);
-    if (!project) return fail(RESOURCE_NOT_FOUND_CODE, "资源不存在");
+    const projectError = await requireOwnedProject({
+      projects: this.project,
+      projectId,
+      userId,
+    });
+    if (projectError) return projectError;
 
     const recovery: MediaToolRecovery | null = binding
       ? {
@@ -148,34 +155,20 @@ export class VideoMattingsService {
       );
     }
 
-    const asset = await this.assets.findOwnedSource(
-      input[VIDEO_MATTING_INPUT_KEYS.sourceAssetId],
-      userId,
-    );
-    if (!asset) return fail(RESOURCE_NOT_FOUND_CODE, "资源不存在");
-    if (asset.type !== "video") {
-      return fail(FAILURE_CODE, "仅支持对视频资产发起智能抠像");
-    }
-
-    const duration = await resolveSourceDuration({
+    const source = await resolveOwnedMediaSource({
       prisma: this.prisma.client,
+      assets: this.assets,
       storage: this.storage,
-      asset: {
-        id: input[VIDEO_MATTING_INPUT_KEYS.sourceAssetId],
-        storage_key: asset.storage_key,
-        duration_ms: asset.duration_ms,
-      },
+      userId,
+      assetId: input[VIDEO_MATTING_INPUT_KEYS.sourceAssetId],
+      expectedTypes: ["video"],
+      wrongTypeMessage: "仅支持对视频资产发起智能抠像",
+      durationMessage: "源视频时长读取失败，请稍后重试或更换素材",
+      maxDurationMs: VIDEO_MATTING_MAX_DURATION_MS,
+      maxDurationMessage: "暂支持 10 分钟以内的视频智能抠像",
     });
-    if (duration === null) {
-      return fail(
-        ASSET_UNAVAILABLE_CODE,
-        "源视频时长读取失败，请稍后重试或更换素材",
-        { code: "asset_unavailable" },
-      );
-    }
-    if (duration.durationMs > VIDEO_MATTING_MAX_DURATION_MS) {
-      return fail(FAILURE_CODE, "暂支持 10 分钟以内的视频智能抠像");
-    }
+    if (!source.ok) return source.envelope;
+    const duration = source.duration!;
 
     const frozenInput = { ...input, duration: duration.seconds } as Prisma.InputJsonObject;
 

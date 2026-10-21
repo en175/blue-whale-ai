@@ -20,7 +20,10 @@ import {
 } from "@lib/shared/generation/media-tool-recovery.js";
 import { enqueueAudioTrimJob } from "@lib/shared/generation/generation-queue.js";
 import { submitMediaToolJob } from "@lib/shared/media-tools/media-tool-submission.js";
-import { resolveSourceDuration } from "@lib/shared/media-tools/source-duration.js";
+import {
+  requireOwnedProject,
+  resolveOwnedMediaSource,
+} from "@lib/shared/media-tools/owned-media-source.js";
 import { MediaToolBillingService } from "@lib/shared/media-tool-pricing/media-tool-billing.service.js";
 import { AssetStorageService } from "@lib/shared/assets/storage.service.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";
@@ -81,8 +84,12 @@ export class AudioTrimsService {
       explicitOutputFormat = rest.output_format;
     }
 
-    const project = await this.project.findOwnedById(projectId, userId);
-    if (!project) return fail(RESOURCE_NOT_FOUND_CODE, "资源不存在");
+    const projectError = await requireOwnedProject({
+      projects: this.project,
+      projectId,
+      userId,
+    });
+    if (projectError) return projectError;
 
     const { recovery, replayed } = await replayAcceptedMediaTool(this.prisma.client, {
       projectId,
@@ -95,11 +102,19 @@ export class AudioTrimsService {
     });
     if (replayed) return replayed;
 
-    const asset = await this.assets.findOwnedSource(sourceAssetId, userId);
-    if (!asset) return fail(RESOURCE_NOT_FOUND_CODE, "资源不存在");
-    if (asset.type !== "audio") {
-      return fail(FAILURE_CODE, "仅支持截取音频资产");
-    }
+    const source = await resolveOwnedMediaSource({
+      prisma: this.prisma.client,
+      assets: this.assets,
+      storage: this.storage,
+      userId,
+      assetId: sourceAssetId,
+      expectedTypes: ["audio"],
+      wrongTypeMessage: "仅支持截取音频资产",
+      durationMessage: "源音频时长读取失败，请稍后重试或更换素材",
+    });
+    if (!source.ok) return source.envelope;
+    const asset = source.asset;
+    const duration = source.duration!;
 
     const outputFormat =
       explicitOutputFormat ?? defaultAudioTrimOutputFormat(asset.storage_key ?? "");
@@ -117,22 +132,6 @@ export class AudioTrimsService {
       return fail(PARAM_MISSING_CODE, parsed.error.issues[0]?.message ?? "音频截取参数非法");
     }
 
-    const duration = await resolveSourceDuration({
-      prisma: this.prisma.client,
-      storage: this.storage,
-      asset: {
-        id: sourceAssetId,
-        storage_key: asset.storage_key,
-        duration_ms: asset.duration_ms,
-      },
-    });
-    if (duration === null) {
-      return fail(
-        ASSET_UNAVAILABLE_CODE,
-        "源音频时长读取失败，请稍后重试或更换素材",
-        { code: "asset_unavailable" },
-      );
-    }
     const start = parsed.data.start_time ?? 0;
     const end = Math.min(parsed.data.end_time ?? duration.seconds, duration.seconds);
     const selectedSeconds = Math.ceil(end - start);

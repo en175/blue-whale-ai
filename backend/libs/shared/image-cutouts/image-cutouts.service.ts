@@ -22,6 +22,10 @@ import { submitMediaToolJob } from "@lib/shared/media-tools/media-tool-submissio
 import { ProjectService } from "@lib/shared/project/project.service.js";
 import { AssetService } from "@lib/shared/assets/assets.service.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
+import {
+  requireOwnedProject,
+  resolveOwnedMediaSource,
+} from "@lib/shared/media-tools/owned-media-source.js";
 import { MediaToolBillingService } from "@lib/shared/media-tool-pricing/media-tool-billing.service.js";
 
 const IDEMPOTENCY_OPERATION = "image_cutout.create";
@@ -100,8 +104,12 @@ export class ImageCutoutsService {
     }
     const input: ImageCutoutInput = parsed.data;
 
-    const project = await this.project.findOwnedById(projectId, userId);
-    if (!project) return fail(RESOURCE_NOT_FOUND_CODE, "资源不存在");
+    const projectError = await requireOwnedProject({
+      projects: this.project,
+      projectId,
+      userId,
+    });
+    if (projectError) return projectError;
 
     const { recovery, replayed } = await replayAcceptedMediaTool(this.prisma.client, {
       projectId,
@@ -114,14 +122,16 @@ export class ImageCutoutsService {
     });
     if (replayed) return replayed;
 
-    const asset = await this.assets.findOwnedSource(
-      input[IMAGE_CUTOUT_INPUT_KEYS.sourceAssetId],
+    const source = await resolveOwnedMediaSource({
+      prisma: this.prisma.client,
+      assets: this.assets,
       userId,
-    );
-    if (!asset) return fail(RESOURCE_NOT_FOUND_CODE, "资源不存在");
-    if (asset.type !== "image") {
-      return fail(FAILURE_CODE, "仅支持对图片资产发起抠图");
-    }
+      assetId: input[IMAGE_CUTOUT_INPUT_KEYS.sourceAssetId],
+      expectedTypes: ["image"],
+      wrongTypeMessage: "仅支持对图片资产发起抠图",
+    });
+    if (!source.ok) return source.envelope;
+    const asset = source.asset;
 
     if (asset.width != null && asset.height != null) {
       const scene = input[IMAGE_CUTOUT_INPUT_KEYS.cutoutScene];
