@@ -3,9 +3,8 @@ import type { AddressInfo } from "node:net";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-
 const AGENT_TOKEN = "agent-service-token-for-test";
-const BILLING_TOKEN = "bwsvc_test_billing_credential";
+const UPSTREAM_KEY = "sk-unified-upstream-key";
 
 function listen(server: Server): Promise<number> {
   return new Promise(resolve => {
@@ -23,6 +22,15 @@ function createFakeNewApi(seen: IncomingHttpHeaders[]) {
     res.writeHead(200, { "content-type": "application/json" });
     res.end(JSON.stringify({ ok: true }));
   });
+}
+
+function settingsStub(key: string | null) {
+  return {
+    requireUpstreamKey: async () => {
+      if (key === null) throw new Error("上游凭证未配置");
+      return key;
+    },
+  };
 }
 
 type Captured = { status: number; body: unknown };
@@ -81,44 +89,41 @@ async function post(
   return { status: response.status, body: await response.json().catch(() => null) };
 }
 
-describe("AgentModelGatewayController 计费归属", () => {
+describe("AgentModelGatewayController 统一上游凭证", () => {
   let upstream: Server | undefined;
   let gateway: Server | undefined;
   let seen: IncomingHttpHeaders[];
-  let lookups: string[];
-  let owners: Map<string, string | null>;
   let port: number;
 
-  beforeEach(async () => {
+  async function boot(key: string | null): Promise<void> {
+    await close(gateway);
+    await close(upstream);
+    gateway = undefined;
+    upstream = undefined;
     seen = [];
-    lookups = [];
-    owners = new Map([["214", "37"]]);
-
     upstream = createFakeNewApi(seen);
     const upstreamPort = await listen(upstream);
 
     process.env.AGENT_SERVICE_TOKEN = AGENT_TOKEN;
-    process.env.NEW_API_AGENT_BILLING_TOKEN = BILLING_TOKEN;
     process.env.NEW_API_BASE_URL = `http://127.0.0.1:${upstreamPort}`;
 
     vi.resetModules();
     const module = await import("./agent-model-gateway.controller.js");
-    const controller = new module.AgentModelGatewayController({
-      findOwnerId: async (id: string) => {
-        lookups.push(id);
-        return owners.has(id) ? owners.get(id)! : null;
-      },
-    } as never);
-
+    const controller = new module.AgentModelGatewayController(settingsStub(key) as never);
     gateway = createGateway(controller as never);
     port = await listen(gateway);
+  }
+
+  beforeEach(async () => {
+    await boot(UPSTREAM_KEY);
   });
 
   afterEach(async () => {
     await close(gateway);
     await close(upstream);
+    gateway = undefined;
+    upstream = undefined;
     delete process.env.AGENT_SERVICE_TOKEN;
-    delete process.env.NEW_API_AGENT_BILLING_TOKEN;
     delete process.env.NEW_API_BASE_URL;
   });
 
@@ -128,24 +133,7 @@ describe("AgentModelGatewayController 计费归属", () => {
     expect(seen).toHaveLength(0);
   });
 
-  it("不带项目号时拒绝，且不打上游", async () => {
-    const result = await post(port, { "x-agent-service-token": AGENT_TOKEN });
-    expect(result.status).toBe(400);
-    expect(result.body).toMatchObject({ data: { reason: "project_context_required" } });
-    expect(seen).toHaveLength(0);
-  });
-
-  it("项目解不出主人时拒绝，绝不回落到默认账户", async () => {
-    const result = await post(port, {
-      "x-agent-service-token": AGENT_TOKEN,
-      "x-blue-whale-project-id": "999",
-    });
-    expect(result.status).toBe(403);
-    expect(result.body).toMatchObject({ data: { reason: "attribution_unresolved" } });
-    expect(seen).toHaveLength(0);
-  });
-
-  it("正常路径注入项目主人作为计费主体，并换成蓝鲸自己的凭证", async () => {
+  it("正常路径换成统一上游 key，不再发送计费主体头", async () => {
     const result = await post(port, {
       "x-agent-service-token": AGENT_TOKEN,
       "x-blue-whale-project-id": "214",
@@ -153,10 +141,17 @@ describe("AgentModelGatewayController 计费归属", () => {
     });
     expect(result.status).toBe(200);
     expect(seen).toHaveLength(1);
-    expect(seen[0]!["x-bw-subject-user-id"]).toBe("37");
-    expect(seen[0]!.authorization).toBe(`Bearer ${BILLING_TOKEN}`);
+    expect(seen[0]!.authorization).toBe(`Bearer ${UPSTREAM_KEY}`);
+    expect(seen[0]!["x-bw-subject-user-id"]).toBeUndefined();
     expect(seen[0]!["x-bw-agent-run-id"]).toBe("run_abc");
     expect(seen[0]!["x-agent-service-token"]).toBeUndefined();
+  });
+
+  it("没有项目号也照常转发——项目号不再参与鉴权或计费", async () => {
+    const result = await post(port, { "x-agent-service-token": AGENT_TOKEN });
+    expect(result.status).toBe(200);
+    expect(seen).toHaveLength(1);
+    expect(seen[0]!["x-bw-subject-user-id"]).toBeUndefined();
   });
 
   it("Agent 伪造的计费主体头和 Authorization 都在网关被丢弃", async () => {
@@ -168,14 +163,22 @@ describe("AgentModelGatewayController 计费归属", () => {
       authorization: "Bearer sk-someone-elses-key",
     });
     expect(result.status).toBe(200);
-    expect(seen[0]!["x-bw-subject-user-id"]).toBe("37");
-    expect(seen[0]!.authorization).toBe(`Bearer ${BILLING_TOKEN}`);
+    expect(seen[0]!["x-bw-subject-user-id"]).toBeUndefined();
+    expect(seen[0]!.authorization).toBe(`Bearer ${UPSTREAM_KEY}`);
     expect(seen[0]!["x-bw-agent-run-id"]).toBeUndefined();
   });
 
-  // 网关把 req.body 重新序列化成最紧凑的 JSON 再转，原来那份不是最紧凑的写法（带空格、换行，或中文写成 \\uXXXX）
-  // 字节数就变了。以前把原请求的 content-length 照抄给 New API，上游按旧长度收不满，报 unexpected EOF，
-  // 网关回 502「NewAPI 不可用」——测试站 10-12 用脚本发带缩进的请求，五种写法只有最紧凑那种能过。
+  it("统一凭证不可用时返回 503，且不打上游", async () => {
+    await boot(null);
+    const result = await post(port, {
+      "x-agent-service-token": AGENT_TOKEN,
+      "x-blue-whale-project-id": "214",
+    });
+    expect(result.status).toBe(503);
+    expect(result.body).toMatchObject({ data: { reason: "upstream_credential_missing" } });
+    expect(seen).toHaveLength(0);
+  });
+
   it.each([
     ["带空格", JSON.stringify({ model: "test-model", messages: [{ role: "user", content: "你好" }] }, null, 1)],
     ["中文转义", JSON.stringify({ model: "test-model", messages: [{ role: "user", content: "你好" }] }).replace("你好", "\\u4f60\\u597d")],
@@ -187,75 +190,6 @@ describe("AgentModelGatewayController 计费归属", () => {
     );
     expect(result.status).toBe(200);
     expect(seen).toHaveLength(1);
-  });
-
-  it("同一项目的连续调用只查一次库", async () => {
-    const headers = {
-      "x-agent-service-token": AGENT_TOKEN,
-      "x-blue-whale-project-id": "214",
-    };
-    await post(port, headers);
-    await post(port, headers);
-    expect(lookups).toEqual(["214"]);
-    expect(seen).toHaveLength(2);
-  });
-});
-
-describe("项目→主体缓存的淘汰顺序", () => {
-  it("续期过的热点项目不会因为「插入序最旧」而被淘汰", async () => {
-    vi.resetModules();
-    process.env.AGENT_SERVICE_TOKEN = AGENT_TOKEN;
-    process.env.NEW_API_AGENT_BILLING_TOKEN = BILLING_TOKEN;
-    const module = await import("./agent-model-gateway.controller.js");
-
-    const lookups: string[] = [];
-    const controller = new module.AgentModelGatewayController({
-      findOwnerId: async (id: string) => {
-        lookups.push(id);
-        return "37";
-      },
-    } as never);
-
-    const resolve = (id: string) =>
-      (controller as unknown as { resolveSubject(id: string): Promise<string | null> }).resolveSubject(id);
-
-    await resolve("hot");
-    for (let i = 0; i < 2_100; i += 1) await resolve(`cold-${i}`);
-    await resolve("hot");
-
-    const hotLookups = lookups.filter(id => id === "hot").length;
-    expect(hotLookups).toBe(2);
-
-    const before = lookups.filter(id => id === "hot").length;
-    for (let i = 0; i < 1_500; i += 1) await resolve(`cold2-${i}`);
-    await resolve("hot");
-    expect(lookups.filter(id => id === "hot").length).toBe(before);
-  });
-});
-
-describe("网关凭证的启动校验", () => {
-  afterEach(() => {
-    vi.resetModules();
-  });
-
-  async function assertConfig(token: string | undefined): Promise<void> {
-    vi.resetModules();
-    if (token === undefined) delete process.env.NEW_API_AGENT_BILLING_TOKEN;
-    else process.env.NEW_API_AGENT_BILLING_TOKEN = token;
-    const module = await import("./agent-model-gateway.controller.js");
-    module.assertAgentModelGatewayConfig();
-  }
-
-  it("没配只记日志，不拦启动——不跑 Agent 的部署仍要能起来", async () => {
-    await expect(assertConfig(undefined)).resolves.toBeUndefined();
-  });
-
-  it("带 bwsvc_ 前缀的凭证通过", async () => {
-    await expect(assertConfig("bwsvc_deadbeef")).resolves.toBeUndefined();
-  });
-
-  it("配了却没有 bwsvc_ 前缀就拒绝启动——NewAPI 按前缀分流，它会静默走错分支", async () => {
-    await expect(assertConfig("sk-looks-like-a-real-token")).rejects.toThrow("bwsvc_");
   });
 });
 
@@ -270,14 +204,11 @@ describe("AgentModelGatewayController 上游空闲超时", () => {
     upstream = createServer(handler);
     const upstreamPort = await listen(upstream);
     process.env.AGENT_SERVICE_TOKEN = AGENT_TOKEN_2;
-    process.env.NEW_API_AGENT_BILLING_TOKEN = "bwsvc_test_billing_credential";
     process.env.NEW_API_BASE_URL = `http://127.0.0.1:${upstreamPort}`;
     process.env.AGENT_MODEL_IDLE_TIMEOUT_MS = String(IDLE_MS);
     vi.resetModules();
     const module = await import("./agent-model-gateway.controller.js");
-    const controller = new module.AgentModelGatewayController({
-      findOwnerId: async () => "37",
-    } as never);
+    const controller = new module.AgentModelGatewayController(settingsStub(UPSTREAM_KEY) as never);
     gateway = createGateway(controller as never);
     port = await listen(gateway);
   }
@@ -288,7 +219,6 @@ describe("AgentModelGatewayController 上游空闲超时", () => {
     gateway = undefined;
     upstream = undefined;
     delete process.env.AGENT_SERVICE_TOKEN;
-    delete process.env.NEW_API_AGENT_BILLING_TOKEN;
     delete process.env.NEW_API_BASE_URL;
     delete process.env.AGENT_MODEL_IDLE_TIMEOUT_MS;
   });

@@ -145,12 +145,9 @@ cd backend && PORT=3100 \
   表现为管理端回显「未配置」、打上游 503 `upstream_credential_missing`。
 
 ⚠️ **上游 key 是项目里唯一的一把上游凭证。** 所有以「蓝鲸自己」身份打 new-api 的调用都用
-它（登录后回注请求头、技能格式化、worker 素材状态跟进……），多配一处就是多一处轮换与漂移。
-唯一看似例外的 `NEW_API_AGENT_BILLING_TOKEN`（`bwsvc_` 前缀）**不是第二把 key，是服务
-身份**——new-api 的 relay 入口按前缀分流，把它换成统一 key 会让 Agent 的账静默记到别人头上
-（详见下）。**它也刻意不配在管理端**：那不是「我们发给上游的我们是谁」。
-
-一个扣不了钱的进程不该开始接受请求，所以拦在启动而不是首次请求。
+它（登录后回注请求头、技能格式化、worker 素材状态跟进、Agent 模型网关……），多配一处就是
+多一处轮换与漂移。Agent 模型网关自 IKPBBJ（2026-10-21）起也走这把，`NEW_API_AGENT_BILLING_TOKEN`
+不再被后端读取；本期 Agent 模型调用不计费，new-api 的账记在统一 key 属主头上。
 
 ## MQ 连接检查
 
@@ -210,7 +207,7 @@ bash .agents/skills/start-local-services/scripts/check-local-services.sh --media
 
 ```bash
 cd backend
-set -a; source /tmp/bw-remote-agent.env; set +a   # Agent 服务三件套；缺失时见下
+set -a; source /tmp/bw-remote-agent.env; set +a   # Agent 服务变量；缺失时见下
 nohup env \
   DATABASE_URL='mysql://<凭据不落文件>@14.103.43.52:3306/blue_whale?timezone=%2B08%3A00' \
   NEW_API_BASE_URL='http://14.103.43.52:3006' \
@@ -220,8 +217,8 @@ nohup env \
 
 - ⚠️ `DATABASE_URL` **必须带 `?timezone=%2B08%3A00`**（测试站 MySQL 全局时区是 UTC）。缺它会命中 `assertClockAgreement`，后端拒绝启动并打出「进程时区与数据库会话时区不一致」——那是**配置问题不是代码坏了**。形态 A（本地库）同理。
 - 完整连接串的获取：SSH 到测试站（密钥 `~/Downloads/weitian.pem`，root@14.103.43.52）从 backend 容器 `docker inspect` 提取。连接串只走进程环境变量注入，不落任何入库文件或日志（ADR-0064）。
-- Agent 三件套变量（`AGENT_SERVICE_BASE_URL=http://14.103.43.52:4112` + `AGENT_SERVICE_TOKEN` + `NEW_API_AGENT_BILLING_TOKEN`）同样从远程容器 inspect 提取，存 `/tmp/bw-remote-agent.env`（600 权限）。缺这三项：右侧边栏 Agent 会话 502、模型网关 503。
-  - 其中 `NEW_API_AGENT_BILLING_TOKEN` **必须保持 `bwsvc_` 前缀**，且它**不等于管理端配的那把统一 key**：它是 new-api 那边 `AGENT_BILLING_SERVICE_TOKEN` 的同一个值，属于**服务身份**而非项目凭证，new-api 的 relay 入口按前缀分流，换成统一 key 不会报错、只会把账静默记到统一 key 的属主头上。后端启动时会校验前缀，配错直接拒绝启动。
+- Agent 两件套变量（`AGENT_SERVICE_BASE_URL=http://14.103.43.52:4112` + `AGENT_SERVICE_TOKEN`）同样从远程容器 inspect 提取，存 `/tmp/bw-remote-agent.env`（600 权限）。缺这两项：右侧边栏 Agent 会话 502。模型网关另需管理端配好的统一 key（`system_settings` 的 `upstream.new_api_key`），缺它模型网关 503 `upstream_credential_missing`。
+  - 本期 Agent 模型调用不计费（IKPBBJ），网关不再发送 `x-bw-subject-user-id`，也不再读 `NEW_API_AGENT_BILLING_TOKEN`。
 - ⚠️ **上游 key 读的是测试站库里的 `system_settings` 行**，而它是用**测试站部署的
   `SYSTEM_SETTINGS_SECRET`** 加密的。本地随便 `openssl rand` 一个密钥解不开它——管理端会
   回显「未配置」、打上游 503 `upstream_credential_missing`。要么用测试站那把密钥（从
