@@ -725,31 +725,75 @@ export async function saveCanvasWithRecovery(
       ...planned.map(write => `${write.submissionRow.submission_id}:${write.outputKey}`),
       ...aligned.map(write => `${write.submissionRow.submission_id}:${write.outputKey}`),
     ]);
+    const alignmentCandidates: Array<{
+      node: Record<string, unknown>;
+      submissionRow: NonNullable<ItemState["submissionRow"]>;
+      markerOutputKey: string;
+    }> = [];
+    const candidateSubmissionIds = new Set<string>();
     for (const node of incomingNodes) {
       const marker = markerOf(node);
       if (marker === null || marker.protocolVersion !== CANVAS_RECOVERY_PROTOCOL_VERSION) continue;
       const markerOutputKey = String(marker.outputKey);
       if (markerOutputKey === TARGET_OUTPUT_KEY) continue;
       const declaredAsset = (node.data as Record<string, unknown> | undefined)?.assetId ?? null;
-      if (declaredAsset === null) continue;
-      const submissionRow = await submissionRowOf(String(marker.submissionId));
+      if (declaredAsset === null || declaredAsset === "") continue;
+      candidateSubmissionIds.add(String(marker.submissionId));
+    }
+    const unknownSubmissionIds = [...candidateSubmissionIds].filter(submissionId => !submissionsById.has(submissionId));
+    if (unknownSubmissionIds.length > 0) {
+      const rows = await tx.generation_canvas_submissions.findMany({
+        where: { project_id: pid, submission_id: { in: unknownSubmissionIds } },
+      });
+      for (const row of rows) submissionsById.set(row.submission_id, row);
+    }
+    for (const node of incomingNodes) {
+      const marker = markerOf(node);
+      if (marker === null || marker.protocolVersion !== CANVAS_RECOVERY_PROTOCOL_VERSION) continue;
+      const markerOutputKey = String(marker.outputKey);
+      if (markerOutputKey === TARGET_OUTPUT_KEY) continue;
+      const declaredAsset = (node.data as Record<string, unknown> | undefined)?.assetId ?? null;
+      if (declaredAsset === null || declaredAsset === "") continue;
+      const submissionRow = submissionsById.get(String(marker.submissionId));
+      if (submissionRow === undefined || submissionRow.target_state !== "replaced") continue;
+      alignmentCandidates.push({ node, submissionRow, markerOutputKey });
+    }
+    const candidateRowsToLoad = [...new Map(
+      alignmentCandidates
+        .map(candidate => candidate.submissionRow)
+        .filter(row => !persistedKeysCache.has(row.submission_id))
+        .map(row => [row.submission_id, row]),
+    ).values()];
+    if (candidateRowsToLoad.length > 0) {
+      for (const row of candidateRowsToLoad) persistedKeysCache.set(row.submission_id, new Set());
+      const outputRows = await tx.generation_canvas_outputs.findMany({
+        where: { generation_canvas_submission_id: { in: candidateRowsToLoad.map(row => row.id) } },
+        select: { generation_canvas_submission_id: true, output_key: true },
+      });
+      for (const outputRow of outputRows) {
+        const submissionRow = candidateRowsToLoad.find(row => row.id === outputRow.generation_canvas_submission_id);
+        if (submissionRow === undefined) continue;
+        persistedKeysCache.get(submissionRow.submission_id)!.add(outputRow.output_key);
+      }
+    }
+    for (const candidate of alignmentCandidates) {
+      const { submissionRow, markerOutputKey } = candidate;
+      if (persistedKeysCache.get(submissionRow.submission_id)!.size > 0) continue;
       const { projection, job } = await projectionOf(submissionRow);
       projectionOrThrow(projection);
-      const persistedKeys = await persistedKeysOf(submissionRow);
-      if (projection.items.every(virtual => persistedKeys.has(virtual.outputKey))) continue;
       const trusted = trustedAssetIdOf(projection, job, markerOutputKey);
       if (trusted === null) continue;
+      const declaredAsset = (candidate.node.data as Record<string, unknown>).assetId;
       if (String(declaredAsset) !== trusted) {
         throw new RecoveryContractError(
           recoveryError(422, "结果资产与任务可信产物不一致", RECOVERY_REASONS.documentMismatch, {
-            nodeId: String(node.id),
+            nodeId: String(candidate.node.id),
             submissionId: submissionRow.submission_id,
             outputKey: markerOutputKey,
           }),
         );
       }
       for (const virtual of projection.items) {
-        if (persistedKeys.has(virtual.outputKey)) continue;
         const key = `${submissionRow.submission_id}:${virtual.outputKey}`;
         if (alignedKeys.has(key)) continue;
         alignedKeys.add(key);
@@ -766,6 +810,27 @@ export async function saveCanvasWithRecovery(
           assetId: asset === null ? null : BigInt(asset),
           createOwner: isMultiResultOutputKey(virtual.outputKey),
         });
+      }
+    }
+    const ownerWriteNodeIds = [...new Set(aligned.filter(write => write.createOwner).map(write => write.nodeId))];
+    if (ownerWriteNodeIds.length > 0) {
+      const existingOwnerRows = await tx.$queryRaw<
+        Array<{ node_id: string; generation_canvas_submission_id: bigint; output_key: string }>
+      >`SELECT node_id, generation_canvas_submission_id, output_key
+        FROM generation_canvas_node_owners WHERE project_id = ${pid}
+        AND node_id IN (${Prisma.join(ownerWriteNodeIds)}) FOR UPDATE`;
+      const existingOwnerByNode = new Map(existingOwnerRows.map(row => [row.node_id, row]));
+      for (let index = aligned.length - 1; index >= 0; index -= 1) {
+        const write = aligned[index]!;
+        if (!write.createOwner) continue;
+        const existing = existingOwnerByNode.get(write.nodeId);
+        if (existing === undefined) continue;
+        if (existing.generation_canvas_submission_id === write.submissionRow.id
+          && existing.output_key === write.outputKey) {
+          write.createOwner = false;
+          continue;
+        }
+        aligned.splice(index, 1);
       }
     }
 

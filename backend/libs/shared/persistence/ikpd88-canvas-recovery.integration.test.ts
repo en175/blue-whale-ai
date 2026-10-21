@@ -259,6 +259,10 @@ describe.skipIf(!databaseUrl)("画布恢复保存以对齐取代校验（IKPD88 
   it("★ 3. 1541 形状：普通写节点带产物但输出未落盘 → 保存时自动补齐", async () => {
     const created = await acceptJob({ submissionId: UUID_A, node: NODE });
     await succeed(BigInt(created.generation_job_id), ["700"]);
+    await raw.query(
+      "UPDATE generation_canvas_submissions SET target_state='replaced' WHERE project_id=? AND submission_id=?",
+      [PROJECT_ID, UUID_A],
+    );
     const seed = await prisma.canvas.create({
       data: {
         project_id: BigInt(PROJECT_ID),
@@ -327,5 +331,36 @@ describe.skipIf(!databaseUrl)("画布恢复保存以对齐取代校验（IKPD88 
       422,
       RECOVERY_REASONS.documentMismatch,
     );
+  });
+
+  it("★ 6. 对齐前资产与可信产物不一致 → 422 带节点定位，且零写入", async () => {
+    const created = await acceptJob({ submissionId: UUID_A, node: NODE });
+    await succeed(BigInt(created.generation_job_id), ["700"]);
+    await raw.query(
+      "UPDATE generation_canvas_submissions SET target_state='replaced' WHERE project_id=? AND submission_id=?",
+      [PROJECT_ID, UUID_A],
+    );
+    const seed = await prisma.canvas.create({
+      data: {
+        project_id: BigInt(PROJECT_ID),
+        version: 1,
+        viewport_json: {},
+        nodes_json: [markerNode(NODE, UUID_A, PRIMARY_OUTPUT_KEY, { assetId: "999" })],
+        edges_json: [],
+      },
+    });
+
+    const envelope = await expectEnvelope(
+      save({
+        commandId: CMD("50001"),
+        version: seed.version,
+        nodes: [markerNode(NODE, UUID_A, PRIMARY_OUTPUT_KEY, { assetId: "999" })],
+        changes: [],
+      }),
+      422,
+      RECOVERY_REASONS.documentMismatch,
+    );
+    expect(envelope.data).toMatchObject({ nodeId: NODE, submissionId: UUID_A, outputKey: PRIMARY_OUTPUT_KEY });
+    expect(await outputsOf(UUID_A)).toEqual([]);
   });
 });

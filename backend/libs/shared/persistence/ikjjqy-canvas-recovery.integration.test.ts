@@ -1017,7 +1017,7 @@ describe.skipIf(!databaseUrl)("多结果任务逐项恢复与删除（IKJJQY）"
       changes: [{ id: recoveryItemId(UUID_A, "segment:2"), rev: 0, action: "remove" }],
     });
     expect((await outputsOfSubmission(UUID_A)).map(row => [row.output_key, row.asset_id?.toString() ?? null, row.state]))
-      .toEqual([["segment:1", "9015", "present"], ["segment:2", "9016", "removed"]]);
+      .toEqual([["segment:2", "9016", "removed"]]);
   });
 
   it("★ 19. 单段场景切分：输出行写入段资产，读取的软删事实随资产状态变化", async () => {

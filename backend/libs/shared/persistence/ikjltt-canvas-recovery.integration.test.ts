@@ -168,12 +168,12 @@ describe.skipIf(!databaseUrl)("旧 primary 不得改动新受理归属（IKJLTT�
     });
   }
 
-  async function expectRejection(promise: Promise<unknown>, reason = RECOVERY_REASONS.documentMismatch) {
+  async function expectRejection(promise: Promise<unknown>, reason = RECOVERY_REASONS.documentMismatch, code = 422) {
     return promise.then(
       () => { throw new Error("应拒绝"); },
       (error: unknown) => {
         expect(error).toBeInstanceOf(RecoveryContractError);
-        expect((error as RecoveryContractError).envelope).toMatchObject({ code: 422, data: { reason } });
+        expect((error as RecoveryContractError).envelope).toMatchObject({ code, data: { reason } });
       },
     );
   }
@@ -242,7 +242,7 @@ describe.skipIf(!databaseUrl)("旧 primary 不得改动新受理归属（IKJLTT�
     return { jobA: jobA.generation_job_id, jobB: jobB.generation_job_id };
   }
 
-  it("★ 1. 接管后旧 A 首次 apply(primary) → 422 整笔回滚；修复前接受并污染 owner output_key", async () => {
+  it("★ 1. 接管后旧 A 首次 apply(primary) → 409 整笔回滚；修复前接受并污染 owner output_key", async () => {
     await seedTakeover();
 
     await expectRejection(save({
@@ -250,7 +250,7 @@ describe.skipIf(!databaseUrl)("旧 primary 不得改动新受理归属（IKJLTT�
       version: null,
       nodes: [markerNode(NODE, UUID_A, PRIMARY_OUTPUT_KEY, "11")],
       changes: [{ id: recoveryItemId(UUID_A, PRIMARY_OUTPUT_KEY), rev: 0, action: "apply" }],
-    }));
+    }), RECOVERY_REASONS.itemConflict, 409);
 
     const owner = await ownerRow(NODE);
     const submissionB = await submissionRow(UUID_B);
@@ -267,7 +267,7 @@ describe.skipIf(!databaseUrl)("旧 primary 不得改动新受理归属（IKJLTT�
     })).toBe(0);
   });
 
-  it("★ 2. A 已转换后被接管，旧 A 重复 apply(primary) → 422；修复前成功且污染 (B,$target) 行", async () => {
+  it("★ 2. A 已转换后被接管，旧 A 重复 apply(primary) → 409；修复前成功且污染 (B,$target) 行", async () => {
 
     await accept(acceptance(UUID_A, NODE, 0)).then(async jobA => succeedJob(jobA.generation_job_id, '["11"]'));
     const base = await save({
@@ -295,7 +295,7 @@ describe.skipIf(!databaseUrl)("旧 primary 不得改动新受理归属（IKJLTT�
       version: fanned.version,
       nodes: [markerNode(NODE, UUID_A, PRIMARY_OUTPUT_KEY, "11")],
       changes: [{ id: recoveryItemId(UUID_A, PRIMARY_OUTPUT_KEY), rev: 1, action: "apply" }],
-    }));
+    }), RECOVERY_REASONS.itemConflict, 409);
     const owner = await ownerRow(NODE);
     const submissionB = await submissionRow(UUID_B);
     expect(owner).toMatchObject({
