@@ -1,0 +1,76 @@
+{
+  "source_repository": "git@gitee.com:hangzhou-xuanfu_1/blue-whale-ai.git",
+  "source_branch": "master",
+  "source_commit": "96782fd214bfc5f3c4554691a65ad13b9b52c28b",
+  "source_commit_time": "2026-10-20T18:16:31+08:00",
+  "source_issue": "IKP5VB",
+  "sop_revision": "v1.0",
+  "source_updated_at": "2026-10-20T18:04:38+08:00",
+  "synced_at": "2026-10-20T10:53:59.000Z",
+  "content_sha256": "cbdf93827e01dbbf9298527e3fb22da8c23deed4a57ed098565a9c7579907486",
+  "scope": [
+    "CLAUDE.md",
+    "docs/agents/README.md",
+    "docs/agents/bluewhale-product-sop.md",
+    "docs/agents/bluewhale-product-sop.sync.json",
+    "docs/agents/issue-tracker.md",
+    "docs/agents/gitee-workflow-agent.md",
+    "docs/agents/gitee-workflow.md",
+    "docs/agents/gitee-workflow.html",
+    ".agents/skills/setup-matt-pocock-skills/issue-tracker-gitee.md"
+  ],
+  "unresolved_conflicts": [],
+  "resolved_differences": [
+    {
+      "paths": [
+        "CLAUDE.md",
+        "docs/agents/git-workflow.md"
+      ],
+      "previous_difference": "默认分支仍以 master 为任务起点，当前分支以 release 为基线；默认分支工单文档允许网页回退，当前规则仅允许 Gitee MCP。未导入这些旧条款。",
+      "resolution": "仅增量导入已确认产研协作规则，保留当前 release 开工基线和 Gitee MCP 专用渠道；这些技术与安全设定不属于 SOP 替换范围。"
+    },
+    {
+      "paths": [
+        "docs/agents/gitee-workflow-agent.md"
+      ],
+      "previous_difference": "本地跳步 B 允许生产部署后免复验直接已上线，主线允许测试或产品给出生产复验结论；SOP 第 4 节要求生产验证及测试、产品共同验收。保留原条款，暂停依赖这些差异的上线收口。",
+      "resolution": "Agent 手册和人类说明已统一为生产部署后进入生产-待验证，两环境验证及测试、产品共同验收通过后才可已上线；仅保留无需发布事项的跳步 C。"
+    },
+    {
+      "paths": [
+        "docs/agents/gitee-workflow-agent.md"
+      ],
+      "previous_difference": "本地跳步 A 允许随父验收子单部署测试站后先到待发布，并声明不代表测试通过；SOP 要求子任务有对应测试结论。子单提前流转的适用边界待确认。",
+      "resolution": "随父验收子单先记录工程及部署就绪，按授权提测；对应父测试及发布前验收结论明确覆盖本票后，才逐票进入待发布。"
+    },
+    {
+      "paths": [
+        "docs/agents/issue-tracker.md",
+        "docs/agents/gitee-workflow-agent.md"
+      ],
+      "previous_difference": "本地正文维护仍要求整体替换，SOP 第 6 节要求保留富文本模式并增量修改；本地子单标题未带版本前缀，SOP 第 3 节要求所有新工作项带已确认版本。原条款未覆盖，相关正文写入及新工作项标题适配待确认。",
+      "resolution": "工单操作手册、Agent 手册及技能配置模板已改为保留富文本的增量修改与编辑态验证；新工作项标题加入已确认版本。正文保护与 MCP 专用渠道不能同时满足时停止写入。"
+    },
+    {
+      "paths": [
+        "docs/agents/issue-tracker.md"
+      ],
+      "resolution": "工程拆分映射继续保留；新发现的问题使用原生缺陷类型，直接关联实际业务父需求及相关子任务，不按发现入口改成任务类型。"
+    },
+    {
+      "paths": [
+        "docs/agents/gitee-workflow.md",
+        "docs/agents/gitee-workflow.html"
+      ],
+      "resolution": "现行说明不再展示旧 PNG 图；旧 HTML 明确标注历史快照并默认折叠，指向现行规则。PNG 原文件保留用于追溯。"
+    }
+  ],
+  "preserved_constraints": [
+    "个人与全局设定未修改",
+    "当前 release 基线、独立任务 worktree 和现有 Git 安全门禁保留",
+    "技术栈、代码审查、测试与发布授权规则保留",
+    "工单及 PR 全部读写仅使用 Gitee MCP，不增加浏览器或 API 回退"
+  ],
+  "adapted_at": "2026-10-20T19:01:42+08:00",
+  "record_type": "已确认规则来源及本仓适配记录，发布与运行验收证据在 PR 中维护"
+}

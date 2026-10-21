@@ -10,6 +10,7 @@
 
 | 场景 | 文档 |
 |---|---|
+| **需求、开发、测试、缺陷或交付** | [bluewhale-product-sop.md](bluewhale-product-sop.md)，先核对 PRD 评审、业务父需求、版本及角色授权 |
 | **开 PR / 提交代码** | [commit-and-review.md](commit-and-review.md) |
 | **开新分支** | [branch-naming.md](branch-naming.md) |
 | **Agent 任务区 / 本地集成 / task worktree 生命周期** | [worktree-workflow.md](worktree-workflow.md) |
