@@ -20,6 +20,7 @@ export interface RequestSmsCodeDeps {
   db: {
     createVerificationCode(record: VerificationCodeRecord): Promise<{ id: string }>;
     invalidateOtherCodes(phone: string, purpose: string, keepId: string): Promise<unknown>;
+    consumeCode(codeId: string): Promise<boolean>;
   };
   sms: {
     send(phone: string, code: string): Promise<unknown>;
@@ -50,7 +51,12 @@ export async function requestSmsCode(
     ip: input.ip,
     expiresAt,
   });
-  await sms.send(input.phone, code);
+  try {
+    await sms.send(input.phone, code);
+  } catch (error) {
+    await db.consumeCode(created.id);
+    throw error;
+  }
   await db.invalidateOtherCodes(input.phone, input.purpose, created.id);
   return { code };
 }

@@ -49,8 +49,9 @@ export class AuthGuard implements CanActivate {
     }
     (request as RequestWithUser).loginToken = token;
 
+    let claims;
     try {
-      await this.sessions.verifyToken(token);
+      claims = await this.sessions.verifyToken(token);
     } catch {
       throw new NewApiError(
         "登录已过期，请重新验证",
@@ -100,7 +101,13 @@ export class AuthGuard implements CanActivate {
       throw new NewApiError("账户已停用", 403, ACCOUNT_ERROR_ACCOUNT_DISABLED);
     }
 
-    response.cookie(SESSION_COOKIE_NAME, token, sessionCookieOptions());
+    const remainingMs = claims.expiresAt - Date.now();
+    if (remainingMs > 0) {
+      response.cookie(SESSION_COOKIE_NAME, token, {
+        ...sessionCookieOptions(),
+        maxAge: remainingMs,
+      });
+    }
 
     (request as RequestWithUser).user = {
       userId: String(session.userId),

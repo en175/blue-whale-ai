@@ -1,7 +1,7 @@
 import {
   ACCOUNT_ERROR_INVALID_PURPOSE,
-  DEFAULT_VERIFICATION_PURPOSE,
   FAILURE_CODE,
+  LEGACY_VERIFICATION_PURPOSE,
   fail,
   isVerificationPurpose,
   ok,
@@ -24,9 +24,9 @@ export async function handleSendCode(
   }
   const purpose =
     input.purpose === undefined || input.purpose === null || input.purpose === ""
-      ? DEFAULT_VERIFICATION_PURPOSE
+      ? LEGACY_VERIFICATION_PURPOSE
       : input.purpose;
-  if (!isVerificationPurpose(purpose)) {
+  if (purpose !== LEGACY_VERIFICATION_PURPOSE && !isVerificationPurpose(purpose)) {
     return fail(FAILURE_CODE, "验证码用途不正确", null, ACCOUNT_ERROR_INVALID_PURPOSE);
   }
   try {

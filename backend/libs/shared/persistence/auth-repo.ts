@@ -10,10 +10,11 @@ export interface AuthRepo {
     expiresAt: Date;
   }): Promise<{ id: string }>;
   invalidateOtherCodes(phone: string, purpose: string, keepId: string): Promise<number>;
-  findActiveCode(phone: string, purpose: string): Promise<{
+  findActiveCode(phone: string, purposes: readonly string[]): Promise<{
     id: string;
     code: string;
     attempts: number;
+    purpose: string;
   } | null>;
   incrementAttempts(codeId: string): Promise<number>;
   consumeCode(codeId: string): Promise<boolean>;
@@ -131,14 +132,19 @@ export function createAuthRepo(prisma: PrismaClient): AuthRepo {
       return result.count;
     },
 
-    async findActiveCode(phone, purpose) {
+    async findActiveCode(phone, purposes) {
       const row = await prisma.bw_verification_codes.findFirst({
-        where: { phone, purpose, is_used: false, gmt_expire: { gt: new Date() } },
+        where: {
+          phone,
+          purpose: { in: [...purposes] },
+          is_used: false,
+          gmt_expire: { gt: new Date() },
+        },
         orderBy: { id: "desc" },
-        select: { id: true, code: true, attempts: true },
+        select: { id: true, code: true, attempts: true, purpose: true },
       });
       return row
-        ? { id: row.id.toString(), code: row.code, attempts: row.attempts }
+        ? { id: row.id.toString(), code: row.code, attempts: row.attempts, purpose: row.purpose }
         : null;
     },
 

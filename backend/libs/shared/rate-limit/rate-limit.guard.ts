@@ -62,6 +62,15 @@ export class RateLimitGuard implements CanActivate {
         windowMs: bucket.windowMs,
       });
       if (!result.allowed) {
+        if (result.retryAfter != null) {
+          try {
+            context
+              .switchToHttp()
+              .getResponse<{ setHeader(name: string, value: string): void }>()
+              ?.setHeader("Retry-After", String(result.retryAfter));
+          } catch {
+          }
+        }
         throw new NewApiError("操作过于频繁，请稍后再试", 429, RATE_LIMITED);
       }
     }

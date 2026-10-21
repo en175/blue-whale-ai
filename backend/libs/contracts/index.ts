@@ -609,6 +609,7 @@ export {
 export {
   VERIFICATION_PURPOSES,
   DEFAULT_VERIFICATION_PURPOSE,
+  LEGACY_VERIFICATION_PURPOSE,
   isVerificationPurpose,
   type VerificationPurpose,
 } from "./verification-purpose.js";

@@ -6,6 +6,7 @@ export interface AccessTokenClaims {
   userId: string;
   jti: string;
   type: "access";
+  expiresAt: number;
 }
 
 const ACCESS_TTL_SECONDS = 7 * 24 * 60 * 60;
@@ -39,5 +40,13 @@ export async function verifyAccessToken(
   if (typeof payload.jti !== "string" || !payload.jti) {
     throw new Error("jwt missing jti");
   }
-  return { userId: payload.sub, jti: payload.jti, type: "access" };
+  if (typeof payload.exp !== "number") {
+    throw new Error("jwt missing exp");
+  }
+  return {
+    userId: payload.sub,
+    jti: payload.jti,
+    type: "access",
+    expiresAt: payload.exp * 1000,
+  };
 }

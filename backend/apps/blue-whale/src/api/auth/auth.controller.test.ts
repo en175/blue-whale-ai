@@ -346,19 +346,54 @@ describe("AuthController 手机号验证码登录（IKJA4Q）", () => {
     );
   });
 
-  it("未勾协议 → 失败信封 terms_required，不碰 identity", async () => {
+  it("未勾协议 → 400 terms_required，不碰 identity", async () => {
     const { controller, identity, res } = setup();
 
-    const out = await controller.loginByCode(
-      { phone: "13800001234", code: "123456" },
+    await expect(
+      controller.loginByCode({ phone: "13800001234", code: "123456" }, res),
+    ).rejects.toMatchObject({
+      name: "NewApiError",
+      status: 400,
+      code: ACCOUNT_ERROR_TERMS_REQUIRED,
+    });
+    expect(identity.loginWithPhoneCode).not.toHaveBeenCalled();
+  });
+
+  it("client_id 透传进会话：同浏览器重登替换旧会话靠它", async () => {
+    const { controller, identity, sessions, res } = setup();
+    identity.loginWithPhoneCode.mockResolvedValue({
+      result: phoneResult(),
+      isNewUser: false,
+    });
+
+    await controller.loginByCode(
+      { ...CODE_BODY, client_id: "browser-client-id-123" },
       res,
     );
 
-    expect(out).toMatchObject({
-      code: FAILURE_CODE,
-      error_code: ACCOUNT_ERROR_TERMS_REQUIRED,
+    expect(sessions.createSession).toHaveBeenCalledWith(
+      "jwt-token",
+      expect.objectContaining({ clientId: "browser-client-id-123" }),
+    );
+  });
+
+  it("client_id 过短/过长按缺失处理，不写进会话", async () => {
+    const { controller, identity, sessions, res } = setup();
+    identity.loginWithPhoneCode.mockResolvedValue({
+      result: phoneResult(),
+      isNewUser: false,
     });
-    expect(identity.loginWithPhoneCode).not.toHaveBeenCalled();
+
+    await controller.loginByCode({ ...CODE_BODY, client_id: "short" }, res);
+    await controller.loginByCode(
+      { ...CODE_BODY, client_id: "x".repeat(65) },
+      res,
+    );
+
+    expect(sessions.createSession).toHaveBeenCalledTimes(2);
+    for (const call of sessions.createSession.mock.calls) {
+      expect(call[1]).not.toHaveProperty("clientId");
+    }
   });
 
   it("手机号格式不对 / 验证码为空 → 失败信封，不碰 identity", async () => {

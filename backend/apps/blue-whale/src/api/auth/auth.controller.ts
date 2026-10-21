@@ -65,6 +65,12 @@ function loginData(result: LocalLoginResult, isNewUser: boolean, token: string) 
   };
 }
 
+function normalizeClientId(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed.length >= 8 && trimmed.length <= 64 ? trimmed : undefined;
+}
+
 function phoneCodeFailure(error: unknown): NewApiError | null {
   if (error instanceof CodeWrongError) {
     return new NewApiError(
@@ -184,7 +190,7 @@ export class AuthController {
   ) {
     const username = typeof body.username === "string" ? body.username.trim() : "";
     const password = typeof body.password === "string" ? body.password : "";
-    const clientId = typeof body.client_id === "string" ? body.client_id.trim() : "";
+    const clientId = normalizeClientId(body.client_id);
     const ip = forwardedFor?.split(",")[0]?.trim() ?? "unknown";
 
     if (!username || !password) {
@@ -239,17 +245,16 @@ export class AuthController {
   ) {
     const phone = typeof body.phone === "string" ? body.phone.trim() : "";
     const code = typeof body.code === "string" ? body.code.trim() : "";
-    const clientId = typeof body.client_id === "string" ? body.client_id.trim() : "";
+    const clientId = normalizeClientId(body.client_id);
     const ip = forwardedFor?.split(",")[0]?.trim() ?? "unknown";
 
     if (!isValidPhone(phone) || !code) {
       return fail(FAILURE_CODE, "手机号和验证码不能为空");
     }
     if (body.agreed_terms !== true) {
-      return fail(
-        FAILURE_CODE,
+      throw new NewApiError(
         "请先阅读并同意用户服务协议和隐私政策",
-        null,
+        400,
         ACCOUNT_ERROR_TERMS_REQUIRED,
       );
     }

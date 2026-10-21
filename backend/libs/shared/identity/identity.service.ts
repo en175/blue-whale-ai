@@ -1,6 +1,9 @@
 import { Injectable } from "@nestjs/common";
 
-import type { VerificationPurpose } from "@lib/contracts";
+import {
+  LEGACY_VERIFICATION_PURPOSE,
+  type VerificationPurpose,
+} from "@lib/contracts";
 import type { Tier } from "@lib/core/identity/tier.js";
 import {
   LastSuperAdminError,
@@ -176,7 +179,10 @@ export class IdentityService {
     purpose?: VerificationPurpose;
   }): Promise<{ result: LocalLoginResult; isNewUser: boolean }> {
     const purpose = input.purpose ?? "login";
-    const record = await this.authCodes.findActiveCode(input.phone, purpose);
+    const record = await this.authCodes.findActiveCode(input.phone, [
+      purpose,
+      LEGACY_VERIFICATION_PURPOSE,
+    ]);
     if (!record) {
       throw new CodeExpiredError();
     }
@@ -238,7 +244,10 @@ export class IdentityService {
     if (!self) throw new InvalidCredentialsError();
     if (self.phone) throw new PhoneAlreadyBoundError();
 
-    const record = await this.authCodes.findActiveCode(input.phone, "bind");
+    const record = await this.authCodes.findActiveCode(input.phone, [
+      "bind",
+      LEGACY_VERIFICATION_PURPOSE,
+    ]);
     if (!record) throw new CodeExpiredError();
     if (record.code !== input.code) {
       const attempts = await this.authCodes.incrementAttempts(record.id);

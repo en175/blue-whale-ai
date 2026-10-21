@@ -32,7 +32,12 @@ function makeGuard(opts: {
   const sessions = {
     verifyToken:
       opts.verifyToken ??
-      (async () => ({ userId: "8", jti: "jti-1", type: "access" })),
+      (async () => ({
+        userId: "8",
+        jti: "jti-1",
+        type: "access",
+        expiresAt: Date.now() + 7 * 24 * 60 * 60 * 1000,
+      })),
     resolveSession: opts.resolveSession ?? (async () => null),
     updateSessionIdentity: async () => undefined,
     wasEvicted: opts.wasEvicted ?? (async () => false),
@@ -109,6 +114,24 @@ describe("AuthGuard（HttpOnly cookie 会话校验，ADR-0062 #19）", () => {
       status: 401,
       code: "session_evicted",
     });
+  });
+
+  it("cookie 的 maxAge 跟随 JWT 剩余时间，不在每次访问时续成 7 天", async () => {
+    const guard = makeGuard({
+      verifyToken: async () => ({
+        userId: "8",
+        jti: "jti-1",
+        type: "access",
+        expiresAt: Date.now() + 60_000,
+      }),
+      resolveSession: async () => VALID_SESSION,
+    });
+    const { context, cookie } = makeContext("sess_abc");
+    await guard.canActivate(context as never);
+
+    const options = cookie.mock.calls[0]?.[2] as { maxAge?: number };
+    expect(options.maxAge).toBeGreaterThan(0);
+    expect(options.maxAge).toBeLessThanOrEqual(60_000);
   });
 
   it("账户停用（status ≠ 1）→ 403", async () => {

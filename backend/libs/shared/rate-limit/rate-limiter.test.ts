@@ -155,3 +155,25 @@ describe("RateLimiter", () => {
     await expect(limiter.isBlocked("login", "x")).resolves.toBe(false);
   });
 });
+
+describe("RateLimiter 滚动窗口", () => {
+  it("窗口滑过之后额度恢复（不是固定窗口边界重置）", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-10-21T12:00:00.000Z"));
+      const limiter = new RateLimiter();
+      const bucket = { scope: "sms", key: "13800001234", limit: 1, windowMs: 60_000 };
+      await expect(limiter.take(bucket)).resolves.toEqual({ allowed: true });
+      await expect(limiter.take(bucket)).resolves.toMatchObject({ allowed: false });
+
+      vi.setSystemTime(new Date("2026-10-21T12:00:30.000Z"));
+      await expect(limiter.take(bucket)).resolves.toMatchObject({ allowed: false });
+
+      vi.setSystemTime(new Date("2026-10-21T12:01:01.000Z"));
+      await expect(limiter.take(bucket)).resolves.toEqual({ allowed: true });
+      await limiter.onModuleDestroy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

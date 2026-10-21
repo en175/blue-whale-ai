@@ -95,24 +95,28 @@ describe("auth-repo 验证码（用途隔离与次数）", () => {
     });
   });
 
-  it("查有效码按 phone + purpose 过滤，并带出已错次数", async () => {
+  it("查有效码按 phone + 用途集合过滤，并带出已错次数", async () => {
     const { prisma } = fakePrisma();
     const findFirst = vi.fn().mockResolvedValue({
       id: 9n,
       code: "123456",
       attempts: 2,
+      purpose: "login",
     });
     (prisma as unknown as { bw_verification_codes: { findFirst: unknown } })
       .bw_verification_codes.findFirst = findFirst;
 
-    const record = await createAuthRepo(prisma).findActiveCode("13800000000", "login");
+    const record = await createAuthRepo(prisma).findActiveCode("13800000000", [
+      "login",
+      "legacy",
+    ]);
 
-    expect(record).toEqual({ id: "9", code: "123456", attempts: 2 });
+    expect(record).toEqual({ id: "9", code: "123456", attempts: 2, purpose: "login" });
     expect(findFirst).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
           phone: "13800000000",
-          purpose: "login",
+          purpose: { in: ["login", "legacy"] },
           is_used: false,
         }),
       }),
