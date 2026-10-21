@@ -21,12 +21,7 @@ import {
   ACCOUNT_ERROR_INVALID_PURPOSE,
   ACCOUNT_ERROR_MIGRATION_INELIGIBLE,
   ACCOUNT_ERROR_MIGRATION_TOKEN_EXPIRED,
-  ACCOUNT_ERROR_OPERATION_FORBIDDEN,
-  ACCOUNT_ERROR_OPERATION_NOT_FOUND,
-  ACCOUNT_ERROR_OPERATION_PENDING,
   ACCOUNT_ERROR_PHONE_TAKEN,
-  ACCOUNT_ERROR_QUERY_TOKEN_EXPIRED,
-  ACCOUNT_ERROR_SESSION_EXPIRED,
   ACCOUNT_ERROR_TERMS_REQUIRED,
   ACCOUNT_LOCKED,
   FAILURE_CODE,
@@ -42,12 +37,6 @@ import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
 import { logger } from "@lib/infra/logging/blue-whale-logger.js";
 import { handleSendCode } from "@lib/shared/auth/handle-send-code.js";
 import { resolveSmsProvider, type SmsProvider } from "@lib/shared/auth/sms.js";
-import {
-  AuthOperationService,
-  maskPhone,
-  type AuthOperationStatus,
-  type AuthOperationType,
-} from "@lib/shared/auth/auth-operation.service.js";
 import { projectPhoneCodeError } from "@lib/shared/auth/phone-code-error.js";
 import { CaptchaService } from "@lib/shared/auth/captcha.service.js";
 import {
@@ -84,7 +73,6 @@ import type { LoginByCodeDto } from "./dto/login-by-code.dto.js";
 import type { LoginDto } from "./dto/login.dto.js";
 import type { MigrationBindDto } from "./dto/migration-bind.dto.js";
 import type { MigrationVerifyDto } from "./dto/migration-verify.dto.js";
-import type { OperationRecoveryDto } from "./dto/operation-recovery.dto.js";
 import type { RegisterDto } from "./dto/register.dto.js";
 
 function loginData(result: LocalLoginResult, isNewUser: boolean, token: string) {
@@ -164,7 +152,6 @@ export class AuthController {
     private readonly limiter: RateLimiter,
     private readonly loginFailures: LoginFailureTracker,
     private readonly identity: IdentityService,
-    private readonly operations: AuthOperationService,
     private readonly phoneActions: PhoneActionService,
     private readonly captcha: CaptchaService,
   ) {}
@@ -214,7 +201,6 @@ export class AuthController {
       purpose?: unknown;
       captcha_id?: unknown;
       captcha_answer?: unknown;
-      request_id?: unknown;
     },
     @Headers("x-forwarded-for") forwardedFor?: string,
     @Res({ passthrough: true }) res?: Response,
@@ -231,33 +217,10 @@ export class AuthController {
     if (purpose !== LEGACY_VERIFICATION_PURPOSE && !isVerificationPurpose(purpose)) {
       return fail(FAILURE_CODE, "验证码用途不正确", null, ACCOUNT_ERROR_INVALID_PURPOSE);
     }
-    const requestId =
-      typeof body?.request_id === "string" && body.request_id.trim()
-        ? body.request_id.trim()
-        : undefined;
-    const started = await this.operations.begin({
-      type: "sms",
-      requestId,
-      phone,
-    });
-    if (started.duplicate) {
-      if (started.operation.status === "pending") {
-        throw new NewApiError(
-          "正在确认操作结果，请稍候",
-          409,
-          ACCOUNT_ERROR_OPERATION_PENDING,
-        );
-      }
-      if (started.operation.status === "succeeded") {
-        return ok({ operation_id: started.operation.id });
-      }
-    }
-
     const captchaId =
       typeof body?.captcha_id === "string" ? body.captcha_id.trim() : "";
     if (!captchaId) {
-      await this.operations.fail(started.operation.id, ACCOUNT_ERROR_CAPTCHA_REQUIRED);
-      throw new NewApiError("请先完成拼图验证", 400, ACCOUNT_ERROR_CAPTCHA_REQUIRED);
+      throw new NewApiError("请先完成验证码验证", 400, ACCOUNT_ERROR_CAPTCHA_REQUIRED);
     }
     const verdict = await this.captcha.verify({
       id: captchaId,
@@ -266,7 +229,6 @@ export class AuthController {
       purpose,
     });
     if (verdict === "expired") {
-      await this.operations.fail(started.operation.id, ACCOUNT_ERROR_CAPTCHA_EXPIRED);
       throw new NewApiError(
         "验证已超时，请换一张后重试",
         400,
@@ -274,7 +236,6 @@ export class AuthController {
       );
     }
     if (verdict === "invalid") {
-      await this.operations.fail(started.operation.id, ACCOUNT_ERROR_CAPTCHA_INVALID);
       throw new NewApiError(
         "验证码错误，已换新图，请重新输入",
         400,
@@ -290,7 +251,6 @@ export class AuthController {
         windowMs: bucket.windowMs,
       });
       if (!hit.allowed) {
-        await this.operations.fail(started.operation.id, "rate_limited");
         res?.setHeader("Retry-After", String(hit.retryAfter ?? 1));
         throw new NewApiError("操作过于频繁，请稍后再试", 429, RATE_LIMITED);
       }
@@ -300,29 +260,8 @@ export class AuthController {
       { phone, purpose, ip },
       { db: createAuthRepo(this.prisma.client), sms: this.sms },
     );
-    if (result.code === 200) {
-      await this.operations.succeed(started.operation.id, {});
-      return ok({ operation_id: started.operation.id });
-    }
-    await this.operations.fail(started.operation.id, "sms_send_failed");
+    if (result.code === 200) return ok();
     return result;
-  }
-
-  private async beginOperation(input: {
-    type: AuthOperationType;
-    userId?: number | null;
-    requestId?: string | undefined;
-    phone?: string | undefined;
-  }) {
-    const started = await this.operations.begin(input);
-    if (started.duplicate && started.operation.status === "pending") {
-      throw new NewApiError(
-        "正在确认操作结果，请稍候",
-        409,
-        ACCOUNT_ERROR_OPERATION_PENDING,
-      );
-    }
-    return started;
   }
 
   private async establishSession(
@@ -411,10 +350,6 @@ export class AuthController {
     const phone = typeof body.phone === "string" ? body.phone.trim() : "";
     const code = typeof body.code === "string" ? body.code.trim() : "";
     const clientId = normalizeClientId(body.client_id);
-    const requestId =
-      typeof body.request_id === "string" && body.request_id.trim()
-        ? body.request_id.trim()
-        : undefined;
     const ip = forwardedFor?.split(",")[0]?.trim() ?? "unknown";
 
     if (!isValidPhone(phone) || !code) {
@@ -428,40 +363,10 @@ export class AuthController {
       );
     }
 
-    const started = await this.beginOperation({
-      type: "login",
-      requestId,
-      phone,
-    });
-    if (started.duplicate && started.operation.status === "succeeded") {
-      const storedUserId = started.operation.result?.user_id;
-      if (typeof storedUserId === "number") {
-        try {
-          const result = await this.identity.getLoginResult(storedUserId);
-          const sessionToken = await this.establishSession(result, clientId);
-          res.cookie(SESSION_COOKIE_NAME, sessionToken, sessionCookieOptions());
-          return ok({
-            ...loginData(result, false, sessionToken),
-            operation_id: started.operation.id,
-          });
-        } catch {
-          throw new NewApiError(
-            "登录已过期，请重新验证",
-            401,
-            ACCOUNT_ERROR_SESSION_EXPIRED,
-          );
-        }
-      }
-    }
-
     try {
       const { result, isNewUser } = await this.identity.loginWithPhoneCode({ phone, code });
       const sessionToken = await this.establishSession(result, clientId);
       res.cookie(SESSION_COOKIE_NAME, sessionToken, sessionCookieOptions());
-      await this.operations.succeed(started.operation.id, {
-        user_id: result.userId,
-        is_new_user: isNewUser,
-      });
       await this.recordLogin({
         userId: String(result.userId),
         username: result.username,
@@ -469,14 +374,10 @@ export class AuthController {
         userAgent,
         success: true,
       });
-      return ok({
-        ...loginData(result, isNewUser, sessionToken),
-        operation_id: started.operation.id,
-      });
+      return ok(loginData(result, isNewUser, sessionToken));
     } catch (error) {
       const failure = phoneCodeFailure(error);
       if (failure) {
-        await this.operations.fail(started.operation.id, String(failure.code ?? "code_error"));
         await this.recordLogin({
           username: phone,
           ip,
@@ -487,14 +388,11 @@ export class AuthController {
         throw failure;
       }
       if (error instanceof AccountDisabledError) {
-        await this.operations.fail(started.operation.id, ACCOUNT_ERROR_ACCOUNT_DISABLED);
         throw new NewApiError(error.message, 403, ACCOUNT_ERROR_ACCOUNT_DISABLED);
       }
       if (error instanceof AccountDeletedError) {
-        await this.operations.fail(started.operation.id, ACCOUNT_ERROR_ACCOUNT_DELETED);
         throw new NewApiError(error.message, 403, ACCOUNT_ERROR_ACCOUNT_DELETED);
       }
-      await this.operations.fail(started.operation.id, "unknown");
       throw toAuthError(error);
     }
   }
@@ -610,10 +508,6 @@ export class AuthController {
     const phone = typeof body.phone === "string" ? body.phone.trim() : "";
     const code = typeof body.code === "string" ? body.code.trim() : "";
     const clientId = normalizeClientId(body.client_id);
-    const requestId =
-      typeof body.request_id === "string" && body.request_id.trim()
-        ? body.request_id.trim()
-        : undefined;
     const ip = forwardedFor?.split(",")[0]?.trim() ?? "unknown";
 
     if (!token) {
@@ -634,31 +528,8 @@ export class AuthController {
       );
     }
 
-    const started = await this.beginOperation({
-      type: "migration",
-      requestId,
-      phone,
-    });
-    if (started.duplicate && started.operation.status === "succeeded") {
-      const storedUserId = started.operation.result?.user_id;
-      if (typeof storedUserId === "number") {
-        const result = await this.identity.getLoginResult(storedUserId);
-        const sessionToken = await this.establishSession(result, clientId);
-        await this.sessions.revokeAllForUser(storedUserId, sessionToken);
-        res.cookie(SESSION_COOKIE_NAME, sessionToken, sessionCookieOptions());
-        return ok({
-          ...loginData(result, false, sessionToken),
-          operation_id: started.operation.id,
-        });
-      }
-    }
-
     const action = await this.phoneActions.resolve("migration", token);
     if (!action) {
-      await this.operations.fail(
-        started.operation.id,
-        ACCOUNT_ERROR_MIGRATION_TOKEN_EXPIRED,
-      );
       throw new NewApiError(
         "原账号验证已过期，请重新验证",
         400,
@@ -675,10 +546,6 @@ export class AuthController {
     } catch (error) {
       const failure = phoneCodeFailure(error);
       if (failure) {
-        await this.operations.fail(
-          started.operation.id,
-          String(failure.code ?? "code_error"),
-        );
         await this.recordLogin({
           username: phone,
           ip,
@@ -689,7 +556,6 @@ export class AuthController {
         throw failure;
       }
       if (error instanceof PhoneTakenError) {
-        await this.operations.fail(started.operation.id, ACCOUNT_ERROR_PHONE_TAKEN);
         await this.recordLogin({
           username: phone,
           ip,
@@ -705,10 +571,6 @@ export class AuthController {
         );
       }
       if (error instanceof MigrationIneligibleError) {
-        await this.operations.fail(
-          started.operation.id,
-          ACCOUNT_ERROR_MIGRATION_INELIGIBLE,
-        );
         await this.recordLogin({
           username: phone,
           ip,
@@ -722,11 +584,9 @@ export class AuthController {
           ACCOUNT_ERROR_MIGRATION_INELIGIBLE,
         );
       }
-      await this.operations.fail(started.operation.id, "unknown");
       throw toAuthError(error);
     }
 
-    await this.operations.succeed(started.operation.id, { user_id: user.id });
     try {
       await this.phoneActions.revoke(token);
     } catch (error) {
@@ -749,10 +609,7 @@ export class AuthController {
         userAgent,
         success: true,
       });
-      return ok({
-        ...loginData(result, false, sessionToken),
-        operation_id: started.operation.id,
-      });
+      return ok(loginData(result, false, sessionToken));
     } catch (error) {
       logger.error(
         `迁移补绑成功但登录失败（userId=${user.id}）：${
@@ -765,108 +622,6 @@ export class AuthController {
         ACCOUNT_ERROR_BIND_SUCCEEDED_LOGIN_FAILED,
       );
     }
-  }
-
-  @Public()
-  @Get("operations/:id")
-  async getOperation(
-    @Param("id") id: string,
-    @Query("query_token") queryToken: string | undefined,
-    @Req() req: Request,
-  ) {
-    const operation = await this.operations.get(id);
-    if (!operation) {
-      throw new NewApiError(
-        "暂未找到本次操作记录，请重试核实",
-        404,
-        ACCOUNT_ERROR_OPERATION_NOT_FOUND,
-      );
-    }
-
-    let allowed = false;
-    const loginToken = extractLoginToken(req);
-    if (loginToken) {
-      const session = await this.sessions.resolveSession(loginToken).catch(() => null);
-      allowed =
-        session != null &&
-        operation.userId != null &&
-        session.userId === operation.userId;
-    }
-    let queryRejected = false;
-    if (!allowed && queryToken) {
-      allowed = await this.operations.verifyQueryToken(queryToken, id);
-      queryRejected = !allowed;
-    }
-    if (!allowed) {
-      if (queryRejected) {
-        throw new NewApiError(
-          "查询授权已过期，请验证身份后继续确认原操作",
-          403,
-          ACCOUNT_ERROR_QUERY_TOKEN_EXPIRED,
-        );
-      }
-      throw new NewApiError(
-        "无权查询该操作记录",
-        403,
-        ACCOUNT_ERROR_OPERATION_FORBIDDEN,
-      );
-    }
-
-    const storedPhone =
-      operation.result && typeof operation.result.phone === "string"
-        ? operation.result.phone
-        : null;
-    return ok({
-      id: operation.id,
-      type: operation.type,
-      status: operation.status satisfies AuthOperationStatus,
-      result: storedPhone
-        ? { ...operation.result, phone: maskPhone(storedPhone) }
-        : operation.result,
-      error_code: operation.errorCode,
-      phone_masked: maskPhone(operation.phone),
-      created_at: operation.createdAt,
-      updated_at: operation.updatedAt,
-    });
-  }
-
-  @Public()
-  @Post("operations/:id/recovery")
-  async recoverOperationQuery(
-    @Param("id") id: string,
-    @Body() body: OperationRecoveryDto,
-  ) {
-    const operation = await this.operations.get(id);
-    if (!operation) {
-      throw new NewApiError(
-        "暂未找到本次操作记录，请重试核实",
-        404,
-        ACCOUNT_ERROR_OPERATION_NOT_FOUND,
-      );
-    }
-    const code = typeof body.code === "string" ? body.code.trim() : "";
-    if (!operation.phone) {
-      throw new NewApiError(
-        "无权查询该操作记录",
-        403,
-        ACCOUNT_ERROR_OPERATION_FORBIDDEN,
-      );
-    }
-    if (!code) {
-      return fail(FAILURE_CODE, "验证码已失效，请重新获取");
-    }
-    try {
-      await this.identity.consumeRecoveryCode(operation.phone, code);
-    } catch (error) {
-      const failure = phoneCodeFailure(error);
-      if (failure) throw failure;
-      throw toAuthError(error);
-    }
-    const queryToken = await this.operations.issueQueryToken(
-      operation.id,
-      operation.userId ?? 0,
-    );
-    return ok({ query_token: queryToken, expires_in: 7 * 24 * 60 * 60 });
   }
 
   private async recordLogin(entry: {

@@ -372,11 +372,6 @@ export class IdentityService {
     return this.toLoginResult(row);
   }
 
-  async consumeRecoveryCode(phone: string, code: string): Promise<void> {
-    const codeId = await this.validatePhoneCode(phone, ["recovery"], code);
-    await this.consumePhoneCode(codeId);
-  }
-
   async updateNickname(
     userId: string | number,
     raw: unknown,

@@ -89,9 +89,6 @@ export const ACCOUNT_ERROR_INVALID_PURPOSE = "invalid_purpose";
 export const ACCOUNT_ERROR_PHONE_TAKEN = "phone_taken";
 export const ACCOUNT_ERROR_SESSION_EXPIRED = "session_expired";
 export const ACCOUNT_ERROR_SESSION_EVICTED = "session_evicted";
-export const ACCOUNT_ERROR_OPERATION_PENDING = "operation_pending";
-export const ACCOUNT_ERROR_OPERATION_NOT_FOUND = "operation_not_found";
-export const ACCOUNT_ERROR_OPERATION_FORBIDDEN = "operation_forbidden";
 export const ACCOUNT_ERROR_REBIND_TOKEN_EXPIRED = "rebind_token_expired";
 export const ACCOUNT_ERROR_REBIND_TOKEN_INVALID = "rebind_token_invalid";
 export const ACCOUNT_ERROR_REBIND_SAME_PHONE = "rebind_same_phone";
@@ -101,7 +98,6 @@ export const ACCOUNT_ERROR_NICKNAME_INVALID = "nickname_invalid";
 export const ACCOUNT_ERROR_MIGRATION_INELIGIBLE = "migration_ineligible";
 export const ACCOUNT_ERROR_MIGRATION_TOKEN_EXPIRED = "migration_token_expired";
 export const ACCOUNT_ERROR_BIND_SUCCEEDED_LOGIN_FAILED = "bind_succeeded_login_failed";
-export const ACCOUNT_ERROR_QUERY_TOKEN_EXPIRED = "query_token_expired";
 export const ACCOUNT_ERROR_CAPTCHA_REQUIRED = "captcha_required";
 export const ACCOUNT_ERROR_CAPTCHA_INVALID = "captcha_invalid";
 export const ACCOUNT_ERROR_CAPTCHA_EXPIRED = "captcha_expired";
@@ -191,9 +187,6 @@ export const ACCOUNT_ERROR_NUMERIC_CODES: Record<string, number> = {
   [ACCOUNT_ERROR_PHONE_TAKEN]: 1111,
   [ACCOUNT_ERROR_SESSION_EXPIRED]: 1112,
   [ACCOUNT_ERROR_SESSION_EVICTED]: 1113,
-  [ACCOUNT_ERROR_OPERATION_PENDING]: 1114,
-  [ACCOUNT_ERROR_OPERATION_NOT_FOUND]: 1115,
-  [ACCOUNT_ERROR_OPERATION_FORBIDDEN]: 1116,
   [ACCOUNT_ERROR_REBIND_TOKEN_EXPIRED]: 1117,
   [ACCOUNT_ERROR_REBIND_TOKEN_INVALID]: 1118,
   [ACCOUNT_ERROR_REBIND_SAME_PHONE]: 1119,
@@ -203,7 +196,6 @@ export const ACCOUNT_ERROR_NUMERIC_CODES: Record<string, number> = {
   [ACCOUNT_ERROR_MIGRATION_INELIGIBLE]: 1123,
   [ACCOUNT_ERROR_MIGRATION_TOKEN_EXPIRED]: 1124,
   [ACCOUNT_ERROR_BIND_SUCCEEDED_LOGIN_FAILED]: 1125,
-  [ACCOUNT_ERROR_QUERY_TOKEN_EXPIRED]: 1126,
   [ACCOUNT_ERROR_CAPTCHA_REQUIRED]: 1127,
   [ACCOUNT_ERROR_CAPTCHA_INVALID]: 1128,
   [ACCOUNT_ERROR_CAPTCHA_EXPIRED]: 1129,
@@ -422,7 +414,6 @@ export const ERROR_CODES: Record<number, string> = {
   1111: "该手机号已绑定其他账号",
   1112: "登录已过期，请重新验证",
   1113: "登录已失效，账号已在其他浏览器登录，请重新验证",
-  1114: "正在确认操作结果，请稍候",
   1115: "暂未找到本次操作记录，请重试核实",
   1116: "无权查询该操作记录",
   1117: "原手机号验证已过期，请重新验证",
@@ -434,7 +425,6 @@ export const ERROR_CODES: Record<number, string> = {
   1123: "账号或密码不正确，或当前账号不可迁移",
   1124: "原账号验证已过期，请重新验证",
   1125: "手机号已绑定，请重新登录",
-  1126: "查询授权已过期，请验证身份后继续确认原操作",
   1127: "请先完成验证码验证",
   1128: "验证码错误，已换新图，请重新输入",
   1129: "验证已超时，请换一张后重试",

@@ -13,11 +13,9 @@
 前端需要改的只有四处：
 
 1. 发码请求加 `purpose`；登录请求加 `agreed_terms`、`client_id`
-2. 写操作带 `request_id`，用它查/重试（弱网恢复）
 3. 登录态失效按 `error_code` 区分「过期 / 被挤出」
 4. 账号信息改读 `nickname`（缺省回退 `username`）
 5. 新增：换绑手机号（两步）、昵称编辑、内部老账号迁移（两步）、操作结果查询
-6. 所有写接口返回 `operation_id`；轮询/恢复统一走 `GET /api/auth/operations/:id`
 
 ---
 
@@ -52,9 +50,6 @@
 | `session_evicted` | 401 | 登录已失效，账号已在其他浏览器登录，请重新验证 | 同上，文案取 `msg` |
 | `rate_limited` | 429 | 操作过于频繁，请稍后再试 | 按后端 `Retry-After` 倒计时 |
 | `account_locked` | 429 | 尝试次数过多，账号已锁定，请稍后再试 | 密码登录 / 迁移验证路径 |
-| `operation_pending` | 409 | 正在确认操作结果，请稍候 | 同 `request_id` 的写操作仍在执行；用 `operation_id` 查询 |
-| `operation_not_found` | 404 | 暂未找到本次操作记录，请重试核实 | 记录不存在或已过 7 天 |
-| `operation_forbidden` | 403 | 无权查询该操作记录 | 非本人操作且无有效查询令牌 |
 | `phone_not_bound` | 200（body.code=400） | 当前账号尚未绑定手机号 | 不能发起换绑 |
 | `rebind_token_expired` | 200（body.code=400） | 原手机号验证已过期，请重新验证 | 回到「验证原手机号」 |
 | `rebind_token_invalid` | 200（body.code=400） | 换绑凭证无效，请重新验证原手机号 | 同上 |
@@ -64,7 +59,6 @@
 | `migration_ineligible` | 400 | 账号或密码不正确，或当前账号不可迁移 | 统一提示，不区分原因 |
 | `migration_token_expired` | 400 | 原账号验证已过期，请重新验证 | 回到「验证原账号」 |
 | `bind_succeeded_login_failed` | 500 | 手机号已绑定，请重新登录 | 绑定已生效，改走手机号登录 |
-| `query_token_expired` | 403 | 查询授权已过期，请验证身份后继续确认原操作 | 走恢复查询 |
 | `captcha_required` | 400 | 请先完成验证码验证 | 取图并输入后再发码 |
 | `captcha_invalid` | 400 | 验证码错误，已换新图，请重新输入 | 挑战已作废，必须重新取图 |
 | `captcha_expired` | 400 | 验证已超时，请换一张后重试 | 重新取图 |
@@ -82,8 +76,7 @@
   "phone": "13800001234",     // 必填，中国大陆 11 位
   "purpose": "login",         // 必填，见下表
   "captcha_id": "cap_xxx",    // 必填，来自 GET /api/auth/captcha
-  "captcha_answer": "ab2c",   // 必填，图中 4 位字符（不区分大小写）
-  "request_id": "uuid"        // 可选，弱网重试沿用
+  "captcha_answer": "ab2c"    // 必填，图中 4 位字符（不区分大小写）
 }
 ```
 
@@ -95,7 +88,7 @@
 | `rebind_new` | 换绑：验证新手机号 | ✅ IKPC9E |
 | `recovery` | 恢复查询授权 | ✅ IKPC9E |
 
-成功：`{ code: 200, data: { operation_id: "op_xxx" } }`。失败：手机号格式错误返回 `code: 400`、无 `error_code`（历史行为），短信渠道异常返回 `msg: "短信发送失败"`。
+成功：`{ code: 200, data: null }`。失败：手机号格式错误返回 `code: 400`、无 `error_code`（历史行为），短信渠道异常返回 `msg: "短信发送失败"`。
 
 **过渡兼容**：不传 `purpose` 时后端按内部用途 `legacy` 发码，登录与补绑都接受这种码。它只为「后端先上线、前端尚未升级」的窗口存在；前端升级后必须显式传用途，`legacy` 会在下一轮删除。
 
@@ -166,8 +159,7 @@
     "phone": "13800001234",
     "is_new_user": true,                // 本次是否自动建号
     "has_password": false,
-    "must_change_password": false,
-    "operation_id": "op_xxx"            // 本次登录操作单，用于弱网查询
+    "must_change_password": false
   }
 }
 ```
@@ -262,47 +254,20 @@
 
 ---
 
-## 9. 写操作的幂等与恢复（所有写接口通用）
+## 9. 断网与超时
 
-所有会改状态的接口（`send-code`、`login-by-code`、`me/phone`、换绑、昵称、迁移补绑）都接受可选 `request_id`（前端生成的 UUID，重试时沿用同一个）：
+网络中断、请求超时或页面刷新后，**直接重新操作即可**：重新发码 → 重新登录 / 重新提交。
 
-- 服务端落一条操作单，响应里返回 `operation_id`
-- 同一 `request_id` 重试：
-  - 已成功 → 直接返回原结果（登录会重新签发会话），不会重复建号/换绑/保存
-  - 仍进行中 → HTTP 409 + `error_code: operation_pending`，前端用 `operation_id` 查询
-- 操作单终态保留 **7 天**；待确认期间不会被清理
+服务端已保证不会重复执行：
 
-### 查询原操作
+| 操作 | 保证 |
+|---|---|
+| 登录 | 验证码一次性，重复提交同一个码会被拒 |
+| 补绑 / 迁移绑定 | 手机号唯一；已绑定时返回“已绑定手机号”/“手机号已绑定，请重新登录” |
+| 换绑 | `rebind_token` 成功后立即作废，重试返回 `rebind_token_invalid`，需重新验证原号 |
+| 昵称 | 保存幂等，重复保存结果相同 |
 
-`GET /api/auth/operations/:id?query_token=...`
-
-- 有当前会话且操作属于自己：只带登录态即可
-- 会话已失效：先用恢复流程拿 `query_token`（见下）
-
-```jsonc
-{
-  "code": 200,
-  "data": {
-    "id": "op_xxx",
-    "type": "login",                 // login | bind | rebind | nickname | sms | migration
-    "status": "succeeded",           // pending | succeeded | failed
-    "result": { "user_id": 42 },     // 成功时的结果；失败为 null
-    "error_code": null,              // 失败时的错误码
-    "phone_masked": "138****1234",   // 脱敏手机号
-                                     // 注意：result 里的 phone 字段同样已脱敏
-    "created_at": 1761030000000,
-    "updated_at": 1761030002000
-  }
-}
-```
-
-### 恢复查询授权（会话失效时）
-
-1. `POST /api/auth/send-code` `{ phone, purpose: "recovery" }`（手机号须是操作关联号码）
-2. `POST /api/auth/operations/:id/recovery` `{ code }` → 返回 `{ query_token, expires_in: 604800 }`
-3. 带 `query_token` 调用查询接口
-
-`query_token` 只对签发时的那条操作有效，7 天过期；只读，不授予登录或业务权限。
+不需要 `request_id` 或操作单编号，也不需要查询接口。若重试时提示“凭证过期/无效”，按提示重新验证即可。
 
 ---
 
@@ -328,7 +293,6 @@
 {
   "code": 200,
   "data": {
-    "operation_id": "op_xxx",
     "phone": "13700000000",
     "revoked_sessions": 3,
     "relogin_required": true
@@ -349,7 +313,7 @@
 - 超长不截断，原样拒绝
 - 与当前值相同 → `changed: false`，不写库
 
-成功：`{ nickname, changed, operation_id }`
+成功：`{ nickname, changed }`
 失败：`error_code: nickname_invalid`，`msg` 直接展示
 
 ---
@@ -374,7 +338,7 @@
 
 - 验证码用途 `bind`（先 `send-code` 带上 `purpose: "bind"`）
 - 只更新原账号 ID 的手机号，不建新号、不发新人权益
-- 成功后直接用本次认证登录，返回结构与手机号登录一致（含 `token` / `user_id` / `nickname` / `operation_id`）
+- 成功后直接用本次认证登录，返回结构与手机号登录一致（含 `token` / `user_id` / `nickname`）
 - 成功后撤销该账号旧会话
 
 特殊情况：绑定已成功但会话签发失败 → HTTP 500 + `error_code: bind_succeeded_login_failed`，文案「手机号已绑定，请重新登录」；此时不要再提交迁移，改用手机号登录。

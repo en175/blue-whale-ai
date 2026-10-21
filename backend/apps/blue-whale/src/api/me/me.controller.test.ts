@@ -56,27 +56,6 @@ function createController(overrides: {
       overrides.updateNickname ??
       vi.fn().mockResolvedValue({ nickname: "新昵称", changed: true }),
   };
-  const operations = {
-    begin: vi.fn(async (input: { type: string; userId?: number | null; phone?: string }) => ({
-      operation: {
-        id: "op_test",
-        type: input.type,
-        userId: input.userId ?? null,
-        status: "pending",
-        result: null,
-        errorCode: null,
-        phone: input.phone ?? null,
-        createdAt: 1,
-        updatedAt: 1,
-      },
-      duplicate: false,
-    })),
-    succeed: vi.fn(async () => undefined),
-    fail: vi.fn(async () => undefined),
-    get: vi.fn(),
-    issueQueryToken: vi.fn(async () => "qry_token"),
-    verifyQueryToken: vi.fn(async () => false),
-  };
   const phoneActions = {
     issue: vi.fn(async () => "pa_token"),
     resolve: vi.fn(async () => null),
@@ -85,10 +64,9 @@ function createController(overrides: {
   const controller = new MeController(
     sessions as never,
     identity as never,
-    operations as never,
     phoneActions as never,
   );
-  return { controller, sessions, identity, operations, phoneActions };
+  return { controller, sessions, identity, phoneActions };
 }
 
 const USER = { userId: "42", username: "alice" } as never;
@@ -507,6 +485,7 @@ describe("MeController 换绑手机号（IKPC9E）", () => {
       code: "123456",
     });
     expect(sessions.revokeAllForUser).toHaveBeenCalledWith(42);
+    expect(RES.clearCookie).toHaveBeenCalled();
     expect(out).toMatchObject({
       code: 200,
       data: { phone: "13900001234", relogin_required: true },
@@ -551,55 +530,5 @@ describe("MeController 昵称（IKPC9E）", () => {
     const out = await controller.updateNickname({ nickname: "小 明" }, USER);
     expect(out).toMatchObject({ error_code: "nickname_invalid" });
     expect(identity.updateNickname).toHaveBeenCalled();
-  });
-});
-
-describe("MeController 换绑重试（评审整改）", () => {
-  it("★ 同 request_id 已成功重试：直接返回原号码，不重新提交", async () => {
-    const { controller, identity, phoneActions, operations } = createController();
-    operations.begin.mockResolvedValue({
-      operation: {
-        id: "op_done",
-        type: "rebind",
-        userId: 42,
-        status: "succeeded",
-        result: { phone: "13700000000" },
-        errorCode: null,
-        phone: "13700000000",
-        createdAt: 1,
-        updatedAt: 2,
-      },
-      duplicate: true,
-    });
-
-    const out = await controller.rebindPhone(
-      { rebind_token: "pa_dead", phone: "13700000000", code: "123456", request_id: "r1" },
-      USER,
-      RES,
-    );
-
-    expect(out).toMatchObject({
-      code: 200,
-      data: { operation_id: "op_done", phone: "13700000000", relogin_required: true },
-    });
-    expect(phoneActions.resolve).not.toHaveBeenCalled();
-    expect(identity.commitRebind).not.toHaveBeenCalled();
-  });
-
-  it("换绑成功清掉当前浏览器会话 cookie", async () => {
-    const { controller, phoneActions } = createController();
-    phoneActions.resolve.mockResolvedValue({
-      kind: "rebind",
-      userId: 42,
-      phone: "13800001234",
-    });
-
-    await controller.rebindPhone(
-      { rebind_token: "pa_ok", phone: "13700000000", code: "123456" },
-      USER,
-      RES,
-    );
-
-    expect(RES.clearCookie).toHaveBeenCalled();
   });
 });

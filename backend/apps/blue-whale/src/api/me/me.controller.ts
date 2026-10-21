@@ -3,7 +3,6 @@ import type { Request, Response } from "express";
 import { isValidPhone, NewApiError } from "@lib/core";
 import { createLogger } from "@lib/core/logging";
 import {
-  ACCOUNT_ERROR_OPERATION_PENDING,
   ACCOUNT_ERROR_PHONE_NOT_BOUND,
   ACCOUNT_ERROR_PHONE_TAKEN,
   ACCOUNT_ERROR_REBIND_BINDING_CHANGED,
@@ -29,7 +28,6 @@ import {
   RebindBindingChangedError,
   RebindSamePhoneError,
 } from "@lib/shared/identity/index.js";
-import { AuthOperationService } from "@lib/shared/auth/auth-operation.service.js";
 import { projectPhoneCodeError } from "@lib/shared/auth/phone-code-error.js";
 import { SessionService } from "@lib/shared/session/session.service.js";
 import {
@@ -49,7 +47,6 @@ export class MeController {
   constructor(
     private readonly sessions: SessionService,
     private readonly identity: IdentityService,
-    private readonly operations: AuthOperationService,
     private readonly phoneActions: PhoneActionService,
   ) {}
 
@@ -85,40 +82,22 @@ export class MeController {
     if (!isValidPhone(phone) || !code) {
       return fail(FAILURE_CODE, "手机号和验证码不能为空");
     }
-    const requestId =
-      typeof body.request_id === "string" && body.request_id.trim()
-        ? body.request_id.trim()
-        : undefined;
-    const started = await this.beginOperation({
-      type: "bind",
-      userId: Number(userId),
-      requestId,
-      phone,
-    });
-    if (started.duplicate && started.operation.status === "succeeded") {
-      return ok({ operation_id: started.operation.id });
-    }
     try {
       await this.identity.bindPhone(userId, { phone, code });
     } catch (error) {
       const failure = projectPhoneCodeError(error);
       if (failure) {
-        await this.operations.fail(started.operation.id, failure.errorCode);
         return fail(FAILURE_CODE, failure.message, null, failure.errorCode);
       }
       if (error instanceof PhoneTakenError) {
-        await this.operations.fail(started.operation.id, ACCOUNT_ERROR_PHONE_TAKEN);
         return fail(FAILURE_CODE, error.message, null, ACCOUNT_ERROR_PHONE_TAKEN);
       }
       if (error instanceof PhoneAlreadyBoundError) {
-        await this.operations.fail(started.operation.id, "phone_already_bound");
         return fail(FAILURE_CODE, error.message);
       }
-      await this.operations.fail(started.operation.id, "unknown");
       throw error;
     }
-    await this.operations.succeed(started.operation.id, { phone });
-    return ok({ operation_id: started.operation.id });
+    return ok();
   }
 
   @Post("me/phone/rebind/verify-current")
@@ -170,33 +149,12 @@ export class MeController {
     const token = typeof body.rebind_token === "string" ? body.rebind_token.trim() : "";
     const phone = typeof body.phone === "string" ? body.phone.trim() : "";
     const code = typeof body.code === "string" ? body.code.trim() : "";
-    const requestId =
-      typeof body.request_id === "string" && body.request_id.trim()
-        ? body.request_id.trim()
-        : undefined;
 
     if (!isValidPhone(phone) || !code) {
       return fail(FAILURE_CODE, "手机号和验证码不能为空");
     }
 
-    const started = await this.beginOperation({
-      type: "rebind",
-      userId: Number(userId),
-      requestId,
-      phone,
-    });
-    if (started.duplicate && started.operation.status === "succeeded") {
-      const storedPhone = started.operation.result?.phone;
-      return ok({
-        operation_id: started.operation.id,
-        phone: typeof storedPhone === "string" ? storedPhone : phone,
-        revoked_sessions: 0,
-        relogin_required: true,
-      });
-    }
-
     if (!token) {
-      await this.operations.fail(started.operation.id, ACCOUNT_ERROR_REBIND_TOKEN_EXPIRED);
       return fail(
         FAILURE_CODE,
         "原手机号验证已过期，请重新验证",
@@ -206,7 +164,6 @@ export class MeController {
     }
     const action = await this.phoneActions.resolve("rebind", token);
     if (!action || action.userId !== Number(userId) || !action.phone) {
-      await this.operations.fail(started.operation.id, ACCOUNT_ERROR_REBIND_TOKEN_INVALID);
       return fail(
         FAILURE_CODE,
         "换绑凭证无效，请重新验证原手机号",
@@ -225,15 +182,12 @@ export class MeController {
     } catch (error) {
       const failure = projectPhoneCodeError(error);
       if (failure) {
-        await this.operations.fail(started.operation.id, failure.errorCode);
         return fail(FAILURE_CODE, failure.message, null, failure.errorCode);
       }
       if (error instanceof PhoneTakenError) {
-        await this.operations.fail(started.operation.id, ACCOUNT_ERROR_PHONE_TAKEN);
         return fail(FAILURE_CODE, error.message, null, ACCOUNT_ERROR_PHONE_TAKEN);
       }
       if (error instanceof RebindSamePhoneError) {
-        await this.operations.fail(started.operation.id, ACCOUNT_ERROR_REBIND_SAME_PHONE);
         return fail(
           FAILURE_CODE,
           error.message,
@@ -242,10 +196,6 @@ export class MeController {
         );
       }
       if (error instanceof RebindBindingChangedError) {
-        await this.operations.fail(
-          started.operation.id,
-          ACCOUNT_ERROR_REBIND_BINDING_CHANGED,
-        );
         return fail(
           FAILURE_CODE,
           error.message,
@@ -254,17 +204,14 @@ export class MeController {
         );
       }
       if (error instanceof InvalidCredentialsError) {
-        await this.operations.fail(started.operation.id, "unauthorized");
         throw new NewApiError("登录已过期，请重新验证", 401, "unauthorized");
       }
-      await this.operations.fail(started.operation.id, "unknown");
       throw error;
     }
 
     let revokedSessions = 0;
     try {
       await this.phoneActions.revoke(token);
-      await this.operations.succeed(started.operation.id, { phone: newPhone });
     } catch (error) {
       this.logger.error(
         `换绑成功但记录收尾失败（userId=${userId}）：${
@@ -286,7 +233,6 @@ export class MeController {
       maxAge: undefined,
     });
     return ok({
-      operation_id: started.operation.id,
       phone: newPhone,
       revoked_sessions: revokedSessions,
       relogin_required: true,
@@ -302,30 +248,11 @@ export class MeController {
     if (userId == null) {
       throw new NewApiError("缺少登录凭证", 401, "unauthorized");
     }
-    const requestId =
-      typeof body.request_id === "string" && body.request_id.trim()
-        ? body.request_id.trim()
-        : undefined;
-    const started = await this.beginOperation({
-      type: "nickname",
-      userId: Number(userId),
-      requestId,
-    });
-    if (started.duplicate && started.operation.status === "succeeded") {
-      const stored = started.operation.result?.nickname;
-      return ok({
-        operation_id: started.operation.id,
-        nickname: typeof stored === "string" ? stored : "",
-        changed: false,
-      });
-    }
     try {
       const result = await this.identity.updateNickname(userId, body.nickname);
-      await this.operations.succeed(started.operation.id, result);
-      return ok({ ...result, operation_id: started.operation.id });
+      return ok(result);
     } catch (error) {
       if (error instanceof NicknameInvalidError) {
-        await this.operations.fail(started.operation.id, "nickname_invalid");
         return fail(
           FAILURE_CODE,
           error.message,
@@ -334,30 +261,13 @@ export class MeController {
         );
       }
       if (error instanceof InvalidCredentialsError) {
-        await this.operations.fail(started.operation.id, "unauthorized");
         throw new NewApiError("登录已过期，请重新验证", 401, "unauthorized");
       }
-      await this.operations.fail(started.operation.id, "unknown");
       throw error;
     }
   }
 
-  private async beginOperation(input: {
-    type: "bind" | "rebind" | "nickname";
-    userId: number;
-    requestId?: string | undefined;
-    phone?: string | undefined;
-  }) {
-    const started = await this.operations.begin(input);
-    if (started.duplicate && started.operation.status === "pending") {
-      throw new NewApiError(
-        "正在确认操作结果，请稍候",
-        409,
-        ACCOUNT_ERROR_OPERATION_PENDING,
-      );
-    }
-    return started;
-  }
+
 
   @Put("me/password")
   async changePassword(
