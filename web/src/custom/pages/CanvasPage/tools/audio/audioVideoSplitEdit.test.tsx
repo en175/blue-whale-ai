@@ -267,7 +267,7 @@ describe('IKH28U 编辑态呈现（进入不建任务）', () => {
     expect(sendBar.contains(close)).toBe(true);
     expect(sendBar.querySelector('button')).toBe(close);
     expect(bodyBtn('audio-video-split-format-trigger').textContent).toBe('M4A');
-    expect(sendBar.textContent).toContain('本期免费');
+    expect(sendBar.textContent).not.toContain('本期免费');
     expect(bodyBtn('audio-video-split-send-btn')).toBeTruthy();
     expect(v1Data().splitEditing).toBe(true);
     expect(v1Data().soloToolbarHidden).toBe(true);

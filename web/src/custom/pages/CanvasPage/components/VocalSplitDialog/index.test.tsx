@@ -78,13 +78,13 @@ describe('单条呈现', () => {
   });
 });
 
-describe('发送条要素：场景下拉 + 格式下拉 + 本期免费 + 发送钮', () => {
-  it('默认态：场景触发钮显「通用」、格式触发钮显 AAC、本期免费标注齐备', () => {
+describe('发送条要素：场景下拉 + 格式下拉 + 报价位 + 发送钮', () => {
+  it('默认态：场景触发钮显「通用」、格式触发钮显 AAC、报价位标注齐备', () => {
     renderDialog();
     const sendBar = container!.querySelector('[data-testid="vocal-split-send-bar"]')!;
     expect(btn('vocal-split-scene-trigger').textContent).toBe('通用');
     expect(btn('vocal-split-format-trigger').textContent).toBe('AAC');
-    expect(sendBar.textContent).toContain('本期免费');
+    expect(sendBar.textContent).not.toContain('本期免费');
     expect(sendBar.textContent).not.toContain('输出最高');
     expect(btn('vocal-split-send-btn')).toBeTruthy();
   });

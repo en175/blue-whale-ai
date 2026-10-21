@@ -263,12 +263,6 @@
   gap: var(--spacing-sm);
 }
 
-.freeHint {
-  font-size: 11px;
-  color: var(--color-text-tertiary);
-  user-select: none;
-}
-
 .sendBtn {
   width: 28.8px;
   height: 28.8px;

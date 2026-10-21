@@ -9,6 +9,7 @@ import {
   IMAGE_CUTOUT_CONTOUR_SLIDER_MAX,
   type ImageCutoutScene,
 } from '../../tools/image/imageCutout';
+import MediaToolQuoteBadge from '../MediaToolQuoteBadge';
 import styles from './index.module.css';
 
 interface CutoutToolbarProps {
@@ -195,7 +196,12 @@ export default function CutoutToolbar({
           </>
         )}
 
-        <span className={styles.freeHint}>本期免费</span>
+        <MediaToolQuoteBadge
+          toolType="image_cutout"
+          input={{}}
+          variant="hint"
+          testId="image-cutout-quote"
+        />
 
         <button
           type="button"

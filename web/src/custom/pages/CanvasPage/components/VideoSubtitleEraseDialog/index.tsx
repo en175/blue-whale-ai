@@ -1,7 +1,8 @@
 import { type VideoSubtitleEraseMode } from '@/custom/enums';
-import { ArrowUp, HelpCircle, Redo2, RotateCcw, Square, Undo2, X, Zap } from 'lucide-react';
+import { ArrowUp, HelpCircle, Redo2, RotateCcw, Square, Undo2, X } from 'lucide-react';
+import type { MediaToolQuoteInput } from '@/custom/api/mediaToolQuote';
 import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../agent/followDialog';
-
+import MediaToolQuoteBadge from '../MediaToolQuoteBadge';
 import styles from './index.module.css';
 
 interface VideoSubtitleEraseDialogProps {
@@ -16,6 +17,7 @@ interface VideoSubtitleEraseDialogProps {
   onReset: () => void;
   boxLimitReached: boolean;
   submitting?: boolean;
+  quoteInput?: MediaToolQuoteInput | null;
   sendBlockedReason: string | null;
   sendBarAnchor: FollowDialogAnchor | null;
   dragHidden?: boolean;
@@ -33,6 +35,7 @@ export default function VideoSubtitleEraseDialog({
   onReset,
   boxLimitReached,
   submitting,
+  quoteInput,
   sendBlockedReason,
   sendBarAnchor, dragHidden,
 }: VideoSubtitleEraseDialogProps) {
@@ -125,10 +128,11 @@ export default function VideoSubtitleEraseDialog({
         </>
       )}
       <span className={styles.divider} />
-      <span className={styles.freeBadge} title="本期免费" data-testid="subtitle-erase-free-badge">
-        <Zap size={12} strokeWidth={2} />
-        <span>0</span>
-      </span>
+      <MediaToolQuoteBadge
+        toolType="video_subtitle_erase"
+        input={quoteInput}
+        testId="subtitle-erase-quote"
+      />
       <button
         type="button"
         className={`${styles.sendBtn} ${!sendDisabled ? styles.sendBtnActive : ''}`}

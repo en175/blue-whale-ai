@@ -8,6 +8,7 @@ import {
   frameInterpolationFpsLabel,
   type FrameInterpolationFps,
 } from '../../tools/video/frameInterpolation';
+import MediaToolQuoteBadge from '../MediaToolQuoteBadge';
 import styles from './index.module.css';
 
 interface FrameInterpolationDialogProps {
@@ -15,6 +16,7 @@ interface FrameInterpolationDialogProps {
   onSend: (fps: FrameInterpolationFps) => boolean | Promise<boolean>;
   onParamsChange: (fps: FrameInterpolationFps) => void;
   initialFps?: FrameInterpolationFps | null;
+  quoteDuration?: number | null;
   generating?: boolean;
   submitting?: boolean;
   followAnchor?: FollowDialogAnchor | null;
@@ -26,6 +28,7 @@ export default function FrameInterpolationDialog({
   onSend,
   onParamsChange,
   initialFps,
+  quoteDuration,
   generating,
   submitting,
   followAnchor, dragHidden,
@@ -90,7 +93,12 @@ export default function FrameInterpolationDialog({
         </div>
 
         <div className={styles.bottomBar}>
-          <span className={styles.freeHint}>本期免费</span>
+          <MediaToolQuoteBadge
+            toolType="video_frame_interpolation"
+            input={quoteDuration ? { duration: Math.round(quoteDuration), fps } : null}
+            variant="hint"
+            testId="frame-interpolation-quote"
+          />
           <button
             type="button"
             className={`${styles.sendBtn} ${canSend ? styles.sendBtnActive : ''}`}

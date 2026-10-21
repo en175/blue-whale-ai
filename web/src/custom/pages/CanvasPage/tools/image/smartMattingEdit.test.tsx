@@ -295,7 +295,6 @@ describe('IKHK9N 编辑态呈现（进入不建任务）', () => {
     expect(bodyBtn('smart-matting-close')).toBeTruthy();
     expect(bodyBtn('smart-matting-title').textContent).toBe('人像抠像');
     expect(bodyBtn('smart-matting-format-trigger').textContent).toContain('WEBM 透明');
-    expect(bodyBtn('smart-matting-free-badge').textContent).toBe('0');
     expect(bodyBtn('smart-matting-send-btn')).toBeTruthy();
     expect(document.body.querySelector('[data-testid="smart-matting-background"]')).toBeNull();
     const bar = sendBar()!;
@@ -304,8 +303,6 @@ describe('IKHK9N 编辑态呈现（进入不建任务）', () => {
       !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
     expect(before(el('smart-matting-close'), el('smart-matting-title'))).toBe(true);
     expect(before(el('smart-matting-title'), el('smart-matting-format-trigger'))).toBe(true);
-    expect(before(el('smart-matting-format-trigger'), el('smart-matting-free-badge'))).toBe(true);
-    expect(before(el('smart-matting-free-badge'), el('smart-matting-send-btn'))).toBe(true);
     expect(v1Data().splitEditing).toBe(true);
     expect(v1Data().soloToolbarHidden).toBe(true);
     expect(apiMocks.createVideoMatting).not.toHaveBeenCalled();

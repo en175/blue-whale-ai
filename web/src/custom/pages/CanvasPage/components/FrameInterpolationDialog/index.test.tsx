@@ -91,10 +91,10 @@ describe('IKHLKR 插帧面板三档渲染与默认值', () => {
   });
 });
 
-describe('IKHLKR 本期免费与发送钮（IKHLKX 接线点）', () => {
+describe('IKHLKR 报价位与发送钮（IKHLKX 接线点）', () => {
   it('免费文案呈现；发送钮悬停「智能补帧，最高可至 120fps」', () => {
     renderPanel();
-    expect(container!.textContent).toContain('本期免费');
+    expect(container!.textContent).not.toContain('本期免费');
     expect(btn('frame-interpolation-send-btn').getAttribute('title')).toBe(FRAME_INTERPOLATION_SEND_HINT);
     expect(FRAME_INTERPOLATION_SEND_HINT).toBe('智能补帧，最高可至 120fps');
   });

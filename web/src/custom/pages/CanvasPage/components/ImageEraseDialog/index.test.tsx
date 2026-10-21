@@ -107,7 +107,7 @@ afterEach(() => {
 });
 
 describe('IKGOTB 工具条与发送条呈现', () => {
-  it('两条齐全：工具条标题/清除文字/画笔/框选/橡皮/笔刷/撤销/重做/X；发送条本期免费+发送', () => {
+  it('两条齐全：工具条标题/清除文字/画笔/框选/橡皮/笔刷/撤销/重做/X；发送条报价位+发送', () => {
     renderDialog();
     expect(container!.querySelector('[data-testid="erase-toolbar"]')!.textContent).toContain('擦除');
     expect(container!.querySelector('[data-testid="erase-toolbar"]')!.textContent).toContain('清除文字');
@@ -115,7 +115,7 @@ describe('IKGOTB 工具条与发送条呈现', () => {
       expect(btn(id), id).toBeTruthy();
     }
     const sendBar = container!.querySelector('[data-testid="erase-send-bar"]')!;
-    expect(sendBar.textContent).toContain('本期免费');
+    expect(sendBar.textContent).not.toContain('本期免费');
     expect(btn('erase-send-btn')).toBeTruthy();
   });
 

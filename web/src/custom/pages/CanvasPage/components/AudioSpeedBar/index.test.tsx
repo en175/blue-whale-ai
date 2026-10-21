@@ -79,7 +79,6 @@ describe('六要素呈现（无格式下拉）', () => {
     expect(slider.max).toBe('1000');
     expect(slider.step).toBe('1');
     expect(container!.querySelector('[data-testid="audio-speed-value"]')!.textContent).toBe('1.00x');
-    expect(container!.querySelector('[data-testid="audio-speed-free"]')!.getAttribute('title')).toBe('本期免费');
     expect(btn('audio-speed-send-btn')).toBeTruthy();
     expect(sendBar.textContent).not.toContain('格式');
     expect(container!.querySelector('[data-testid^="audio-speed-format"]')).toBeNull();

@@ -245,7 +245,7 @@ describe('IKIHPK 点「音视频合成」建草稿卡与面板跟随', () => {
     expect(syncBtn('none')!.className).toMatch(/Active/);
     expect(syncBtn('video')).toBeTruthy();
     expect(syncBtn('audio')).toBeTruthy();
-    await vi.waitFor(() => expect(document.body.textContent).toContain('本期免费'), { timeout: 3000 });
+    await vi.waitFor(() => expect(document.body.querySelector('[data-testid="audio-video-mux-send"]')).not.toBeNull(), { timeout: 3000 });
     expect(sendBtn()!.disabled).toBe(true);
     expect(sendBtn()!.getAttribute('title')).toBe('先选择视频');
     expect(slot()!.textContent).toContain('拖线到本卡');

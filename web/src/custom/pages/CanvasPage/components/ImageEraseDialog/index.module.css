@@ -122,14 +122,6 @@
   left: 0;
 }
 
-.freeHint {
-  font-size: 12px;
-  color: #7ee08a;
-  background-color: rgba(126, 224, 138, 0.1);
-  border-radius: 999px;
-  padding: 2px 8px;
-}
-
 .sendHint {
   font-size: 12px;
   color: var(--color-text-tertiary);

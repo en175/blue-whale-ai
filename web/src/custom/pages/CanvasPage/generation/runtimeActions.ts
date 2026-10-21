@@ -91,6 +91,7 @@ export function createActions(ctx: RuntimeContext, polling: { poll: (execution: 
       })
       .catch((e: unknown) => {
         if (!owns(execution)) { options?.onStale?.({ nodeId }); return; }
+        host.openRechargeForCreditsError(e);
         const bindingConflict = adoptConflictBindingRevision(nodeId, e);
         active.delete(nodeId);
         if (bindingConflict) submitAttempts.delete(nodeId);

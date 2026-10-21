@@ -77,11 +77,11 @@ describe('IKH28U 单条呈现', () => {
 });
 
 describe('IKH28X 发送条三要素', () => {
-  it('三要素齐备：格式触发钮显当前格式（默认 M4A）、「本期免费」标注、发送钮', () => {
+  it('三要素齐备：格式触发钮显当前格式（默认 M4A）、「报价位」标注、发送钮', () => {
     renderDialog();
     const sendBar = container!.querySelector('[data-testid="audio-video-split-send-bar"]')!;
     expect(btn('audio-video-split-format-trigger').textContent).toBe('M4A');
-    expect(sendBar.textContent).toContain('本期免费');
+    expect(sendBar.textContent).not.toContain('本期免费');
     expect(sendBar.textContent).not.toContain('输出最高');
     expect(btn('audio-video-split-send-btn')).toBeTruthy();
     expect(sendBar.textContent).not.toContain('发送功能即将可用');

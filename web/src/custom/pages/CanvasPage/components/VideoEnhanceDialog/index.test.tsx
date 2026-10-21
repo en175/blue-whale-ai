@@ -85,10 +85,10 @@ describe('IKH3VG 面板三档渲染与默认值', () => {
   });
 });
 
-describe('IKH3VG 本期免费与发送钮', () => {
+describe('IKH3VG 报价位与发送钮', () => {
   it('免费文案呈现；发送钮悬停「最高可至 4K」', () => {
     renderPanel();
-    expect(container!.textContent).toContain('本期免费');
+    expect(container!.textContent).not.toContain('本期免费');
     expect(btn('video-enhance-send-btn').getAttribute('title')).toBe('最高可至 4K');
   });
 

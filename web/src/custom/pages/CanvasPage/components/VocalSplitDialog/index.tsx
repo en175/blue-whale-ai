@@ -2,8 +2,10 @@ import { VOCAL_SPLIT_SCENE_OPTIONS } from '@/custom/enums';
 import { useState } from 'react';
 import { ArrowUp, ChevronDown, X } from 'lucide-react';
 import DropdownMenu from '@/custom/components/DropdownMenu';
+import type { MediaToolQuoteInput } from '@/custom/api/mediaToolQuote';
 import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../agent/followDialog';
 import { VOCAL_SPLIT_FORMATS, vocalSplitSceneHint, vocalSplitSceneLabel, type VocalSplitFormat, type VocalSplitScene } from '../../tools/audio/vocalSplit';
+import MediaToolQuoteBadge from '../MediaToolQuoteBadge';
 import styles from './index.module.css';
 
 interface VocalSplitDialogProps {
@@ -14,6 +16,7 @@ interface VocalSplitDialogProps {
   onFormatChange: (format: VocalSplitFormat) => void;
   onSend: () => void;
   submitting?: boolean;
+  quoteInput?: MediaToolQuoteInput | null;
   sendBarAnchor: FollowDialogAnchor | null;
   dragHidden?: boolean;
 }
@@ -26,6 +29,7 @@ export default function VocalSplitDialog({
   onFormatChange,
   onSend,
   submitting,
+  quoteInput,
   sendBarAnchor, dragHidden,
 }: VocalSplitDialogProps) {
   const readOnly = submitting === true;
@@ -122,7 +126,11 @@ export default function VocalSplitDialog({
           onSelect: () => onFormatChange(item),
         }))}
       />
-      <span className={styles.freeHint}>本期免费</span>
+      <MediaToolQuoteBadge
+        toolType="vocal_split"
+        input={quoteInput}
+        testId="vocal-split-quote"
+      />
       <button
         type="button"
         className={`${styles.sendBtn} ${!readOnly ? styles.sendBtnActive : ''}`}

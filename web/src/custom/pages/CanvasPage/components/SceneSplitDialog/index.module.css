@@ -87,17 +87,6 @@
   left: 0;
 }
 
-.freeBadge {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  font-size: var(--font-size-xs);
-  color: var(--color-success);
-  background-color: rgba(64, 192, 87, 0.1);
-  border-radius: var(--radius-full);
-  padding: 2px 8px;
-}
-
 .sendBtn {
   width: 30px;
   height: 30px;

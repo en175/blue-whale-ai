@@ -4,6 +4,7 @@ import { X, ArrowUp, ChevronDown } from 'lucide-react';
 import RatioIcon from '@/custom/components/RatioIcon';
 import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../agent/followDialog';
 import { OUTPAINT_PRESET_ORDER, matchOutpaintPreset, maxExpandPerSide, outpaintPresetAvailability, type ExpandSides } from '../../tools/image/imageOutpaint';
+import MediaToolQuoteBadge from '../MediaToolQuoteBadge';
 import styles from './index.module.css';
 
 interface OutpaintDialogProps {
@@ -136,7 +137,12 @@ export default function OutpaintDialog({
           <ChevronDown size={12} strokeWidth={2} />
         </button>
 
-        <span className={styles.freeHint}>本期免费</span>
+        <MediaToolQuoteBadge
+          toolType="image_outpaint"
+          input={{}}
+          variant="hint"
+          testId="image-outpaint-quote"
+        />
 
         <button
           type="button"
