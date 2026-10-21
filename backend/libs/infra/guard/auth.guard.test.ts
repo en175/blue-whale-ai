@@ -24,6 +24,7 @@ function makeGuard(opts: {
   verifyToken?: (token: string) => Promise<unknown>;
   resolveSession?: (token: string) => Promise<unknown>;
   resolveAccessState?: () => Promise<unknown>;
+  wasEvicted?: () => Promise<boolean>;
 } = {}) {
   const reflector = {
     getAllAndOverride: () => opts.isPublic ?? false,
@@ -34,6 +35,7 @@ function makeGuard(opts: {
       (async () => ({ userId: "8", jti: "jti-1", type: "access" })),
     resolveSession: opts.resolveSession ?? (async () => null),
     updateSessionIdentity: async () => undefined,
+    wasEvicted: opts.wasEvicted ?? (async () => false),
   };
   const identity = {
     resolveAccessState:
@@ -91,11 +93,21 @@ describe("AuthGuard（HttpOnly cookie 会话校验，ADR-0062 #19）", () => {
     );
   });
 
-  it("会话不存在/过期（resolve 返回 null）→ 401", async () => {
+  it("会话不存在/过期（resolve 返回 null）→ 401 session_expired", async () => {
     const guard = makeGuard();
     const { context } = makeContext("sess_dead");
     await expect(guard.canActivate(context as never)).rejects.toMatchObject({
       status: 401,
+      code: "session_expired",
+    });
+  });
+
+  it("被第 4 个浏览器挤出 → 401 session_evicted（前端据此换文案）", async () => {
+    const guard = makeGuard({ wasEvicted: async () => true });
+    const { context } = makeContext("sess_evicted");
+    await expect(guard.canActivate(context as never)).rejects.toMatchObject({
+      status: 401,
+      code: "session_evicted",
     });
   });
 

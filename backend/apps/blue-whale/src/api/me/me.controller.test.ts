@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Request, Response } from "express";
 
-import { InvalidVerificationCodeError } from "@lib/core";
 import { FAILURE_CODE } from "@lib/contracts";
 import {
+  CodeExpiredError,
+  CodeWrongError,
   InvalidCredentialsError,
   PasswordPolicyError,
   PhoneAlreadyBoundError,
@@ -286,9 +287,22 @@ describe("MeController（IKJA4Q 手机号与口令标识）", () => {
     } as never);
 
     expect(result).toMatchObject({
-      data: { phone: "13800001234", has_password: false },
+      data: { phone: "13800001234", has_password: false, nickname: "alice" },
     });
     expect(resolveAccountFlags).toHaveBeenCalledWith("42");
+  });
+
+  it("有昵称时返回昵称，不再回退 username", async () => {
+    const resolveAccountFlags = vi.fn().mockResolvedValue({
+      phone: null,
+      nickname: "蓝鲸用户_Ab12Cd",
+      hasPassword: true,
+    });
+    const { controller } = createController({ resolveAccountFlags });
+
+    const result = await controller.me({ userId: "42", username: "alice" } as never);
+
+    expect(result).toMatchObject({ data: { nickname: "蓝鲸用户_Ab12Cd" } });
   });
 
   it("查不到人时回空串 + false——不替用户宣称他有口令", async () => {
@@ -358,7 +372,8 @@ describe("MeController（IKJA4Q 手机号与口令标识）", () => {
 
   it("绑定手机号：码错 / 被别人占用 / 自己已绑过 → 三句不同的话", async () => {
     const cases = [
-      [new InvalidVerificationCodeError("验证码错误或已过期"), "验证码错误或已过期"],
+      [new CodeWrongError(4), "验证码错误，请重新输入（还可尝试4次）"],
+      [new CodeExpiredError(), "验证码已失效，请重新获取"],
       [new PhoneTakenError(), "该手机号已被绑定"],
       [new PhoneAlreadyBoundError(), "当前账号已绑定手机号，暂不支持换绑"],
     ] as const;

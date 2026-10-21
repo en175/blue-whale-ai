@@ -27,9 +27,12 @@ export class AllExceptionsFilter implements ExceptionFilter {
     }
 
     if (exception instanceof NewApiError) {
-      response
-        .status(exception.status)
-        .json({ code: exception.status, msg: exception.message, data: null });
+      response.status(exception.status).json({
+        code: exception.status,
+        msg: exception.message,
+        data: null,
+        ...(typeof exception.code === "string" ? { error_code: exception.code } : {}),
+      });
       return;
     }
 

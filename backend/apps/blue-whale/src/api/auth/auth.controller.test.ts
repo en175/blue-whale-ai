@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 const { FakeRedis } = vi.hoisted(() => {
   class FakeRedis {
     store = new Map<string, string>();
+    zsets = new Map<string, Map<string, number>>();
     ttlMs = new Map<string, number>();
 
     constructor(_options?: unknown) {}
@@ -11,23 +12,38 @@ const { FakeRedis } = vi.hoisted(() => {
       _script: string,
       _numKeys: number,
       key: string,
-      ttlSec: string,
-    ): Promise<number> {
-      const n = Number(this.store.get(key) ?? 0) + 1;
-      this.store.set(key, String(n));
-      if (n === 1) this.ttlMs.set(key, Number(ttlSec) * 1000);
-      return n;
+      nowRaw: string,
+      windowRaw: string,
+      limitRaw: string,
+      member: string,
+    ): Promise<[number, number]> {
+      const now = Number(nowRaw);
+      const window = Number(windowRaw);
+      const limit = Number(limitRaw);
+      const zset = this.zsets.get(key) ?? new Map<string, number>();
+      for (const [item, score] of zset) {
+        if (score <= now - window) zset.delete(item);
+      }
+      if (zset.size >= limit) {
+        const oldest = Math.min(...zset.values());
+        return [0, window - (now - oldest)];
+      }
+      zset.set(member, now);
+      this.zsets.set(key, zset);
+      this.ttlMs.set(key, window);
+      return [1, 0];
     }
 
     async pttl(key: string): Promise<number> {
-      if (!this.store.has(key)) return -2;
+      if (!this.zsets.has(key) && !this.store.has(key)) return -2;
       return this.ttlMs.get(key) ?? -1;
     }
 
     async del(...keys: string[]): Promise<number> {
       let n = 0;
       for (const key of keys) {
-        if (this.store.delete(key)) n += 1;
+        const removed = this.store.delete(key) || this.zsets.delete(key);
+        if (removed) n += 1;
         this.ttlMs.delete(key);
       }
       return n;
@@ -40,7 +56,7 @@ const { FakeRedis } = vi.hoisted(() => {
     }
 
     async exists(key: string): Promise<number> {
-      return this.store.has(key) ? 1 : 0;
+      return this.store.has(key) || this.zsets.has(key) ? 1 : 0;
     }
 
     async quit(): Promise<"OK"> {
@@ -55,12 +71,18 @@ vi.mock("ioredis", () => ({
 }));
 
 import { Reflector } from "@nestjs/core";
-import { InvalidVerificationCodeError, NewApiError } from "@lib/core";
-import { ACCOUNT_LOCKED, FAILURE_CODE } from "@lib/contracts";
+import { NewApiError } from "@lib/core";
+import {
+  ACCOUNT_ERROR_CODE_WRONG,
+  ACCOUNT_ERROR_TERMS_REQUIRED,
+  ACCOUNT_LOCKED,
+  FAILURE_CODE,
+} from "@lib/contracts";
 import type { Response } from "express";
 import type { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 import type { SessionService } from "@lib/shared/session/session.service.js";
 import {
+  CodeWrongError,
   InvalidCredentialsError,
   type IdentityService,
   type LocalLoginResult,
@@ -81,6 +103,7 @@ function loginResult(): LocalLoginResult {
   return {
     userId: 42,
     username: "alice",
+    nickname: null,
     email: null,
     phone: null,
     hasPassword: true,
@@ -248,7 +271,7 @@ describe("AuthController 限流声明（IKDR4J）", () => {
 });
 
 describe("AuthController 手机号验证码登录（IKJA4Q）", () => {
-  const CODE_BODY = { phone: "13800001234", code: "123456" };
+  const CODE_BODY = { phone: "13800001234", code: "123456", agreed_terms: true };
 
   function phoneResult(over: Partial<LocalLoginResult> = {}): LocalLoginResult {
     return { ...loginResult(), phone: "13800001234", hasPassword: false, ...over };
@@ -304,24 +327,38 @@ describe("AuthController 手机号验证码登录（IKJA4Q）", () => {
     expect(out).toMatchObject({ code: 200, data: { must_change_password: true } });
   });
 
-  it("验证码错误 → 401，不签发会话，且留一条失败登录日志", async () => {
+  it("验证码错误 → 400 code_wrong，不签发会话，且留一条失败登录日志", async () => {
     const { controller, identity, sessions, res } = setup();
-    identity.loginWithPhoneCode.mockRejectedValue(
-      new InvalidVerificationCodeError("验证码错误或已过期"),
-    );
+    identity.loginWithPhoneCode.mockRejectedValue(new CodeWrongError(4));
 
     await expect(controller.loginByCode(CODE_BODY, res)).rejects.toMatchObject({
       name: "NewApiError",
-      status: 401,
+      status: 400,
+      code: ACCOUNT_ERROR_CODE_WRONG,
     });
     expect(sessions.createSession).not.toHaveBeenCalled();
     expect(identity.recordLogin).toHaveBeenCalledWith(
       expect.objectContaining({
         success: false,
-        reason: "验证码错误",
+        reason: "验证码错误，请重新输入（还可尝试4次）",
         username: "13800001234",
       }),
     );
+  });
+
+  it("未勾协议 → 失败信封 terms_required，不碰 identity", async () => {
+    const { controller, identity, res } = setup();
+
+    const out = await controller.loginByCode(
+      { phone: "13800001234", code: "123456" },
+      res,
+    );
+
+    expect(out).toMatchObject({
+      code: FAILURE_CODE,
+      error_code: ACCOUNT_ERROR_TERMS_REQUIRED,
+    });
+    expect(identity.loginWithPhoneCode).not.toHaveBeenCalled();
   });
 
   it("手机号格式不对 / 验证码为空 → 失败信封，不碰 identity", async () => {

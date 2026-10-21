@@ -1,6 +1,6 @@
 import { Injectable } from "@nestjs/common";
 
-import { InvalidVerificationCodeError } from "@lib/core";
+import type { VerificationPurpose } from "@lib/contracts";
 import type { Tier } from "@lib/core/identity/tier.js";
 import {
   LastSuperAdminError,
@@ -31,6 +31,7 @@ import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 export interface LocalLoginResult {
   userId: number;
   username: string;
+  nickname: string | null;
   email: string | null;
   phone: string | null;
   hasPassword: boolean;
@@ -41,8 +42,46 @@ export interface LocalLoginResult {
 
 export interface AccountFlags {
   phone: string | null;
+  nickname: string | null;
   hasPassword: boolean;
   mustChangePassword: boolean;
+}
+
+const MAX_CODE_ATTEMPTS = 5;
+
+export class CodeExpiredError extends Error {
+  constructor() {
+    super("验证码已失效，请重新获取");
+    this.name = "CodeExpiredError";
+  }
+}
+
+export class CodeWrongError extends Error {
+  constructor(readonly remaining: number) {
+    super("验证码错误，请重新输入");
+    this.name = "CodeWrongError";
+  }
+}
+
+export class CodeAttemptsExhaustedError extends Error {
+  constructor() {
+    super("验证码连续错误5次，已失效，请重新获取");
+    this.name = "CodeAttemptsExhaustedError";
+  }
+}
+
+export class AccountDisabledError extends Error {
+  constructor() {
+    super("账号已停用");
+    this.name = "AccountDisabledError";
+  }
+}
+
+export class AccountDeletedError extends Error {
+  constructor() {
+    super("该手机号关联的账号已删除，暂无法登录");
+    this.name = "AccountDeletedError";
+  }
 }
 
 export class PhoneAlreadyBoundError extends Error {
@@ -82,6 +121,7 @@ export class IdentityService {
     return {
       userId: Number(user.id),
       username: user.username,
+      nickname: user.nickname,
       email: user.email,
       phone: user.phone,
       hasPassword: user.password !== null,
@@ -133,14 +173,33 @@ export class IdentityService {
   async loginWithPhoneCode(input: {
     phone: string;
     code: string;
+    purpose?: VerificationPurpose;
   }): Promise<{ result: LocalLoginResult; isNewUser: boolean }> {
-    const record = await this.authCodes.findValidCode(input.phone, input.code);
+    const purpose = input.purpose ?? "login";
+    const record = await this.authCodes.findActiveCode(input.phone, purpose);
     if (!record) {
-      throw new InvalidVerificationCodeError("验证码错误或已过期");
+      throw new CodeExpiredError();
+    }
+
+    if (record.code !== input.code) {
+      const attempts = await this.authCodes.incrementAttempts(record.id);
+      if (attempts >= MAX_CODE_ATTEMPTS) {
+        await this.authCodes.consumeCode(record.id);
+        throw new CodeAttemptsExhaustedError();
+      }
+      throw new CodeWrongError(MAX_CODE_ATTEMPTS - attempts);
+    }
+
+    await this.assertPhoneAccountUsable(input.phone);
+
+    const consumed = await this.authCodes.consumeCode(record.id);
+    if (!consumed) {
+      throw new CodeExpiredError();
     }
 
     const user = await this.authCodes.upsertUser(input.phone);
-    await this.authCodes.markCodeUsed(record.id);
+    if (user.isDelete) throw new AccountDeletedError();
+    if (user.status !== USER_STATUS_NORMAL) throw new AccountDisabledError();
 
     if (user.created) {
       try {
@@ -158,10 +217,17 @@ export class IdentityService {
       this.logger.error(
         `手机号登录找到的账号不可用（userId=${user.id}）——该行可能已被软删，且手机号仍被它占用`,
       );
-      throw new InvalidCredentialsError();
+      throw new AccountDeletedError();
     }
 
     return { result: await this.toLoginResult(row), isNewUser: user.created };
+  }
+
+  private async assertPhoneAccountUsable(phone: string): Promise<void> {
+    const existing = await this.authCodes.findByPhone(phone);
+    if (!existing) return;
+    if (existing.isDelete) throw new AccountDeletedError();
+    if (existing.status !== USER_STATUS_NORMAL) throw new AccountDisabledError();
   }
 
   async bindPhone(
@@ -172,11 +238,19 @@ export class IdentityService {
     if (!self) throw new InvalidCredentialsError();
     if (self.phone) throw new PhoneAlreadyBoundError();
 
-    const record = await this.authCodes.findValidCode(input.phone, input.code);
-    if (!record) throw new InvalidVerificationCodeError("验证码错误或已过期");
+    const record = await this.authCodes.findActiveCode(input.phone, "bind");
+    if (!record) throw new CodeExpiredError();
+    if (record.code !== input.code) {
+      const attempts = await this.authCodes.incrementAttempts(record.id);
+      if (attempts >= MAX_CODE_ATTEMPTS) {
+        await this.authCodes.consumeCode(record.id);
+        throw new CodeAttemptsExhaustedError();
+      }
+      throw new CodeWrongError(MAX_CODE_ATTEMPTS - attempts);
+    }
 
+    await this.authCodes.consumeCode(record.id);
     await this.users.updatePhone(String(userId), input.phone);
-    await this.authCodes.markCodeUsed(record.id);
   }
 
   async resolveAccountFlags(userId: string | number): Promise<AccountFlags | null> {
@@ -184,6 +258,7 @@ export class IdentityService {
     return user
       ? {
           phone: user.phone,
+          nickname: user.nickname,
           hasPassword: user.password !== null,
           mustChangePassword: user.mustChangePassword,
         }

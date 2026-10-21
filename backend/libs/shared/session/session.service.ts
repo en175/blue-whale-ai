@@ -7,6 +7,7 @@ import { sessionJwtSecret } from "./jwt-secret.js";
 
 const SESSION_TTL_SECONDS = 7 * 24 * 60 * 60;
 const ROLE_STATUS_RECHECK_MS = 5 * 60 * 1000;
+export const MAX_SESSIONS_PER_USER = 3;
 
 export interface ResolvedSession {
   userId: number;
@@ -24,7 +25,33 @@ type SessionPayload = {
   status: number;
   email: string | null;
   verifiedAt: number;
+  createdAt: number;
+  clientId?: string | undefined;
 };
+
+type IndexEntry = {
+  createdAt: number;
+  clientId?: string | undefined;
+};
+
+function encodeIndex(entry: IndexEntry): string {
+  return JSON.stringify(entry);
+}
+
+function decodeIndex(raw: string | null): IndexEntry | null {
+  if (!raw) return null;
+  if (raw === "1") return { createdAt: 0, clientId: undefined };
+  try {
+    const parsed = JSON.parse(raw) as Partial<IndexEntry>;
+    if (typeof parsed.createdAt !== "number") return null;
+    return {
+      createdAt: parsed.createdAt,
+      clientId: typeof parsed.clientId === "string" ? parsed.clientId : undefined,
+    };
+  } catch {
+    return null;
+  }
+}
 
 @Injectable()
 export class SessionService implements OnModuleDestroy {
@@ -60,6 +87,73 @@ export class SessionService implements OnModuleDestroy {
     return `user_session:${userId}:${hash}`;
   }
 
+  private indexPrefix(userId: number): string {
+    return `user_session:${userId}:`;
+  }
+
+  private async listIndexEntries(
+    userId: number,
+  ): Promise<Array<{ hash: string; entry: IndexEntry }>> {
+    const prefix = this.indexPrefix(userId);
+    let cursor = "0";
+    const entries: Array<{ hash: string; entry: IndexEntry }> = [];
+    do {
+      const [next, keys] = await this.redis.scan(
+        cursor,
+        "MATCH",
+        `${prefix}*`,
+        "COUNT",
+        100,
+      );
+      cursor = next;
+      for (const key of keys) {
+        if (!key.startsWith(prefix)) continue;
+        const entry = decodeIndex(await this.redis.get(key));
+        if (entry) entries.push({ hash: key.slice(prefix.length), entry });
+      }
+    } while (cursor !== "0");
+    return entries;
+  }
+
+  private async dropUserSessions(
+    userId: number,
+    hashes: readonly string[],
+  ): Promise<void> {
+    if (hashes.length === 0) return;
+    const pipeline = this.redis.pipeline();
+    for (const hash of hashes) {
+      pipeline.del(`session:${hash}`);
+      pipeline.del(this.indexKey(userId, hash));
+    }
+    await pipeline.exec();
+  }
+
+  private async evictSessions(
+    userId: number,
+    hashes: readonly string[],
+  ): Promise<void> {
+    if (hashes.length === 0) return;
+    const pipeline = this.redis.pipeline();
+    for (const hash of hashes) {
+      pipeline.set(this.evictedKey(hash), "1", "EX", SESSION_TTL_SECONDS);
+      pipeline.del(`session:${hash}`);
+      pipeline.del(this.indexKey(userId, hash));
+    }
+    await pipeline.exec();
+  }
+
+  private evictedKey(hash: string): string {
+    return `session_evicted:${hash}`;
+  }
+
+  async wasEvicted(token: string): Promise<boolean> {
+    try {
+      return (await this.redis.exists(this.evictedKey(this.hashOf(token)))) === 1;
+    } catch {
+      return false;
+    }
+  }
+
   async createSession(
     token: string,
     input: {
@@ -68,27 +162,56 @@ export class SessionService implements OnModuleDestroy {
       role: number;
       status: number;
       email: string | null;
+      clientId?: string | undefined;
     },
   ): Promise<void> {
     const hash = this.hashOf(token);
+    const createdAt = Date.now();
+    const clientId =
+      typeof input.clientId === "string" && input.clientId.trim().length > 0
+        ? input.clientId.trim()
+        : undefined;
+
+    if (clientId) {
+      const sameBrowser = (await this.listIndexEntries(input.userId)).filter(
+        (item) => item.entry.clientId === clientId,
+      );
+      await this.evictSessions(
+        input.userId,
+        sameBrowser.map((item) => item.hash),
+      );
+    }
+
     const payload: SessionPayload = {
       userId: input.userId,
       username: input.username,
       role: input.role,
       status: input.status,
       email: input.email,
-      verifiedAt: Date.now(),
+      verifiedAt: createdAt,
+      createdAt,
+      clientId,
     };
+
     await this.redis
       .multi()
       .set(this.key(token), JSON.stringify(payload), "EX", SESSION_TTL_SECONDS)
       .set(
         this.indexKey(input.userId, hash),
-        "1",
+        encodeIndex({ createdAt, clientId }),
         "EX",
         SESSION_TTL_SECONDS,
       )
       .exec();
+
+    const entries = await this.listIndexEntries(input.userId);
+    if (entries.length > MAX_SESSIONS_PER_USER) {
+      const oldest = entries
+        .sort((left, right) => left.entry.createdAt - right.entry.createdAt)
+        .slice(0, entries.length - MAX_SESSIONS_PER_USER)
+        .map((item) => item.hash);
+      await this.evictSessions(input.userId, oldest);
+    }
   }
 
   async resolveSession(token: string): Promise<ResolvedSession | null> {
@@ -102,13 +225,18 @@ export class SessionService implements OnModuleDestroy {
       await this.redis.del(key);
       return null;
     }
-    await this.redis.expire(key, SESSION_TTL_SECONDS);
-    await this.redis.set(
-      this.indexKey(data.userId, this.hashOf(token)),
-      "1",
-      "EX",
-      SESSION_TTL_SECONDS,
-    );
+    const indexKey = this.indexKey(data.userId, this.hashOf(token));
+    if ((await this.redis.exists(indexKey)) === 0) {
+      const ttlMs = await this.redis.pttl(key);
+      if (ttlMs > 0) {
+        await this.redis.set(
+          indexKey,
+          encodeIndex({ createdAt: data.createdAt ?? 0, clientId: data.clientId }),
+          "PX",
+          ttlMs,
+        );
+      }
+    }
     return {
       userId: data.userId,
       username: data.username,
@@ -131,13 +259,7 @@ export class SessionService implements OnModuleDestroy {
       data.role = input.role;
       data.status = input.status;
       data.verifiedAt = Date.now();
-      await this.redis.set(key, JSON.stringify(data), "EX", SESSION_TTL_SECONDS);
-      await this.redis.set(
-        this.indexKey(data.userId, this.hashOf(token)),
-        "1",
-        "EX",
-        SESSION_TTL_SECONDS,
-      );
+      await this.redis.set(key, JSON.stringify(data), "KEEPTTL");
     } catch {
     }
   }
@@ -157,32 +279,14 @@ export class SessionService implements OnModuleDestroy {
 
   async revokeAllForUser(userId: number, exceptToken?: string | undefined): Promise<number> {
     const keepHash = exceptToken ? this.hashOf(exceptToken) : null;
-    const prefix = `user_session:${userId}:`;
-    let cursor = "0";
-    const hashes = new Set<string>();
-    do {
-      const [next, keys] = await this.redis.scan(
-        cursor,
-        "MATCH",
-        `${prefix}*`,
-        "COUNT",
-        100,
-      );
-      cursor = next;
-      for (const k of keys) {
-        if (k.startsWith(prefix)) {
-          const hash = k.slice(prefix.length);
-          if (hash !== keepHash) hashes.add(hash);
-        }
-      }
-    } while (cursor !== "0");
-    if (hashes.size === 0) return 0;
-    const pipeline = this.redis.pipeline();
-    for (const hash of hashes) {
-      pipeline.del(`session:${hash}`);
-      pipeline.del(this.indexKey(userId, hash));
-    }
-    await pipeline.exec();
-    return hashes.size;
+    const entries = (await this.listIndexEntries(userId)).filter(
+      (item) => item.hash !== keepHash,
+    );
+    if (entries.length === 0) return 0;
+    await this.dropUserSessions(
+      userId,
+      entries.map((item) => item.hash),
+    );
+    return entries.length;
   }
 }

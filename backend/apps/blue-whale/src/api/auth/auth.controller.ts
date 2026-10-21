@@ -1,7 +1,18 @@
 import { Body, Controller, Get, Headers, Post, Req, Res } from "@nestjs/common";
 import type { Request, Response } from "express";
-import { InvalidVerificationCodeError, isValidPhone, NewApiError } from "@lib/core";
-import { ACCOUNT_LOCKED, FAILURE_CODE, ok } from "@lib/contracts";
+import { isValidPhone, NewApiError } from "@lib/core";
+import {
+  ACCOUNT_ERROR_ACCOUNT_DELETED,
+  ACCOUNT_ERROR_ACCOUNT_DISABLED,
+  ACCOUNT_ERROR_CODE_ATTEMPTS_EXHAUSTED,
+  ACCOUNT_ERROR_CODE_EXPIRED,
+  ACCOUNT_ERROR_CODE_WRONG,
+  ACCOUNT_ERROR_TERMS_REQUIRED,
+  ACCOUNT_LOCKED,
+  FAILURE_CODE,
+  fail,
+  ok,
+} from "@lib/contracts";
 import { createAuthRepo } from "@lib/shared/persistence/index.js";
 import { Public } from "@lib/infra/decorators/public.decorator.js";
 import { logger } from "@lib/infra/logging/blue-whale-logger.js";
@@ -18,6 +29,11 @@ import {
 } from "@lib/shared/rate-limit/login-failure-tracker.js";
 import { RateLimiter } from "@lib/shared/rate-limit/rate-limiter.js";
 import {
+  AccountDeletedError,
+  AccountDisabledError,
+  CodeAttemptsExhaustedError,
+  CodeExpiredError,
+  CodeWrongError,
   IdentityService,
   InvalidCredentialsError,
   PasswordPolicyError,
@@ -40,12 +56,36 @@ function loginData(result: LocalLoginResult, isNewUser: boolean, token: string) 
     token,
     user_id: result.userId,
     username: result.username,
+    nickname: result.nickname ?? result.username,
     email: result.email ?? null,
     phone: result.phone ?? "",
     is_new_user: isNewUser,
     has_password: result.hasPassword,
     must_change_password: result.mustChangePassword,
   };
+}
+
+function phoneCodeFailure(error: unknown): NewApiError | null {
+  if (error instanceof CodeWrongError) {
+    return new NewApiError(
+      `验证码错误，请重新输入（还可尝试${error.remaining}次）`,
+      400,
+      ACCOUNT_ERROR_CODE_WRONG,
+    );
+  }
+  if (error instanceof CodeAttemptsExhaustedError) {
+    return new NewApiError(error.message, 400, ACCOUNT_ERROR_CODE_ATTEMPTS_EXHAUSTED);
+  }
+  if (error instanceof CodeExpiredError) {
+    return new NewApiError(error.message, 400, ACCOUNT_ERROR_CODE_EXPIRED);
+  }
+  if (error instanceof AccountDisabledError) {
+    return new NewApiError(error.message, 403, ACCOUNT_ERROR_ACCOUNT_DISABLED);
+  }
+  if (error instanceof AccountDeletedError) {
+    return new NewApiError(error.message, 403, ACCOUNT_ERROR_ACCOUNT_DELETED);
+  }
+  return null;
 }
 
 const AUTH_RATE_LIMIT_WINDOW_MS = 60_000;
@@ -104,17 +144,20 @@ export class AuthController {
   @Post("send-code")
   @SMS_CODE_RATE_LIMIT
   async sendCode(
-    @Body() body: { phone?: unknown },
+    @Body() body: { phone?: unknown; purpose?: unknown },
     @Headers("x-forwarded-for") forwardedFor?: string,
   ) {
     const ip = forwardedFor?.split(",")[0]?.trim() ?? "unknown";
     return handleSendCode(
-      { phone: body?.phone, ip },
+      { phone: body?.phone, purpose: body?.purpose, ip },
       { db: createAuthRepo(this.prisma.client), sms: this.sms },
     );
   }
 
-  private async establishSession(result: LocalLoginResult): Promise<string> {
+  private async establishSession(
+    result: LocalLoginResult,
+    clientId?: string | undefined,
+  ): Promise<string> {
     if (result.userId == null || !result.username) {
       throw new NewApiError("账户服务响应异常", 502, "invalid_identity");
     }
@@ -125,6 +168,7 @@ export class AuthController {
       role: result.role,
       status: result.status,
       email: result.email ?? null,
+      ...(clientId ? { clientId } : {}),
     });
     return token;
   }
@@ -140,6 +184,7 @@ export class AuthController {
   ) {
     const username = typeof body.username === "string" ? body.username.trim() : "";
     const password = typeof body.password === "string" ? body.password : "";
+    const clientId = typeof body.client_id === "string" ? body.client_id.trim() : "";
     const ip = forwardedFor?.split(",")[0]?.trim() ?? "unknown";
 
     if (!username || !password) {
@@ -157,7 +202,7 @@ export class AuthController {
     try {
       const result = await this.identity.login({ username, password });
       await this.loginFailures.clear(username);
-      const sessionToken = await this.establishSession(result);
+      const sessionToken = await this.establishSession(result, clientId || undefined);
       res.cookie(SESSION_COOKIE_NAME, sessionToken, sessionCookieOptions());
       await this.recordLogin({
         userId: String(result.userId),
@@ -194,15 +239,24 @@ export class AuthController {
   ) {
     const phone = typeof body.phone === "string" ? body.phone.trim() : "";
     const code = typeof body.code === "string" ? body.code.trim() : "";
+    const clientId = typeof body.client_id === "string" ? body.client_id.trim() : "";
     const ip = forwardedFor?.split(",")[0]?.trim() ?? "unknown";
 
     if (!isValidPhone(phone) || !code) {
-      return { code: FAILURE_CODE, msg: "手机号和验证码不能为空", data: null };
+      return fail(FAILURE_CODE, "手机号和验证码不能为空");
+    }
+    if (body.agreed_terms !== true) {
+      return fail(
+        FAILURE_CODE,
+        "请先阅读并同意用户服务协议和隐私政策",
+        null,
+        ACCOUNT_ERROR_TERMS_REQUIRED,
+      );
     }
 
     try {
       const { result, isNewUser } = await this.identity.loginWithPhoneCode({ phone, code });
-      const sessionToken = await this.establishSession(result);
+      const sessionToken = await this.establishSession(result, clientId || undefined);
       res.cookie(SESSION_COOKIE_NAME, sessionToken, sessionCookieOptions());
       await this.recordLogin({
         userId: String(result.userId),
@@ -213,15 +267,16 @@ export class AuthController {
       });
       return ok(loginData(result, isNewUser, sessionToken));
     } catch (error) {
-      if (error instanceof InvalidVerificationCodeError) {
+      const failure = phoneCodeFailure(error);
+      if (failure) {
         await this.recordLogin({
           username: phone,
           ip,
           userAgent,
           success: false,
-          reason: "验证码错误",
+          reason: failure.message,
         });
-        throw new NewApiError(error.message, 401, "invalid_verification_code");
+        throw failure;
       }
       throw toAuthError(error);
     }

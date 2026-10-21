@@ -49,7 +49,12 @@ describe("AllExceptionsFilter", () => {
     const { json, status, host } = capture();
     filter.catch(new NewApiError("会话不存在", 404, "session_not_found"), host);
     expect(status).toHaveBeenCalledWith(404);
-    expect(json).toHaveBeenCalledWith({ code: 404, msg: "会话不存在", data: null });
+    expect(json).toHaveBeenCalledWith({
+      code: 404,
+      msg: "会话不存在",
+      data: null,
+      error_code: "session_not_found",
+    });
   });
 
   it("HttpException 保留自己的状态码", () => {

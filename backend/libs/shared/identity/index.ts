@@ -1,6 +1,11 @@
 export { IdentityModule } from "./identity.module.js";
 export {
   IdentityService,
+  AccountDeletedError,
+  AccountDisabledError,
+  CodeAttemptsExhaustedError,
+  CodeExpiredError,
+  CodeWrongError,
   InvalidCredentialsError,
   PhoneAlreadyBoundError,
   type AccountFlags,

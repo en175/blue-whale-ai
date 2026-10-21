@@ -5,6 +5,7 @@ import { SessionService } from "./session.service.js";
 const { FakeRedis } = vi.hoisted(() => {
   class FakeRedis {
     store = new Map<string, string>();
+    ttlMs = new Map<string, number>();
     expiredKeys: string[] = [];
     setKeys: string[] = [];
 
@@ -13,12 +14,23 @@ const { FakeRedis } = vi.hoisted(() => {
     async set(
       key: string,
       value: string,
-      _mode?: string,
-      _ttl?: number,
+      mode?: string,
+      ttl?: number,
     ): Promise<"OK"> {
       this.store.set(key, value);
       this.setKeys.push(key);
+      if (mode === "EX" && ttl != null) this.ttlMs.set(key, ttl * 1000);
+      if (mode === "PX" && ttl != null) this.ttlMs.set(key, ttl);
       return "OK";
+    }
+
+    async pttl(key: string): Promise<number> {
+      if (!this.store.has(key)) return -2;
+      return this.ttlMs.get(key) ?? -1;
+    }
+
+    async exists(key: string): Promise<number> {
+      return this.store.has(key) ? 1 : 0;
     }
 
     async get(key: string): Promise<string | null> {
@@ -167,11 +179,13 @@ describe("SessionService（登录态凭证分层，Redis 存储，ADR-0062 #19�
     expect(await service.resolveSession("sess_unknown")).toBeNull();
   });
 
-  it("resolveSession 每次访问滑动续期（调用 EXPIRE）", async () => {
+  it("resolveSession 不再滑动续期（固定 7 天，从签发时刻起算）", async () => {
     const token = await makeSession();
+    const key = `session:${hash(token)}`;
+    const ttlBefore = await redis.pttl(key);
     await service.resolveSession(token);
-    expect(redis.expiredKeys).toContain(`session:${hash(token)}`);
-    expect(redis.setKeys).toContain(`user_session:8:${hash(token)}`);
+    expect(redis.expiredKeys).toHaveLength(0);
+    expect(await redis.pttl(key)).toBe(ttlBefore);
   });
 
   it("resolveSession 对部署前旧会话（无索引键）惰性补建索引", async () => {
@@ -266,5 +280,83 @@ describe("SessionService（登录态凭证分层，Redis 存储，ADR-0062 #19�
     await makeSession();
     expect(await service.revokeAllForUser(12345)).toBe(0);
     expect(await service.resolveSession((await makeSession()))).not.toBeNull();
+  });
+});
+
+describe("SessionService 会话数量与同浏览器替换（PRD 7.5）", () => {
+  let service: SessionService;
+  let redis: FakeRedis;
+
+  beforeEach(() => {
+    vi.stubEnv("SESSION_JWT_SECRET", "session-service-test-secret-key-32bytes!!");
+    service = new SessionService();
+    redis = (service as unknown as { redis: FakeRedis }).redis;
+    redis.store.clear();
+    redis.ttlMs.clear();
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  async function make(token: string, clientId?: string): Promise<string> {
+    await service.createSession(token, { ...BASE, ...(clientId ? { clientId } : {}) });
+    return token;
+  }
+
+  it("最多 3 个会话：第 4 个登录淘汰最早登录的", async () => {
+    const first = await make("t1");
+    await make("t2");
+    await make("t3");
+    await make("t4");
+
+    expect(await service.resolveSession(first)).toBeNull();
+    expect(await service.resolveSession("t2")).not.toBeNull();
+    expect(await service.resolveSession("t4")).not.toBeNull();
+    expect(redis.store.has(`user_session:8:${hash(first)}`)).toBe(false);
+  });
+
+  it("被淘汰的会话留下标记，前端据此区分「被挤出」和「已过期」", async () => {
+    const first = await make("t1");
+    await make("t2");
+    await make("t3");
+    await make("t4");
+
+    expect(await service.wasEvicted(first)).toBe(true);
+    expect(await service.wasEvicted("t2")).toBe(false);
+  });
+
+  it("同一 client_id 重新登录替换旧会话，只占 1 个名额", async () => {
+    const old = await make("t-old", "browser-a");
+    const keep = await make("t-keep");
+    const fresh = await make("t-new", "browser-a");
+
+    expect(await service.resolveSession(old)).toBeNull();
+    expect(await service.wasEvicted(old)).toBe(true);
+    expect(await service.resolveSession(keep)).not.toBeNull();
+    expect(await service.resolveSession(fresh)).not.toBeNull();
+  });
+
+  it("不同 client_id 各自计数，挤人时先挤最早的", async () => {
+    const a = await make("a", "browser-a");
+    const b = await make("b", "browser-b");
+    await make("c", "browser-c");
+    await make("d", "browser-d");
+
+    expect(await service.resolveSession(a)).toBeNull();
+    expect(await service.resolveSession(b)).not.toBeNull();
+  });
+
+  it("部署前的旧索引值（\"1\"）按最早会话处理，可被淘汰与吊销", async () => {
+    const legacy = await make("legacy");
+    redis.store.set(`user_session:8:${hash(legacy)}`, "1");
+    const newer = await make("n1");
+    await make("n2");
+    const fourth = await make("n3");
+
+    expect(await service.resolveSession(legacy)).toBeNull();
+    expect(await service.wasEvicted(legacy)).toBe(true);
+    expect(await service.resolveSession(fourth)).not.toBeNull();
+    expect(await service.resolveSession(newer)).not.toBeNull();
   });
 });

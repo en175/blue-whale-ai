@@ -3,6 +3,7 @@ import type { PrismaClient } from "@prisma/client";
 export interface IdentityUserRow {
   id: string;
   username: string;
+  nickname: string | null;
   email: string | null;
   phone: string | null;
   status: string;
@@ -49,6 +50,7 @@ export class PhoneTakenError extends Error {
 const SELECT = {
   id: true,
   username: true,
+  nickname: true,
   email: true,
   phone: true,
   status: true,
@@ -60,6 +62,7 @@ export function createIdentityUserRepo(prisma: PrismaClient): IdentityUserRepo {
   function hydrate(row: {
     id: bigint;
     username: string;
+    nickname: string | null;
     email: string | null;
     phone: string | null;
     status: string;
@@ -69,6 +72,7 @@ export function createIdentityUserRepo(prisma: PrismaClient): IdentityUserRepo {
     return {
       id: String(row.id),
       username: row.username,
+      nickname: row.nickname,
       email: row.email,
       phone: row.phone,
       status: row.status,

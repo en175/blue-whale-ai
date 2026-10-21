@@ -1,8 +1,12 @@
 import { Body, Controller, Get, Post, Put, Req, Res } from "@nestjs/common";
 import type { Request, Response } from "express";
-import { InvalidVerificationCodeError, isValidPhone, NewApiError } from "@lib/core";
+import { isValidPhone, NewApiError } from "@lib/core";
 import { createLogger } from "@lib/core/logging";
 import {
+  ACCOUNT_ERROR_CODE_ATTEMPTS_EXHAUSTED,
+  ACCOUNT_ERROR_CODE_EXPIRED,
+  ACCOUNT_ERROR_CODE_WRONG,
+  ACCOUNT_ERROR_PHONE_TAKEN,
   ACCOUNT_ERROR_UNKNOWN_NUMERIC_CODE,
   changePasswordRequestSchema,
   FAILURE_CODE,
@@ -12,6 +16,9 @@ import {
 import { projectAccountError } from "@lib/shared/account/change-password-error.js";
 import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
 import {
+  CodeAttemptsExhaustedError,
+  CodeExpiredError,
+  CodeWrongError,
   IdentityService,
   PhoneAlreadyBoundError,
   PhoneTakenError,
@@ -40,6 +47,7 @@ export class MeController {
       id: Number(user.userId),
       user_id: Number(user.userId),
       username: user.username,
+      nickname: flags?.nickname ?? user.username,
       email: user.email,
       phone: flags?.phone ?? "",
       has_password: flags?.hasPassword ?? false,
@@ -67,11 +75,29 @@ export class MeController {
     try {
       await this.identity.bindPhone(userId, { phone, code });
     } catch (error) {
-      if (
-        error instanceof InvalidVerificationCodeError ||
-        error instanceof PhoneTakenError ||
-        error instanceof PhoneAlreadyBoundError
-      ) {
+      if (error instanceof CodeWrongError) {
+        return fail(
+          FAILURE_CODE,
+          `验证码错误，请重新输入（还可尝试${error.remaining}次）`,
+          null,
+          ACCOUNT_ERROR_CODE_WRONG,
+        );
+      }
+      if (error instanceof CodeAttemptsExhaustedError) {
+        return fail(
+          FAILURE_CODE,
+          error.message,
+          null,
+          ACCOUNT_ERROR_CODE_ATTEMPTS_EXHAUSTED,
+        );
+      }
+      if (error instanceof CodeExpiredError) {
+        return fail(FAILURE_CODE, error.message, null, ACCOUNT_ERROR_CODE_EXPIRED);
+      }
+      if (error instanceof PhoneTakenError) {
+        return fail(FAILURE_CODE, error.message, null, ACCOUNT_ERROR_PHONE_TAKEN);
+      }
+      if (error instanceof PhoneAlreadyBoundError) {
         return fail(FAILURE_CODE, error.message);
       }
       throw error;

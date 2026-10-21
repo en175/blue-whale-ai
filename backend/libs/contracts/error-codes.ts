@@ -79,6 +79,16 @@ export const ACCOUNT_ERROR_UNKNOWN_NUMERIC_CODE = 1100;
 export const ACCOUNT_ERROR_PASSWORD_INCORRECT = "password_incorrect";
 export const ACCOUNT_ERROR_PASSWORD_INVALID = "password_invalid";
 export const ACCOUNT_ERROR_PASSWORD_NOT_SET = "password_not_set";
+export const ACCOUNT_ERROR_TERMS_REQUIRED = "terms_required";
+export const ACCOUNT_ERROR_CODE_WRONG = "code_wrong";
+export const ACCOUNT_ERROR_CODE_EXPIRED = "code_expired";
+export const ACCOUNT_ERROR_CODE_ATTEMPTS_EXHAUSTED = "code_attempts_exhausted";
+export const ACCOUNT_ERROR_ACCOUNT_DISABLED = "account_disabled";
+export const ACCOUNT_ERROR_ACCOUNT_DELETED = "account_deleted";
+export const ACCOUNT_ERROR_INVALID_PURPOSE = "invalid_purpose";
+export const ACCOUNT_ERROR_PHONE_TAKEN = "phone_taken";
+export const ACCOUNT_ERROR_SESSION_EXPIRED = "session_expired";
+export const ACCOUNT_ERROR_SESSION_EVICTED = "session_evicted";
 
 export const GENERATION_ERROR_UNKNOWN_NUMERIC_CODE = 1000;
 
@@ -155,6 +165,16 @@ export const ACCOUNT_ERROR_NUMERIC_CODES: Record<string, number> = {
   [ACCOUNT_ERROR_PASSWORD_INCORRECT]: 1101,
   [ACCOUNT_ERROR_PASSWORD_INVALID]: 1102,
   [ACCOUNT_ERROR_PASSWORD_NOT_SET]: 1103,
+  [ACCOUNT_ERROR_TERMS_REQUIRED]: 1104,
+  [ACCOUNT_ERROR_CODE_WRONG]: 1105,
+  [ACCOUNT_ERROR_CODE_EXPIRED]: 1106,
+  [ACCOUNT_ERROR_CODE_ATTEMPTS_EXHAUSTED]: 1107,
+  [ACCOUNT_ERROR_ACCOUNT_DISABLED]: 1108,
+  [ACCOUNT_ERROR_ACCOUNT_DELETED]: 1109,
+  [ACCOUNT_ERROR_INVALID_PURPOSE]: 1110,
+  [ACCOUNT_ERROR_PHONE_TAKEN]: 1111,
+  [ACCOUNT_ERROR_SESSION_EXPIRED]: 1112,
+  [ACCOUNT_ERROR_SESSION_EVICTED]: 1113,
 };
 
 export function accountErrorToNumeric(code: string): number {
@@ -360,6 +380,16 @@ export const ERROR_CODES: Record<number, string> = {
   1101: "原密码错误，请重试",
   1102: "新密码需为 8-20 位",
   1103: "当前账号未设置密码",
+  1104: "请先阅读并同意用户服务协议和隐私政策",
+  1105: "验证码错误，请重新输入",
+  1106: "验证码已失效，请重新获取",
+  1107: "验证码连续错误5次，已失效，请重新获取",
+  1108: "账号已停用",
+  1109: "该手机号关联的账号已删除，暂无法登录",
+  1110: "验证码用途不正确",
+  1111: "该手机号已绑定其他账号",
+  1112: "登录已过期，请重新验证",
+  1113: "登录已失效，账号已在其他浏览器登录，请重新验证",
   100000: "缺少幂等键",
   100100: "资源不存在",
   100202: "资源不可用",
