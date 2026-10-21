@@ -1,7 +1,7 @@
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { ArrowUp, X } from 'lucide-react';
 import DragSlider from '@/custom/components/DragSlider';
-import type { MediaToolQuoteInput } from '@/custom/api/mediaToolQuote';
+import type { MediaToolQuoteParams } from '@/custom/api/mediaToolQuote';
 import {
   AUDIO_SPEED_MAX_SPEED,
   AUDIO_SPEED_MIN_SPEED,
@@ -23,7 +23,7 @@ interface AudioSpeedBarProps {
   onSpeedChange: (speed: number) => void;
   onSend: () => void;
   submitting?: boolean;
-  quoteInput?: MediaToolQuoteInput | null;
+  quoteParams?: MediaToolQuoteParams | null;
   anchor: FollowDialogAnchor | null;
   dragHidden?: boolean;
 }
@@ -42,7 +42,7 @@ export default function AudioSpeedBar({
   onSpeedChange,
   onSend,
   submitting,
-  quoteInput,
+  quoteParams,
   anchor, dragHidden,
 }: AudioSpeedBarProps) {
   const readOnly = submitting === true;
@@ -128,7 +128,7 @@ export default function AudioSpeedBar({
       {}
       <MediaToolQuoteBadge
         toolType="audio_speed"
-        input={quoteInput}
+        params={quoteParams}
         testId="audio-speed-quote"
       />
       <button

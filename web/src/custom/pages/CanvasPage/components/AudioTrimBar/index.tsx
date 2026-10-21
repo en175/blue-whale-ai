@@ -1,6 +1,6 @@
 import { ArrowUp, ChevronDown, X } from 'lucide-react';
 import DropdownMenu from '@/custom/components/DropdownMenu';
-import type { MediaToolQuoteInput } from '@/custom/api/mediaToolQuote';
+import type { MediaToolQuoteParams } from '@/custom/api/mediaToolQuote';
 import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../agent/followDialog';
 import { AUDIO_TRIM_FORMATS, type AudioTrimFormat } from '../../tools/audio/audioTrim';
 import { audioTrimRangeLabel } from '../../tools/audio/audioTrimGeometry';
@@ -15,7 +15,7 @@ interface AudioTrimBarProps {
   onFormatChange: (format: AudioTrimFormat) => void;
   onSend: () => void;
   submitting?: boolean;
-  quoteInput?: MediaToolQuoteInput | null;
+  quoteParams?: MediaToolQuoteParams | null;
   anchor: FollowDialogAnchor | null;
   dragHidden?: boolean;
 }
@@ -28,7 +28,7 @@ export default function AudioTrimBar({
   onFormatChange,
   onSend,
   submitting,
-  quoteInput,
+  quoteParams,
   anchor, dragHidden,
 }: AudioTrimBarProps) {
   const readOnly = submitting === true;
@@ -89,7 +89,7 @@ export default function AudioTrimBar({
       {}
       <MediaToolQuoteBadge
         toolType="audio_trim"
-        input={quoteInput}
+        params={quoteParams}
         testId="audio-trim-quote"
       />
       <button

@@ -3,7 +3,7 @@ import { useInfiniteQuery, useMutation } from '@tanstack/react-query';
 import { ArrowUp, ChevronDown, Plus, X } from 'lucide-react';
 import type { Node } from '@xyflow/react';
 import { assetPageQueryOptions } from '@/custom/api/assets';
-import type { MediaToolQuoteInput } from '@/custom/api/mediaToolQuote';
+import type { MediaToolQuoteParams } from '@/custom/api/mediaToolQuote';
 import { isApiError } from '@/shared/api/http';
 import { uploadAssetFile } from '@/custom/utils/upload';
 import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../agent/followDialog';
@@ -28,7 +28,7 @@ interface AudioMixBarProps {
   onSend: () => void;
   onClose: () => void;
   submitting: boolean;
-  quoteInput?: MediaToolQuoteInput | null;
+  quoteParams?: MediaToolQuoteParams | null;
   anchor: FollowDialogAnchor | null;
   dragHidden?: boolean;
 }
@@ -65,7 +65,7 @@ function AudioMixLibrary({ selectedIds, full, submitting, onAdd }: {
 
 export default function AudioMixBar({
   source, candidates, selected, onAdd, onRemove, projectId, format, onFormatChange,
-  onSend, onClose, submitting, quoteInput, anchor, dragHidden,
+  onSend, onClose, submitting, quoteParams, anchor, dragHidden,
 }: AudioMixBarProps) {
   const [tab, setTab] = useState<SourceTab>('canvas');
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -221,7 +221,7 @@ export default function AudioMixBar({
       />
       <MediaToolQuoteBadge
         toolType="audio_mix"
-        input={quoteInput}
+        params={quoteParams}
         testId="audio-mix-quote"
       />
       <button type="button" className={`${bar.sendBtn} ${!disabled ? bar.sendBtnActive : ''}`}

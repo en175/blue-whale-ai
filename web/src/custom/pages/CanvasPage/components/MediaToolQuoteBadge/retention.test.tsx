@@ -27,7 +27,7 @@ function deferred<T>() {
 function element(duration: number) {
   return createElement(MediaToolQuoteBadge, {
     toolType: 'audio_trim',
-    input: { duration },
+    params: { source_asset_id: String(duration) },
     testId: 'quote',
   });
 }

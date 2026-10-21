@@ -16,7 +16,7 @@ interface FrameInterpolationDialogProps {
   onSend: (fps: FrameInterpolationFps) => boolean | Promise<boolean>;
   onParamsChange: (fps: FrameInterpolationFps) => void;
   initialFps?: FrameInterpolationFps | null;
-  quoteDuration?: number | null;
+  sourceAssetId?: string | null;
   generating?: boolean;
   submitting?: boolean;
   followAnchor?: FollowDialogAnchor | null;
@@ -28,7 +28,7 @@ export default function FrameInterpolationDialog({
   onSend,
   onParamsChange,
   initialFps,
-  quoteDuration,
+  sourceAssetId,
   generating,
   submitting,
   followAnchor, dragHidden,
@@ -95,7 +95,7 @@ export default function FrameInterpolationDialog({
         <div className={styles.bottomBar}>
           <MediaToolQuoteBadge
             toolType="video_frame_interpolation"
-            input={quoteDuration ? { duration: Math.round(quoteDuration), fps } : null}
+            params={sourceAssetId ? { source_asset_id: sourceAssetId, fps } : null}
             variant="hint"
             testId="frame-interpolation-quote"
           />

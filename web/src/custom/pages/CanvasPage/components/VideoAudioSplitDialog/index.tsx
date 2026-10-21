@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import { ArrowUp, ChevronDown, X } from 'lucide-react';
-import type { MediaToolQuoteInput } from '@/custom/api/mediaToolQuote';
+import type { MediaToolQuoteParams } from '@/custom/api/mediaToolQuote';
 import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../agent/followDialog';
 import { useDismissOnOutside } from '../../hooks/shared/useDismissOnOutside';
 import { AUDIO_VIDEO_SPLIT_FORMATS, type AudioVideoSplitFormat } from '../../tools/audio/audioVideoSplit';
@@ -13,7 +13,7 @@ interface VideoAudioSplitDialogProps {
   onFormatChange: (format: AudioVideoSplitFormat) => void;
   onSend: () => void;
   submitting?: boolean;
-  quoteInput?: MediaToolQuoteInput | null;
+  quoteParams?: MediaToolQuoteParams | null;
   sendBarAnchor: FollowDialogAnchor | null;
   dragHidden?: boolean;
 }
@@ -24,7 +24,7 @@ export default function VideoAudioSplitDialog({
   onFormatChange,
   onSend,
   submitting,
-  quoteInput,
+  quoteParams,
   sendBarAnchor, dragHidden,
 }: VideoAudioSplitDialogProps) {
   const readOnly = submitting === true;
@@ -100,7 +100,7 @@ export default function VideoAudioSplitDialog({
       </div>
       <MediaToolQuoteBadge
         toolType="media_extract"
-        input={quoteInput}
+        params={quoteParams}
         testId="media-extract-quote"
       />
       <button

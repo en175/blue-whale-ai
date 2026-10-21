@@ -1,6 +1,6 @@
 import { type VideoSubtitleEraseMode } from '@/custom/enums';
 import { ArrowUp, HelpCircle, Redo2, RotateCcw, Square, Undo2, X } from 'lucide-react';
-import type { MediaToolQuoteInput } from '@/custom/api/mediaToolQuote';
+import type { MediaToolQuoteParams } from '@/custom/api/mediaToolQuote';
 import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../agent/followDialog';
 import MediaToolQuoteBadge from '../MediaToolQuoteBadge';
 import styles from './index.module.css';
@@ -17,7 +17,7 @@ interface VideoSubtitleEraseDialogProps {
   onReset: () => void;
   boxLimitReached: boolean;
   submitting?: boolean;
-  quoteInput?: MediaToolQuoteInput | null;
+  quoteParams?: MediaToolQuoteParams | null;
   sendBlockedReason: string | null;
   sendBarAnchor: FollowDialogAnchor | null;
   dragHidden?: boolean;
@@ -35,7 +35,7 @@ export default function VideoSubtitleEraseDialog({
   onReset,
   boxLimitReached,
   submitting,
-  quoteInput,
+  quoteParams,
   sendBlockedReason,
   sendBarAnchor, dragHidden,
 }: VideoSubtitleEraseDialogProps) {
@@ -130,7 +130,7 @@ export default function VideoSubtitleEraseDialog({
       <span className={styles.divider} />
       <MediaToolQuoteBadge
         toolType="video_subtitle_erase"
-        input={quoteInput}
+        params={quoteParams}
         testId="subtitle-erase-quote"
       />
       <button

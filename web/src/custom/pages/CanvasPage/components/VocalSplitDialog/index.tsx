@@ -2,7 +2,7 @@ import { VOCAL_SPLIT_SCENE_OPTIONS } from '@/custom/enums';
 import { useState } from 'react';
 import { ArrowUp, ChevronDown, X } from 'lucide-react';
 import DropdownMenu from '@/custom/components/DropdownMenu';
-import type { MediaToolQuoteInput } from '@/custom/api/mediaToolQuote';
+import type { MediaToolQuoteParams } from '@/custom/api/mediaToolQuote';
 import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../agent/followDialog';
 import { VOCAL_SPLIT_FORMATS, vocalSplitSceneHint, vocalSplitSceneLabel, type VocalSplitFormat, type VocalSplitScene } from '../../tools/audio/vocalSplit';
 import MediaToolQuoteBadge from '../MediaToolQuoteBadge';
@@ -16,7 +16,7 @@ interface VocalSplitDialogProps {
   onFormatChange: (format: VocalSplitFormat) => void;
   onSend: () => void;
   submitting?: boolean;
-  quoteInput?: MediaToolQuoteInput | null;
+  quoteParams?: MediaToolQuoteParams | null;
   sendBarAnchor: FollowDialogAnchor | null;
   dragHidden?: boolean;
 }
@@ -29,7 +29,7 @@ export default function VocalSplitDialog({
   onFormatChange,
   onSend,
   submitting,
-  quoteInput,
+  quoteParams,
   sendBarAnchor, dragHidden,
 }: VocalSplitDialogProps) {
   const readOnly = submitting === true;
@@ -128,7 +128,7 @@ export default function VocalSplitDialog({
       />
       <MediaToolQuoteBadge
         toolType="vocal_split"
-        input={quoteInput}
+        params={quoteParams}
         testId="vocal-split-quote"
       />
       <button

@@ -11,14 +11,14 @@ describe('fetchMediaToolQuote', () => {
     http.apiRequest.mockResolvedValue({ credits: 2, quote_revision: 'rev' });
   });
 
-  it('按工具类型提交报价输入并静默处理错误', async () => {
-    await fetchMediaToolQuote('audio_trim', { duration: 61 });
+  it('按工具类型提交原始素材与参数并静默处理错误', async () => {
+    await fetchMediaToolQuote('audio_trim', { source_asset_id: '61', start_time: 0, end_time: 61 });
 
     expect(http.apiRequest).toHaveBeenCalledWith(
       '/api/media-tools/audio_trim/quote',
       {
         method: 'POST',
-        body: JSON.stringify({ input: { duration: 61 } }),
+        body: JSON.stringify({ source_asset_id: '61', start_time: 0, end_time: 61 }),
         silent: true,
       },
     );

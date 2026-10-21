@@ -1,6 +1,6 @@
 import { SCENE_SPLIT_GRANULARITY_LABELS } from '@/custom/enums';
 import { ArrowUp, X } from 'lucide-react';
-import type { MediaToolQuoteInput } from '@/custom/api/mediaToolQuote';
+import type { MediaToolQuoteParams } from '@/custom/api/mediaToolQuote';
 import { anchoredOverlayStyle, type FollowDialogAnchor } from '../../agent/followDialog';
 import { SCENE_SPLIT_GRANULARITIES, type SceneSplitGranularity } from '../../tools/video/sceneSplit';
 import MediaToolQuoteBadge from '../MediaToolQuoteBadge';
@@ -12,7 +12,7 @@ interface SceneSplitDialogProps {
   onGranularityChange: (granularity: SceneSplitGranularity) => void;
   onSend: () => void;
   submitting?: boolean;
-  quoteInput?: MediaToolQuoteInput | null;
+  quoteParams?: MediaToolQuoteParams | null;
   sendBarAnchor: FollowDialogAnchor | null;
   dragHidden?: boolean;
 }
@@ -23,7 +23,7 @@ export default function SceneSplitDialog({
   onGranularityChange,
   onSend,
   submitting,
-  quoteInput,
+  quoteParams,
   sendBarAnchor, dragHidden,
 }: SceneSplitDialogProps) {
   const readOnly = submitting === true;
@@ -78,7 +78,7 @@ export default function SceneSplitDialog({
       </div>
       <MediaToolQuoteBadge
         toolType="video_scene_split"
-        input={quoteInput}
+        params={quoteParams}
         testId="scene-split-quote"
       />
       <button

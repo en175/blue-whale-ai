@@ -44,7 +44,7 @@ function withQuery(node: ReactElement) {
   return createElement(QueryClientProvider, { client }, node);
 }
 
-async function renderBadge(input: Record<string, unknown> | null = {}) {
+async function renderBadge(params: Record<string, unknown> | null = {}) {
   mountNode = document.createElement('div');
   document.body.appendChild(mountNode);
   root = createRoot(mountNode);
@@ -52,7 +52,7 @@ async function renderBadge(input: Record<string, unknown> | null = {}) {
     root.render(
       withQuery(createElement(MediaToolQuoteBadge, {
         toolType: 'audio_trim',
-        input,
+        params,
         testId: 'quote',
       })),
     );
