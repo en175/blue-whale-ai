@@ -215,7 +215,9 @@ def cleanup(root: Path, snapshot_path: Path, equivalent: str | None = None) -> d
         lineage_file = common_dir / "blue-whale" / "implement-spec-lineage" / f"{slug}.json"
         lineage_ref = "refs/agent-implement-spec-lineage/" + slug
         if not lineage_file.is_file():
-            raise CleanupError("远端 PR 源分支尚未包含子任务提交，且无已核验的线性化记录，未清理。")
+            raise CleanupError("远端 PR 源分支尚未包含子任务提交，且无已核验的线性化记录，未清理。"
+                               + ("已合并 PR 的移植提交请显式传 --equivalent-commit <完整 SHA>。"
+                                  if merged else ""))
         lineage = load_record(lineage_file)
         child_heads = lineage.get("child_heads")
         if not isinstance(child_heads, dict):

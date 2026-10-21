@@ -116,6 +116,8 @@ class ImplementSpecChildMergeTest(unittest.TestCase):
         result = self.cleanup(snapshot, equivalent=equivalent)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertFalse(self.child_one.exists())
+        self.assertNotEqual(run("git", "show-ref", "--verify", f"refs/heads/{CHILD_ONE}",
+                                cwd=self.main, check=False).returncode, 0)
         self.assertEqual((self.main / "shared.txt").read_text(), "context\nnew\nsafety\n")
 
     def test_cleanup_equivalent_rejects_different_or_shifted_patch(self):
