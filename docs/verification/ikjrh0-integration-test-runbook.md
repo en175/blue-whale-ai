@@ -39,6 +39,7 @@ IKHJ0Q_DATABASE_URL="$BW_INTEGRATION_DATABASE_URL" \
 | [ikjltt-canvas-recovery](../../backend/libs/shared/persistence/ikjltt-canvas-recovery.integration.test.ts) | `IKJLTT_DATABASE_URL` | `3316 / bw_gate_ikjltt` | 旧 primary 不得改动新受理归属，混入旧操作时整笔拒绝 |
 | [ikkbl9-canvas-recovery](../../backend/libs/shared/persistence/ikkbl9-canvas-recovery.integration.test.ts) | `IKKBL9_DATABASE_URL` | `3317 / bw_gate_ikkbl9` | 受保护项判据锚定节点持有者：陈旧标记可推进到持有者，缺席仍须声明持有者 |
 | [iklbuf-canvas-recovery](../../backend/libs/shared/persistence/iklbuf-canvas-recovery.integration.test.ts) | `IKLBUF_DATABASE_URL` | `3318 / bw_gate_iklbuf` | 陈旧标记推进到持有者同提交的产物键（持有者在 `$target`、来件 `primary`）可保存；未声明改动仍拒绝 |
+| [ikpd88-canvas-recovery](../../backend/libs/shared/persistence/ikpd88-canvas-recovery.integration.test.ts) | `IKPD88_DATABASE_URL` | `3319 / bw_gate_ikpd88` | replaceTarget 不再要求客户端逐条声明输出；普通写节点带产物自动补齐；归属冲突 409 带节点定位 |
 | [ikjltx-media-tool-replay](../../backend/libs/shared/persistence/ikjltx-media-tool-replay.integration.test.ts) | `IKJLTX_DATABASE_URL` | `3309 / bw_gate_ikjltx` | 原意图回读先于素材等可变状态；旧关联重放不重新取得当前归属 |
 | [ikjlxe-canvas-recovery](../../backend/libs/shared/persistence/ikjlxe-canvas-recovery.integration.test.ts) | `IKJLXE_DATABASE_URL` | 以本地隔离库配置为准 | 首次 primary 与目标卡成对转换、同状态重复 apply 和回执重放 |
 | [ikizqc-finalize-unique](../../backend/libs/shared/persistence/ikizqc-finalize-unique.integration.test.ts) | `IKIZQC_DATABASE_URL` | 原示例为 `3307 / ikizqc_probe` | 同成片来源并发插入恰一行成功；NULL 来源允许重复；失败占位仍占唯一键 |
