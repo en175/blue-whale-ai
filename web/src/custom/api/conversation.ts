@@ -63,7 +63,14 @@ export async function sendConversationMessage(
       signal,
     },
   );
-  if (res.status === 401) handleUnauthorized();
+  if (res.status === 401) {
+    let errorCode: string | undefined;
+    if ((res.headers.get('content-type') ?? '').includes('application/json')) {
+      const failure = (await res.clone().json().catch(() => undefined)) as { error_code?: unknown } | undefined;
+      if (typeof failure?.error_code === 'string') errorCode = failure.error_code;
+    }
+    handleUnauthorized(errorCode);
+  }
 
   const contentType = res.headers.get('content-type') ?? '';
   if (contentType.includes('application/json')) {

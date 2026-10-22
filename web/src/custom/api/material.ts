@@ -149,14 +149,15 @@ async function materialRequestOnce<T>(
   const text = await res.text();
   const json: unknown = text ? JSON.parse(text) : {};
 
-  const fail: (status: number, message: string, code: number | string) => never = (
+  const fail: (status: number, message: string, code: number | string, errorCode?: string) => never = (
     status,
     message,
     code,
+    errorCode,
   ) => {
-    const err = new ApiError(status, message, code as number);
-    if (status === 401) {
-      handleUnauthorized();
+    const err = new ApiError(status, message, code as number, null, errorCode);
+    if (errorCode === 'account_disabled' || status === 401) {
+      handleUnauthorized(errorCode);
     } else if (!opts?.silent) {
       toast.error(message);
     }
@@ -169,8 +170,8 @@ async function materialRequestOnce<T>(
     'code' in json &&
     'msg' in json
   ) {
-    const err = json as { code: number; msg: string };
-    fail(res.status, err.msg, err.code);
+    const err = json as { code: number; msg: string; error_code?: string };
+    fail(res.status, err.msg, err.code, err.error_code);
   }
 
   if (

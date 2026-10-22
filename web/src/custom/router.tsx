@@ -1,4 +1,5 @@
 import { createBrowserRouter, Navigate, Outlet } from 'react-router-dom';
+import { useAuthStore } from '@/shared/stores/auth';
 import MainLayout from '@/custom/layouts/MainLayout';
 import Home from '@/custom/pages/Home';
 import CanvasPage from '@/custom/pages/CanvasPage';
@@ -9,6 +10,11 @@ import History from '@/custom/pages/History';
 import AuthSuccess from '@/custom/pages/AuthSuccess';
 import { adminRoutes } from '@/shared/router/adminRoutes';
 import { RequireAuth } from '@/shared/router/guards';
+
+function AccountScopedOutlet() {
+  const userId = useAuthStore((state) => state.user?.userId ?? null);
+  return <Outlet key={userId ?? 'guest'} />;
+}
 
 const router = createBrowserRouter([
   {
@@ -34,7 +40,7 @@ const router = createBrowserRouter([
       {
         element: (
           <RequireAuth>
-            <Outlet />
+            <AccountScopedOutlet />
           </RequireAuth>
         ),
         children: [

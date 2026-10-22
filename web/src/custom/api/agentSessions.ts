@@ -309,7 +309,10 @@ async function sessionRequest<T>(path: string, init?: RequestInit): Promise<T> {
   }
   const record = body && typeof body === 'object' ? (body as Record<string, unknown>) : undefined;
   const failure = res.ok ? null : describeFailure(record, res.status);
-  if (res.status === 401 && failure?.code !== 'capability_required') handleUnauthorized();
+  const errorCode = typeof record?.error_code === 'string' ? record.error_code : undefined;
+  if (errorCode === 'account_disabled' || (res.status === 401 && failure?.code !== 'capability_required')) {
+    handleUnauthorized(errorCode);
+  }
   if (failure) throw new ApiError(res.status, failure.message, failure.code);
   return body as T;
 }

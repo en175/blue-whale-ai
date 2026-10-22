@@ -3,8 +3,10 @@ import { RouterProvider } from 'react-router-dom';
 import { Toaster } from 'sonner';
 import router from '@/custom/router';
 import AuthExpiredGate from '@/custom/components/AuthExpiredGate';
+import ForeignDraftReset from '@/shared/session/ForeignDraftReset';
 import { fetchMe, toSessionUser } from '@/custom/api/auth';
 import { updateUser } from '@/shared/utils/auth';
+import { installSessionSyncListener } from '@/shared/utils/sessionSync';
 
 let meSyncStarted = false;
 
@@ -17,9 +19,12 @@ function App() {
       .catch(() => undefined);
   }, []);
 
+  useEffect(() => installSessionSyncListener(), []);
+
   return (
     <>
       <RouterProvider router={router} />
+      <ForeignDraftReset />
       <AuthExpiredGate />
       <Toaster position="top-center" theme="dark" duration={2600} />
     </>

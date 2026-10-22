@@ -4,6 +4,11 @@ import { toast } from 'sonner';
 import { API_REQUEST_TIMEOUT_MS, ApiError, apiRequest, envelopeErrorCode, readApiErrorMessage } from './http';
 import { useAuthStore } from '@/shared/stores/auth';
 import { useAuthPromptStore } from '@/shared/stores/authPrompt';
+import {
+  ACCOUNT_DISABLED_MESSAGE,
+  SESSION_EVICTED_MESSAGE,
+  SESSION_EXPIRED_MESSAGE,
+} from '@/shared/utils/sessionNotice';
 
 vi.mock('sonner', () => ({
   toast: { error: vi.fn(), success: vi.fn() },
@@ -154,8 +159,60 @@ describe('apiRequest 401', () => {
       status: 401,
     });
     expect(useAuthPromptStore.getState().open).toBe(true);
+    expect(useAuthPromptStore.getState().notice).toBe(SESSION_EXPIRED_MESSAGE);
     expect(useAuthStore.getState().user).toEqual(sampleUser);
     expect(toast.error).not.toHaveBeenCalled();
+  });
+
+  it('被挤出时提示其他浏览器登录，并保留当前页用户', async () => {
+    useAuthStore.setState({ user: sampleUser });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({
+          code: 401,
+          msg: SESSION_EVICTED_MESSAGE,
+          error_code: 'session_evicted',
+          data: null,
+        }), {
+          status: 401,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      ),
+    );
+
+    await expect(apiRequest('/api/projects/p1', { silent: true })).rejects.toMatchObject({
+      status: 401,
+      errorCode: 'session_evicted',
+    });
+    expect(useAuthPromptStore.getState().notice).toBe(SESSION_EVICTED_MESSAGE);
+    expect(useAuthStore.getState().user).toEqual(sampleUser);
+  });
+
+  it('账号停用时清掉本地登录态，不再弹登录框', async () => {
+    useAuthStore.setState({ user: sampleUser });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({
+          code: 403,
+          msg: ACCOUNT_DISABLED_MESSAGE,
+          error_code: 'account_disabled',
+          data: null,
+        }), {
+          status: 403,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      ),
+    );
+
+    await expect(apiRequest('/api/me', { silent: true })).rejects.toMatchObject({
+      status: 403,
+      errorCode: 'account_disabled',
+    });
+    expect(useAuthPromptStore.getState().open).toBe(false);
+    expect(useAuthStore.getState().user).toBeNull();
+    expect(toast.error).toHaveBeenCalledWith(ACCOUNT_DISABLED_MESSAGE);
   });
 
   it('未登录 /api/me 401 不清出登录门', async () => {

@@ -202,7 +202,6 @@ export function createActions(ctx: RuntimeContext, polling: { poll: (execution: 
         }
         if (isApiError(e) && e.status === 401) {
           host.patchNode(nodeId, { genStatus: 'failed', errorText: '', errorCode: undefined });
-          host.addAuthResume(() => { retry(nodeId); });
           return;
         }
         if (host.findNode(nodeId) == null) return;

@@ -1,6 +1,9 @@
 import { clearSessionToken } from '@/shared/api/sessionToken';
+import { showToast } from '@/shared/components/Toast';
 import { useAuthStore, type SessionUser } from '@/shared/stores/auth';
 import { useAuthPromptStore } from '@/shared/stores/authPrompt';
+import { ACCOUNT_DISABLED_MESSAGE, loginPromptFor } from '@/shared/utils/sessionNotice';
+import { publishSessionSync } from '@/shared/utils/sessionSync';
 
 export type { SessionUser };
 
@@ -32,10 +35,23 @@ export function setSession(user: SessionUser | null) {
   }
 }
 
-export function handleUnauthorized() {
+export function handleAccountDisabled() {
+  clearSessionToken();
+  useAuthPromptStore.getState().reset();
+  useAuthStore.getState().clearSession();
+  showToast('error', ACCOUNT_DISABLED_MESSAGE);
+  publishSessionSync({ kind: 'disabled' });
+}
+
+export function handleUnauthorized(errorCode?: string) {
+  if (errorCode === 'account_disabled') {
+    handleAccountDisabled();
+    return;
+  }
   clearSessionToken();
   if (useAuthStore.getState().user) {
-    useAuthPromptStore.getState().notifyExpired();
+    useAuthPromptStore.getState().notifyExpired(loginPromptFor(errorCode));
+    publishSessionSync({ kind: 'expired', errorCode });
     return;
   }
   useAuthStore.getState().clearSession();

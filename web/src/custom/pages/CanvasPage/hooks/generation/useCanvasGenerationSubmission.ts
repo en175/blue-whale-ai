@@ -14,7 +14,6 @@ import {
 } from '@/custom/api/jobs';
 import { flattenPromptDocForSend, type PromptDoc } from '@/custom/utils/prompt-doc';
 import { normalizeVideoMode, type VideoMode } from '@/custom/utils/video-modes';
-import { useAuthPromptStore } from '@/shared/stores/authPrompt';
 import { blockIfCreditsInsufficient, openRechargeForCreditsError } from '@/custom/utils/creditsGate';
 import { composeImageSendPrompt } from '../../components/ImageDialog/composeImageSendPrompt';
 import type { ImageTextAttachment } from '../../components/ImageDialog';
@@ -807,10 +806,15 @@ export function useCanvasGenerationSubmission(host: CanvasGenerationSubmissionHo
             }
             if (isApiError(e) && e.status === 401) {
               if (inPlaceNodeId) rollbackInPlace();
-              else removePlaceholder();
-              useAuthPromptStore.getState().addResume(() => {
-                startGenerationJob(type, parameters, inputAssetIds, videoRefs, targetNodeId, initialDraft);
-              });
+              else {
+                patchMediaNode(nodeId, {
+                  draft: true,
+                  genStatus: 'draft',
+                  progress: undefined,
+                  errorText: undefined,
+                  fileName: draftFileNameOf(type),
+                });
+              }
               return true;
             }
             return false;
