@@ -86,7 +86,6 @@
 | `bind` | 首次补绑手机号 | ✅ IKPC9D（页面入口在 IKPC9F） |
 | `rebind_old` | 换绑：验证原手机号 | ✅ IKPC9E |
 | `rebind_new` | 换绑：验证新手机号 | ✅ IKPC9E |
-| `recovery` | 恢复查询授权 | ✅ IKPC9E |
 
 成功：`{ code: 200, data: null }`。失败：手机号格式错误返回 `code: 400`、无 `error_code`（历史行为），短信渠道异常返回 `msg: "短信发送失败"`。
 
