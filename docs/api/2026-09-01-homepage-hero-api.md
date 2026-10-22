@@ -16,8 +16,8 @@
 | 管理端编辑 | PATCH | `/api/admin/site-config/homepage-heroes/:id` | admin |
 | 管理端删除 | DELETE | `/api/admin/site-config/homepage-heroes/:id` | admin |
 | 管理端调序 | PUT | `/api/admin/site-config/homepage-heroes/:id/sort` | admin |
-| 上传预签名 | POST | `/api/admin/site-config/uploads/presign` | admin |
-| 上传完成确认 | POST | `/api/admin/site-config/uploads/complete` | admin |
+| 上传预签名 | POST | `/api/admin/site-config/homepage-heroes/uploads/presign` | admin |
+| 上传完成确认 | POST | `/api/admin/site-config/homepage-heroes/uploads/complete` | admin |
 | **公开读取（首页轮播）** | GET | `/api/site/homepage-heroes?scene=homepage` | **免登录** |
 | **公开读取（登录弹窗）** | GET | `/api/site/homepage-heroes?scene=auth` | **免登录** |
 
@@ -122,7 +122,7 @@
 
 **三段式：presign → 浏览器直传 TOS → complete 回填 URL**。前端**不接触 AccessKey**；拿到的 `upload_url` 带签名，直接 PUT 上传即可。
 
-### 3.1 预签名 `POST /api/admin/site-config/uploads/presign`
+### 3.1 预签名 `POST /api/admin/site-config/homepage-heroes/uploads/presign`
 
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
@@ -143,7 +143,7 @@
 
 用 `upload_url` 发起 `PUT`，带 presign 返回的 `headers`（含 `Content-Type`、签名头）。**文件本体不进产品后端**。
 
-### 3.3 完成确认 `POST /api/admin/site-config/uploads/complete`
+### 3.3 完成确认 `POST /api/admin/site-config/homepage-heroes/uploads/complete`
 
 请求体 = presign 入参 + `storage_key`（presign 返回值）。后端校验对象实际 size/mime 与声明一致 → 置公有读 → 返回最终公网 URL。
 
