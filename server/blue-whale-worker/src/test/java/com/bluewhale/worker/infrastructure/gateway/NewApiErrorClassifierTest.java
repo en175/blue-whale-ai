@@ -146,4 +146,25 @@ class NewApiErrorClassifierTest {
     void quotaNull() {
         assertThat(NewApiErrorClassifier.isQuotaSignal(null)).isFalse();
     }
+
+    @Test
+    @DisplayName("IKPPYX: Seedance 视频编辑英文正文 → isTaskTypeSignal 命中")
+    void videoEditProseTaskTypeSignal() {
+        assertThat(NewApiErrorClassifier.isTaskTypeSignal(
+                "The parameters `ratio` and `duration` specified in the request are not valid. " +
+                        "Seedance identified your task as video editing based on your prompt."))
+                .isTrue();
+        assertThat(NewApiErrorClassifier.isTaskTypeSignal(
+                "Issues: [0] `ratio` must be `adaptive`. [1] `duration` must be -1."))
+                .isTrue();
+    }
+
+    @Test
+    @DisplayName("IKPPYX: 普通 InvalidParameter 不误判为任务类型约束")
+    void videoEditProseNotMatched() {
+        assertThat(NewApiErrorClassifier.isTaskTypeSignal(
+                "InvalidParameter: The request parameter is not valid.")).isFalse();
+        assertThat(NewApiErrorClassifier.isTaskTypeSignal("ratio must be 16:9")).isFalse();
+        assertThat(NewApiErrorClassifier.isTaskTypeSignal(null)).isFalse();
+    }
 }
