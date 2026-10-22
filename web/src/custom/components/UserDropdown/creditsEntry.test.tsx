@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { MemoryRouter } from 'react-router-dom';
@@ -7,6 +8,7 @@ import { setSession, type SessionUser } from '@/shared/utils/auth';
 import UserDropdown from './index';
 
 vi.mock('@/custom/api/auth', () => ({
+  accountProfileKeys: { all: ['account-profile'] },
   fetchCredits: vi.fn(async () => ({ credits: 10 })),
   logout: vi.fn(async () => null),
 }));
@@ -31,8 +33,15 @@ async function renderMenu() {
   mountNode = document.createElement('div');
   document.body.appendChild(mountNode);
   root = createRoot(mountNode);
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   await act(async () => {
-    root.render(createElement(MemoryRouter, null, createElement(UserDropdown)));
+    root.render(
+      createElement(
+        QueryClientProvider,
+        { client: queryClient },
+        createElement(MemoryRouter, null, createElement(UserDropdown)),
+      ),
+    );
   });
 }
 
@@ -52,12 +61,11 @@ afterEach(async () => {
 });
 
 describe('UserDropdown 未登录入口', () => {
-  it('未登录时同时展示登录和注册', async () => {
+  it('未登录时只展示一个注册/登录按钮', async () => {
     setSession(null);
     await renderMenu();
     expect([...document.body.querySelectorAll('button')].map((button) => button.textContent?.trim())).toEqual([
-      '登录',
-      '注册',
+      '注册/登录',
     ]);
   });
 });
