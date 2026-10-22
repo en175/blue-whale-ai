@@ -112,12 +112,12 @@ const SMS_PHONE_BUCKETS = [
     scope: "send_code_phone_minute",
     key: "phone" as const,
     limit: 1,
-    windowMs: 60_000,
+    windowMs: 10_000,
   },
   {
     scope: "send_code_phone_day",
     key: "phone" as const,
-    limit: 10,
+    limit: 60,
     windowMs: DAY_MS,
   },
 ];
