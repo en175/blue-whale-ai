@@ -24,7 +24,6 @@ import {
   AccountDeletedError,
   AccountDisabledError,
   InvalidCredentialsError,
-  MigrationIneligibleError,
   PhoneAlreadyBoundError,
   PhoneNotBoundError,
   RebindBindingChangedError,
@@ -187,6 +186,20 @@ describe("PhoneBindingService 补绑 / 换绑", () => {
     });
   });
 
+  it("原号带空白的存量数据：验证后提交换绑仍能通过", async () => {
+    const { service, users } = build({ user: row({ phone: " 13800001234 " }) });
+    const { oldPhone } = await service.rebindVerifyCurrent("42", "123456");
+    expect(oldPhone).toBe("13800001234");
+
+    const out = await service.commitRebind("42", {
+      oldPhone,
+      phone: "13700000000",
+      code: "123456",
+    });
+    expect(out).toEqual({ phone: "13700000000" });
+    expect(users.updatePhone).toHaveBeenCalledWith("42", "13700000000");
+  });
+
   it("提交换绑：原绑定已变化 / 同号分别拒绝", async () => {
     await expect(
       build({ user: row({ phone: "13900000000" }) }).service.commitRebind("42", {
@@ -239,7 +252,7 @@ describe("PhoneBindingService 内部账号迁移", () => {
     ).rejects.toThrow(InvalidCredentialsError);
   });
 
-  it("已绑号 → 不可迁移", async () => {
+  it("已绑号 → 提示直接使用手机号登录", async () => {
     const hash = await hashPassword("Passw0rd!");
     const { service } = build({
       loginUser: row({ password: hash, phone: "13800001234" }),
@@ -249,7 +262,41 @@ describe("PhoneBindingService 内部账号迁移", () => {
         username: "alice",
         password: "Passw0rd!",
       }),
-    ).rejects.toThrow(MigrationIneligibleError);
+    ).rejects.toMatchObject({
+      name: "MigrationIneligibleError",
+      message: "该账号已绑定手机号，请直接使用手机号登录",
+    });
+  });
+
+  it("停用账号 → 提示无法迁移", async () => {
+    const hash = await hashPassword("Passw0rd!");
+    const { service } = build({
+      loginUser: row({ password: hash, phone: null, status: "DISABLED" }),
+    });
+    await expect(
+      service.verifyMigrationCandidate({
+        username: "alice",
+        password: "Passw0rd!",
+      }),
+    ).rejects.toMatchObject({
+      name: "MigrationIneligibleError",
+      message: "账号已停用，无法迁移",
+    });
+  });
+
+  it("phone 为空字符串或纯空白时视为未绑定，可迁移", async () => {
+    const hash = await hashPassword("Passw0rd!");
+    for (const phone of ["", "   "]) {
+      const { service } = build({
+        loginUser: row({ password: hash, phone }),
+      });
+      await expect(
+        service.verifyMigrationCandidate({
+          username: "alice",
+          password: "Passw0rd!",
+        }),
+      ).resolves.toEqual({ userId: "42" });
+    }
   });
 
   it("密码正确且未绑号 → 返回用户 id", async () => {
@@ -279,13 +326,29 @@ describe("PhoneBindingService 内部账号迁移", () => {
     expect(out.id).toBe("42");
   });
 
-  it("补绑时资格不符 → MigrationIneligibleError", async () => {
+  it("补绑时资格不符 → 提示已绑定手机号", async () => {
     const { service } = build({ user: row({ phone: "13800001234" }) });
     await expect(
       service.commitMigrationBind("42", {
         phone: "13700000000",
         code: "123456",
       }),
-    ).rejects.toThrow(MigrationIneligibleError);
+    ).rejects.toMatchObject({
+      name: "MigrationIneligibleError",
+      message: "该账号已绑定手机号，请直接使用手机号登录",
+    });
+  });
+
+  it("补绑时账号停用 → 提示无法迁移", async () => {
+    const { service } = build({ user: row({ status: "DISABLED" }) });
+    await expect(
+      service.commitMigrationBind("42", {
+        phone: "13700000000",
+        code: "123456",
+      }),
+    ).rejects.toMatchObject({
+      name: "MigrationIneligibleError",
+      message: "账号已停用，无法迁移",
+    });
   });
 });

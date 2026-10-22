@@ -84,6 +84,7 @@ import type { SessionService } from "@lib/shared/session/session.service.js";
 import {
   CodeWrongError,
   InvalidCredentialsError,
+  MigrationIneligibleError,
   type IdentityService,
   type LocalLoginResult,
 } from "@lib/shared/identity/index.js";
@@ -604,13 +605,66 @@ describe("AuthController 内部账号迁移（IKPC9F）", () => {
     });
   });
 
-  it("账号/密码/资格不通过 → 统一提示，不泄露具体原因", async () => {
+  it("原账号或密码为空 → 请输入原账号和密码", async () => {
+    const { controller, identity } = setup();
+
+    await expect(
+      controller.verifyMigrationPassword({ username: "", password: "" }),
+    ).rejects.toMatchObject({
+      status: 401,
+      code: "invalid_credentials",
+      message: "请输入原账号和密码",
+    });
+    expect(identity.verifyMigrationCandidate).not.toHaveBeenCalled();
+  });
+
+  it("密码错误 → 账号或密码不正确", async () => {
     const { controller, identity } = setup();
     identity.verifyMigrationCandidate.mockRejectedValue(new InvalidCredentialsError());
 
     await expect(
       controller.verifyMigrationPassword({ username: "alice", password: "bad" }),
-    ).rejects.toMatchObject({ status: 401, code: "invalid_credentials" });
+    ).rejects.toMatchObject({
+      status: 401,
+      code: "invalid_credentials",
+      message: "账号或密码不正确",
+    });
+  });
+
+  it("账号已绑定手机号 → 单独提示，不再混在密码错误里", async () => {
+    const { controller, identity } = setup();
+    identity.verifyMigrationCandidate.mockRejectedValue(
+      new MigrationIneligibleError("该账号已绑定手机号，请直接使用手机号登录"),
+    );
+
+    await expect(
+      controller.verifyMigrationPassword({
+        username: "alice",
+        password: "OldPass123",
+      }),
+    ).rejects.toMatchObject({
+      status: 400,
+      code: "migration_ineligible",
+      message: "该账号已绑定手机号，请直接使用手机号登录",
+    });
+  });
+
+  it("账号停用 → 单独提示无法迁移", async () => {
+    const { controller, identity } = setup();
+    identity.verifyMigrationCandidate.mockRejectedValue(
+      new MigrationIneligibleError("账号已停用，无法迁移"),
+    );
+
+    await expect(
+      controller.verifyMigrationPassword({
+        username: "alice",
+        password: "OldPass123",
+      }),
+    ).rejects.toMatchObject({
+      status: 400,
+      code: "migration_ineligible",
+      message: "账号已停用，无法迁移",
+    });
   });
 
   it("凭证无效 → migration_token_expired，不碰 identity", async () => {

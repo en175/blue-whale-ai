@@ -56,7 +56,7 @@
 | `rebind_same_phone` | 200（body.code=400） | 新手机号与当前手机号相同，无需更换 | 停留当前步骤 |
 | `rebind_binding_changed` | 200（body.code=400） | 账号绑定状态已变化，请重新登录 | 终止换绑，刷新账号信息 |
 | `nickname_invalid` | 200（body.code=400） | 昵称需为2—20个字符… | 原位提示，保留输入 |
-| `migration_ineligible` | 400 | 账号或密码不正确，或当前账号不可迁移 | 统一提示，不区分原因 |
+| `migration_ineligible` | 400 | 该账号已绑定手机号，请直接使用手机号登录 / 账号已停用，无法迁移 | 密码正确后才会出现；直接展示 `msg` |
 | `migration_token_expired` | 400 | 原账号验证已过期，请重新验证 | 回到「验证原账号」 |
 | `bind_succeeded_login_failed` | 500 | 手机号已绑定，请重新登录 | 绑定已生效，改走手机号登录 |
 | `captcha_required` | 400 | 请先完成验证码验证 | 取图并输入后再发码 |
@@ -323,7 +323,17 @@
 `POST /api/auth/migration/verify-password` `{ username, password }`
 
 成功：`{ migration_token, expires_in: 600 }`
-失败：密码错误/账号不存在返回 401 `invalid_credentials`；密码正确但资格不符返回 400 `migration_ineligible`。两者文案相同（「账号或密码不正确，或当前账号不可迁移」），不泄露账号是否存在。
+
+失败：
+
+| 情况 | HTTP / error_code | msg |
+|---|---|---|
+| 账号不存在或密码错误 | 401 `invalid_credentials` | 账号或密码不正确 |
+| 原账号或密码为空 | 401 `invalid_credentials` | 请输入原账号和密码 |
+| 密码正确但已绑定手机号 | 400 `migration_ineligible` | 该账号已绑定手机号，请直接使用手机号登录 |
+| 密码正确但账号已停用 | 400 `migration_ineligible` | 账号已停用，无法迁移 |
+
+只有在密码验证通过后才会区分资格原因；密码错误与账号不存在仍返回同一条文案，不泄露账号是否存在。
 
 风控：同 IP 20 次/分、同账号 5 次/分；同账号 15 分钟内错 5 次锁 15 分钟。
 
