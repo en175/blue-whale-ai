@@ -1,6 +1,7 @@
 package com.bluewhale.worker.infrastructure.config;
 
 import com.bluewhale.worker.infrastructure.config.NewApiUpstreamConfig.UpstreamBaseUrl;
+import com.bluewhale.worker.infrastructure.config.GenerationWatermarkConfig.GenerationWatermarkPolicy;
 import com.bluewhale.worker.infrastructure.audio.NewApiAudioClient;
 import com.bluewhale.worker.infrastructure.gateway.NewApiImageClient;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMaterialClient;
@@ -26,7 +27,8 @@ class NewApiUpstreamWiringTest {
 
     private final ApplicationContextRunner runner = new ApplicationContextRunner()
             .withUserConfiguration(ClientScanFixture.class)
-            .withBean(UpstreamBaseUrl.class, () -> new UpstreamBaseUrl("http://new-api.invalid"));
+            .withBean(UpstreamBaseUrl.class, () -> new UpstreamBaseUrl("http://new-api.invalid"))
+            .withBean(GenerationWatermarkPolicy.class, GenerationWatermarkPolicy::disabled);
 
     @Test
     @DisplayName("17 个扫包客户端全部从唯一地址 bean 装配起来（无一各自读 env）")
@@ -48,7 +50,9 @@ class NewApiUpstreamWiringTest {
     @DisplayName("手工 @Bean 的 NewApiVideoClient 也从同一个地址 bean 取地址")
     void handWiredVideoClientTakesTheBaseUrlBean() {
         NewApiVideoClient client = new RocketMqConfig()
-                .newApiVideoClient(new UpstreamBaseUrl("http://new-api.invalid"));
+                .newApiVideoClient(
+                        new UpstreamBaseUrl("http://new-api.invalid"),
+                        GenerationWatermarkPolicy.disabled());
         assertThat(client).isNotNull();
     }
 }

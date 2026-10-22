@@ -17,6 +17,7 @@ const KEY_CREDENTIALS = "credentials";
 const KEY_UPSTREAM = "upstream";
 const KEY_POLICY = "policy";
 const KEY_RATE_LIMIT = "rateLimit";
+const KEY_WATERMARK = "watermark";
 
 const CREDENTIAL_FIELDS = [
   { name: "hccb_mch_no", secret: false },
@@ -53,11 +54,16 @@ export interface SystemRateLimit {
   burst: number;
 }
 
+export interface SystemWatermark {
+  enabled: boolean;
+}
+
 export interface SystemSettingsView {
   credentials: SystemCredentials;
   upstream: SystemUpstream;
   policy: SystemPolicy;
   rateLimit: SystemRateLimit;
+  watermark: SystemWatermark;
 }
 
 export interface SystemSettingsPatch {
@@ -65,6 +71,7 @@ export interface SystemSettingsPatch {
   upstream?: Partial<SystemUpstream>;
   policy?: Partial<SystemPolicy>;
   rateLimit?: Partial<SystemRateLimit>;
+  watermark?: Partial<SystemWatermark>;
 }
 
 export interface PayMerchantConfig {
@@ -93,6 +100,8 @@ const emptyRateLimit = (): SystemRateLimit => ({
   burst: 0,
 });
 
+const emptyWatermark = (): SystemWatermark => ({ enabled: false });
+
 
 function parseJsonObject(raw: string, module: string): Record<string, unknown> {
   try {
@@ -113,6 +122,10 @@ function readString(source: Record<string, unknown>, key: string): string {
 function readPositiveNumber(source: Record<string, unknown>, key: string): number {
   const value = source[key];
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0;
+}
+
+function readBoolean(source: Record<string, unknown>, key: string): boolean {
+  return source[key] === true;
 }
 
 function isMaskedEcho(submitted: string, current: string): boolean {
@@ -138,6 +151,7 @@ export class SystemSettingsService {
       upstream: await this.readUpstreamMasked(),
       policy: await this.readPolicy(),
       rateLimit: await this.readRateLimit(),
+      watermark: await this.readWatermark(),
     };
   }
 
@@ -178,6 +192,14 @@ export class SystemSettingsService {
         burst: patch.rateLimit.burst ?? current.burst,
       };
       await this.repo.put(KEY_RATE_LIMIT, JSON.stringify(next), false);
+    }
+
+    if (patch.watermark) {
+      const current = await this.readWatermark();
+      const next: SystemWatermark = {
+        enabled: patch.watermark.enabled ?? current.enabled,
+      };
+      await this.repo.put(KEY_WATERMARK, JSON.stringify(next), false);
     }
   }
 
@@ -293,5 +315,12 @@ export class SystemSettingsService {
       result[field] = readPositiveNumber(source, field);
     }
     return result;
+  }
+
+  private async readWatermark(): Promise<SystemWatermark> {
+    const row = await this.repo.get(KEY_WATERMARK);
+    if (!row) return emptyWatermark();
+    const source = parseJsonObject(row.value, "生成水印");
+    return { enabled: readBoolean(source, "enabled") };
   }
 }

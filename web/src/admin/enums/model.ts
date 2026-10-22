@@ -9,7 +9,6 @@ export const TYPE_TABS: { key: ModelType; label: string }[] = [
 
 export const FEATURE_BOOL_LABELS: Record<string, { label: string; types?: ModelType[] }> = {
   reference_image: { label: '参考图 reference_image', types: ['image', 'video'] },
-  watermark: { label: '水印 watermark', types: ['image', 'video'] },
   stream: { label: '流式输出 stream', types: ['image'] },
   sequential_image_generation: { label: '顺序生成 sequential_image_generation', types: ['image'] },
   first_frame: { label: '首帧 first_frame', types: ['video'] },

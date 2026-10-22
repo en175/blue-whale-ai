@@ -7,6 +7,7 @@ import {
   type SystemPolicy,
   type SystemRateLimit,
   type SystemUpstream,
+  type SystemWatermark,
 } from "@lib/shared/system-settings/index.js";
 
 @Controller("admin/settings")
@@ -41,6 +42,7 @@ interface SettingsPatch {
   upstream?: Partial<SystemUpstream>;
   policy?: Partial<SystemPolicy>;
   rateLimit?: Partial<SystemRateLimit>;
+  watermark?: Partial<SystemWatermark>;
 }
 
 function parsePatch(body: Record<string, unknown>): SettingsPatch {
@@ -102,6 +104,13 @@ function parsePatch(body: Record<string, unknown>): SettingsPatch {
     };
   }
 
+  const watermark = body.watermark;
+  if (watermark !== undefined) {
+    const source = requireObject(watermark, "watermark");
+    rejectUnknownKeys(source, WATERMARK_KEYS, "watermark");
+    patch.watermark = readOptionalBoolean(source, "enabled");
+  }
+
   return patch;
 }
 
@@ -112,7 +121,7 @@ const CREDENTIAL_KEYS = [
   "hccb_notify_url",
 ] as const satisfies readonly (keyof SystemCredentials)[];
 const UPSTREAM_KEYS = ["new_api_key"] as const satisfies readonly (keyof SystemUpstream)[];
-const MODULE_KEYS = ["credentials", "upstream", "policy", "rateLimit"] as const;
+const MODULE_KEYS = ["credentials", "upstream", "policy", "rateLimit", "watermark"] as const;
 const POLICY_KEYS = ["refund_text", "invoice_text"] as const satisfies readonly (keyof SystemPolicy)[];
 const RATE_LIMIT_KEYS = [
   "rate_per_min",
@@ -120,6 +129,7 @@ const RATE_LIMIT_KEYS = [
   "concurrent",
   "burst",
 ] as const satisfies readonly (keyof SystemRateLimit)[];
+const WATERMARK_KEYS = ["enabled"] as const satisfies readonly (keyof SystemWatermark)[];
 
 function requireObject(value: unknown, module: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -159,5 +169,15 @@ function readOptionalPositive(
   if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
     throw new AdminException(400, `${key} 须为大于 0 的数值`);
   }
+  return { [key]: value };
+}
+
+function readOptionalBoolean(
+  source: Record<string, unknown>,
+  key: keyof SystemWatermark,
+): Partial<SystemWatermark> {
+  const value = source[key];
+  if (value === undefined) return {};
+  if (typeof value !== "boolean") throw new AdminException(400, `${key} 须为布尔值`);
   return { [key]: value };
 }

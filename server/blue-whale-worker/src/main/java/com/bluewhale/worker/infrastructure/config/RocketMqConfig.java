@@ -560,8 +560,10 @@ public class RocketMqConfig {
     }
 
     @Bean
-    public NewApiVideoClient newApiVideoClient(NewApiUpstreamConfig.UpstreamBaseUrl baseUrl) {
-        return new NewApiVideoClient(baseUrl);
+    public NewApiVideoClient newApiVideoClient(
+            NewApiUpstreamConfig.UpstreamBaseUrl baseUrl,
+            GenerationWatermarkConfig.GenerationWatermarkPolicy watermarkPolicy) {
+        return new NewApiVideoClient(baseUrl, watermarkPolicy);
     }
 
     @Bean

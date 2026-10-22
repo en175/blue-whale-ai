@@ -8,6 +8,7 @@ export {
   type SystemSettingsPatch,
   type SystemSettingsView,
   type SystemUpstream,
+  type SystemWatermark,
 } from "./system-settings.service.js";
 export {
   SYSTEM_SETTINGS_SECRET_ENV,

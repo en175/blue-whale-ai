@@ -101,7 +101,7 @@ class ImageJobProcessorI2iAliasTest {
         }
         when(upstreamCredential.requireKey()).thenReturn("token");
         when(imageClient.generate(anyString(), any(ImageProtocol.class), anyString(), anyString(),
-                anyInt(), any(), any(), anyBoolean(), anyBoolean(), anyList()))
+                anyInt(), any(), any(), anyBoolean(), anyBoolean(), anyList(), anyBoolean()))
                 .thenThrow(new ImageProviderError(
                         GenerationError.ERROR_PROVIDER_FAILED, "stop after capture"));
         when(stateMachine.requeueImageJobForRetry(eq("100"), any())).thenReturn(true);
@@ -111,7 +111,7 @@ class ImageJobProcessorI2iAliasTest {
         ArgumentCaptor<ImageProtocol> protocolCaptor = ArgumentCaptor.forClass(ImageProtocol.class);
         ArgumentCaptor<String> modelCaptor = ArgumentCaptor.forClass(String.class);
         verify(imageClient).generate(anyString(), protocolCaptor.capture(), modelCaptor.capture(),
-                anyString(), anyInt(), any(), any(), anyBoolean(), anyBoolean(), anyList());
+                anyString(), anyInt(), any(), any(), anyBoolean(), anyBoolean(), anyList(), anyBoolean());
         return new Outbound(protocolCaptor.getValue(), modelCaptor.getValue());
     }
 

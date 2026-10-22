@@ -3,6 +3,7 @@ package com.bluewhale.worker.infrastructure.gateway;
 import com.bluewhale.common.http.NewApiHttpSupport;
 import com.bluewhale.worker.application.service.JobClaimService;
 import com.bluewhale.worker.infrastructure.config.NewApiUpstreamConfig.UpstreamBaseUrl;
+import com.bluewhale.worker.infrastructure.config.GenerationWatermarkConfig.GenerationWatermarkPolicy;
 import com.bluewhale.worker.domain.error.VideoProviderError;
 import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient.SubmitResult;
 import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient.VideoReference;
@@ -868,5 +869,50 @@ class NewApiVideoClientEndpointTest {
         org.assertj.core.api.Assertions.assertThatThrownBy(() -> client.finalize("t", "task-expired"))
                 .isInstanceOf(com.bluewhale.worker.domain.error.VideoProviderError.class)
                 .hasMessageContaining("HTTP 400");
+    }
+
+    @Test
+    @DisplayName("水印开关开启 → submit 的 metadata 带 watermark:true")
+    void submitAddsWatermarkWhenEnabled() throws Exception {
+        VideoSubmitInput input = new VideoSubmitInput(
+                "doubao-seedance-2-0-260128", "猫", 5, "720p", "16:9",
+                null, null, List.of(), null);
+
+        new NewApiVideoClient(
+                new UpstreamBaseUrl(baseUrl),
+                new GenerationWatermarkPolicy(key -> "{\"enabled\":true}"))
+                .submit("t", input);
+
+        JsonNode body = JSON.readTree(lastBody.get());
+        assertThat(body.get("metadata").get("watermark").asBoolean()).isTrue();
+    }
+
+    @Test
+    @DisplayName("水印开关关闭 → submit 的 metadata 不带 watermark")
+    void submitOmitsWatermarkWhenDisabled() throws Exception {
+        VideoSubmitInput input = new VideoSubmitInput(
+                "doubao-seedance-2-0-260128", "猫", 5, "720p", "16:9",
+                null, null, List.of(), null);
+
+        new NewApiVideoClient(
+                new UpstreamBaseUrl(baseUrl),
+                new GenerationWatermarkPolicy(key -> "{\"enabled\":false}"))
+                .submit("t", input);
+
+        JsonNode body = JSON.readTree(lastBody.get());
+        assertThat(body.get("metadata").has("watermark")).isFalse();
+    }
+
+    @Test
+    @DisplayName("水印开关开启 → finalize 顶层带 watermark（不是 metadata）")
+    void finalizeAddsWatermarkWhenEnabled() throws Exception {
+        new NewApiVideoClient(
+                new UpstreamBaseUrl(baseUrl),
+                new GenerationWatermarkPolicy(key -> "{\"enabled\":true}"))
+                .finalize("t", "task-final");
+
+        JsonNode body = JSON.readTree(lastBody.get());
+        assertThat(body.get("watermark").asBoolean()).isTrue();
+        assertThat(body.has("metadata")).isFalse();
     }
 }
