@@ -79,6 +79,7 @@ import {
   FAILURE_CODE,
 } from "@lib/contracts";
 import type { Response } from "express";
+import { LoginEntryService } from "@lib/shared/session/login-entry.service.js";
 import type { SessionService } from "@lib/shared/session/session.service.js";
 import {
   CodeWrongError,
@@ -146,6 +147,10 @@ function setup() {
     })),
     verify: vi.fn(async () => "ok"),
   };
+  const loginEntry = new LoginEntryService(
+    sessions as unknown as SessionService,
+    identity as unknown as IdentityService,
+  );
   const controller = new AuthController(
     verification as never,
     sessions as unknown as SessionService,
@@ -154,8 +159,12 @@ function setup() {
     identity as unknown as IdentityService,
     phoneActions as never,
     captcha as never,
+    loginEntry,
   );
-  const res = { cookie: vi.fn() } as unknown as Response;
+  const res = {
+    cookie: vi.fn(),
+    clearCookie: vi.fn(),
+  } as unknown as Response;
   return {
     controller,
     identity,

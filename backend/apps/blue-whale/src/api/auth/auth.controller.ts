@@ -48,33 +48,19 @@ import {
   MigrationIneligibleError,
   PhoneActionService,
   PhoneTakenError,
-  type LocalLoginResult,
 } from "@lib/shared/identity/index.js";
+import { LoginEntryService } from "@lib/shared/session/login-entry.service.js";
 import { SessionService } from "@lib/shared/session/session.service.js";
 import { extractLoginToken } from "@lib/shared/session/login-token.js";
 import {
-  SESSION_COOKIE_NAME,
-  sessionCookieOptions,
+  applySessionCookie,
+  clearSessionCookie,
 } from "@lib/shared/session/cookie.js";
 import type { LoginByCodeDto } from "./dto/login-by-code.dto.js";
 import type { LoginDto } from "./dto/login.dto.js";
 import type { MigrationBindDto } from "./dto/migration-bind.dto.js";
 import type { MigrationVerifyDto } from "./dto/migration-verify.dto.js";
 import type { RegisterDto } from "./dto/register.dto.js";
-
-function loginData(result: LocalLoginResult, isNewUser: boolean, token: string) {
-  return {
-    token,
-    user_id: result.userId,
-    username: result.username,
-    nickname: result.nickname ?? result.username,
-    email: result.email ?? null,
-    phone: result.phone ?? "",
-    is_new_user: isNewUser,
-    has_password: result.hasPassword,
-    must_change_password: result.mustChangePassword,
-  };
-}
 
 function normalizeClientId(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
@@ -145,6 +131,7 @@ export class AuthController {
     private readonly identity: IdentityService,
     private readonly phoneActions: PhoneActionService,
     private readonly captcha: CaptchaService,
+    private readonly loginEntry: LoginEntryService,
   ) {}
 
   @Public()
@@ -251,25 +238,6 @@ export class AuthController {
     }
   }
 
-  private async establishSession(
-    result: LocalLoginResult,
-    clientId?: string | undefined,
-  ): Promise<string> {
-    if (result.userId == null || !result.username) {
-      throw new NewApiError("账户服务响应异常", 502, "invalid_identity");
-    }
-    const token = await this.sessions.issueToken(String(result.userId));
-    await this.sessions.createSession(token, {
-      userId: result.userId,
-      username: result.username,
-      role: result.role,
-      status: result.status,
-      email: result.email ?? null,
-      ...(clientId ? { clientId } : {}),
-    });
-    return token;
-  }
-
   @Public()
   @Post("login")
   @authRateLimit("login")
@@ -285,11 +253,11 @@ export class AuthController {
     const ip = forwardedFor?.split(",")[0]?.trim() ?? "unknown";
 
     if (!username || !password) {
-      await this.recordLogin({ username, ip, userAgent, success: false, reason: "凭据为空" });
+      await this.loginEntry.fail({ username, ip, userAgent, reason: "凭据为空" });
       return { code: FAILURE_CODE, msg: "用户名和密码不能为空", data: null };
     }
     if (await this.limiter.isBlocked(LOGIN_LOCK_SCOPE, username)) {
-      await this.recordLogin({ username, ip, userAgent, success: false, reason: "账号锁定" });
+      await this.loginEntry.fail({ username, ip, userAgent, reason: "账号锁定" });
       throw new NewApiError(
         "尝试次数过多，账号已锁定，请稍后再试",
         429,
@@ -299,20 +267,19 @@ export class AuthController {
     try {
       const result = await this.identity.login({ username, password });
       await this.loginFailures.clear(username);
-      const sessionToken = await this.establishSession(result, clientId || undefined);
-      res.cookie(SESSION_COOKIE_NAME, sessionToken, sessionCookieOptions());
-      await this.recordLogin({
-        userId: String(result.userId),
-        username,
+      const entry = await this.loginEntry.succeed({
+        result,
+        isNewUser: false,
+        clientId: clientId || undefined,
         ip,
         userAgent,
-        success: true,
       });
-      return ok(loginData(result, false, sessionToken));
+      applySessionCookie(res, entry.token);
+      return ok(entry.data);
     } catch (error) {
       if (error instanceof InvalidCredentialsError) {
         await this.loginFailures.recordFailure(username);
-        await this.recordLogin({ username, ip, userAgent, success: false, reason: "账密错误" });
+        await this.loginEntry.fail({ username, ip, userAgent, reason: "账密错误" });
         throw new NewApiError(error.message, 401, "invalid_credentials");
       }
       throw toAuthError(error);
@@ -346,24 +313,22 @@ export class AuthController {
 
     try {
       const { result, isNewUser } = await this.identity.loginWithPhoneCode({ phone, code });
-      const sessionToken = await this.establishSession(result, clientId);
-      res.cookie(SESSION_COOKIE_NAME, sessionToken, sessionCookieOptions());
-      await this.recordLogin({
-        userId: String(result.userId),
-        username: result.username,
+      const entry = await this.loginEntry.succeed({
+        result,
+        isNewUser,
+        clientId,
         ip,
         userAgent,
-        success: true,
       });
-      return ok(loginData(result, isNewUser, sessionToken));
+      applySessionCookie(res, entry.token);
+      return ok(entry.data);
     } catch (error) {
       const failure = phoneCodeFailure(error);
       if (failure) {
-        await this.recordLogin({
+        await this.loginEntry.fail({
           username: phone,
           ip,
           userAgent,
-          success: false,
           reason: failure.message,
         });
         throw failure;
@@ -418,12 +383,11 @@ export class AuthController {
       });
       await this.limiter.reset(MIGRATION_FAILURE_SCOPE, username);
       await this.limiter.reset(MIGRATION_LOCK_SCOPE, username);
-      await this.recordLogin({
+      await this.loginEntry.audit({
         userId,
         username,
         ip,
         userAgent,
-        success: true,
         reason: "迁移验证",
       });
       const migrationToken = await this.phoneActions.issue({
@@ -442,21 +406,19 @@ export class AuthController {
         if (!result.allowed) {
           await this.limiter.block(MIGRATION_LOCK_SCOPE, username, 15 * 60 * 1000);
         }
-        await this.recordLogin({
+        await this.loginEntry.fail({
           username,
           ip,
           userAgent,
-          success: false,
           reason: "迁移密码错误",
         });
         throw new NewApiError(uniformMessage, 401, "invalid_credentials");
       }
       if (error instanceof MigrationIneligibleError) {
-        await this.recordLogin({
+        await this.loginEntry.fail({
           username,
           ip,
           userAgent,
-          success: false,
           reason: "迁移资格不符",
         });
         throw new NewApiError(
@@ -520,11 +482,10 @@ export class AuthController {
       });
     } catch (error) {
       if (error instanceof PhoneTakenError) {
-        await this.recordLogin({
+        await this.loginEntry.fail({
           username: phone,
           ip,
           userAgent,
-          success: false,
           reason: "迁移补绑失败：号码已占用",
         });
         return fail(
@@ -536,11 +497,10 @@ export class AuthController {
       }
       const failure = phoneCodeFailure(error);
       if (failure) {
-        await this.recordLogin({
+        await this.loginEntry.fail({
           username: phone,
           ip,
           userAgent,
-          success: false,
           reason: `迁移补绑失败：${failure.message}`,
         });
         throw failure;
@@ -560,17 +520,16 @@ export class AuthController {
 
     try {
       const result = await this.identity.getLoginResult(user.id);
-      const sessionToken = await this.establishSession(result, clientId);
-      await this.sessions.revokeAllForUser(Number(user.id), sessionToken);
-      res.cookie(SESSION_COOKIE_NAME, sessionToken, sessionCookieOptions());
-      await this.recordLogin({
-        userId: String(user.id),
-        username: user.username,
+      const entry = await this.loginEntry.succeed({
+        result,
+        isNewUser: false,
+        clientId,
         ip,
         userAgent,
-        success: true,
+        revokeOthers: true,
       });
-      return ok(loginData(result, false, sessionToken));
+      applySessionCookie(res, entry.token);
+      return ok(entry.data);
     } catch (error) {
       logger.error(
         `迁移补绑成功但登录失败（userId=${user.id}）：${
@@ -585,41 +544,18 @@ export class AuthController {
     }
   }
 
-  private async recordLogin(entry: {
-    userId?: string | null | undefined;
-    username: string;
-    ip: string;
-    userAgent?: string | undefined;
-    success: boolean;
-    reason?: string | undefined;
-  }): Promise<void> {
-    try {
-      await this.identity.recordLogin({
-        userId: entry.userId ?? null,
-        username: entry.username,
-        ip: entry.ip,
-        userAgent: entry.userAgent ?? "",
-        success: entry.success,
-        reason: entry.reason,
-      });
-    } catch (error) {
-      logger.error(
-        `登录日志写入失败（username=${entry.username} success=${entry.success}）：${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
-    }
-  }
-
   @Public()
   @Post("register")
   @authRateLimit("register")
   async register(
     @Body() body: RegisterDto,
     @Res({ passthrough: true }) res: Response,
+    @Headers("x-forwarded-for") forwardedFor?: string,
+    @Headers("user-agent") userAgent?: string,
   ) {
     const username = typeof body.username === "string" ? body.username.trim() : "";
     const password = typeof body.password === "string" ? body.password : "";
+    const ip = forwardedFor?.split(",")[0]?.trim() ?? "unknown";
     if (!username || !password) {
       return { code: FAILURE_CODE, msg: "用户名和密码不能为空", data: null };
     }
@@ -631,9 +567,14 @@ export class AuthController {
           ? { email: body.email.trim() }
           : {}),
       });
-      const sessionToken = await this.establishSession(result);
-      res.cookie(SESSION_COOKIE_NAME, sessionToken, sessionCookieOptions());
-      return ok(loginData(result, true, sessionToken));
+      const entry = await this.loginEntry.succeed({
+        result,
+        isNewUser: true,
+        ip,
+        userAgent,
+      });
+      applySessionCookie(res, entry.token);
+      return ok(entry.data);
     } catch (error) {
       const failure = phoneCodeFailure(error);
       if (failure) throw failure;
@@ -646,10 +587,7 @@ export class AuthController {
   async logout(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
     const token = extractLoginToken(req);
     if (token) await this.sessions.revoke(token);
-    res.clearCookie(SESSION_COOKIE_NAME, {
-      ...sessionCookieOptions(),
-      maxAge: undefined,
-    });
+    clearSessionCookie(res);
     return ok();
   }
 

@@ -22,10 +22,7 @@ import {
   PhoneActionService,
 } from "@lib/shared/identity/index.js";
 import { SessionService } from "@lib/shared/session/session.service.js";
-import {
-  SESSION_COOKIE_NAME,
-  sessionCookieOptions,
-} from "@lib/shared/session/cookie.js";
+import { clearSessionCookie } from "@lib/shared/session/cookie.js";
 import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js";
 import type { BindPhoneDto } from "./dto/bind-phone.dto.js";
 import type { NicknameDto } from "./dto/nickname.dto.js";
@@ -192,10 +189,7 @@ export class MeController {
         }`,
       );
     }
-    res.clearCookie(SESSION_COOKIE_NAME, {
-      ...sessionCookieOptions(),
-      maxAge: undefined,
-    });
+    clearSessionCookie(res);
     return ok({
       phone: newPhone,
       revoked_sessions: revokedSessions,
@@ -282,7 +276,7 @@ export class MeController {
       }
       try {
         if (currentToken) await this.sessions.revoke(currentToken);
-        res.clearCookie(SESSION_COOKIE_NAME, sessionCookieOptions());
+        clearSessionCookie(res);
       } catch (fallbackError) {
         this.logger.error(
           `changePassword fallback revoke failed: ${
