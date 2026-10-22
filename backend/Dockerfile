@@ -1,7 +1,7 @@
 
 FROM node:24-alpine
 RUN sed -i 's|dl-cdn.alpinelinux.org|mirrors.aliyun.com|g' /etc/apk/repositories && \
-    apk add --no-cache tzdata
+    apk add --no-cache tzdata fontconfig ttf-dejavu
 RUN corepack enable
 WORKDIR /app
 
