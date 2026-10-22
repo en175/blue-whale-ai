@@ -1,48 +1,122 @@
 import { describe, expect, it } from "vitest";
 
 import { NewApiError } from "@lib/core";
-import { projectAccountBusinessFailure } from "./auth-error.js";
+import {
+  ACCOUNT_ERROR_CODE_WRONG,
+  ACCOUNT_ERROR_PASSWORD_INCORRECT,
+  ACCOUNT_ERROR_PASSWORD_INVALID,
+  ACCOUNT_ERROR_UNKNOWN_NUMERIC_CODE,
+  accountErrorToNumeric,
+  accountMessageFor,
+} from "@lib/contracts";
+import {
+  CodeWrongError,
+  InvalidPhoneError,
+} from "@lib/shared/auth/phone-verification.service.js";
+import {
+  AccountDisabledError,
+  InvalidCredentialsError,
+  NicknameInvalidError,
+} from "@lib/shared/identity/identity.service.js";
+import { PasswordPolicyError } from "@lib/shared/identity/password.js";
+import { PhoneTakenError } from "@lib/shared/persistence/identity-user-repo.js";
+import {
+  projectAuthFailure,
+  projectPasswordChangeFailure,
+  toAuthError,
+} from "./auth-error.js";
 
-describe("projectAccountBusinessFailure", () => {
-  it("白名单拒绝（HTTP 200）→ 透传原文到指定状态（登录 401）", () => {
-    const out = projectAccountBusinessFailure(
-      new NewApiError("This account is not allowed to log into the current system", 200),
-      401,
-    );
-    expect(out).toEqual(
-      new NewApiError(
-        "This account is not allowed to log into the current system",
-        401,
-        undefined,
+describe("projectAuthFailure", () => {
+  it("验证码错误保留剩余次数文案", () => {
+    expect(projectAuthFailure(new CodeWrongError(3))).toEqual({
+      status: 400,
+      message: "验证码错误，请重新输入（还可尝试3次）",
+      errorCode: ACCOUNT_ERROR_CODE_WRONG,
+    });
+  });
+
+  it("手机号非法与账号停用使用各自的公开状态", () => {
+    expect(projectAuthFailure(new InvalidPhoneError())).toEqual({
+      status: 400,
+      message: "手机号格式不正确",
+    });
+    expect(projectAuthFailure(new AccountDisabledError())).toMatchObject({
+      status: 403,
+      errorCode: "account_disabled",
+    });
+  });
+
+  it("号码占用与昵称非法映射到契约错误码", () => {
+    expect(projectAuthFailure(new PhoneTakenError())).toMatchObject({
+      status: 400,
+      errorCode: "phone_taken",
+    });
+    expect(projectAuthFailure(new NicknameInvalidError())).toMatchObject({
+      status: 400,
+      errorCode: "nickname_invalid",
+    });
+  });
+
+  it("凭据错误映射 401 invalid_credentials", () => {
+    expect(projectAuthFailure(new InvalidCredentialsError())).toMatchObject({
+      status: 401,
+      errorCode: "invalid_credentials",
+    });
+  });
+
+  it("未知错误返回 null，交给统一兜底", () => {
+    expect(projectAuthFailure(new Error("boom"))).toBeNull();
+    expect(projectAuthFailure("boom")).toBeNull();
+  });
+});
+
+describe("projectPasswordChangeFailure", () => {
+  it("密码策略错误 → password_invalid", () => {
+    expect(
+      projectPasswordChangeFailure(
+        new PasswordPolicyError("密码长度需为8-20位"),
+        "修改密码失败",
       ),
-    );
+    ).toEqual({
+      code: accountErrorToNumeric(ACCOUNT_ERROR_PASSWORD_INVALID),
+      message: "密码长度需为8-20位",
+    });
   });
 
-  it("保留上游 code（如有）", () => {
-    const out = projectAccountBusinessFailure(
-      new NewApiError("账号未开通", 200, "not_allowed"),
-      401,
-    );
-    expect(out?.code).toBe("not_allowed");
-    expect(out?.message).toBe("账号未开通");
+  it("凭据错误 → password_incorrect", () => {
+    expect(
+      projectPasswordChangeFailure(
+        new InvalidCredentialsError(),
+        "修改密码失败",
+      ),
+    ).toEqual({
+      code: accountErrorToNumeric(ACCOUNT_ERROR_PASSWORD_INCORRECT),
+      message: accountMessageFor(ACCOUNT_ERROR_PASSWORD_INCORRECT),
+    });
   });
 
-  it("非 200 NewApiError → null，走 toAuthError 映射", () => {
-    const out = projectAccountBusinessFailure(
-      new NewApiError("bad gateway", 502),
-      401,
-    );
-    expect(out).toBeNull();
+  it("未知错误 → 1100 + 兜底文案", () => {
+    expect(
+      projectPasswordChangeFailure(new Error("db exploded"), "修改密码失败"),
+    ).toEqual({
+      code: ACCOUNT_ERROR_UNKNOWN_NUMERIC_CODE,
+      message: "修改密码失败",
+    });
+  });
+});
+
+describe("toAuthError", () => {
+  it("401 统一为登录凭证无效", () => {
+    expect(toAuthError(new NewApiError("x", 401))).toMatchObject({
+      status: 401,
+      message: "登录凭证无效",
+    });
   });
 
-  it("非 NewApiError → null", () => {
-    expect(projectAccountBusinessFailure(new Error("boom"), 401)).toBeNull();
-    expect(projectAccountBusinessFailure("boom", 401)).toBeNull();
-  });
-
-  it("login 与 register 投影状态可分别指定", () => {
-    const upstream = new NewApiError("用户名重复", 200);
-    expect(projectAccountBusinessFailure(upstream, 401)?.status).toBe(401);
-    expect(projectAccountBusinessFailure(upstream, 400)?.status).toBe(400);
+  it("未知错误 → 502 account_service_error", () => {
+    expect(toAuthError(new Error("boom"))).toMatchObject({
+      status: 502,
+      code: "account_service_error",
+    });
   });
 });

@@ -11,13 +11,10 @@ import {
 import type { Request, Response } from "express";
 import { isValidPhone, NewApiError } from "@lib/core";
 import {
-  ACCOUNT_ERROR_ACCOUNT_DELETED,
-  ACCOUNT_ERROR_ACCOUNT_DISABLED,
   ACCOUNT_ERROR_BIND_SUCCEEDED_LOGIN_FAILED,
   ACCOUNT_ERROR_CAPTCHA_EXPIRED,
   ACCOUNT_ERROR_CAPTCHA_INVALID,
   ACCOUNT_ERROR_CAPTCHA_REQUIRED,
-  ACCOUNT_ERROR_INVALID_PURPOSE,
   ACCOUNT_ERROR_MIGRATION_INELIGIBLE,
   ACCOUNT_ERROR_MIGRATION_TOKEN_EXPIRED,
   ACCOUNT_ERROR_PHONE_TAKEN,
@@ -31,15 +28,12 @@ import {
 import { Public } from "@lib/infra/decorators/public.decorator.js";
 import { logger } from "@lib/infra/logging/blue-whale-logger.js";
 import {
-  InvalidPhoneError,
-  InvalidPurposeError,
   normalizeVerificationInput,
   PhoneVerificationService,
 } from "@lib/shared/auth/phone-verification.service.js";
-import { projectPhoneCodeError } from "@lib/shared/auth/phone-code-error.js";
 import { CaptchaService } from "@lib/shared/auth/captcha.service.js";
 import {
-  projectAccountBusinessFailure,
+  projectAuthFailure,
   toAuthError,
 } from "@lib/shared/errors/auth-error.js";
 import { RateLimit } from "@lib/shared/rate-limit/decorators/rate-limit.decorator.js";
@@ -49,15 +43,11 @@ import {
 } from "@lib/shared/rate-limit/login-failure-tracker.js";
 import { RateLimiter } from "@lib/shared/rate-limit/rate-limiter.js";
 import {
-  AccountDeletedError,
-  AccountDisabledError,
   IdentityService,
   InvalidCredentialsError,
   MigrationIneligibleError,
-  PasswordPolicyError,
   PhoneActionService,
   PhoneTakenError,
-  UsernameTakenError,
   type LocalLoginResult,
 } from "@lib/shared/identity/index.js";
 import { SessionService } from "@lib/shared/session/session.service.js";
@@ -93,24 +83,15 @@ function normalizeClientId(value: unknown): string | undefined {
 }
 
 function phoneCodeFailure(error: unknown): NewApiError | null {
-  const failure = projectPhoneCodeError(error);
+  const failure = projectAuthFailure(error);
   if (!failure) return null;
   return new NewApiError(failure.message, failure.status, failure.errorCode);
 }
 
 function verificationInputFailure(error: unknown) {
-  if (error instanceof InvalidPhoneError) {
-    return fail(FAILURE_CODE, error.message);
-  }
-  if (error instanceof InvalidPurposeError) {
-    return fail(
-      FAILURE_CODE,
-      error.message,
-      null,
-      ACCOUNT_ERROR_INVALID_PURPOSE,
-    );
-  }
-  return null;
+  const failure = projectAuthFailure(error);
+  if (!failure) return null;
+  return fail(FAILURE_CODE, failure.message, null, failure.errorCode);
 }
 
 const AUTH_RATE_LIMIT_WINDOW_MS = 60_000;
@@ -334,12 +315,6 @@ export class AuthController {
         await this.recordLogin({ username, ip, userAgent, success: false, reason: "账密错误" });
         throw new NewApiError(error.message, 401, "invalid_credentials");
       }
-      const projected = projectAccountBusinessFailure(error, 401);
-      if (projected) {
-        await this.loginFailures.recordFailure(username);
-        await this.recordLogin({ username, ip, userAgent, success: false, reason: "账密错误" });
-        throw projected;
-      }
       throw toAuthError(error);
     }
   }
@@ -392,12 +367,6 @@ export class AuthController {
           reason: failure.message,
         });
         throw failure;
-      }
-      if (error instanceof AccountDisabledError) {
-        throw new NewApiError(error.message, 403, ACCOUNT_ERROR_ACCOUNT_DISABLED);
-      }
-      if (error instanceof AccountDeletedError) {
-        throw new NewApiError(error.message, 403, ACCOUNT_ERROR_ACCOUNT_DELETED);
       }
       throw toAuthError(error);
     }
@@ -550,17 +519,6 @@ export class AuthController {
         code,
       });
     } catch (error) {
-      const failure = phoneCodeFailure(error);
-      if (failure) {
-        await this.recordLogin({
-          username: phone,
-          ip,
-          userAgent,
-          success: false,
-          reason: `迁移补绑失败：${failure.message}`,
-        });
-        throw failure;
-      }
       if (error instanceof PhoneTakenError) {
         await this.recordLogin({
           username: phone,
@@ -576,19 +534,16 @@ export class AuthController {
           ACCOUNT_ERROR_PHONE_TAKEN,
         );
       }
-      if (error instanceof MigrationIneligibleError) {
+      const failure = phoneCodeFailure(error);
+      if (failure) {
         await this.recordLogin({
           username: phone,
           ip,
           userAgent,
           success: false,
-          reason: "迁移补绑失败：资格不符",
+          reason: `迁移补绑失败：${failure.message}`,
         });
-        throw new NewApiError(
-          error.message,
-          400,
-          ACCOUNT_ERROR_MIGRATION_INELIGIBLE,
-        );
+        throw failure;
       }
       throw toAuthError(error);
     }
@@ -680,9 +635,8 @@ export class AuthController {
       res.cookie(SESSION_COOKIE_NAME, sessionToken, sessionCookieOptions());
       return ok(loginData(result, true, sessionToken));
     } catch (error) {
-      if (error instanceof UsernameTakenError || error instanceof PasswordPolicyError) {
-        throw new NewApiError(error.message, 400, FAILURE_CODE);
-      }
+      const failure = phoneCodeFailure(error);
+      if (failure) throw failure;
       throw toAuthError(error);
     }
   }

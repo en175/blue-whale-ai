@@ -512,9 +512,7 @@ describe("AuthController 登录日志", () => {
 
   it("账密错误记一条 success=false 并带原因", async () => {
     const { controller, identity, res } = setup();
-    identity.login.mockRejectedValue(
-      new NewApiError("用户名或密码错误", 200, "invalid_credentials"),
-    );
+    identity.login.mockRejectedValue(credentialFailure());
 
     await controller.login(LOGIN_BODY, res, "203.0.113.9").catch(() => undefined);
 
