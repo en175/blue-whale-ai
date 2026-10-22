@@ -10,7 +10,7 @@ import {
   type BillingRelease,
 } from "@lib/shared/billing/billing-release.js";
 import { quoteRevisionOf } from "@lib/shared/generation/handle-quote-generation-job.js";
-import { IdentityService } from "@lib/shared/identity/identity.service.js";
+import { AccountDirectoryService } from "@lib/shared/identity/account-directory.service.js";
 import type { JobBilling } from "@lib/shared/persistence/job-billing.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 
@@ -109,13 +109,13 @@ export class MediaToolBillingService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly identity: IdentityService,
+    private readonly directory: AccountDirectoryService,
   ) {}
 
   private billingDeps() {
     if (this.deps === undefined) {
       const client = sharedBillingClient();
-      const resolveTier = (userId: string) => this.identity.resolveTier(userId);
+      const resolveTier = (userId: string) => this.directory.resolveTier(userId);
       this.deps = {
         charge: createBillingCharge({ client, resolveTier, logger }),
         release: createBillingRelease({

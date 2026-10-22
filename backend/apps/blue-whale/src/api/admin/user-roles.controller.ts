@@ -9,7 +9,7 @@ import {
   UseGuards,
 } from "@nestjs/common";
 import {
-  IdentityService,
+  AccountDirectoryService,
   LastSuperAdminError,
   UnknownRoleError,
 } from "@lib/shared/identity/index.js";
@@ -31,14 +31,14 @@ function parseUserId(raw: string): string {
 @UseGuards(AdminGuard)
 export class AdminUserRolesController {
   constructor(
-    private readonly identity: IdentityService,
+    private readonly directory: AccountDirectoryService,
     private readonly operationLog: OperationLogService,
   ) {}
 
   @Get(":userId/roles")
   async list(@Param("userId") rawUserId: string) {
     const userId = parseUserId(rawUserId);
-    return { success: true, data: { roles: await this.identity.listRoleCodes(userId) } };
+    return { success: true, data: { roles: await this.directory.listRoleCodes(userId) } };
   }
 
   @Post(":userId/roles")
@@ -54,14 +54,14 @@ export class AdminUserRolesController {
     if (!code) throw new AdminException(400, "code 必填");
 
     try {
-      await this.identity.grantRole(userId, code, String(operator.userId));
+      await this.directory.grantRole(userId, code, String(operator.userId));
     } catch (error) {
       if (error instanceof UnknownRoleError) throw new AdminException(400, error.message);
       throw error;
     }
 
     await this.recordLog(operator, xForwardedFor, "user.role_grant", userId, `授予角色 ${code}`);
-    return { success: true, data: { roles: await this.identity.listRoleCodes(userId) } };
+    return { success: true, data: { roles: await this.directory.listRoleCodes(userId) } };
   }
 
   @Delete(":userId/roles/:code")
@@ -75,7 +75,7 @@ export class AdminUserRolesController {
     const userId = parseUserId(rawUserId);
 
     try {
-      await this.identity.revokeRole(userId, code);
+      await this.directory.revokeRole(userId, code);
     } catch (error) {
       if (error instanceof LastSuperAdminError) {
         throw new AdminException(409, error.message);
@@ -85,7 +85,7 @@ export class AdminUserRolesController {
     }
 
     await this.recordLog(operator, xForwardedFor, "user.role_revoke", userId, `撤销角色 ${code}`);
-    return { success: true, data: { roles: await this.identity.listRoleCodes(userId) } };
+    return { success: true, data: { roles: await this.directory.listRoleCodes(userId) } };
   }
 
   private async recordLog(

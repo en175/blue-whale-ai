@@ -50,6 +50,7 @@ import {
   InvalidCredentialsError,
   MigrationIneligibleError,
   PhoneActionService,
+  PhoneBindingService,
   PhoneTakenError,
 } from "@lib/shared/identity/index.js";
 import { LoginEntryService } from "@lib/shared/session/login-entry.service.js";
@@ -136,6 +137,7 @@ export class AuthController {
     private readonly limiter: RateLimiter,
     private readonly loginFailures: LoginFailureTracker,
     private readonly identity: IdentityService,
+    private readonly phoneBinding: PhoneBindingService,
     private readonly phoneActions: PhoneActionService,
     private readonly captcha: CaptchaService,
     private readonly loginEntry: LoginEntryService,
@@ -321,7 +323,7 @@ export class AuthController {
     }
 
     try {
-      const { result, isNewUser } = await this.identity.loginWithPhoneCode({ phone, code });
+      const { result, isNewUser } = await this.phoneBinding.loginWithPhoneCode({ phone, code });
       const entry = await this.loginEntry.succeed({
         result,
         isNewUser,
@@ -386,7 +388,7 @@ export class AuthController {
     }
 
     try {
-      const { userId } = await this.identity.verifyMigrationCandidate({
+      const { userId } = await this.phoneBinding.verifyMigrationCandidate({
         username,
         password,
       });
@@ -491,7 +493,7 @@ export class AuthController {
 
     let user: { id: string; username: string };
     try {
-      user = await this.identity.commitMigrationBind(action.userId, {
+      user = await this.phoneBinding.commitMigrationBind(action.userId, {
         phone,
         code,
       });

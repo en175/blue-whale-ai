@@ -3,7 +3,7 @@ import { Injectable } from "@nestjs/common";
 import { ApiError } from "@lib/core";
 import { createLogger } from "@lib/core/logging";
 import {
-  IdentityService,
+  AccountDirectoryService,
   type LocalLoginResult,
 } from "@lib/shared/identity/index.js";
 import { SessionService } from "./session.service.js";
@@ -57,14 +57,14 @@ export class LoginEntryService {
 
   constructor(
     private readonly sessions: SessionService,
-    private readonly identity: IdentityService,
+    private readonly directory: AccountDirectoryService,
   ) {}
 
   private async record(
     input: LoginAuditInput & { success: boolean },
   ): Promise<void> {
     try {
-      await this.identity.recordLogin({
+      await this.directory.recordLogin({
         userId: input.userId ?? null,
         username: input.username,
         ip: input.ip,

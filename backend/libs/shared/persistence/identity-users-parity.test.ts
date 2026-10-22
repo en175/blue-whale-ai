@@ -16,6 +16,10 @@ const snapshotSql = readFileSync(
 );
 const schemaPrisma = readFileSync(new URL("../../../prisma/schema.prisma", import.meta.url), "utf8");
 const authRepo = readFileSync(new URL("./auth-repo.ts", import.meta.url), "utf8");
+const userRepo = readFileSync(
+  new URL("./identity-user-repo.ts", import.meta.url),
+  "utf8",
+);
 
 describe("identity_users 三轨迁移", () => {
   it("三轨逐字一致（改一处必须三处同改）", () => {
@@ -61,9 +65,9 @@ describe("identity_users 三轨迁移", () => {
   });
 
   it("TS 侧不再引用旧表名", () => {
-    expect(authRepo).toContain("prisma.bw_users");
+    expect(userRepo).toContain("prisma.bw_users");
     expect(authRepo).toContain("prisma.bw_verification_codes");
-    expect(authRepo).not.toMatch(/prisma\.users\b/);
+    expect(userRepo).not.toMatch(/prisma\.users\b/);
     expect(authRepo).not.toMatch(/prisma\.verification_codes\b/);
   });
 });

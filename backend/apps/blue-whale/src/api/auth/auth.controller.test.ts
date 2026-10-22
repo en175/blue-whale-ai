@@ -149,7 +149,7 @@ function setup() {
   };
   const loginEntry = new LoginEntryService(
     sessions as unknown as SessionService,
-    identity as unknown as IdentityService,
+    identity as never,
   );
   const controller = new AuthController(
     verification as never,
@@ -157,6 +157,7 @@ function setup() {
     limiter,
     tracker,
     identity as unknown as IdentityService,
+    identity as never,
     phoneActions as never,
     captcha as never,
     loginEntry,

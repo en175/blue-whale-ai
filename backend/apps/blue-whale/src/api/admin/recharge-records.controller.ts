@@ -5,7 +5,7 @@ import {
   parsePageSizeParam,
 } from "@lib/shared/account/admin-paging.js";
 import { AdminException, toAdminError } from "@lib/shared/errors/admin-error.js";
-import { IdentityService } from "@lib/shared/identity/identity.service.js";
+import { AccountDirectoryService } from "@lib/shared/identity/account-directory.service.js";
 import { OperationLogService } from "@lib/shared/operation-log/operation-log.service.js";
 import { RechargeService } from "@lib/shared/recharge/recharge.service.js";
 import {
@@ -22,7 +22,7 @@ export class AdminRechargeRecordsController {
   constructor(
     private readonly recharge: RechargeService,
     private readonly operationLog: OperationLogService,
-    private readonly identity: IdentityService,
+    private readonly directory: AccountDirectoryService,
   ) {}
 
   @Get()
@@ -48,7 +48,7 @@ export class AdminRechargeRecordsController {
 
     const keyword = (query.keyword ?? query.userId ?? "").trim();
     if (keyword) {
-      const resolved = await this.identity.findAdminUserIdByKeyword(keyword);
+      const resolved = await this.directory.findAdminUserIdByKeyword(keyword);
       if (resolved === undefined) {
         return { success: true, data: { list: [], total: 0 } };
       }
@@ -61,7 +61,7 @@ export class AdminRechargeRecordsController {
     try {
       const { items, total } = await this.recharge.listOrdersForAdmin(filter);
 
-      const identities = await this.identity.loadAdminUserIdentities(
+      const identities = await this.directory.loadAdminUserIdentities(
         items.map((item) => Number(item.userId)),
       );
 

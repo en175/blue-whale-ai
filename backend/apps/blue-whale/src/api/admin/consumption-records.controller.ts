@@ -3,7 +3,7 @@ import { AdminGuard } from "@lib/infra/guard/admin.guard.js";
 import { parsePageParam, parsePageSizeParam } from "@lib/shared/account/admin-paging.js";
 import { BillingAdminConfigError, BillingAdminError, listAdminTransactions } from "@lib/shared/billing/billing-admin-client.js";
 import { AdminException } from "@lib/shared/errors/admin-error.js";
-import { IdentityService } from "@lib/shared/identity/identity.service.js";
+import { AccountDirectoryService } from "@lib/shared/identity/account-directory.service.js";
 import { JobsService } from "@lib/shared/jobs/jobs.service.js";
 
 @Controller("admin/consumption-records")
@@ -11,7 +11,7 @@ import { JobsService } from "@lib/shared/jobs/jobs.service.js";
 export class AdminConsumptionRecordsController {
   constructor(
     private readonly jobs: JobsService,
-    private readonly identity: IdentityService,
+    private readonly directory: AccountDirectoryService,
   ) {}
 
   @Get()
@@ -22,7 +22,7 @@ export class AdminConsumptionRecordsController {
 
     let userId: number | undefined;
     if (keyword) {
-      userId = await this.identity.findAdminUserIdByKeyword(keyword);
+      userId = await this.directory.findAdminUserIdByKeyword(keyword);
       if (userId === undefined) {
         return { success: true, data: { items: [], total: 0 } };
       }
@@ -42,7 +42,7 @@ export class AdminConsumptionRecordsController {
           .filter((id): id is string => id != null),
       );
 
-      const identities = await this.identity.loadAdminUserIdentities(
+      const identities = await this.directory.loadAdminUserIdentities(
         page.items.map((item) => item.userId),
       );
 

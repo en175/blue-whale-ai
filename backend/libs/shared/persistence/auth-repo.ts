@@ -1,4 +1,3 @@
-import { randomInt } from "node:crypto";
 import type { PrismaClient } from "@prisma/client";
 
 export interface AuthRepo {
@@ -18,91 +17,9 @@ export interface AuthRepo {
   } | null>;
   incrementAttempts(codeId: string): Promise<number>;
   consumeCode(codeId: string): Promise<boolean>;
-  findByPhone(phone: string): Promise<{
-    id: string;
-    username: string;
-    nickname: string | null;
-    phone: string;
-    status: string;
-    isDelete: boolean;
-    created: boolean;
-  } | null>;
-  upsertUser(phone: string): Promise<{
-    id: string;
-    username: string;
-    nickname: string | null;
-    phone: string;
-    status: string;
-    isDelete: boolean;
-    created: boolean;
-  }>;
 }
-
-const DEFAULT_NICKNAME_PREFIX = "蓝鲸用户_";
-const NICKNAME_RANDOM_LENGTH = 6;
-const NICKNAME_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-
-function randomNickname(): string {
-  let suffix = "";
-  for (let index = 0; index < NICKNAME_RANDOM_LENGTH; index++) {
-    suffix += NICKNAME_ALPHABET[randomInt(0, NICKNAME_ALPHABET.length)];
-  }
-  return `${DEFAULT_NICKNAME_PREFIX}${suffix}`;
-}
-
-function randomUsername(): string {
-  return "用户" + String(randomInt(0, 10000)).padStart(4, "0");
-}
-
-const UNIQUE_VIOLATION = "P2002";
-
-const USERNAME_RETRIES = 5;
-
-function isUniqueViolation(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    (error as { code?: unknown }).code === UNIQUE_VIOLATION
-  );
-}
-
-type PhoneUserRow = {
-  id: bigint;
-  username: string;
-  nickname: string | null;
-  phone: string | null;
-  status: string;
-  is_delete: boolean;
-};
-
-function hydrateUser(row: PhoneUserRow, created: boolean) {
-  return {
-    id: row.id.toString(),
-    username: row.username,
-    nickname: row.nickname,
-    phone: row.phone ?? "",
-    status: row.status,
-    isDelete: row.is_delete,
-    created,
-  };
-}
-
-const USER_SELECT = {
-  id: true,
-  username: true,
-  nickname: true,
-  phone: true,
-  status: true,
-  is_delete: true,
-} as const;
 
 export function createAuthRepo(prisma: PrismaClient): AuthRepo {
-  async function findByPhone(phone: string) {
-    const row = await prisma.bw_users.findFirst({ where: { phone }, select: USER_SELECT });
-    return row ? hydrateUser(row, false) : null;
-  }
-
   return {
     async createVerificationCode(record) {
       const created = await prisma.bw_verification_codes.create({
@@ -144,7 +61,12 @@ export function createAuthRepo(prisma: PrismaClient): AuthRepo {
         select: { id: true, code: true, attempts: true, purpose: true },
       });
       return row
-        ? { id: row.id.toString(), code: row.code, attempts: row.attempts, purpose: row.purpose }
+        ? {
+            id: row.id.toString(),
+            code: row.code,
+            attempts: row.attempts,
+            purpose: row.purpose,
+          }
         : null;
     },
 
@@ -163,37 +85,6 @@ export function createAuthRepo(prisma: PrismaClient): AuthRepo {
         data: { is_used: true },
       });
       return result.count === 1;
-    },
-
-    findByPhone,
-
-    async upsertUser(phone) {
-      const existing = await findByPhone(phone);
-      if (existing) return existing;
-
-      for (let attempt = 0; attempt < USERNAME_RETRIES; attempt++) {
-        try {
-          const created = await prisma.bw_users.create({
-            data: {
-              phone,
-              username: randomUsername(),
-              nickname: randomNickname(),
-              status: "NORMAL",
-            },
-            select: USER_SELECT,
-          });
-          return hydrateUser(created, true);
-        } catch (error) {
-          if (!isUniqueViolation(error)) throw error;
-          const raced = await findByPhone(phone);
-          if (raced) return raced;
-        }
-      }
-
-      throw new Error(
-        `自动生成用户名连续 ${USERNAME_RETRIES} 次撞车（phone=${phone}）——` +
-          `随机空间过小或索引异常，请检查`,
-      );
     },
   };
 }

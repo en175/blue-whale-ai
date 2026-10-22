@@ -4,7 +4,7 @@ import {
   fetchConsumedCredits,
 } from "@lib/shared/billing/billing-admin-client.js";
 import { createLogger, type Logger } from "@lib/core/logging";
-import { IdentityService } from "@lib/shared/identity/index.js";
+import { AccountDirectoryService } from "@lib/shared/identity/index.js";
 import {
   PAID_REACHED_STATUSES,
   RECHARGE_ORDER_STATUS,
@@ -33,7 +33,7 @@ export class DashboardService {
   private readonly logger: Logger = createLogger("dashboard");
 
   constructor(
-    private readonly identity: IdentityService,
+    private readonly directory: AccountDirectoryService,
     private readonly prisma: PrismaService,
   ) {}
 
@@ -41,7 +41,7 @@ export class DashboardService {
     const window = withinRange(range);
 
     const [totalUsers, jobTypeCounts, rechargeTotals] = await Promise.all([
-      this.identity.countAdminUsers(),
+      this.directory.countAdminUsers(),
       this.countJobsByType(window),
       this.sumPaidRecharges(window),
     ]);

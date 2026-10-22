@@ -5,7 +5,7 @@ import {
   parsePageSizeParam,
 } from "@lib/shared/account/admin-paging.js";
 import { AdminException, toAdminError } from "@lib/shared/errors/admin-error.js";
-import { IdentityService } from "@lib/shared/identity/identity.service.js";
+import { AccountDirectoryService } from "@lib/shared/identity/account-directory.service.js";
 import { JobsService } from "@lib/shared/jobs/jobs.service.js";
 
 const BIGINT_ID_RE = /^[1-9]\d{0,18}$/;
@@ -15,7 +15,7 @@ const BIGINT_ID_RE = /^[1-9]\d{0,18}$/;
 export class AdminJobRecordsController {
   constructor(
     private readonly jobs: JobsService,
-    private readonly identity: IdentityService,
+    private readonly directory: AccountDirectoryService,
   ) {}
 
   @Get()
@@ -47,7 +47,7 @@ export class AdminJobRecordsController {
 
     const keyword = (query.keyword ?? query.userId ?? "").trim();
     if (keyword) {
-      const resolved = await this.identity.findAdminUserIdByKeyword(keyword);
+      const resolved = await this.directory.findAdminUserIdByKeyword(keyword);
       if (resolved === undefined) {
         return { success: true, data: { list: [], total: 0 } };
       }
@@ -57,7 +57,7 @@ export class AdminJobRecordsController {
     try {
       const page = await this.jobs.listForAdmin(filter);
 
-      const identities = await this.identity.loadAdminUserIdentities(
+      const identities = await this.directory.loadAdminUserIdentities(
         page.records.map((record) => Number(record.user_id)),
       );
 

@@ -1,3 +1,4 @@
+import { randomInt } from "node:crypto";
 import type { PrismaClient } from "@prisma/client";
 
 export interface IdentityUserRow {
@@ -19,10 +20,18 @@ export const USER_STATUS_DISABLED: IdentityUserStatus = "DISABLED";
 export interface IdentityUserRepo {
   findByLoginName(loginName: string): Promise<IdentityUserRow | null>;
   findById(id: string): Promise<IdentityUserRow | null>;
+  findByPhoneIncludingDeleted(
+    phone: string,
+  ): Promise<{ user: IdentityUserRow; deleted: boolean } | null>;
+  upsertPhone(
+    phone: string,
+  ): Promise<{ user: IdentityUserRow; created: boolean; deleted: boolean }>;
   create(input: {
     username: string;
-    passwordHash: string;
+    passwordHash: string | null;
     email: string | null;
+    phone?: string | null | undefined;
+    nickname?: string | null | undefined;
   }): Promise<IdentityUserRow>;
   updatePassword(
     id: string,
@@ -59,6 +68,29 @@ const SELECT = {
   must_change_password: true,
 } as const;
 
+const SELECT_WITH_DELETE = {
+  ...SELECT,
+  is_delete: true,
+} as const;
+
+const DEFAULT_NICKNAME_PREFIX = "蓝鲸用户_";
+const NICKNAME_RANDOM_LENGTH = 6;
+const NICKNAME_ALPHABET =
+  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+const USERNAME_RETRIES = 5;
+
+function randomNickname(): string {
+  let suffix = "";
+  for (let index = 0; index < NICKNAME_RANDOM_LENGTH; index++) {
+    suffix += NICKNAME_ALPHABET[randomInt(0, NICKNAME_ALPHABET.length)];
+  }
+  return `${DEFAULT_NICKNAME_PREFIX}${suffix}`;
+}
+
+function randomUsername(): string {
+  return "用户" + String(randomInt(0, 10000)).padStart(4, "0");
+}
+
 export function createIdentityUserRepo(prisma: PrismaClient): IdentityUserRepo {
   function hydrate(row: {
     id: bigint;
@@ -82,6 +114,36 @@ export function createIdentityUserRepo(prisma: PrismaClient): IdentityUserRepo {
     };
   }
 
+  async function createUser(input: {
+    username: string;
+    passwordHash: string | null;
+    email: string | null;
+    phone?: string | null | undefined;
+    nickname?: string | null | undefined;
+  }) {
+    return prisma.bw_users.create({
+      data: {
+        username: input.username,
+        password: input.passwordHash,
+        email: input.email,
+        status: "NORMAL",
+        ...(input.phone ? { phone: input.phone } : {}),
+        ...(input.nickname ? { nickname: input.nickname } : {}),
+      },
+      select: SELECT,
+    });
+  }
+
+  async function findByPhoneIncludingDeleted(phone: string) {
+    const row = await prisma.bw_users.findFirst({
+      where: { phone },
+      select: SELECT_WITH_DELETE,
+    });
+    return row
+      ? { user: hydrate(row), deleted: row.is_delete === true }
+      : null;
+  }
+
   return {
     async findByLoginName(loginName) {
       const row = await prisma.bw_users.findFirst({
@@ -102,17 +164,38 @@ export function createIdentityUserRepo(prisma: PrismaClient): IdentityUserRepo {
       return row ? hydrate(row) : null;
     },
 
+    findByPhoneIncludingDeleted,
+
+    async upsertPhone(phone) {
+      const existing = await findByPhoneIncludingDeleted(phone);
+      if (existing) return { ...existing, created: false };
+
+      for (let attempt = 0; attempt < USERNAME_RETRIES; attempt++) {
+        try {
+          const created = await createUser({
+            phone,
+            username: randomUsername(),
+            nickname: randomNickname(),
+            passwordHash: null,
+            email: null,
+          });
+          return { user: hydrate(created), created: true, deleted: false };
+        } catch (error) {
+          if (!isUniqueViolation(error)) throw error;
+          const raced = await findByPhoneIncludingDeleted(phone);
+          if (raced) return { ...raced, created: false };
+        }
+      }
+
+      throw new Error(
+        `自动生成用户名连续 ${USERNAME_RETRIES} 次撞车（phone=${phone}）——` +
+          `随机空间过小或索引异常，请检查`,
+      );
+    },
+
     async create(input) {
       try {
-        const row = await prisma.bw_users.create({
-          data: {
-            username: input.username,
-            password: input.passwordHash,
-            email: input.email,
-            status: "NORMAL",
-          },
-          select: SELECT,
-        });
+        const row = await createUser(input);
         return hydrate(row);
       } catch (error) {
         if (isUniqueViolation(error)) throw new UsernameTakenError(input.username);

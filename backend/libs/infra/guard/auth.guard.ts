@@ -7,7 +7,7 @@ import {
   ACCOUNT_ERROR_SESSION_EXPIRED,
 } from "@lib/contracts";
 import type { Request, Response } from "express";
-import { IdentityService } from "@lib/shared/identity/index.js";
+import { AccountDirectoryService } from "@lib/shared/identity/index.js";
 import { SessionService } from "@lib/shared/session/session.service.js";
 import { extractLoginToken } from "@lib/shared/session/login-token.js";
 import {
@@ -31,7 +31,7 @@ export class AuthGuard implements CanActivate {
   constructor(
     private readonly reflector: Reflector,
     private readonly sessions: SessionService,
-    private readonly identity: IdentityService,
+    private readonly directory: AccountDirectoryService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -84,7 +84,7 @@ export class AuthGuard implements CanActivate {
 
     if (session.needsRecheck) {
       try {
-        const { role, status } = await this.identity.resolveAccessState(
+        const { role, status } = await this.directory.resolveAccessState(
           session.userId,
         );
         session = {

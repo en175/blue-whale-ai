@@ -18,9 +18,11 @@ import {
 import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
 import { requirePhoneAndCode } from "@lib/shared/auth/phone-verification.service.js";
 import {
+  AccountDirectoryService,
   IdentityService,
   InvalidCredentialsError,
   PhoneActionService,
+  PhoneBindingService,
 } from "@lib/shared/identity/index.js";
 import { SessionService } from "@lib/shared/session/session.service.js";
 import { clearSessionCookie } from "@lib/shared/session/cookie.js";
@@ -44,6 +46,8 @@ export class MeController {
   constructor(
     private readonly sessions: SessionService,
     private readonly identity: IdentityService,
+    private readonly phoneBinding: PhoneBindingService,
+    private readonly directory: AccountDirectoryService,
     private readonly phoneActions: PhoneActionService,
   ) {}
 
@@ -59,9 +63,9 @@ export class MeController {
       phone: flags?.phone ?? "",
       has_password: flags?.hasPassword ?? false,
       must_change_password: flags?.mustChangePassword ?? false,
-      is_admin: await this.identity.isAdmin(user.userId),
-      tier: await this.identity.resolveTier(user.userId),
-      roles: await this.identity.listRoleCodes(user.userId),
+      is_admin: await this.directory.isAdmin(user.userId),
+      tier: await this.directory.resolveTier(user.userId),
+      roles: await this.directory.listRoleCodes(user.userId),
     });
   }
 
@@ -87,7 +91,7 @@ export class MeController {
     }
     const { phone, code } = credentials;
     try {
-      await this.identity.bindPhone(userId, { phone, code });
+      await this.phoneBinding.bindPhone(userId, { phone, code });
     } catch (error) {
       const failure = projectAuthFailure(error);
       if (failure) {
@@ -112,7 +116,7 @@ export class MeController {
       return fail(FAILURE_CODE, "验证码已失效，请重新获取");
     }
     try {
-      const { oldPhone } = await this.identity.rebindVerifyCurrent(userId, code);
+      const { oldPhone } = await this.phoneBinding.rebindVerifyCurrent(userId, code);
       const rebindToken = await this.phoneActions.issue({
         kind: "rebind",
         userId: Number(userId),
@@ -175,7 +179,7 @@ export class MeController {
 
     let newPhone: string;
     try {
-      ({ phone: newPhone } = await this.identity.commitRebind(userId, {
+      ({ phone: newPhone } = await this.phoneBinding.commitRebind(userId, {
         oldPhone: action.phone,
         phone,
         code,
