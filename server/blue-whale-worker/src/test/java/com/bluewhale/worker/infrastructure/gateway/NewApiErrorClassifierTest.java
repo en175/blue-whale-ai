@@ -157,6 +157,11 @@ class NewApiErrorClassifierTest {
         assertThat(NewApiErrorClassifier.isTaskTypeSignal(
                 "Issues: [0] `ratio` must be `adaptive`. [1] `duration` must be -1."))
                 .isTrue();
+        assertThat(NewApiErrorClassifier.isTaskTypeSignal(
+                "Issues: `ratio` must be `adaptive`. `duration` must be `-1`."))
+                .isTrue();
+        assertThat(NewApiErrorClassifier.isTaskTypeSignal(
+                "`ratio` must be `adaptive`. `duration` must be -10")).isFalse();
     }
 
     @Test

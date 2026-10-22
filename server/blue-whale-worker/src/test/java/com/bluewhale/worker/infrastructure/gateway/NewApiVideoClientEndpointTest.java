@@ -294,6 +294,55 @@ class NewApiVideoClientEndpointTest {
     }
 
     @Test
+    @DisplayName("IKPPYX: submit 400 视频编辑正文 + 额度信号 → platform_quota_exhausted（守卫不覆盖）")
+    void submitVideoEditProseWithQuotaSignalKeepsQuota() throws Exception {
+        String text = "余额不足。The parameters `ratio` and `duration` specified in the request are not valid. "
+                + "Seedance identified your task as video editing based on your prompt.";
+        server.createContext("/v1/video/generations", exchange -> {
+            byte[] resp = ("{\"error\":{\"message\":\"" + text + "\"}}").getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(400, resp.length);
+            try (OutputStream out = exchange.getResponseBody()) {
+                out.write(resp);
+            }
+        });
+
+        VideoSubmitInput input = new VideoSubmitInput(
+                "doubao-seedance-2-5-260628", "把背景改成海边", 5.0, "720p", "16:9",
+                null, null,
+                List.of(new VideoReference("video", "https://tos.test/src.mp4", null)),
+                null);
+
+        assertThatThrownBy(() -> new NewApiVideoClient(new UpstreamBaseUrl(baseUrl)).submit("t", input))
+                .isInstanceOf(VideoProviderError.class)
+                .satisfies(e -> assertThat(((VideoProviderError) e).getCode())
+                        .isEqualTo("platform_quota_exhausted"));
+    }
+
+    @Test
+    @DisplayName("IKPPYX: submit 400 普通 InvalidParameter → provider_failed")
+    void submitPlainInvalidParameterKeepsProviderFailed() throws Exception {
+        server.createContext("/v1/video/generations", exchange -> {
+            byte[] resp = "{\"error\":{\"message\":\"InvalidParameter: The request parameter is not valid.\"}}"
+                    .getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(400, resp.length);
+            try (OutputStream out = exchange.getResponseBody()) {
+                out.write(resp);
+            }
+        });
+
+        VideoSubmitInput input = new VideoSubmitInput(
+                "doubao-seedance-2-5-260628", "一只猫在跑步", 5.0, "720p", "16:9",
+                null, null, List.of(), null);
+
+        assertThatThrownBy(() -> new NewApiVideoClient(new UpstreamBaseUrl(baseUrl)).submit("t", input))
+                .isInstanceOf(VideoProviderError.class)
+                .satisfies(e -> assertThat(((VideoProviderError) e).getCode())
+                        .isEqualTo("provider_failed"));
+    }
+
+    @Test
     @DisplayName("IKPPYX: poll FAILURE 视频编辑英文正文 → task_type_param_constraint")
     void pollVideoEditProseMapsToTaskTypeConstraint() throws Exception {
         String text = "The parameters `ratio` and `duration` specified in the request are not valid. "

@@ -44,7 +44,7 @@ public final class NewApiErrorClassifier {
     );
 
     private static final Pattern VIDEO_EDIT_DURATION_PATTERN = Pattern.compile(
-            "`?duration`?\\s+must\\s+be\\s+-1\\b",
+            "`?duration`?\\s+must\\s+be\\s+`?-1`?\\b",
             Pattern.CASE_INSENSITIVE
     );
 
