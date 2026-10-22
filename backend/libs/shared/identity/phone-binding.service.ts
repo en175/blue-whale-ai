@@ -27,6 +27,10 @@ import {
   type LocalLoginResult,
 } from "./identity.service.js";
 
+function hasBoundPhone(phone: string | null | undefined): boolean {
+  return typeof phone === "string" && phone.trim().length > 0;
+}
+
 @Injectable()
 export class PhoneBindingService {
   private readonly logger = createLogger("phone-binding");
@@ -108,7 +112,7 @@ export class PhoneBindingService {
   ): Promise<void> {
     const self = await this.users.findById(String(userId));
     if (!self) throw new InvalidCredentialsError();
-    if (self.phone) throw new PhoneAlreadyBoundError();
+    if (hasBoundPhone(self.phone)) throw new PhoneAlreadyBoundError();
 
     const verified = await this.verification.verify({
       phone: input.phone,
@@ -125,15 +129,16 @@ export class PhoneBindingService {
   ): Promise<{ oldPhone: string }> {
     const self = await this.users.findById(String(userId));
     if (!self) throw new InvalidCredentialsError();
-    if (!self.phone) throw new PhoneNotBoundError();
+    if (!hasBoundPhone(self.phone)) throw new PhoneNotBoundError();
+    const oldPhone = (self.phone ?? "").trim();
 
     const verified = await this.verification.verify({
-      phone: self.phone,
+      phone: oldPhone,
       code,
       purposes: ["rebind_old"],
     });
     await this.verification.consume(verified);
-    return { oldPhone: self.phone };
+    return { oldPhone };
   }
 
   async commitRebind(
@@ -167,8 +172,13 @@ export class PhoneBindingService {
     if (!(await verifyPassword(input.password, user.password))) {
       throw new InvalidCredentialsError();
     }
-    if (user.phone !== null || user.status !== USER_STATUS_NORMAL) {
-      throw new MigrationIneligibleError();
+    if (hasBoundPhone(user.phone)) {
+      throw new MigrationIneligibleError(
+        "该账号已绑定手机号，请直接使用手机号登录",
+      );
+    }
+    if (user.status !== USER_STATUS_NORMAL) {
+      throw new MigrationIneligibleError("账号已停用，无法迁移");
     }
     return { userId: user.id };
   }
@@ -179,8 +189,13 @@ export class PhoneBindingService {
   ): Promise<IdentityUserRow> {
     const self = await this.users.findById(String(userId));
     if (!self) throw new MigrationIneligibleError();
-    if (self.phone !== null || self.status !== USER_STATUS_NORMAL) {
-      throw new MigrationIneligibleError();
+    if (hasBoundPhone(self.phone)) {
+      throw new MigrationIneligibleError(
+        "该账号已绑定手机号，请直接使用手机号登录",
+      );
+    }
+    if (self.status !== USER_STATUS_NORMAL) {
+      throw new MigrationIneligibleError("账号已停用，无法迁移");
     }
     const verified = await this.verification.verify({
       phone: input.phone,

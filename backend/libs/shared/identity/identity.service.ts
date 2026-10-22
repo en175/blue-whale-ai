@@ -80,8 +80,8 @@ export class RebindBindingChangedError extends Error {
 }
 
 export class MigrationIneligibleError extends Error {
-  constructor() {
-    super("账号或密码不正确，或当前账号不可迁移");
+  constructor(message = "账号或密码不正确，或当前账号不可迁移") {
+    super(message);
     this.name = "MigrationIneligibleError";
   }
 }

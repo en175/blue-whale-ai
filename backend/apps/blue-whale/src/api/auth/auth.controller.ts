@@ -376,10 +376,10 @@ export class AuthController {
     const username = typeof body.username === "string" ? body.username.trim() : "";
     const password = typeof body.password === "string" ? body.password : "";
     const ip = forwardedFor?.split(",")[0]?.trim() ?? "unknown";
-    const uniformMessage = "账号或密码不正确，或当前账号不可迁移";
+    const invalidCredentialsMessage = "账号或密码不正确";
 
     if (!username || !password) {
-      throw new ApiError(uniformMessage, 401, "invalid_credentials");
+      throw new ApiError("请输入原账号和密码", 401, "invalid_credentials");
     }
     if (await this.limiter.isBlocked(MIGRATION_LOCK_SCOPE, username)) {
       throw new ApiError(
@@ -425,17 +425,17 @@ export class AuthController {
           userAgent,
           reason: "迁移密码错误",
         });
-        throw new ApiError(uniformMessage, 401, "invalid_credentials");
+        throw new ApiError(invalidCredentialsMessage, 401, "invalid_credentials");
       }
       if (error instanceof MigrationIneligibleError) {
         await this.loginEntry.fail({
           username,
           ip,
           userAgent,
-          reason: "迁移资格不符",
+          reason: error.message,
         });
         throw new ApiError(
-          uniformMessage,
+          error.message,
           400,
           ACCOUNT_ERROR_MIGRATION_INELIGIBLE,
         );
