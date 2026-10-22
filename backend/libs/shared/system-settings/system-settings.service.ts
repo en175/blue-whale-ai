@@ -102,7 +102,6 @@ const emptyRateLimit = (): SystemRateLimit => ({
 
 const emptyWatermark = (): SystemWatermark => ({ enabled: false });
 
-
 function parseJsonObject(raw: string, module: string): Record<string, unknown> {
   try {
     const parsed: unknown = JSON.parse(raw);

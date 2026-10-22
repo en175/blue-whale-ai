@@ -46,7 +46,7 @@ class ImageJobProcessorI2iAliasTest {
 
     private ImageJobProcessor processor;
 
-    private record Outbound(ImageProtocol protocol, String model) {}
+    private record Outbound(ImageProtocol protocol, String model, boolean watermarkSupported) {}
 
     @BeforeEach
     void setUp() {
@@ -110,9 +110,12 @@ class ImageJobProcessorI2iAliasTest {
 
         ArgumentCaptor<ImageProtocol> protocolCaptor = ArgumentCaptor.forClass(ImageProtocol.class);
         ArgumentCaptor<String> modelCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Boolean> watermarkCaptor = ArgumentCaptor.forClass(Boolean.class);
         verify(imageClient).generate(anyString(), protocolCaptor.capture(), modelCaptor.capture(),
-                anyString(), anyInt(), any(), any(), anyBoolean(), anyBoolean(), anyList(), anyBoolean());
-        return new Outbound(protocolCaptor.getValue(), modelCaptor.getValue());
+                anyString(), anyInt(), any(), any(), anyBoolean(), anyBoolean(), anyList(),
+                watermarkCaptor.capture());
+        return new Outbound(
+                protocolCaptor.getValue(), modelCaptor.getValue(), watermarkCaptor.getValue());
     }
 
 
@@ -203,5 +206,21 @@ class ImageJobProcessorI2iAliasTest {
     void nullChannelFallsBackToMediaDefault() {
         assertThat(captureOutbound(List.of(), "{}", null).protocol())
                 .isEqualTo(ImageProtocol.INLINE_IMAGE);
+    }
+
+    @Test
+    @DisplayName("水印支持位：seedream-image → true")
+    void seedreamChannelSupportsWatermark() {
+        assertThat(captureOutbound(List.of(), "{}", "seedream-image").watermarkSupported()).isTrue();
+    }
+
+    @Test
+    @DisplayName("水印支持位：gpt-image / gpt-image-openai → false")
+    void nonSeedreamChannelsDoNotSupportWatermark() {
+        assertThat(captureOutbound(List.of("101"), "{}", "gpt-image", GPT_MATRIX)
+                .watermarkSupported()).isFalse();
+        reset(stateMachine, assetSource, upstreamCredential, imageClient, capabilityMapper);
+        assertThat(captureOutbound(List.of(), "{}", "gpt-image-openai", GPT_MATRIX)
+                .watermarkSupported()).isFalse();
     }
 }
