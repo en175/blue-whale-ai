@@ -304,7 +304,7 @@ export default function AudioDialog({
   const currentRefs = orderRefStripItems(allRefs, r => `media:${r.source}:${r.id}`, mixedStrip.order);
   const orderedAttachments = orderRefStripItems(attachments ?? [], a => `text:${a.nodeId}`, mixedStrip.order);
   const invalidPrompt = (promptDoc !== null && docHasInvalidRef(promptDoc))
-    || (maxInput != null && billedCharCount > maxInput);
+    || (maxInput != null && promptText.length > maxInput);
   const handleStripReorder = (from: number, to: number) => {
     const { nextMedia: nextRefIds, nextText: nextTextKeys, mediaChanged: refChanged, textChanged } = mixedStrip.reorder(from, to);
     if (refChanged) {
@@ -556,7 +556,7 @@ export default function AudioDialog({
           {}
           <div
             data-testid="audio-char-count"
-            className={`${styles.charCount} ${maxInput != null && billedCharCount >= maxInput ? styles.charCountWarn : ''}`}
+            className={`${styles.charCount} ${maxInput != null && promptText.length >= maxInput ? styles.charCountWarn : ''}`}
           >
             {promptCharCountLabel(billedCharCount, maxInput)}
           </div>

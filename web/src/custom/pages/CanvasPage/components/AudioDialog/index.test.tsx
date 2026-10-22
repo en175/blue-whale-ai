@@ -550,6 +550,12 @@ describe('IKJIVN 音频面板报价带当前文本且不带 target_node_id', () 
 
     await typePromptRefText(container, `${'字'.repeat(101)}${spaces}`);
     expect(container.querySelector<HTMLButtonElement>('[data-testid="audio-send"]')!.disabled).toBe(true);
+
+    await typePromptRefText(container, `${'字'.repeat(50)}${' '.repeat(5)}${'字'.repeat(50)}`);
+    expect(container.querySelector<HTMLButtonElement>('[data-testid="audio-send"]')!.disabled).toBe(true);
+
+    await typePromptRefText(container, `${'🐋'.repeat(60)}${'字'.repeat(40)}`);
+    expect(container.querySelector<HTMLButtonElement>('[data-testid="audio-send"]')!.disabled).toBe(true);
   });
 });
 

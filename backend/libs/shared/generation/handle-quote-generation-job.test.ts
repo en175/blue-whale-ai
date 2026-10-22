@@ -46,6 +46,15 @@ const VIDEO_BODY = {
   },
 };
 
+const AUDIO_BODY = {
+  type: "audio",
+  expected_output_count: 1,
+  parameters: {
+    prompt: "你好 世界",
+    model_id: "seed-audio-1.0",
+  },
+};
+
 function fakeBilling() {
   const charge = vi
     .fn()
@@ -68,6 +77,18 @@ function modelWhitelist(videoRow: Record<string, unknown> = {}) {
     .mockResolvedValue([
       { model_id: MODEL_ID, version: 345, features: { audio: true }, ...videoRow },
       { model_id: IMAGE_MODEL_ID, features: { image_reference_max: 10 } },
+      {
+        model_id: "seed-audio-1.0",
+        version: 9,
+        features: { audio_reference_max: 3, image_reference_max: 1 },
+        pricing: {
+          baseUnit: "usage.characters",
+          basePrice: { kind: "const", value: 19000 },
+          unitDenominator: 100,
+          quantityStep: 100,
+          minCredits: 1,
+        },
+      },
       {
         model_id: MODEL_25_ID,
         features: {
@@ -197,6 +218,26 @@ describe("handleQuoteGenerationJob", () => {
     expect(queryBalance).not.toHaveBeenCalled();
     expect(result.code).toBe(200);
     expect(result.data).toEqual({ credits: 42, quote_revision: expect.any(String) });
+  });
+
+  it("★ 音频报价把文本折成去空白的 prompt_characters，不再按 0 字落到下限", async () => {
+    const { client, quote } = fakeBilling();
+    const result = await handleQuoteGenerationJob(
+      USER_ID,
+      PROJECT_ID,
+      AUDIO_BODY,
+      previewDeps(client, vi.fn().mockResolvedValue("free")),
+    );
+
+    expect(result.code).toBe(200);
+    const quoteArg = quote.mock.calls[0]?.[0] as unknown as {
+      specs: Record<string, string>;
+      taskType: string;
+    };
+    expect(quoteArg.taskType).toBe("audio");
+    expect(quoteArg.specs.prompt_characters).toBe("4");
+    expect(quoteArg.specs).not.toHaveProperty("prompt");
+    expect(quoteArg.specs.reference_count).toBe("0");
   });
 
   it("★ 图片参考图进报价规格 —— 参考图是定价维度，漏了预览就比实扣低", async () => {
