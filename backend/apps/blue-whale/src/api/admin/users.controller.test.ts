@@ -365,7 +365,7 @@ describe("AdminUsersController.manage（IKJABH 重置密码）", () => {
     return controller.manage(USER, rawUserId, body as Record<string, unknown>);
   }
 
-  it("重置：写新口令（置强制改密）→ 踢该用户全部会话 → 审计 user.reset_password", async () => {
+  it("重置：写新口令 → 踢该用户全部会话 → 审计 user.reset_password", async () => {
     const { controller, identity, sessions, operationLog } = createController({
       revokeAllForUser: vi.fn().mockResolvedValue(2),
     });

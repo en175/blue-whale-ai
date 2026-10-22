@@ -65,7 +65,7 @@ describe("bw_users.must_change_password 删除 — 074 drop", () => {
     const offenders = roots
       .flatMap((root) => collectSourceFiles(root))
       .filter((file) => file !== SELF)
-      .filter((file) => /must_change_password|mustChangePassword/.test(readFileSync(file, "utf8")))
+      .filter((file) => /\bmust[-_]?change[-_]?password\b/i.test(readFileSync(file, "utf8")))
       .map((file) => relative(REPO_ROOT, file))
       .sort();
 

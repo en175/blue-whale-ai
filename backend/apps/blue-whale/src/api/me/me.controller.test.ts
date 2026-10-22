@@ -34,7 +34,7 @@ function createController(overrides: {
     revoke: overrides.revoke ?? vi.fn().mockResolvedValue(undefined),
   };
   const identity = {
-    changePassword: overrides.changePassword ?? vi.fn().mockResolvedValue(false),
+    changePassword: overrides.changePassword ?? vi.fn().mockResolvedValue(undefined),
     resolveTier: overrides.resolveTier ?? vi.fn().mockResolvedValue("free"),
     listRoleCodes: overrides.listRoleCodes ?? vi.fn().mockResolvedValue([]),
     isAdmin: overrides.isAdmin ?? vi.fn().mockResolvedValue(false),

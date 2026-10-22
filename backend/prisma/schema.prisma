@@ -677,6 +677,7 @@ model bw_users {
   /// new-api 迁来还没设过我们侧口令的行没有它。校验路径必须把 NULL 当作
   /// 「不能用口令登录」，而不是「任意口令都能登」——见 `libs/shared/identity/password.ts`。
   password     String?  @db.VarChar(63)
+
   @@unique([username], map: "uk_bw_users__username")
 }
 
