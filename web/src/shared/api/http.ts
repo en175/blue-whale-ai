@@ -1,5 +1,5 @@
 import { toast } from 'sonner';
-import { handleUnauthorized } from '@/shared/utils/auth';
+import { handleAccountDisabled, handleUnauthorized } from '@/shared/utils/auth';
 import { getSessionToken } from '@/shared/api/sessionToken';
 
 export const API_PREFIX = '/api';
@@ -107,13 +107,6 @@ async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
     init?.signal?.removeEventListener('abort', onExternalAbort);
   }
 
-  if (
-    res.status === 401 &&
-    !path.startsWith(`${API_PREFIX}/auth/`) &&
-    path !== `${API_PREFIX}/admin/session`
-  ) {
-    handleUnauthorized();
-  }
   return res;
 }
 
@@ -149,7 +142,16 @@ async function doRequest<T>(path: string, init?: ApiRequestInit): Promise<{ data
       body?.data,
       typeof body?.error_code === 'string' ? body.error_code : undefined,
     );
-    if (!silent && err.status !== 401) toast.error(err.message);
+    if (err.errorCode === 'account_disabled') {
+      handleAccountDisabled();
+    } else if (
+      err.status === 401 &&
+      !path.startsWith(`${API_PREFIX}/auth/`) &&
+      path !== `${API_PREFIX}/admin/session`
+    ) {
+      handleUnauthorized(err.errorCode);
+    }
+    if (!silent && err.status !== 401 && err.errorCode !== 'account_disabled') toast.error(err.message);
     throw err;
   }
   return { data: body.data as T, warning: body.warning };

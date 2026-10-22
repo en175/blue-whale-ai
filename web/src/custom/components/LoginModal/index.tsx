@@ -27,6 +27,7 @@ import { isMainlandPhone, PHONE_FORMAT_MESSAGE, SMS_SENT_MESSAGE } from '@/custo
 import Modal from '@/custom/components/Modal';
 import { useAuthStore, type SessionUser } from '@/shared/stores/auth';
 import { updateUser } from '@/shared/utils/auth';
+import { publishSessionSync } from '@/shared/utils/sessionSync';
 import styles from './index.module.css';
 import {
   PLATFORM_PRIVACY_POLICY_HREF,
@@ -38,6 +39,7 @@ type LoginView = 'phone' | 'verify' | 'bind';
 interface LoginModalProps {
   onClose: () => void;
   onSuccess?: () => void;
+  notice?: string;
 }
 
 const SEND_CODE_COOLDOWN_SECONDS = 60;
@@ -45,6 +47,16 @@ const TERMS_REQUIRED_MESSAGE = '请先阅读并同意用户服务协议和隐私
 
 function messageOf(error: unknown, fallback: string) {
   return isApiError(error) ? error.message : fallback;
+}
+
+function FormMessages({ notice, error }: { notice?: string; error: string }) {
+  if (!notice && !error) return null;
+  return (
+    <>
+      {notice ? <p className={styles.error}>{notice}</p> : null}
+      {error ? <p className={styles.error}>{error}</p> : null}
+    </>
+  );
 }
 
 function LoginBackdrop() {
@@ -146,7 +158,7 @@ function PhoneField({
   );
 }
 
-export default function LoginModal({ onClose, onSuccess }: LoginModalProps) {
+export default function LoginModal({ onClose, onSuccess, notice }: LoginModalProps) {
   const [view, setView] = useState<LoginView>('phone');
   const [phone, setPhone] = useState('');
   const [code, setCode] = useState('');
@@ -190,6 +202,7 @@ export default function LoginModal({ onClose, onSuccess }: LoginModalProps) {
           roles: [],
         };
     useAuthStore.getState().applyLogin({ ...login, email: login.email ?? '' }, user);
+    publishSessionSync({ kind: 'login' });
     fetchAdminSession()
       .then((session) => updateUser({ isAdmin: session.isAdmin }))
       .catch(() => undefined);
@@ -428,7 +441,7 @@ export default function LoginModal({ onClose, onSuccess }: LoginModalProps) {
                   {sendLabel}
                 </button>
               </label>
-              {error && <p className={styles.error}>{error}</p>}
+              <FormMessages notice={notice} error={error} />
               <button
                 type="submit"
                 className={loginReady ? `${styles.submit} ${styles.submitReady}` : styles.submit}
@@ -489,7 +502,7 @@ export default function LoginModal({ onClose, onSuccess }: LoginModalProps) {
                   {passwordVisible ? <EyeOff size={18} /> : <Eye size={18} />}
                 </button>
               </label>
-              {error && <p className={styles.error}>{error}</p>}
+              <FormMessages notice={notice} error={error} />
               <button
                 type="submit"
                 className={verifyReady ? `${styles.submit} ${styles.submitReady}` : styles.submit}
@@ -551,7 +564,7 @@ export default function LoginModal({ onClose, onSuccess }: LoginModalProps) {
                   {sendLabel}
                 </button>
               </label>
-              {error && <p className={styles.error}>{error}</p>}
+              <FormMessages notice={notice} error={error} />
               <button
                 type="submit"
                 className={loginReady ? `${styles.submit} ${styles.submitReady}` : styles.submit}

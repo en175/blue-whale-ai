@@ -10,7 +10,10 @@ import {
 import DropdownMenu from '@/custom/components/DropdownMenu';
 import { joinClassNames } from '@/custom/utils/class-names';
 import styles from './index.module.css';
+import { showToast } from '@/shared/components/Toast';
 import { getCurrentUser, subscribe, isAdmin, setSession } from '@/shared/utils/auth';
+import { BROWSER_LOGOUT_MESSAGE } from '@/shared/utils/sessionNotice';
+import { publishSessionSync } from '@/shared/utils/sessionSync';
 import { accountProfileKeys, logout, fetchCredits } from '@/custom/api/auth';
 import { useAuthStore } from '@/shared/stores/auth';
 import { useRechargeUiStore } from '@/custom/stores/recharge';
@@ -76,6 +79,8 @@ export default function UserDropdown() {
     setLoggingOut(true);
     await logout().catch(() => undefined);
     setSession(null);
+    publishSessionSync({ kind: 'logout' });
+    showToast('success', BROWSER_LOGOUT_MESSAGE);
     setLoggingOut(false);
   };
 

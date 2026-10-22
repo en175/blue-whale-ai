@@ -18,10 +18,6 @@ vi.mock('@/custom/utils/creditsGate', async (importOriginal) => {
     openRechargeForCreditsError: vi.fn(() => false),
   };
 });
-vi.mock('@/shared/stores/authPrompt', () => ({
-  useAuthPromptStore: { getState: () => ({ addResume: vi.fn() }) },
-}));
-
 const { blockIfCreditsInsufficient, openRechargeForCreditsError } = await import('@/custom/utils/creditsGate');
 
 function mediaNode(id: string, data: Record<string, unknown> = {}): Node {
@@ -297,11 +293,22 @@ describe('startGenerationJob 创建生成任务', () => {
     expect(bag.runtime.submitCalls[0].payload.target_node_id).toBeUndefined();
   });
 
-  it('创建失败为 401 时摘卡并登记鉴权恢复', async () => {
+  it('创建失败为 401 时保留草稿且不重发', async () => {
     await mount([]);
     bag.runtime.nextError = new ApiError(401, '未登录');
-    expect(handles().startGenerationJob('image', { model_id: 'm', prompt: 'p' })).toBe(true);
-    expect(bag.nodes).toHaveLength(0);
+    expect(handles().startGenerationJob('image', { model_id: 'm', prompt: '把猫画成蓝鲸' })).toBe(true);
+    expect(bag.nodes).toHaveLength(1);
+    expect(bag.nodes[0]?.data).toMatchObject({ prompt: '把猫画成蓝鲸' });
+    expect(bag.patches).toContainEqual({
+      nodeId: bag.nodes[0]?.id,
+      patch: {
+        draft: true,
+        genStatus: 'draft',
+        progress: undefined,
+        errorText: undefined,
+        fileName: '图片草稿',
+      },
+    });
   });
 
   it('创建失败为非鉴权错误时交还运行时收敛', async () => {

@@ -153,21 +153,14 @@ describe('专属重试归属冲突的意图治理（IKJP8A）', () => {
     expect(vi.mocked(retryAudioMix).mock.calls).toHaveLength(1);
   });
 
-  it('401 接续保留：失败卡无错误文案，续跑回调按同一意图重发', async () => {
+  it('401 停在失败卡，重新登录不自动重发', async () => {
     const ctx = setupRecoveryScenario();
     await ctx.runtime.recover('1');
     vi.mocked(retryAudioMix).mockRejectedValueOnce(new ApiError(401, '未登录', 401));
     expect(ctx.runtime.retry(NODE_ID)).toBe(true);
     await flush();
     expect(ctx.nodes.get(NODE_ID)?.data).toMatchObject({ genStatus: 'failed', errorText: '' });
-    expect(ctx.authResume).toHaveLength(1);
-    vi.mocked(retryAudioMix).mockResolvedValueOnce({
-      job_id: '501', status: 'queued', replayed: false,
-      canvas_binding: bindingView(SID_B, NODE_ID, '501', 2),
-    });
-    ctx.authResume[0]!();
-    await flush();
-    expect(ctx.retryCall(1)).toMatchObject({ key: SID_B, binding: { submission_id: SID_B, expected_binding_revision: 1 } });
-    expect(ctx.runtime.statusOf(NODE_ID)).toMatchObject({ phase: 'generating', jobId: '501', submissionId: SID_B });
+    expect(ctx.authResume).toHaveLength(0);
+    expect(vi.mocked(retryAudioMix).mock.calls).toHaveLength(1);
   });
 });
