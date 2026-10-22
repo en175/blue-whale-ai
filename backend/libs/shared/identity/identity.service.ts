@@ -26,7 +26,6 @@ export interface LocalLoginResult {
   email: string | null;
   phone: string | null;
   hasPassword: boolean;
-  mustChangePassword: boolean;
   role: number;
   status: number;
 }
@@ -35,7 +34,6 @@ export interface AccountFlags {
   phone: string | null;
   nickname: string | null;
   hasPassword: boolean;
-  mustChangePassword: boolean;
 }
 
 export {
@@ -128,7 +126,6 @@ export class IdentityService {
       email: user.email,
       phone: user.phone,
       hasPassword: user.password !== null,
-      mustChangePassword: user.mustChangePassword,
       role: roleRank(await this.roles.listRoleCodes(user.id)),
       status: user.status === USER_STATUS_NORMAL ? 1 : 0,
     };
@@ -201,7 +198,6 @@ export class IdentityService {
           phone: user.phone,
           nickname: user.nickname,
           hasPassword: user.password !== null,
-          mustChangePassword: user.mustChangePassword,
         }
       : null;
   }
@@ -209,7 +205,7 @@ export class IdentityService {
   async changePassword(
     userId: string | number,
     input: { oldPassword?: string | undefined; newPassword: string },
-  ): Promise<boolean> {
+  ): Promise<void> {
     const user = await this.users.findById(String(userId));
     if (!user) {
       throw new InvalidCredentialsError();
@@ -220,8 +216,7 @@ export class IdentityService {
       }
     }
     const passwordHash = await hashPassword(input.newPassword);
-    await this.users.updatePassword(String(userId), passwordHash, false);
-    return user.mustChangePassword;
+    await this.users.updatePassword(String(userId), passwordHash);
   }
 
   async resetPassword(userId: string | number, newPassword: string): Promise<void> {
@@ -230,7 +225,7 @@ export class IdentityService {
       throw new InvalidCredentialsError();
     }
     const passwordHash = await hashPassword(newPassword);
-    await this.users.updatePassword(String(userId), passwordHash, true);
+    await this.users.updatePassword(String(userId), passwordHash);
   }
 
 }

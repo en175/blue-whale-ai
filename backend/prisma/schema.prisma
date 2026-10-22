@@ -677,16 +677,6 @@ model bw_users {
   /// new-api 迁来还没设过我们侧口令的行没有它。校验路径必须把 NULL 当作
   /// 「不能用口令登录」，而不是「任意口令都能登」——见 `libs/shared/identity/password.ts`。
   password     String?  @db.VarChar(63)
-  /// 管理员重置口令后置 1：该用户**下次登录必须改密**，改完清零（IKJABH）。
-  ///
-  /// <p>为什么需要它：只靠「重置后踢掉全部会话」挡不住——用户拿管理员给的临时口令
-  /// 再登一次就回来了，而那个口令管理员是知道的。这个标记在**登录之后**仍然生效，
-  /// 前端据此强制弹改密。
-  ///
-  /// ⚠️ 默认 **false**：存量用户与手机号验证码建号的用户都没被重置过，
-  /// 默认 true 会让全站用户下次登录被集体拦去改密。
-  must_change_password Boolean @default(false)
-
   @@unique([username], map: "uk_bw_users__username")
 }
 

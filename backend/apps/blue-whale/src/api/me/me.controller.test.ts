@@ -43,7 +43,6 @@ function createController(overrides: {
       vi.fn().mockResolvedValue({
         phone: null,
         hasPassword: true,
-        mustChangePassword: false,
       }),
     bindPhone: overrides.bindPhone ?? vi.fn().mockResolvedValue(undefined),
     rebindVerifyCurrent:
@@ -148,7 +147,7 @@ describe("MeController（IKBRCK 改密）", () => {
       oldPassword: "OldPass123",
       newPassword: "NewPass456",
     });
-    expect(sessions.revokeAllForUser).toHaveBeenCalledWith(42, undefined);
+    expect(sessions.revokeAllForUser).toHaveBeenCalledWith(42);
     expect(sessions.revoke).not.toHaveBeenCalled();
   });
 
@@ -158,7 +157,7 @@ describe("MeController（IKBRCK 改密）", () => {
     });
     const result = await controller.changePassword(BODY, USER, REQ, RES);
     expect(result).toMatchObject({ code: 200, data: { revokedSessions: 0 } });
-    expect(sessions.revokeAllForUser).toHaveBeenCalledWith(42, undefined);
+    expect(sessions.revokeAllForUser).toHaveBeenCalledWith(42);
     expect(sessions.revoke).toHaveBeenCalledWith("sess_current");
     expect(RES.clearCookie).toHaveBeenCalled();
   });
@@ -201,45 +200,6 @@ describe("MeController（IKBRCK 改密）", () => {
       data: null,
     });
     expect(sessions.revokeAllForUser).not.toHaveBeenCalled();
-  });
-});
-
-describe("MeController（IKJABH 强制改密不掉线）", () => {
-  it("★ 强制改密：当前会话被豁免，其余会话照踢", async () => {
-    const { controller, sessions } = createController({
-      changePassword: vi.fn().mockResolvedValue(true),
-      revokeAllForUser: vi.fn().mockResolvedValue(2),
-    });
-
-    const result = await controller.changePassword(BODY, USER, REQ, RES);
-
-    expect(result).toMatchObject({ code: 200, data: { revokedSessions: 2 } });
-    expect(sessions.revokeAllForUser).toHaveBeenCalledWith(42, "sess_current");
-    expect(RES.clearCookie).not.toHaveBeenCalled();
-  });
-
-  it("★ 强制改密且枚举失败：兜底整个跳过，不能把刚豁免的会话又吊销掉", async () => {
-    const { controller, sessions } = createController({
-      changePassword: vi.fn().mockResolvedValue(true),
-      revokeAllForUser: vi.fn().mockRejectedValue(new Error("redis timeout")),
-    });
-
-    const result = await controller.changePassword(BODY, USER, REQ, RES);
-
-    expect(result).toMatchObject({ code: 200, data: { revokedSessions: 0 } });
-    expect(sessions.revoke).not.toHaveBeenCalled();
-    expect(RES.clearCookie).not.toHaveBeenCalled();
-  });
-
-  it("自助改密（非强制）行为不变：全部会话照旧吊销，含当前会话", async () => {
-    const { controller, sessions } = createController({
-      changePassword: vi.fn().mockResolvedValue(false),
-      revokeAllForUser: vi.fn().mockResolvedValue(1),
-    });
-
-    await controller.changePassword(BODY, USER, REQ, RES);
-
-    expect(sessions.revokeAllForUser).toHaveBeenCalledWith(42, undefined);
   });
 });
 
@@ -339,28 +299,6 @@ describe("MeController（IKJA4Q 手机号与口令标识）", () => {
     const result = await controller.me({ userId: "42", username: "alice" } as never);
 
     expect(result).toMatchObject({ data: { phone: "", has_password: false } });
-  });
-
-  it("★ must_change_password 来自 identity 现查（IKJABH）", async () => {
-    const resolveAccountFlags = vi
-      .fn()
-      .mockResolvedValue({ phone: null, hasPassword: true, mustChangePassword: true });
-    const { controller } = createController({ resolveAccountFlags });
-
-    const result = await controller.me({ userId: "42", username: "alice" } as never);
-
-    expect(result).toMatchObject({ data: { must_change_password: true } });
-    expect(resolveAccountFlags).toHaveBeenCalledWith("42");
-  });
-
-  it("查不到人时 must_change_password 回 false，不凭空拦人改密", async () => {
-    const { controller } = createController({
-      resolveAccountFlags: vi.fn().mockResolvedValue(null),
-    });
-
-    const result = await controller.me({ userId: "42", username: "alice" } as never);
-
-    expect(result).toMatchObject({ data: { must_change_password: false } });
   });
 
   it("绑定手机号：合法入参转交 identity，返回成功信封", async () => {

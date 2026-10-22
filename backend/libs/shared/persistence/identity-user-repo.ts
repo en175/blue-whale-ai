@@ -9,7 +9,6 @@ export interface IdentityUserRow {
   phone: string | null;
   status: string;
   password: string | null;
-  mustChangePassword: boolean;
 }
 
 export type IdentityUserStatus = "NORMAL" | "DISABLED";
@@ -33,11 +32,7 @@ export interface IdentityUserRepo {
     phone?: string | null | undefined;
     nickname?: string | null | undefined;
   }): Promise<IdentityUserRow>;
-  updatePassword(
-    id: string,
-    passwordHash: string,
-    mustChangePassword: boolean,
-  ): Promise<void>;
+  updatePassword(id: string, passwordHash: string): Promise<void>;
   updatePhone(id: string, phone: string): Promise<void>;
   updateNickname(id: string, nickname: string): Promise<void>;
   updateStatus(id: string, status: IdentityUserStatus): Promise<boolean>;
@@ -65,7 +60,6 @@ const SELECT = {
   phone: true,
   status: true,
   password: true,
-  must_change_password: true,
 } as const;
 
 const SELECT_WITH_DELETE = {
@@ -100,7 +94,6 @@ export function createIdentityUserRepo(prisma: PrismaClient): IdentityUserRepo {
     phone: string | null;
     status: string;
     password: string | null;
-    must_change_password: boolean;
   }): IdentityUserRow {
     return {
       id: String(row.id),
@@ -110,7 +103,6 @@ export function createIdentityUserRepo(prisma: PrismaClient): IdentityUserRepo {
       phone: row.phone,
       status: row.status,
       password: row.password,
-      mustChangePassword: row.must_change_password,
     };
   }
 
@@ -203,12 +195,11 @@ export function createIdentityUserRepo(prisma: PrismaClient): IdentityUserRepo {
       }
     },
 
-    async updatePassword(id, passwordHash, mustChangePassword) {
+    async updatePassword(id, passwordHash) {
       await prisma.bw_users.update({
         where: { id: BigInt(id) },
         data: {
           password: passwordHash,
-          must_change_password: mustChangePassword,
           gmt_modified: new Date(),
         },
       });

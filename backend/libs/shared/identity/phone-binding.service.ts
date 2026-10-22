@@ -49,7 +49,6 @@ export class PhoneBindingService {
       email: user.email,
       phone: user.phone,
       hasPassword: user.password !== null,
-      mustChangePassword: user.mustChangePassword,
       role: roleRank(await this.roles.listRoleCodes(user.id)),
       status: user.status === USER_STATUS_NORMAL ? 1 : 0,
     };

@@ -17,7 +17,6 @@ export interface LoginResponseData {
   phone: string;
   is_new_user: boolean;
   has_password: boolean;
-  must_change_password: boolean;
 }
 
 export interface LoginEntry {
@@ -47,7 +46,6 @@ function loginResponse(
     phone: result.phone ?? "",
     is_new_user: isNewUser,
     has_password: result.hasPassword,
-    must_change_password: result.mustChangePassword,
   };
 }
 
