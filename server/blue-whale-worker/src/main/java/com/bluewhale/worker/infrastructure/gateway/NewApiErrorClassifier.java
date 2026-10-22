@@ -33,6 +33,21 @@ public final class NewApiErrorClassifier {
             Pattern.CASE_INSENSITIVE
     );
 
+    private static final Pattern VIDEO_EDIT_TASK_PROSE_PATTERN = Pattern.compile(
+            "identified your task as video editing",
+            Pattern.CASE_INSENSITIVE
+    );
+
+    private static final Pattern VIDEO_EDIT_RATIO_PATTERN = Pattern.compile(
+            "`?ratio`?\\s+must\\s+be\\s+`?adaptive`?",
+            Pattern.CASE_INSENSITIVE
+    );
+
+    private static final Pattern VIDEO_EDIT_DURATION_PATTERN = Pattern.compile(
+            "`?duration`?\\s+must\\s+be\\s+`?-1`?\\b",
+            Pattern.CASE_INSENSITIVE
+    );
+
     public static String classifyError(String text, int httpStatus) {
         if (isCopyrightSignal(text)) {
             return GenerationError.ERROR_CONTENT_REJECTED_REFERENCE;
@@ -76,6 +91,10 @@ public final class NewApiErrorClassifier {
     }
 
     public static boolean isTaskTypeSignal(String text) {
-        return text != null && TASK_TYPE_PATTERN.matcher(text).find();
+        if (text == null) return false;
+        if (TASK_TYPE_PATTERN.matcher(text).find()) return true;
+        if (VIDEO_EDIT_TASK_PROSE_PATTERN.matcher(text).find()) return true;
+        return VIDEO_EDIT_RATIO_PATTERN.matcher(text).find()
+                && VIDEO_EDIT_DURATION_PATTERN.matcher(text).find();
     }
 }

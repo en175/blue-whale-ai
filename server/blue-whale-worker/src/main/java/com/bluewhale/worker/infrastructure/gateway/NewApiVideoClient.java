@@ -136,7 +136,7 @@ public class NewApiVideoClient {
             String rawText = respBody != null ? respBody.string() : "";
 
             if (!response.isSuccessful()) {
-                String code = NewApiErrorClassifier.classifyError(rawText, response.code());
+                String code = classifySubmitFailure(rawText, response.code());
                 String truncated = rawText.length() > 300 ? rawText.substring(0, 300) + "…" : rawText;
                 throw new VideoProviderError(code,
                         "new-api 视频提交失败: HTTP " + response.code() + " body=" + truncated,
@@ -197,7 +197,7 @@ public class NewApiVideoClient {
             String rawText = respBody != null ? respBody.string() : "";
 
             if (!response.isSuccessful()) {
-                String code = NewApiErrorClassifier.classifyError(rawText, response.code());
+                String code = classifySubmitFailure(rawText, response.code());
                 String truncated = rawText.length() > 300 ? rawText.substring(0, 300) + "…" : rawText;
                 throw new VideoProviderError(code,
                         "new-api 成片提交失败: HTTP " + response.code() + " body=" + truncated,
@@ -219,6 +219,15 @@ public class NewApiVideoClient {
             throw new VideoProviderError(GenerationError.ERROR_PROVIDER_FAILED,
                     "new-api 成片提交解析失败: " + e.getMessage());
         }
+    }
+
+    private static String classifySubmitFailure(String rawText, int httpStatus) {
+        String code = NewApiErrorClassifier.classifyError(rawText, httpStatus);
+        if (GenerationError.ERROR_PROVIDER_FAILED.equals(code)
+                && NewApiErrorClassifier.isTaskTypeSignal(rawText)) {
+            return GenerationError.ERROR_TASK_TYPE_PARAM_CONSTRAINT;
+        }
+        return code;
     }
 
     private static SubmitResult parseSubmitResult(JsonNode parsed) {
