@@ -4,10 +4,6 @@ import { describe, expect, it, vi } from "vitest";
 const repos = vi.hoisted(() => ({
   createIdentityUserRepo: vi.fn(),
   createIdentityRoleRepo: vi.fn(),
-  createIdentityMembershipRepo: vi.fn(),
-  createIdentityLoginLogRepo: vi.fn(),
-  createAdminUserQuery: vi.fn(),
-  createAuthRepo: vi.fn(),
 }));
 
 vi.mock("@lib/shared/persistence/identity-user-repo.js", async (importOriginal) => ({
@@ -17,22 +13,6 @@ vi.mock("@lib/shared/persistence/identity-user-repo.js", async (importOriginal) 
 vi.mock("@lib/shared/persistence/identity-role-repo.js", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   createIdentityRoleRepo: repos.createIdentityRoleRepo,
-}));
-vi.mock("@lib/shared/persistence/identity-membership-repo.js", async (importOriginal) => ({
-  ...(await importOriginal<Record<string, unknown>>()),
-  createIdentityMembershipRepo: repos.createIdentityMembershipRepo,
-}));
-vi.mock("@lib/shared/persistence/identity-login-log-repo.js", async (importOriginal) => ({
-  ...(await importOriginal<Record<string, unknown>>()),
-  createIdentityLoginLogRepo: repos.createIdentityLoginLogRepo,
-}));
-vi.mock("@lib/shared/persistence/admin-user-query.js", async (importOriginal) => ({
-  ...(await importOriginal<Record<string, unknown>>()),
-  createAdminUserQuery: repos.createAdminUserQuery,
-}));
-vi.mock("@lib/shared/persistence/auth-repo.js", async (importOriginal) => ({
-  ...(await importOriginal<Record<string, unknown>>()),
-  createAuthRepo: repos.createAuthRepo,
 }));
 
 import { hashPassword } from "@lib/shared/identity/password.js";
@@ -54,10 +34,6 @@ async function buildService(user: Partial<IdentityUserRow> | null) {
   repos.createIdentityRoleRepo.mockReturnValue({
     listRoleCodes: vi.fn().mockResolvedValue([]),
   });
-  repos.createIdentityMembershipRepo.mockReturnValue({});
-  repos.createIdentityLoginLogRepo.mockReturnValue({});
-  repos.createAdminUserQuery.mockReturnValue({});
-  repos.createAuthRepo.mockReturnValue({});
 
   return { service: new IdentityService({ client: {} } as never), users };
 }
@@ -151,34 +127,14 @@ describe("IdentityService.resetPassword", () => {
 });
 
 describe("IdentityService 昵称", () => {
-  function build(config: {
-    user?: Partial<IdentityUserRow> | null;
-    code?: { id: string; code: string; attempts: number; purpose: string } | null;
-    attempts?: number;
-    consumed?: boolean;
-  }) {
+  function build(config: { user?: Partial<IdentityUserRow> | null }) {
     const users = {
       findById: vi.fn().mockResolvedValue(config.user === null ? null : userRow(config.user ?? {})),
-      findByLoginName: vi.fn().mockResolvedValue(
-        config.user === null ? null : userRow(config.user ?? {}),
-      ),
-      updatePhone: vi.fn().mockResolvedValue(undefined),
       updateNickname: vi.fn().mockResolvedValue(undefined),
-    };
-    const authCodes = {
-      findActiveCode: vi.fn().mockResolvedValue(config.code ?? null),
-      incrementAttempts: vi.fn().mockResolvedValue(config.attempts ?? 1),
-      consumeCode: vi.fn().mockResolvedValue(config.consumed ?? true),
-      findByPhone: vi.fn(),
-      upsertUser: vi.fn(),
     };
     repos.createIdentityUserRepo.mockReturnValue(users);
     repos.createIdentityRoleRepo.mockReturnValue({ listRoleCodes: vi.fn().mockResolvedValue([]) });
-    repos.createIdentityMembershipRepo.mockReturnValue({});
-    repos.createIdentityLoginLogRepo.mockReturnValue({});
-    repos.createAdminUserQuery.mockReturnValue({});
-    repos.createAuthRepo.mockReturnValue(authCodes);
-    return { service: new IdentityService({ client: {} } as never), users, authCodes };
+    return { service: new IdentityService({ client: {} } as never), users };
   }
 
   it("昵称非法 → NicknameInvalidError，不写库", async () => {

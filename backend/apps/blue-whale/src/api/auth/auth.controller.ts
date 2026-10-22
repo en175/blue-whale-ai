@@ -187,8 +187,10 @@ export class AuthController {
     },
     @Headers("x-forwarded-for") forwardedFor?: string,
     @Res({ passthrough: true }) res?: Response,
+    @Headers("x-real-ip") realIp?: string,
   ) {
     const ip = forwardedFor?.split(",")[0]?.trim() ?? "unknown";
+    const allowlistIp = realIp?.trim() || null;
     let request;
     try {
       request = normalizeVerificationInput({
@@ -229,7 +231,7 @@ export class AuthController {
 
     const phoneDecision = await enforceRateLimit(
       SMS_PHONE_BUCKETS,
-      { ip, allowlistIp: ip, account: null, phone, user: null },
+      { ip, allowlistIp, account: null, phone, user: null },
       { limiter: this.limiter, allowlist: this.allowlist },
     );
     if (!phoneDecision.allowed) {

@@ -28,7 +28,7 @@ import { SnapshotService } from "@lib/shared/snapshot/snapshot.service.js";
 import { ModelCapabilityReadService } from "@lib/shared/generation/model-capability.service.js";
 import { GenerationCommandService } from "@lib/shared/generation/generation-command.service.js";
 import { MaterialService } from "@lib/shared/material/material.service.js";
-import { IdentityService } from "@lib/shared/identity/identity.service.js";
+import { AccountDirectoryService } from "@lib/shared/identity/account-directory.service.js";
 import { AllExceptionsFilter } from "@lib/infra/filters/all-exceptions.filter.js";
 
 vi.mock("@lib/shared/generation/generation-queue.js", () => ({
@@ -145,7 +145,7 @@ describe.skipIf(process.env.IKI697_BROWSER !== "1")(
       Reflect.defineMetadata("design:paramtypes", [ProjectService, AssetService, AssetStorageService], ProjectAssetsController);
       Reflect.defineMetadata("design:paramtypes", [ModelCapabilityReadService], GenerationModelsController);
       Reflect.defineMetadata("design:paramtypes", [ProjectService, GenerationCommandService, ModelCapabilityReadService,
-        CanvasService, MaterialService, AssetService, IdentityService], GenerationJobsController);
+        CanvasService, MaterialService, AssetService, AccountDirectoryService], GenerationJobsController);
       class HarnessModule {}
       Module({ controllers: [CanvasesController, ProjectsController, JobsController, AudioMixesController,
         AssetsController, ProjectAssetsController, GenerationModelsController, GenerationJobsController], providers: [
@@ -160,7 +160,7 @@ describe.skipIf(process.env.IKI697_BROWSER !== "1")(
         { provide: ModelCapabilityReadService, useValue: new ModelCapabilityReadService(prisma) },
         { provide: GenerationCommandService, useValue: new GenerationCommandService(prisma) },
         { provide: MaterialService, useValue: {} },
-        { provide: IdentityService, useValue: new IdentityService(prisma) },
+        { provide: AccountDirectoryService, useValue: new AccountDirectoryService(prisma) },
       ] })(HarnessModule);
       app = await NestFactory.create(HarnessModule, { logger: false, bodyParser: false });
       app.useGlobalFilters(new AllExceptionsFilter());

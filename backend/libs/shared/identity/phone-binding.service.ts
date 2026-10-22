@@ -35,9 +35,7 @@ export class PhoneBindingService {
 
   constructor(
     prisma: PrismaService,
-    private readonly verification: PhoneVerificationService = new PhoneVerificationService(
-      prisma,
-    ),
+    private readonly verification: PhoneVerificationService,
   ) {
     this.users = createIdentityUserRepo(prisma.client);
     this.roles = createIdentityRoleRepo(prisma.client);

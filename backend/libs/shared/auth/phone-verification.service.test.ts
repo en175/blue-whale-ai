@@ -149,7 +149,7 @@ describe("PhoneVerificationService.verify / consume", () => {
     );
   });
 
-  it("剩余次数为 0 时不再返回 CodeWrongError", async () => {
+  it("第 4 次错误 → 仍返回 CodeWrongError(1)", async () => {
     resetRepo();
     repo.findActiveCode.mockResolvedValue({ id: "9", code: "123456" });
     repo.incrementAttempts.mockResolvedValue(4);

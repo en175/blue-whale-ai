@@ -151,6 +151,7 @@ function setup() {
     sessions as unknown as SessionService,
     identity as never,
   );
+  const allowlist = { isAllowed: vi.fn(() => false) };
   const controller = new AuthController(
     verification as never,
     sessions as unknown as SessionService,
@@ -161,7 +162,7 @@ function setup() {
     phoneActions as never,
     captcha as never,
     loginEntry,
-    { isAllowed: () => false } as never,
+    allowlist as never,
   );
   const res = {
     cookie: vi.fn(),
@@ -178,6 +179,7 @@ function setup() {
     verification,
     phoneActions,
     captcha,
+    allowlist,
   };
 }
 
@@ -774,5 +776,47 @@ describe("AuthController 发码（验证码通过后）", () => {
     );
 
     expect(out).toMatchObject({ code: 400, msg: "短信发送失败" });
+  });
+
+  it("豁免只认 X-Real-IP：伪造 X-Forwarded-For 不能跳过手机号频控", async () => {
+    const { controller, limiter, allowlist, verification } = setup();
+    allowlist.isAllowed.mockImplementation((kind, key) => kind === "ip" && key === "10.0.0.1");
+    const take = vi.spyOn(limiter, "take").mockResolvedValue({ allowed: true } as never);
+
+    await controller.sendCode(
+      {
+        phone: "13800001234",
+        purpose: "login",
+        captcha_id: "cap_test",
+        captcha_answer: "AB2C",
+      },
+      "10.0.0.1",
+      undefined,
+      undefined,
+    );
+
+    expect(take).toHaveBeenCalled();
+    expect(verification.issue).toHaveBeenCalled();
+  });
+
+  it("X-Real-IP 命中豁免 → 跳过手机号频控", async () => {
+    const { controller, limiter, allowlist, verification } = setup();
+    allowlist.isAllowed.mockImplementation((kind, key) => kind === "ip" && key === "10.0.0.1");
+    const take = vi.spyOn(limiter, "take").mockResolvedValue({ allowed: true } as never);
+
+    await controller.sendCode(
+      {
+        phone: "13800001234",
+        purpose: "login",
+        captcha_id: "cap_test",
+        captcha_answer: "AB2C",
+      },
+      "203.0.113.9",
+      undefined,
+      "10.0.0.1",
+    );
+
+    expect(take).not.toHaveBeenCalled();
+    expect(verification.issue).toHaveBeenCalled();
   });
 });

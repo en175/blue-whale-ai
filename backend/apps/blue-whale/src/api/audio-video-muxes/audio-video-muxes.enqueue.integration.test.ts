@@ -12,7 +12,7 @@ import { CanvasService } from "@lib/shared/canvas/canvas.service.js";
 import { GenerationCommandService } from "@lib/shared/generation/generation-command.service.js";
 import { ModelCapabilityReadService } from "@lib/shared/generation/model-capability.service.js";
 import { enqueueAudioVideoMuxJob } from "@lib/shared/generation/generation-queue.js";
-import { IdentityService } from "@lib/shared/identity/identity.service.js";
+import { AccountDirectoryService } from "@lib/shared/identity/account-directory.service.js";
 import { MaterialService } from "@lib/shared/material/material.service.js";
 import { SystemSettingsService } from "@lib/shared/system-settings/index.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
@@ -65,7 +65,7 @@ describe.skipIf(!databaseUrl)("audio video mux creation when enqueue fails", () 
     Reflect.defineMetadata("design:paramtypes", [AudioVideoMuxesService], AudioVideoMuxesController);
     Reflect.defineMetadata("design:paramtypes", [
       ProjectService, GenerationCommandService, ModelCapabilityReadService,
-      CanvasService, MaterialService, AssetService, IdentityService,
+      CanvasService, MaterialService, AssetService, AccountDirectoryService,
     ], GenerationJobsController);
     class HarnessModule {}
     Module({ controllers: [AudioVideoMuxesController, GenerationJobsController], providers: [
@@ -78,7 +78,7 @@ describe.skipIf(!databaseUrl)("audio video mux creation when enqueue fails", () 
 
       { provide: MaterialService, useValue: new MaterialService(prisma, new SystemSettingsService(prisma)) },
       { provide: AssetService, useValue: new AssetService(prisma, new AssetStorageService()) },
-      { provide: IdentityService, useValue: new IdentityService(prisma) },
+      { provide: AccountDirectoryService, useValue: new AccountDirectoryService(prisma) },
     ] })(HarnessModule);
     app = await NestFactory.create(HarnessModule, { logger: false, bodyParser: false });
     app.use(json());

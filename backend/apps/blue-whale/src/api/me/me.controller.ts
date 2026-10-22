@@ -93,6 +93,9 @@ export class MeController {
     try {
       await this.phoneBinding.bindPhone(userId, { phone, code });
     } catch (error) {
+      if (error instanceof InvalidCredentialsError) {
+        throw new ApiError("登录已过期，请重新验证", 401, "unauthorized");
+      }
       const failure = projectAuthFailure(error);
       if (failure) {
         return fail(FAILURE_CODE, failure.message, null, failure.errorCode);

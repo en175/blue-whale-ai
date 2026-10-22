@@ -19,7 +19,7 @@ import { MaterialService } from "@lib/shared/material/material.service.js";
 import { SystemSettingsService } from "@lib/shared/system-settings/index.js";
 import { AssetService } from "@lib/shared/assets/assets.service.js";
 import { AssetStorageService } from "@lib/shared/assets/storage.service.js";
-import { IdentityService } from "@lib/shared/identity/identity.service.js";
+import { AccountDirectoryService } from "@lib/shared/identity/account-directory.service.js";
 import { AllExceptionsFilter } from "@lib/infra/filters/all-exceptions.filter.js";
 import { createSceneCardGenerationRepo } from "@lib/shared/persistence/scene-card-generation-repo.js";
 import { capabilityDigestFromModelCapability } from "@lib/shared/persistence/capability-digest.js";
@@ -153,7 +153,7 @@ describe.skipIf(!process.env.IKDMQV_DATABASE_URL)("Generation failure retry publ
     });
     const canvasService = new CanvasService(prisma, projects);
     Reflect.defineMetadata("design:paramtypes", [CanvasService], CanvasesController);
-    Reflect.defineMetadata("design:paramtypes", [ProjectService, GenerationCommandService, ModelCapabilityReadService, CanvasService, MaterialService, AssetService, AssetStorageService, IdentityService], GenerationJobsController);
+    Reflect.defineMetadata("design:paramtypes", [ProjectService, GenerationCommandService, ModelCapabilityReadService, CanvasService, MaterialService, AssetService, AssetStorageService, AccountDirectoryService], GenerationJobsController);
     Reflect.defineMetadata("design:paramtypes", [ModelCapabilityReadService], GenerationModelsController);
     Reflect.defineMetadata("design:paramtypes", [ProjectService, CanvasService, SnapshotService, PrismaService], ProjectsController);
     Reflect.defineMetadata("design:paramtypes", [JobsService], JobsController);
@@ -170,7 +170,7 @@ describe.skipIf(!process.env.IKDMQV_DATABASE_URL)("Generation failure retry publ
       { provide: MaterialService, useValue: new MaterialService(prisma, new SystemSettingsService(prisma)) },
       { provide: AssetService, useValue: new AssetService(prisma, new AssetStorageService()) },
       { provide: AssetStorageService, useValue: new AssetStorageService() },
-      { provide: IdentityService, useValue: new IdentityService(prisma) },
+      { provide: AccountDirectoryService, useValue: new AccountDirectoryService(prisma) },
     ] })(HarnessModule);
     app = await NestFactory.create(HarnessModule, { logger: false, bodyParser: false });
     app.useGlobalFilters(new AllExceptionsFilter());
