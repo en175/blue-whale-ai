@@ -1,6 +1,9 @@
 import { Injectable } from "@nestjs/common";
 
-import { InvalidVerificationCodeError } from "@lib/core";
+import {
+  LEGACY_VERIFICATION_PURPOSE,
+  type VerificationPurpose,
+} from "@lib/contracts";
 import type { Tier } from "@lib/core/identity/tier.js";
 import {
   LastSuperAdminError,
@@ -26,11 +29,13 @@ import {
   hashPassword,
   verifyPassword,
 } from "@lib/shared/identity/password.js";
+import { normalizeNickname } from "@lib/core";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 
 export interface LocalLoginResult {
   userId: number;
   username: string;
+  nickname: string | null;
   email: string | null;
   phone: string | null;
   hasPassword: boolean;
@@ -41,8 +46,83 @@ export interface LocalLoginResult {
 
 export interface AccountFlags {
   phone: string | null;
+  nickname: string | null;
   hasPassword: boolean;
   mustChangePassword: boolean;
+}
+
+const MAX_CODE_ATTEMPTS = 5;
+
+export class CodeExpiredError extends Error {
+  constructor() {
+    super("验证码已失效，请重新获取");
+    this.name = "CodeExpiredError";
+  }
+}
+
+export class CodeWrongError extends Error {
+  constructor(readonly remaining: number) {
+    super("验证码错误，请重新输入");
+    this.name = "CodeWrongError";
+  }
+}
+
+export class CodeAttemptsExhaustedError extends Error {
+  constructor() {
+    super("验证码连续错误5次，已失效，请重新获取");
+    this.name = "CodeAttemptsExhaustedError";
+  }
+}
+
+export class AccountDisabledError extends Error {
+  constructor() {
+    super("账号已停用");
+    this.name = "AccountDisabledError";
+  }
+}
+
+export class AccountDeletedError extends Error {
+  constructor() {
+    super("该手机号关联的账号已删除，暂无法登录");
+    this.name = "AccountDeletedError";
+  }
+}
+
+export class PhoneNotBoundError extends Error {
+  constructor() {
+    super("当前账号尚未绑定手机号");
+    this.name = "PhoneNotBoundError";
+  }
+}
+
+export class RebindSamePhoneError extends Error {
+  constructor() {
+    super("新手机号与当前手机号相同，无需更换");
+    this.name = "RebindSamePhoneError";
+  }
+}
+
+export class RebindBindingChangedError extends Error {
+  constructor() {
+    super("账号绑定状态已变化，请重新登录");
+    this.name = "RebindBindingChangedError";
+  }
+}
+
+export class MigrationIneligibleError extends Error {
+  constructor() {
+    super("账号或密码不正确，或当前账号不可迁移");
+    this.name = "MigrationIneligibleError";
+  }
+}
+
+export class NicknameInvalidError extends Error {
+  constructor() {
+    super(
+      "昵称需为2—20个字符，仅支持中文、英文大小写字母、数字、下划线（_）和短横线（-）",
+    );
+    this.name = "NicknameInvalidError";
+  }
 }
 
 export class PhoneAlreadyBoundError extends Error {
@@ -82,6 +162,7 @@ export class IdentityService {
     return {
       userId: Number(user.id),
       username: user.username,
+      nickname: user.nickname,
       email: user.email,
       phone: user.phone,
       hasPassword: user.password !== null,
@@ -130,17 +211,50 @@ export class IdentityService {
     return this.toLoginResult(created);
   }
 
+  private async validatePhoneCode(
+    phone: string,
+    purposes: readonly string[],
+    code: string,
+  ): Promise<string> {
+    const record = await this.authCodes.findActiveCode(phone, purposes);
+    if (!record) {
+      throw new CodeExpiredError();
+    }
+    if (record.code !== code) {
+      const attempts = await this.authCodes.incrementAttempts(record.id);
+      if (attempts >= MAX_CODE_ATTEMPTS) {
+        await this.authCodes.consumeCode(record.id);
+        throw new CodeAttemptsExhaustedError();
+      }
+      throw new CodeWrongError(MAX_CODE_ATTEMPTS - attempts);
+    }
+    return record.id;
+  }
+
+  private async consumePhoneCode(codeId: string): Promise<void> {
+    if (!(await this.authCodes.consumeCode(codeId))) {
+      throw new CodeExpiredError();
+    }
+  }
+
   async loginWithPhoneCode(input: {
     phone: string;
     code: string;
+    purpose?: VerificationPurpose;
   }): Promise<{ result: LocalLoginResult; isNewUser: boolean }> {
-    const record = await this.authCodes.findValidCode(input.phone, input.code);
-    if (!record) {
-      throw new InvalidVerificationCodeError("验证码错误或已过期");
-    }
+    const purpose = input.purpose ?? "login";
+    const codeId = await this.validatePhoneCode(
+      input.phone,
+      [purpose, LEGACY_VERIFICATION_PURPOSE],
+      input.code,
+    );
+
+    await this.assertPhoneAccountUsable(input.phone);
+    await this.consumePhoneCode(codeId);
 
     const user = await this.authCodes.upsertUser(input.phone);
-    await this.authCodes.markCodeUsed(record.id);
+    if (user.isDelete) throw new AccountDeletedError();
+    if (user.status !== USER_STATUS_NORMAL) throw new AccountDisabledError();
 
     if (user.created) {
       try {
@@ -158,10 +272,17 @@ export class IdentityService {
       this.logger.error(
         `手机号登录找到的账号不可用（userId=${user.id}）——该行可能已被软删，且手机号仍被它占用`,
       );
-      throw new InvalidCredentialsError();
+      throw new AccountDeletedError();
     }
 
     return { result: await this.toLoginResult(row), isNewUser: user.created };
+  }
+
+  private async assertPhoneAccountUsable(phone: string): Promise<void> {
+    const existing = await this.authCodes.findByPhone(phone);
+    if (!existing) return;
+    if (existing.isDelete) throw new AccountDeletedError();
+    if (existing.status !== USER_STATUS_NORMAL) throw new AccountDisabledError();
   }
 
   async bindPhone(
@@ -172,11 +293,98 @@ export class IdentityService {
     if (!self) throw new InvalidCredentialsError();
     if (self.phone) throw new PhoneAlreadyBoundError();
 
-    const record = await this.authCodes.findValidCode(input.phone, input.code);
-    if (!record) throw new InvalidVerificationCodeError("验证码错误或已过期");
-
+    const codeId = await this.validatePhoneCode(
+      input.phone,
+      ["bind", LEGACY_VERIFICATION_PURPOSE],
+      input.code,
+    );
+    await this.consumePhoneCode(codeId);
     await this.users.updatePhone(String(userId), input.phone);
-    await this.authCodes.markCodeUsed(record.id);
+  }
+
+  async rebindVerifyCurrent(userId: string | number, code: string): Promise<{ oldPhone: string }> {
+    const self = await this.users.findById(String(userId));
+    if (!self) throw new InvalidCredentialsError();
+    if (!self.phone) throw new PhoneNotBoundError();
+
+    const codeId = await this.validatePhoneCode(self.phone, ["rebind_old"], code);
+    await this.consumePhoneCode(codeId);
+    return { oldPhone: self.phone };
+  }
+
+  async commitRebind(
+    userId: string | number,
+    input: { oldPhone: string; phone: string; code: string },
+  ): Promise<{ phone: string }> {
+    const self = await this.users.findById(String(userId));
+    if (!self) throw new InvalidCredentialsError();
+    if (self.phone !== input.oldPhone) throw new RebindBindingChangedError();
+    if (self.phone === input.phone) throw new RebindSamePhoneError();
+
+    const codeId = await this.validatePhoneCode(input.phone, ["rebind_new"], input.code);
+    await this.consumePhoneCode(codeId);
+    await this.users.updatePhone(String(userId), input.phone);
+    return { phone: input.phone };
+  }
+
+  async verifyMigrationCandidate(input: {
+    username: string;
+    password: string;
+  }): Promise<{ userId: string }> {
+    const user = await this.users.findByLoginName(input.username);
+    if (!user || user.password === null) {
+      await burnVerificationTime(input.password);
+      throw new InvalidCredentialsError();
+    }
+    if (!(await verifyPassword(input.password, user.password))) {
+      throw new InvalidCredentialsError();
+    }
+    if (user.phone !== null || user.status !== USER_STATUS_NORMAL) {
+      throw new MigrationIneligibleError();
+    }
+    return { userId: user.id };
+  }
+
+  async commitMigrationBind(
+    userId: string | number,
+    input: { phone: string; code: string },
+  ): Promise<IdentityUserRow> {
+    const self = await this.users.findById(String(userId));
+    if (!self) throw new MigrationIneligibleError();
+    if (self.phone !== null || self.status !== USER_STATUS_NORMAL) {
+      throw new MigrationIneligibleError();
+    }
+    const codeId = await this.validatePhoneCode(
+      input.phone,
+      ["bind", LEGACY_VERIFICATION_PURPOSE],
+      input.code,
+    );
+    await this.consumePhoneCode(codeId);
+    await this.users.updatePhone(String(userId), input.phone);
+    const updated = await this.users.findById(String(userId));
+    if (!updated) throw new MigrationIneligibleError();
+    return updated;
+  }
+
+  async getLoginResult(userId: string | number): Promise<LocalLoginResult> {
+    const row = await this.users.findById(String(userId));
+    if (!row) throw new InvalidCredentialsError();
+    return this.toLoginResult(row);
+  }
+
+  async updateNickname(
+    userId: string | number,
+    raw: unknown,
+  ): Promise<{ nickname: string; changed: boolean }> {
+    const parsed = normalizeNickname(raw);
+    if (!parsed.ok) throw new NicknameInvalidError();
+    const self = await this.users.findById(String(userId));
+    if (!self) throw new InvalidCredentialsError();
+    if (self.nickname === parsed.value) {
+      return { nickname: parsed.value, changed: false };
+    }
+    await this.users.updateNickname(String(userId), parsed.value);
+    return { nickname: parsed.value, changed: true };
   }
 
   async resolveAccountFlags(userId: string | number): Promise<AccountFlags | null> {
@@ -184,6 +392,7 @@ export class IdentityService {
     return user
       ? {
           phone: user.phone,
+          nickname: user.nickname,
           hasPassword: user.password !== null,
           mustChangePassword: user.mustChangePassword,
         }

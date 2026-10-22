@@ -1,6 +1,11 @@
 import { CanActivate, ExecutionContext, Injectable } from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
 import { NewApiError } from "@lib/core";
+import {
+  ACCOUNT_ERROR_ACCOUNT_DISABLED,
+  ACCOUNT_ERROR_SESSION_EVICTED,
+  ACCOUNT_ERROR_SESSION_EXPIRED,
+} from "@lib/contracts";
 import type { Request, Response } from "express";
 import { IdentityService } from "@lib/shared/identity/index.js";
 import { SessionService } from "@lib/shared/session/session.service.js";
@@ -44,10 +49,15 @@ export class AuthGuard implements CanActivate {
     }
     (request as RequestWithUser).loginToken = token;
 
+    let claims;
     try {
-      await this.sessions.verifyToken(token);
+      claims = await this.sessions.verifyToken(token);
     } catch {
-      throw new NewApiError("登录已过期，请重新登录", 401, "unauthorized");
+      throw new NewApiError(
+        "登录已过期，请重新验证",
+        401,
+        ACCOUNT_ERROR_SESSION_EXPIRED,
+      );
     }
 
     let session;
@@ -58,7 +68,18 @@ export class AuthGuard implements CanActivate {
       throw new NewApiError("会话服务暂不可用", 503, "session_service_error");
     }
     if (!session) {
-      throw new NewApiError("登录已过期，请重新登录", 401, "unauthorized");
+      if (await this.sessions.wasEvicted(token)) {
+        throw new NewApiError(
+          "登录已失效，账号已在其他浏览器登录，请重新验证",
+          401,
+          ACCOUNT_ERROR_SESSION_EVICTED,
+        );
+      }
+      throw new NewApiError(
+        "登录已过期，请重新验证",
+        401,
+        ACCOUNT_ERROR_SESSION_EXPIRED,
+      );
     }
 
     if (session.needsRecheck) {
@@ -77,10 +98,16 @@ export class AuthGuard implements CanActivate {
       }
     }
     if (session.status !== ENABLED_STATUS) {
-      throw new NewApiError("账户已停用", 403, "account_disabled");
+      throw new NewApiError("账户已停用", 403, ACCOUNT_ERROR_ACCOUNT_DISABLED);
     }
 
-    response.cookie(SESSION_COOKIE_NAME, token, sessionCookieOptions());
+    const remainingMs = claims.expiresAt - Date.now();
+    if (remainingMs > 0) {
+      response.cookie(SESSION_COOKIE_NAME, token, {
+        ...sessionCookieOptions(),
+        maxAge: remainingMs,
+      });
+    }
 
     (request as RequestWithUser).user = {
       userId: String(session.userId),

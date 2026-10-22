@@ -19,14 +19,22 @@ import {
   uploadHomepageHeroFile,
   type HomepageHeroAdmin,
   type HomepageHeroPayload,
+  type HomepageHeroScene,
 } from '@/shared/api/homepageHeroes';
 import { isApiError } from '@/shared/api/http';
 import ConfirmModal from '../../components/ConfirmModal';
 import { remoteImageCrossOrigin, resolveMediaSrc } from '@/shared/utils/remoteImageCors';
 import auroraPoster from '@/shared/assets/home-hero/aurora-poster.jpg';
-import { Alert, Badge, Button, Checkbox, Empty, Modal, Page, PageHeader, Table } from '../../ui';
+import { Alert, Badge, Button, Checkbox, Empty, Modal, Page, PageHeader, Table, Tabs } from '../../ui';
 
 const fmtTime = (iso: string) => new Date(iso).toLocaleString('zh-CN', { hour12: false });
+
+const SCENE_TABS = [
+  { key: 'homepage', label: '首页背景' },
+  { key: 'auth', label: '登录弹窗' },
+] as const;
+
+const sceneLabel = (scene: HomepageHeroScene) => (scene === 'auth' ? '登录弹窗背景' : '首页背景');
 
 const errMsg = (e: unknown, fallback: string) => (isApiError(e) ? e.message : fallback);
 
@@ -50,7 +58,8 @@ const urlCellStyle = {
 
 export default function SiteConfig() {
   const queryClient = useQueryClient();
-  const list = useQuery(adminHomepageHeroesOptions());
+  const [scene, setScene] = useState<HomepageHeroScene>('homepage');
+  const list = useQuery(adminHomepageHeroesOptions(scene));
   const [form, setForm] = useState<{ id?: string } | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [draggedId, setDraggedId] = useState<string | null>(null);
@@ -58,6 +67,16 @@ export default function SiteConfig() {
 
   const items = list.data ?? [];
   const enabledCount = items.filter((row) => row.enabled === 1).length;
+  const label = sceneLabel(scene);
+
+  const changeScene = (next: string) => {
+    if (next !== 'homepage' && next !== 'auth') return;
+    setScene(next);
+    setForm(null);
+    setDeleteId(null);
+    setDraggedId(null);
+    setActionError('');
+  };
 
   const invalidate = () => {
     void queryClient.invalidateQueries({ queryKey: homepageHeroKeys.all });
@@ -89,7 +108,7 @@ export default function SiteConfig() {
   const saveMut = useMutation({
     mutationFn: async ({ id, payload }: { id?: string; payload: HomepageHeroPayload }) => {
       if (id) return updateHomepageHero(id, payload, { silent: true });
-      return createHomepageHero(payload, { silent: true });
+      return createHomepageHero({ ...payload, scene }, { silent: true });
     },
     onSuccess: () => {
       setForm(null);
@@ -122,8 +141,8 @@ export default function SiteConfig() {
   return (
     <Page>
       <PageHeader
-        title="通用配置"
-        subtitle={`首页封面图 / 视频（已启用 ${enabledCount}/${HOMEPAGE_HERO_MAX_ENABLED}）`}
+        title="站点设置"
+        subtitle={`${label}图 / 视频（已启用 ${enabledCount}/${HOMEPAGE_HERO_MAX_ENABLED}）`}
         extra={
           <Button
             variant="primary"
@@ -135,22 +154,29 @@ export default function SiteConfig() {
         }
       />
 
-      {}
-      <Alert tone="info" title="首页默认兜底背景">
-        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-          <img
-            src={auroraPoster}
-            alt="首页默认兜底背景"
-            style={{ width: 128, height: 72, flex: '0 0 auto', objectFit: 'cover', borderRadius: 'var(--admin-radius-surface)' }}
-          />
-          <div>
-            <p style={{ margin: 0 }}>
-              GET /api/site/homepage-heroes 仅返回已启用的后台条目，不包含此默认图。没有可播放条目时首页使用这张内置静态图；视频没有封面时也以它作为加载封面。
-            </p>
-            <code>web/src/shared/assets/home-hero/aurora-poster.jpg</code>
+      <Tabs items={SCENE_TABS} value={scene} onChange={changeScene} />
+
+      {scene === 'homepage' ? (
+        <Alert tone="info" title="首页默认兜底背景">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+            <img
+              src={auroraPoster}
+              alt="首页默认兜底背景"
+              style={{ width: 128, height: 72, flex: '0 0 auto', objectFit: 'cover', borderRadius: 'var(--admin-radius-surface)' }}
+            />
+            <div>
+              <p style={{ margin: 0 }}>
+                GET /api/site/homepage-heroes?scene=homepage 仅返回已启用的后台条目，不包含此默认图。没有可播放条目时首页使用这张内置静态图；视频没有封面时也以它作为加载封面。
+              </p>
+              <code>web/src/shared/assets/home-hero/aurora-poster.jpg</code>
+            </div>
           </div>
-        </div>
-      </Alert>
+        </Alert>
+      ) : (
+        <Alert tone="info" title="登录弹窗背景">
+          登录弹窗读取 GET /api/site/homepage-heroes?scene=auth，与首页素材互不影响。未配置或停用时由前端展示静态占位背景。
+        </Alert>
+      )}
 
       {actionError && <Alert tone="danger">{actionError}</Alert>}
 
@@ -180,7 +206,7 @@ export default function SiteConfig() {
             <tr>
               <td colSpan={9}>
                 <Empty
-                  message={isApiError(list.error) ? list.error.message : '获取首页背景配置失败'}
+                  message={isApiError(list.error) ? list.error.message : `获取${label}配置失败`}
                   extra={<Button onClick={() => void list.refetch()}>重试</Button>}
                 />
               </td>
@@ -189,7 +215,7 @@ export default function SiteConfig() {
           {!list.isPending && !list.isError && items.length === 0 && (
             <tr>
               <td colSpan={9}>
-                <Empty message="暂无首页背景条目" />
+                <Empty message={`暂无${label}条目`} />
               </td>
             </tr>
           )}
@@ -304,6 +330,7 @@ export default function SiteConfig() {
 
       {form !== null && (
         <HeroFormModal
+          label={label}
           initial={form.id !== undefined ? items.find((row) => row.id === form.id) : undefined}
           enabledCount={enabledCount}
           saving={saveMut.isPending}
@@ -317,7 +344,7 @@ export default function SiteConfig() {
 
       {deleteId !== null && (
         <ConfirmModal
-          title="删除首页背景"
+          title={`删除${label}`}
           content={`确定删除该${items.find((row) => row.id === deleteId)?.media_type === 'image' ? '图片' : '视频'}条目吗？删除后无法恢复，需重新上传。`}
           confirmText={deleteMut.isPending ? '删除中…' : '确认删除'}
           onConfirm={() => {
@@ -335,6 +362,7 @@ export default function SiteConfig() {
 }
 
 interface HeroFormModalProps {
+  label: string;
   initial?: HomepageHeroAdmin;
   enabledCount: number;
   saving: boolean;
@@ -342,7 +370,7 @@ interface HeroFormModalProps {
   onSubmit: (payload: HomepageHeroPayload, id?: string) => Promise<unknown>;
 }
 
-function HeroFormModal({ initial, enabledCount, saving, onClose, onSubmit }: HeroFormModalProps) {
+function HeroFormModal({ label, initial, enabledCount, saving, onClose, onSubmit }: HeroFormModalProps) {
   const atCap = enabledCount >= HOMEPAGE_HERO_MAX_ENABLED && initial?.enabled !== 1;
   const [coverUrl, setCoverUrl] = useState(
     initial?.media_type === 'video' ? initial.poster_url ?? '' : initial?.media_url ?? '',
@@ -401,7 +429,7 @@ function HeroFormModal({ initial, enabledCount, saving, onClose, onSubmit }: Her
   return (
     <Modal
       open
-      title={initial ? '编辑首页背景' : '新建首页背景'}
+      title={`${initial ? '编辑' : '新建'}${label}`}
       width={640}
       onClose={onClose}
       footer={

@@ -27,11 +27,15 @@ export class HomepageHeroAuditService {
     }
   }
 
-  async logCreate(ref: string, mediaType: string) {
+  private sceneLabel(scene: string): string {
+    return scene === "auth" ? "登录弹窗背景配置" : "首页背景配置";
+  }
+
+  async logCreate(ref: string, mediaType: string, scene: string) {
     await this.writeLog({
       action: "创建",
       target: ref,
-      detail: `新增首页背景配置（${mediaType}）`,
+      detail: `新增${this.sceneLabel(scene)}（${mediaType}）`,
     });
   }
 
@@ -44,11 +48,11 @@ export class HomepageHeroAuditService {
     });
   }
 
-  async logDelete(ref: string) {
+  async logDelete(ref: string, scene: string) {
     await this.writeLog({
       action: "删除",
       target: ref,
-      detail: "软删除首页背景配置（可恢复）",
+      detail: `软删除${this.sceneLabel(scene)}（可恢复）`,
     });
   }
 

@@ -1,13 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Request, Response } from "express";
 
-import { InvalidVerificationCodeError } from "@lib/core";
 import { FAILURE_CODE } from "@lib/contracts";
 import {
+  CodeExpiredError,
+  CodeWrongError,
   InvalidCredentialsError,
+  NicknameInvalidError,
   PasswordPolicyError,
   PhoneAlreadyBoundError,
+  PhoneNotBoundError,
   PhoneTakenError,
+  RebindSamePhoneError,
 } from "@lib/shared/identity/index.js";
 import { MeController } from "./me.controller.js";
 
@@ -21,6 +25,9 @@ function createController(overrides: {
   isAdmin?: ReturnType<typeof vi.fn>;
   resolveAccountFlags?: ReturnType<typeof vi.fn>;
   bindPhone?: ReturnType<typeof vi.fn>;
+  rebindVerifyCurrent?: ReturnType<typeof vi.fn>;
+  commitRebind?: ReturnType<typeof vi.fn>;
+  updateNickname?: ReturnType<typeof vi.fn>;
 } = {}) {
   const sessions = {
     revokeAllForUser: overrides.revokeAllForUser ?? vi.fn().mockResolvedValue(0),
@@ -39,9 +46,27 @@ function createController(overrides: {
         mustChangePassword: false,
       }),
     bindPhone: overrides.bindPhone ?? vi.fn().mockResolvedValue(undefined),
+    rebindVerifyCurrent:
+      overrides.rebindVerifyCurrent ??
+      vi.fn().mockResolvedValue({ oldPhone: "13800001234" }),
+    commitRebind:
+      overrides.commitRebind ??
+      vi.fn().mockResolvedValue({ phone: "13900001234" }),
+    updateNickname:
+      overrides.updateNickname ??
+      vi.fn().mockResolvedValue({ nickname: "新昵称", changed: true }),
   };
-  const controller = new MeController(sessions as never, identity as never);
-  return { controller, sessions, identity };
+  const phoneActions = {
+    issue: vi.fn(async () => "pa_token"),
+    resolve: vi.fn(async () => null),
+    revoke: vi.fn(async () => undefined),
+  };
+  const controller = new MeController(
+    sessions as never,
+    identity as never,
+    phoneActions as never,
+  );
+  return { controller, sessions, identity, phoneActions };
 }
 
 const USER = { userId: "42", username: "alice" } as never;
@@ -286,9 +311,22 @@ describe("MeController（IKJA4Q 手机号与口令标识）", () => {
     } as never);
 
     expect(result).toMatchObject({
-      data: { phone: "13800001234", has_password: false },
+      data: { phone: "13800001234", has_password: false, nickname: "alice" },
     });
     expect(resolveAccountFlags).toHaveBeenCalledWith("42");
+  });
+
+  it("有昵称时返回昵称，不再回退 username", async () => {
+    const resolveAccountFlags = vi.fn().mockResolvedValue({
+      phone: null,
+      nickname: "蓝鲸用户_Ab12Cd",
+      hasPassword: true,
+    });
+    const { controller } = createController({ resolveAccountFlags });
+
+    const result = await controller.me({ userId: "42", username: "alice" } as never);
+
+    expect(result).toMatchObject({ data: { nickname: "蓝鲸用户_Ab12Cd" } });
   });
 
   it("查不到人时回空串 + false——不替用户宣称他有口令", async () => {
@@ -358,7 +396,8 @@ describe("MeController（IKJA4Q 手机号与口令标识）", () => {
 
   it("绑定手机号：码错 / 被别人占用 / 自己已绑过 → 三句不同的话", async () => {
     const cases = [
-      [new InvalidVerificationCodeError("验证码错误或已过期"), "验证码错误或已过期"],
+      [new CodeWrongError(4), "验证码错误，请重新输入（还可尝试4次）"],
+      [new CodeExpiredError(), "验证码已失效，请重新获取"],
       [new PhoneTakenError(), "该手机号已被绑定"],
       [new PhoneAlreadyBoundError(), "当前账号已绑定手机号，暂不支持换绑"],
     ] as const;
@@ -383,5 +422,113 @@ describe("MeController（IKJA4Q 手机号与口令标识）", () => {
       controller.bindPhone({ phone: "13800001234", code: "123456" }, undefined),
     ).rejects.toMatchObject({ status: 401 });
     expect(bindPhone).not.toHaveBeenCalled();
+  });
+});
+
+describe("MeController 换绑手机号（IKPC9E）", () => {
+  it("验证原号成功 → 签发 10 分钟换绑凭证", async () => {
+    const { controller, phoneActions } = createController();
+    const out = await controller.verifyCurrentPhone({ code: "123456" }, USER);
+    expect(out).toMatchObject({
+      code: 200,
+      data: { rebind_token: "pa_token", expires_in: 600 },
+    });
+    expect(phoneActions.issue).toHaveBeenCalledWith({
+      kind: "rebind",
+      userId: 42,
+      phone: "13800001234",
+    });
+  });
+
+  it("未绑号 → phone_not_bound", async () => {
+    const { controller } = createController({
+      rebindVerifyCurrent: vi.fn().mockRejectedValue(new PhoneNotBoundError()),
+    });
+    const out = await controller.verifyCurrentPhone({ code: "123456" }, USER);
+    expect(out).toMatchObject({ error_code: "phone_not_bound" });
+  });
+
+  it("换绑凭证不属于当前用户 → rebind_token_invalid，不提交", async () => {
+    const { controller, identity, phoneActions } = createController();
+    phoneActions.resolve.mockResolvedValue({
+      kind: "rebind",
+      userId: 99,
+      phone: "13800001234",
+    });
+
+    const out = await controller.rebindPhone(
+      { rebind_token: "pa_x", phone: "13700000000", code: "123456" },
+      USER,
+      RES,
+    );
+
+    expect(out).toMatchObject({ error_code: "rebind_token_invalid" });
+    expect(identity.commitRebind).not.toHaveBeenCalled();
+  });
+
+  it("换绑成功 → 撤销全部会话并要求用新号重登", async () => {
+    const { controller, identity, phoneActions, sessions } = createController();
+    phoneActions.resolve.mockResolvedValue({
+      kind: "rebind",
+      userId: 42,
+      phone: "13800001234",
+    });
+    const out = await controller.rebindPhone(
+      { rebind_token: "pa_ok", phone: "13700000000", code: "123456" },
+      USER,
+      RES,
+    );
+
+    expect(identity.commitRebind).toHaveBeenCalledWith("42", {
+      oldPhone: "13800001234",
+      phone: "13700000000",
+      code: "123456",
+    });
+    expect(sessions.revokeAllForUser).toHaveBeenCalledWith(42);
+    expect(RES.clearCookie).toHaveBeenCalled();
+    expect(out).toMatchObject({
+      code: 200,
+      data: { phone: "13900001234", relogin_required: true },
+    });
+  });
+
+  it("新旧同号 → rebind_same_phone", async () => {
+    const { controller, identity, phoneActions } = createController({
+      commitRebind: vi.fn().mockRejectedValue(new RebindSamePhoneError()),
+    });
+    phoneActions.resolve.mockResolvedValue({
+      kind: "rebind",
+      userId: 42,
+      phone: "13800001234",
+    });
+
+    const out = await controller.rebindPhone(
+      { rebind_token: "pa_ok", phone: "13800001234", code: "123456" },
+      USER,
+      RES,
+    );
+
+    expect(out).toMatchObject({ error_code: "rebind_same_phone" });
+    expect(identity.commitRebind).toHaveBeenCalled();
+  });
+});
+
+describe("MeController 昵称（IKPC9E）", () => {
+  it("保存成功返回新昵称", async () => {
+    const { controller } = createController();
+    const out = await controller.updateNickname({ nickname: "新昵称" }, USER);
+    expect(out).toMatchObject({
+      code: 200,
+      data: { nickname: "新昵称", changed: true },
+    });
+  });
+
+  it("非法昵称 → nickname_invalid，不落库", async () => {
+    const { controller, identity } = createController({
+      updateNickname: vi.fn().mockRejectedValue(new NicknameInvalidError()),
+    });
+    const out = await controller.updateNickname({ nickname: "小 明" }, USER);
+    expect(out).toMatchObject({ error_code: "nickname_invalid" });
+    expect(identity.updateNickname).toHaveBeenCalled();
   });
 });

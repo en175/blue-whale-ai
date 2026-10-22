@@ -1,11 +1,22 @@
 export { IdentityModule } from "./identity.module.js";
 export {
   IdentityService,
+  AccountDeletedError,
+  AccountDisabledError,
+  CodeAttemptsExhaustedError,
+  CodeExpiredError,
+  CodeWrongError,
   InvalidCredentialsError,
+  MigrationIneligibleError,
+  NicknameInvalidError,
   PhoneAlreadyBoundError,
+  PhoneNotBoundError,
+  RebindBindingChangedError,
+  RebindSamePhoneError,
   type AccountFlags,
   type LocalLoginResult,
 } from "./identity.service.js";
+export { PhoneActionService, type PhoneActionKind } from "./phone-action.service.js";
 export { PasswordPolicyError } from "./password.js";
 
 export { LastSuperAdminError } from "@lib/core/identity/roles.js";

@@ -24,6 +24,7 @@ function makeGuard(opts: {
   verifyToken?: (token: string) => Promise<unknown>;
   resolveSession?: (token: string) => Promise<unknown>;
   resolveAccessState?: () => Promise<unknown>;
+  wasEvicted?: () => Promise<boolean>;
 } = {}) {
   const reflector = {
     getAllAndOverride: () => opts.isPublic ?? false,
@@ -31,9 +32,15 @@ function makeGuard(opts: {
   const sessions = {
     verifyToken:
       opts.verifyToken ??
-      (async () => ({ userId: "8", jti: "jti-1", type: "access" })),
+      (async () => ({
+        userId: "8",
+        jti: "jti-1",
+        type: "access",
+        expiresAt: Date.now() + 7 * 24 * 60 * 60 * 1000,
+      })),
     resolveSession: opts.resolveSession ?? (async () => null),
     updateSessionIdentity: async () => undefined,
+    wasEvicted: opts.wasEvicted ?? (async () => false),
   };
   const identity = {
     resolveAccessState:
@@ -91,12 +98,40 @@ describe("AuthGuard（HttpOnly cookie 会话校验，ADR-0062 #19）", () => {
     );
   });
 
-  it("会话不存在/过期（resolve 返回 null）→ 401", async () => {
+  it("会话不存在/过期（resolve 返回 null）→ 401 session_expired", async () => {
     const guard = makeGuard();
     const { context } = makeContext("sess_dead");
     await expect(guard.canActivate(context as never)).rejects.toMatchObject({
       status: 401,
+      code: "session_expired",
     });
+  });
+
+  it("被第 4 个浏览器挤出 → 401 session_evicted（前端据此换文案）", async () => {
+    const guard = makeGuard({ wasEvicted: async () => true });
+    const { context } = makeContext("sess_evicted");
+    await expect(guard.canActivate(context as never)).rejects.toMatchObject({
+      status: 401,
+      code: "session_evicted",
+    });
+  });
+
+  it("cookie 的 maxAge 跟随 JWT 剩余时间，不在每次访问时续成 7 天", async () => {
+    const guard = makeGuard({
+      verifyToken: async () => ({
+        userId: "8",
+        jti: "jti-1",
+        type: "access",
+        expiresAt: Date.now() + 60_000,
+      }),
+      resolveSession: async () => VALID_SESSION,
+    });
+    const { context, cookie } = makeContext("sess_abc");
+    await guard.canActivate(context as never);
+
+    const options = cookie.mock.calls[0]?.[2] as { maxAge?: number };
+    expect(options.maxAge).toBeGreaterThan(0);
+    expect(options.maxAge).toBeLessThanOrEqual(60_000);
   });
 
   it("账户停用（status ≠ 1）→ 403", async () => {

@@ -1,12 +1,44 @@
-import { Body, Controller, Get, Headers, Post, Req, Res } from "@nestjs/common";
+import {
+  Body,
+  Controller,
+  Get,
+  Headers,
+  Param,
+  Post,
+  Query,
+  Req,
+  Res,
+} from "@nestjs/common";
 import type { Request, Response } from "express";
-import { InvalidVerificationCodeError, isValidPhone, NewApiError } from "@lib/core";
-import { ACCOUNT_LOCKED, FAILURE_CODE, ok } from "@lib/contracts";
+import { isValidPhone, NewApiError } from "@lib/core";
+import {
+  ACCOUNT_ERROR_ACCOUNT_DELETED,
+  ACCOUNT_ERROR_ACCOUNT_DISABLED,
+  ACCOUNT_ERROR_BIND_SUCCEEDED_LOGIN_FAILED,
+  ACCOUNT_ERROR_CAPTCHA_EXPIRED,
+  ACCOUNT_ERROR_CAPTCHA_INVALID,
+  ACCOUNT_ERROR_CAPTCHA_REQUIRED,
+  ACCOUNT_ERROR_INVALID_PURPOSE,
+  ACCOUNT_ERROR_MIGRATION_INELIGIBLE,
+  ACCOUNT_ERROR_MIGRATION_TOKEN_EXPIRED,
+  ACCOUNT_ERROR_PHONE_TAKEN,
+  ACCOUNT_ERROR_TERMS_REQUIRED,
+  ACCOUNT_LOCKED,
+  FAILURE_CODE,
+  LEGACY_VERIFICATION_PURPOSE,
+  RATE_LIMITED,
+  fail,
+  isVerificationPurpose,
+  ok,
+} from "@lib/contracts";
 import { createAuthRepo } from "@lib/shared/persistence/index.js";
 import { Public } from "@lib/infra/decorators/public.decorator.js";
+import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
 import { logger } from "@lib/infra/logging/blue-whale-logger.js";
 import { handleSendCode } from "@lib/shared/auth/handle-send-code.js";
 import { resolveSmsProvider, type SmsProvider } from "@lib/shared/auth/sms.js";
+import { projectPhoneCodeError } from "@lib/shared/auth/phone-code-error.js";
+import { CaptchaService } from "@lib/shared/auth/captcha.service.js";
 import {
   projectAccountBusinessFailure,
   toAuthError,
@@ -18,9 +50,14 @@ import {
 } from "@lib/shared/rate-limit/login-failure-tracker.js";
 import { RateLimiter } from "@lib/shared/rate-limit/rate-limiter.js";
 import {
+  AccountDeletedError,
+  AccountDisabledError,
   IdentityService,
   InvalidCredentialsError,
+  MigrationIneligibleError,
   PasswordPolicyError,
+  PhoneActionService,
+  PhoneTakenError,
   UsernameTakenError,
   type LocalLoginResult,
 } from "@lib/shared/identity/index.js";
@@ -30,9 +67,12 @@ import {
   SESSION_COOKIE_NAME,
   sessionCookieOptions,
 } from "@lib/shared/session/cookie.js";
+import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 import type { LoginByCodeDto } from "./dto/login-by-code.dto.js";
 import type { LoginDto } from "./dto/login.dto.js";
+import type { MigrationBindDto } from "./dto/migration-bind.dto.js";
+import type { MigrationVerifyDto } from "./dto/migration-verify.dto.js";
 import type { RegisterDto } from "./dto/register.dto.js";
 
 function loginData(result: LocalLoginResult, isNewUser: boolean, token: string) {
@@ -40,6 +80,7 @@ function loginData(result: LocalLoginResult, isNewUser: boolean, token: string) 
     token,
     user_id: result.userId,
     username: result.username,
+    nickname: result.nickname ?? result.username,
     email: result.email ?? null,
     phone: result.phone ?? "",
     is_new_user: isNewUser,
@@ -48,7 +89,22 @@ function loginData(result: LocalLoginResult, isNewUser: boolean, token: string) 
   };
 }
 
+function normalizeClientId(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed.length >= 8 && trimmed.length <= 64 ? trimmed : undefined;
+}
+
+function phoneCodeFailure(error: unknown): NewApiError | null {
+  const failure = projectPhoneCodeError(error);
+  if (!failure) return null;
+  return new NewApiError(failure.message, failure.status, failure.errorCode);
+}
+
 const AUTH_RATE_LIMIT_WINDOW_MS = 60_000;
+
+const MIGRATION_FAILURE_SCOPE = "migration_failure";
+const MIGRATION_LOCK_SCOPE = "migration_lock";
 
 function authRateLimit(
   endpoint: "login" | "register" | "login_by_code",
@@ -74,10 +130,13 @@ function authRateLimit(
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+const SMS_PHONE_BUCKETS = [
+  { scope: "send_code_phone_minute", limit: 1, windowMs: 60_000 },
+  { scope: "send_code_phone_day", limit: 10, windowMs: DAY_MS },
+] as const;
+
 const SMS_CODE_RATE_LIMIT = RateLimit({
   buckets: [
-    { scope: "send_code_phone_minute", key: "phone" as const, limit: 1, windowMs: 60_000 },
-    { scope: "send_code_phone_day", key: "phone" as const, limit: 10, windowMs: DAY_MS },
     { scope: "send_code_ip_minute", key: "ip" as const, limit: 5, windowMs: 60_000 },
     { scope: "send_code_ip_day", key: "ip" as const, limit: 50, windowMs: DAY_MS },
   ],
@@ -93,6 +152,8 @@ export class AuthController {
     private readonly limiter: RateLimiter,
     private readonly loginFailures: LoginFailureTracker,
     private readonly identity: IdentityService,
+    private readonly phoneActions: PhoneActionService,
+    private readonly captcha: CaptchaService,
   ) {}
 
   private get sms(): SmsProvider {
@@ -101,20 +162,112 @@ export class AuthController {
   }
 
   @Public()
+  @Get("captcha")
+  @RateLimit({
+    buckets: [
+      {
+        scope: "captcha_ip",
+        key: "ip" as const,
+        limit: 20,
+        windowMs: 60_000,
+      },
+    ],
+  })
+  async getCaptcha(
+    @Query("phone") phoneRaw: string | undefined,
+    @Query("purpose") purposeRaw: string | undefined,
+  ) {
+    const phone = typeof phoneRaw === "string" ? phoneRaw.trim() : "";
+    const purpose =
+      purposeRaw === undefined || purposeRaw === "" || purposeRaw === null
+        ? LEGACY_VERIFICATION_PURPOSE
+        : purposeRaw;
+    if (!isValidPhone(phone)) {
+      return fail(FAILURE_CODE, "手机号格式不正确");
+    }
+    if (purpose !== LEGACY_VERIFICATION_PURPOSE && !isVerificationPurpose(purpose)) {
+      return fail(FAILURE_CODE, "验证码用途不正确", null, ACCOUNT_ERROR_INVALID_PURPOSE);
+    }
+    return ok(await this.captcha.issue(phone, purpose));
+  }
+
+  @Public()
   @Post("send-code")
   @SMS_CODE_RATE_LIMIT
   async sendCode(
-    @Body() body: { phone?: unknown },
+    @Body()
+    body: {
+      phone?: unknown;
+      purpose?: unknown;
+      captcha_id?: unknown;
+      captcha_answer?: unknown;
+    },
     @Headers("x-forwarded-for") forwardedFor?: string,
+    @Res({ passthrough: true }) res?: Response,
   ) {
     const ip = forwardedFor?.split(",")[0]?.trim() ?? "unknown";
-    return handleSendCode(
-      { phone: body?.phone, ip },
+    const phone = typeof body?.phone === "string" ? body.phone.trim() : "";
+    const purpose =
+      body?.purpose === undefined || body?.purpose === null || body?.purpose === ""
+        ? LEGACY_VERIFICATION_PURPOSE
+        : body.purpose;
+    if (!isValidPhone(phone)) {
+      return fail(FAILURE_CODE, "手机号格式不正确");
+    }
+    if (purpose !== LEGACY_VERIFICATION_PURPOSE && !isVerificationPurpose(purpose)) {
+      return fail(FAILURE_CODE, "验证码用途不正确", null, ACCOUNT_ERROR_INVALID_PURPOSE);
+    }
+    const captchaId =
+      typeof body?.captcha_id === "string" ? body.captcha_id.trim() : "";
+    if (!captchaId) {
+      throw new NewApiError("请先完成验证码验证", 400, ACCOUNT_ERROR_CAPTCHA_REQUIRED);
+    }
+    const verdict = await this.captcha.verify({
+      id: captchaId,
+      answer: body?.captcha_answer,
+      phone,
+      purpose,
+    });
+    if (verdict === "expired") {
+      throw new NewApiError(
+        "验证已超时，请换一张后重试",
+        400,
+        ACCOUNT_ERROR_CAPTCHA_EXPIRED,
+      );
+    }
+    if (verdict === "invalid") {
+      throw new NewApiError(
+        "验证码错误，已换新图，请重新输入",
+        400,
+        ACCOUNT_ERROR_CAPTCHA_INVALID,
+      );
+    }
+
+    for (const bucket of SMS_PHONE_BUCKETS) {
+      const hit = await this.limiter.take({
+        scope: bucket.scope,
+        key: phone,
+        limit: bucket.limit,
+        windowMs: bucket.windowMs,
+      });
+      if (!hit.allowed) {
+        res?.setHeader("Retry-After", String(hit.retryAfter ?? 1));
+        throw new NewApiError("操作过于频繁，请稍后再试", 429, RATE_LIMITED);
+      }
+    }
+
+    const result = await handleSendCode(
+      { phone, purpose, ip },
       { db: createAuthRepo(this.prisma.client), sms: this.sms },
     );
+    if (result.code === 200) return ok();
+    return result;
   }
 
-  private async establishSession(result: LocalLoginResult): Promise<string> {
+  private async establishSession(
+    result: LocalLoginResult,
+    clientId?: string | undefined,
+  ): Promise<string> {
     if (result.userId == null || !result.username) {
       throw new NewApiError("账户服务响应异常", 502, "invalid_identity");
     }
@@ -125,6 +278,7 @@ export class AuthController {
       role: result.role,
       status: result.status,
       email: result.email ?? null,
+      ...(clientId ? { clientId } : {}),
     });
     return token;
   }
@@ -140,6 +294,7 @@ export class AuthController {
   ) {
     const username = typeof body.username === "string" ? body.username.trim() : "";
     const password = typeof body.password === "string" ? body.password : "";
+    const clientId = normalizeClientId(body.client_id);
     const ip = forwardedFor?.split(",")[0]?.trim() ?? "unknown";
 
     if (!username || !password) {
@@ -157,7 +312,7 @@ export class AuthController {
     try {
       const result = await this.identity.login({ username, password });
       await this.loginFailures.clear(username);
-      const sessionToken = await this.establishSession(result);
+      const sessionToken = await this.establishSession(result, clientId || undefined);
       res.cookie(SESSION_COOKIE_NAME, sessionToken, sessionCookieOptions());
       await this.recordLogin({
         userId: String(result.userId),
@@ -194,15 +349,23 @@ export class AuthController {
   ) {
     const phone = typeof body.phone === "string" ? body.phone.trim() : "";
     const code = typeof body.code === "string" ? body.code.trim() : "";
+    const clientId = normalizeClientId(body.client_id);
     const ip = forwardedFor?.split(",")[0]?.trim() ?? "unknown";
 
     if (!isValidPhone(phone) || !code) {
-      return { code: FAILURE_CODE, msg: "手机号和验证码不能为空", data: null };
+      return fail(FAILURE_CODE, "手机号和验证码不能为空");
+    }
+    if (body.agreed_terms !== true) {
+      throw new NewApiError(
+        "请先阅读并同意用户服务协议和隐私政策",
+        400,
+        ACCOUNT_ERROR_TERMS_REQUIRED,
+      );
     }
 
     try {
       const { result, isNewUser } = await this.identity.loginWithPhoneCode({ phone, code });
-      const sessionToken = await this.establishSession(result);
+      const sessionToken = await this.establishSession(result, clientId);
       res.cookie(SESSION_COOKIE_NAME, sessionToken, sessionCookieOptions());
       await this.recordLogin({
         userId: String(result.userId),
@@ -213,17 +376,251 @@ export class AuthController {
       });
       return ok(loginData(result, isNewUser, sessionToken));
     } catch (error) {
-      if (error instanceof InvalidVerificationCodeError) {
+      const failure = phoneCodeFailure(error);
+      if (failure) {
         await this.recordLogin({
           username: phone,
           ip,
           userAgent,
           success: false,
-          reason: "验证码错误",
+          reason: failure.message,
         });
-        throw new NewApiError(error.message, 401, "invalid_verification_code");
+        throw failure;
+      }
+      if (error instanceof AccountDisabledError) {
+        throw new NewApiError(error.message, 403, ACCOUNT_ERROR_ACCOUNT_DISABLED);
+      }
+      if (error instanceof AccountDeletedError) {
+        throw new NewApiError(error.message, 403, ACCOUNT_ERROR_ACCOUNT_DELETED);
       }
       throw toAuthError(error);
+    }
+  }
+
+  @Public()
+  @Post("migration/verify-password")
+  @RateLimit({
+    buckets: [
+      {
+        scope: "migration_verify_ip",
+        key: "ip" as const,
+        limit: 20,
+        windowMs: 60_000,
+      },
+      {
+        scope: "migration_verify_account",
+        key: "account" as const,
+        limit: 5,
+        windowMs: 60_000,
+      },
+    ],
+  })
+  async verifyMigrationPassword(
+    @Body() body: MigrationVerifyDto,
+    @Headers("x-forwarded-for") forwardedFor?: string,
+    @Headers("user-agent") userAgent?: string,
+  ) {
+    const username = typeof body.username === "string" ? body.username.trim() : "";
+    const password = typeof body.password === "string" ? body.password : "";
+    const ip = forwardedFor?.split(",")[0]?.trim() ?? "unknown";
+    const uniformMessage = "账号或密码不正确，或当前账号不可迁移";
+
+    if (!username || !password) {
+      throw new NewApiError(uniformMessage, 401, "invalid_credentials");
+    }
+    if (await this.limiter.isBlocked(MIGRATION_LOCK_SCOPE, username)) {
+      throw new NewApiError(
+        "尝试次数过多，账号已锁定，请稍后再试",
+        429,
+        ACCOUNT_LOCKED,
+      );
+    }
+
+    try {
+      const { userId } = await this.identity.verifyMigrationCandidate({
+        username,
+        password,
+      });
+      await this.limiter.reset(MIGRATION_FAILURE_SCOPE, username);
+      await this.limiter.reset(MIGRATION_LOCK_SCOPE, username);
+      await this.recordLogin({
+        userId,
+        username,
+        ip,
+        userAgent,
+        success: true,
+        reason: "迁移验证",
+      });
+      const migrationToken = await this.phoneActions.issue({
+        kind: "migration",
+        userId: Number(userId),
+      });
+      return ok({ migration_token: migrationToken, expires_in: 600 });
+    } catch (error) {
+      if (error instanceof InvalidCredentialsError) {
+        const result = await this.limiter.take({
+          scope: MIGRATION_FAILURE_SCOPE,
+          key: username,
+          limit: 4,
+          windowMs: 15 * 60 * 1000,
+        });
+        if (!result.allowed) {
+          await this.limiter.block(MIGRATION_LOCK_SCOPE, username, 15 * 60 * 1000);
+        }
+        await this.recordLogin({
+          username,
+          ip,
+          userAgent,
+          success: false,
+          reason: "迁移密码错误",
+        });
+        throw new NewApiError(uniformMessage, 401, "invalid_credentials");
+      }
+      if (error instanceof MigrationIneligibleError) {
+        await this.recordLogin({
+          username,
+          ip,
+          userAgent,
+          success: false,
+          reason: "迁移资格不符",
+        });
+        throw new NewApiError(
+          uniformMessage,
+          400,
+          ACCOUNT_ERROR_MIGRATION_INELIGIBLE,
+        );
+      }
+      throw toAuthError(error);
+    }
+  }
+
+  @Public()
+  @Post("migration/bind-phone")
+  @authRateLimit("login_by_code", "phone")
+  async bindPhoneForMigration(
+    @Body() body: MigrationBindDto,
+    @Res({ passthrough: true }) res: Response,
+    @Headers("x-forwarded-for") forwardedFor?: string,
+    @Headers("user-agent") userAgent?: string,
+  ) {
+    const token =
+      typeof body.migration_token === "string" ? body.migration_token.trim() : "";
+    const phone = typeof body.phone === "string" ? body.phone.trim() : "";
+    const code = typeof body.code === "string" ? body.code.trim() : "";
+    const clientId = normalizeClientId(body.client_id);
+    const ip = forwardedFor?.split(",")[0]?.trim() ?? "unknown";
+
+    if (!token) {
+      throw new NewApiError(
+        "原账号验证已过期，请重新验证",
+        400,
+        ACCOUNT_ERROR_MIGRATION_TOKEN_EXPIRED,
+      );
+    }
+    if (!isValidPhone(phone) || !code) {
+      return fail(FAILURE_CODE, "手机号和验证码不能为空");
+    }
+    if (body.agreed_terms !== true) {
+      throw new NewApiError(
+        "请先阅读并同意用户服务协议和隐私政策",
+        400,
+        ACCOUNT_ERROR_TERMS_REQUIRED,
+      );
+    }
+
+    const action = await this.phoneActions.resolve("migration", token);
+    if (!action) {
+      throw new NewApiError(
+        "原账号验证已过期，请重新验证",
+        400,
+        ACCOUNT_ERROR_MIGRATION_TOKEN_EXPIRED,
+      );
+    }
+
+    let user: { id: string; username: string };
+    try {
+      user = await this.identity.commitMigrationBind(action.userId, {
+        phone,
+        code,
+      });
+    } catch (error) {
+      const failure = phoneCodeFailure(error);
+      if (failure) {
+        await this.recordLogin({
+          username: phone,
+          ip,
+          userAgent,
+          success: false,
+          reason: `迁移补绑失败：${failure.message}`,
+        });
+        throw failure;
+      }
+      if (error instanceof PhoneTakenError) {
+        await this.recordLogin({
+          username: phone,
+          ip,
+          userAgent,
+          success: false,
+          reason: "迁移补绑失败：号码已占用",
+        });
+        return fail(
+          FAILURE_CODE,
+          error.message,
+          null,
+          ACCOUNT_ERROR_PHONE_TAKEN,
+        );
+      }
+      if (error instanceof MigrationIneligibleError) {
+        await this.recordLogin({
+          username: phone,
+          ip,
+          userAgent,
+          success: false,
+          reason: "迁移补绑失败：资格不符",
+        });
+        throw new NewApiError(
+          error.message,
+          400,
+          ACCOUNT_ERROR_MIGRATION_INELIGIBLE,
+        );
+      }
+      throw toAuthError(error);
+    }
+
+    try {
+      await this.phoneActions.revoke(token);
+    } catch (error) {
+      logger.error(
+        `迁移补绑成功后作废迁移凭证失败（userId=${user.id}）：${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+
+    try {
+      const result = await this.identity.getLoginResult(user.id);
+      const sessionToken = await this.establishSession(result, clientId);
+      await this.sessions.revokeAllForUser(Number(user.id), sessionToken);
+      res.cookie(SESSION_COOKIE_NAME, sessionToken, sessionCookieOptions());
+      await this.recordLogin({
+        userId: String(user.id),
+        username: user.username,
+        ip,
+        userAgent,
+        success: true,
+      });
+      return ok(loginData(result, false, sessionToken));
+    } catch (error) {
+      logger.error(
+        `迁移补绑成功但登录失败（userId=${user.id}）：${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      throw new NewApiError(
+        "手机号已绑定，请重新登录",
+        500,
+        ACCOUNT_ERROR_BIND_SUCCEEDED_LOGIN_FAILED,
+      );
     }
   }
 

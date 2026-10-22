@@ -61,5 +61,5 @@ export function buildNote(before: CatalogDocumentJson, after: SiteParams): strin
   if (beforePolicy.floorFactorBp !== after.floorFactorBp) {
     changes.push(`折扣底线 ${beforePolicy.floorFactorBp} → ${after.floorFactorBp}`);
   }
-  return `系统设置·计费：${changes.join('；')}`;
+  return `通用设置·计费：${changes.join('；')}`;
 }

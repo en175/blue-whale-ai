@@ -4,6 +4,7 @@ import { http, putToPresignedUrl, type ApiRequestInit, type PresignData } from '
 export const HOMEPAGE_HERO_MAX_ENABLED = 8;
 
 export type HomepageHeroMediaType = 'image' | 'video';
+export type HomepageHeroScene = 'homepage' | 'auth';
 
 export interface HomepageHeroPublic {
   id: string;
@@ -14,12 +15,14 @@ export interface HomepageHeroPublic {
 }
 
 export interface HomepageHeroAdmin extends HomepageHeroPublic {
+  scene: HomepageHeroScene;
   enabled: number;
   created_at: string;
   updated_at: string;
 }
 
 export interface HomepageHeroPayload {
+  scene?: HomepageHeroScene;
   media_type: HomepageHeroMediaType;
   media_url?: string;
   poster_url?: string | null;
@@ -67,25 +70,25 @@ export function selectPlayableHeroSlides(
     }));
 }
 
-export function fetchPublicHomepageHeroes() {
-  return http.get<HomepageHeroPublic[]>(PUBLIC_HEROES, { silent: true });
+export function fetchPublicHomepageHeroes(scene: HomepageHeroScene = 'homepage') {
+  return http.get<HomepageHeroPublic[]>(`${PUBLIC_HEROES}?scene=${scene}`, { silent: true });
 }
 
-export function fetchAdminHomepageHeroes() {
-  return http.get<HomepageHeroAdmin[]>(ADMIN_HEROES, { silent: true });
+export function fetchAdminHomepageHeroes(scene: HomepageHeroScene = 'homepage') {
+  return http.get<HomepageHeroAdmin[]>(`${ADMIN_HEROES}?scene=${scene}`, { silent: true });
 }
 
-export function publicHomepageHeroesOptions() {
+export function publicHomepageHeroesOptions(scene: HomepageHeroScene = 'homepage') {
   return queryOptions({
-    queryKey: homepageHeroKeys.public(),
-    queryFn: fetchPublicHomepageHeroes,
+    queryKey: [...homepageHeroKeys.public(), scene],
+    queryFn: () => fetchPublicHomepageHeroes(scene),
   });
 }
 
-export function adminHomepageHeroesOptions() {
+export function adminHomepageHeroesOptions(scene: HomepageHeroScene = 'homepage') {
   return queryOptions({
-    queryKey: homepageHeroKeys.admin(),
-    queryFn: fetchAdminHomepageHeroes,
+    queryKey: [...homepageHeroKeys.admin(), scene],
+    queryFn: () => fetchAdminHomepageHeroes(scene),
   });
 }
 

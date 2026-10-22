@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 const { FakeRedis } = vi.hoisted(() => {
   class FakeRedis {
     store = new Map<string, string>();
+    zsets = new Map<string, Map<string, number>>();
     ttlMs = new Map<string, number>();
 
     constructor(_options?: unknown) {}
@@ -11,23 +12,38 @@ const { FakeRedis } = vi.hoisted(() => {
       _script: string,
       _numKeys: number,
       key: string,
-      ttlSec: string,
-    ): Promise<number> {
-      const n = Number(this.store.get(key) ?? 0) + 1;
-      this.store.set(key, String(n));
-      if (n === 1) this.ttlMs.set(key, Number(ttlSec) * 1000);
-      return n;
+      nowRaw: string,
+      windowRaw: string,
+      limitRaw: string,
+      member: string,
+    ): Promise<[number, number]> {
+      const now = Number(nowRaw);
+      const window = Number(windowRaw);
+      const limit = Number(limitRaw);
+      const zset = this.zsets.get(key) ?? new Map<string, number>();
+      for (const [item, score] of zset) {
+        if (score <= now - window) zset.delete(item);
+      }
+      if (zset.size >= limit) {
+        const oldest = Math.min(...zset.values());
+        return [0, window - (now - oldest)];
+      }
+      zset.set(member, now);
+      this.zsets.set(key, zset);
+      this.ttlMs.set(key, window);
+      return [1, 0];
     }
 
     async pttl(key: string): Promise<number> {
-      if (!this.store.has(key)) return -2;
+      if (!this.zsets.has(key) && !this.store.has(key)) return -2;
       return this.ttlMs.get(key) ?? -1;
     }
 
     async del(...keys: string[]): Promise<number> {
       let n = 0;
       for (const key of keys) {
-        if (this.store.delete(key)) n += 1;
+        const removed = this.store.delete(key) || this.zsets.delete(key);
+        if (removed) n += 1;
         this.ttlMs.delete(key);
       }
       return n;
@@ -40,7 +56,7 @@ const { FakeRedis } = vi.hoisted(() => {
     }
 
     async exists(key: string): Promise<number> {
-      return this.store.has(key) ? 1 : 0;
+      return this.store.has(key) || this.zsets.has(key) ? 1 : 0;
     }
 
     async quit(): Promise<"OK"> {
@@ -55,12 +71,18 @@ vi.mock("ioredis", () => ({
 }));
 
 import { Reflector } from "@nestjs/core";
-import { InvalidVerificationCodeError, NewApiError } from "@lib/core";
-import { ACCOUNT_LOCKED, FAILURE_CODE } from "@lib/contracts";
+import { NewApiError } from "@lib/core";
+import {
+  ACCOUNT_ERROR_CODE_WRONG,
+  ACCOUNT_ERROR_TERMS_REQUIRED,
+  ACCOUNT_LOCKED,
+  FAILURE_CODE,
+} from "@lib/contracts";
 import type { Response } from "express";
 import type { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 import type { SessionService } from "@lib/shared/session/session.service.js";
 import {
+  CodeWrongError,
   InvalidCredentialsError,
   type IdentityService,
   type LocalLoginResult,
@@ -81,6 +103,7 @@ function loginResult(): LocalLoginResult {
   return {
     userId: 42,
     username: "alice",
+    nickname: null,
     email: null,
     phone: null,
     hasPassword: true,
@@ -96,6 +119,8 @@ function setup() {
   const sessions = {
     issueToken: vi.fn(async () => "jwt-token"),
     createSession: vi.fn(async () => undefined),
+    resolveSession: vi.fn(async () => null),
+    revokeAllForUser: vi.fn(async () => 0),
   };
   const prisma = { client: {} };
   const identity = {
@@ -103,6 +128,23 @@ function setup() {
     login: vi.fn(),
     register: vi.fn(),
     loginWithPhoneCode: vi.fn(),
+    getLoginResult: vi.fn(),
+    verifyMigrationCandidate: vi.fn(),
+    commitMigrationBind: vi.fn(),
+    consumeRecoveryCode: vi.fn(),
+  };
+  const phoneActions = {
+    issue: vi.fn(async () => "pa_token"),
+    resolve: vi.fn(async () => null),
+    revoke: vi.fn(async () => undefined),
+  };
+  const captcha = {
+    issue: vi.fn(async () => ({
+      id: "cap_test",
+      image: "data:image/png;base64,AA==",
+      expires_in: 60,
+    })),
+    verify: vi.fn(async () => "ok"),
   };
   const controller = new AuthController(
     prisma as unknown as PrismaService,
@@ -110,9 +152,21 @@ function setup() {
     limiter,
     tracker,
     identity as unknown as IdentityService,
+    phoneActions as never,
+    captcha as never,
   );
   const res = { cookie: vi.fn() } as unknown as Response;
-  return { controller, identity, sessions, res, limiter, tracker, prisma };
+  return {
+    controller,
+    identity,
+    sessions,
+    res,
+    limiter,
+    tracker,
+    prisma,
+    phoneActions,
+    captcha,
+  };
 }
 
 const LOGIN_BODY = { username: "alice", password: "wrong-pass" };
@@ -237,18 +291,18 @@ describe("AuthController 限流声明（IKDR4J）", () => {
     expect(buckets.some((b) => b.key === "account")).toBe(false);
   });
 
-  it("send-code 声明短信四个桶：号/分、号/天、IP/分、IP/天", () => {
+  it("send-code 装饰器只声明 IP 两桶；号码两桶移到拼图校验之后（防止刷错拼图锁死别人号码）", () => {
     const buckets = bucketsOf(
       AuthController.prototype.sendCode as (...args: never[]) => unknown,
     );
-    expect(buckets.filter((b) => b.key === "phone")).toHaveLength(2);
+    expect(buckets.filter((b) => b.key === "phone")).toHaveLength(0);
     expect(buckets.filter((b) => b.key === "ip")).toHaveLength(2);
     expect(Math.max(...buckets.map((b) => b.windowMs))).toBe(86_400_000);
   });
 });
 
 describe("AuthController 手机号验证码登录（IKJA4Q）", () => {
-  const CODE_BODY = { phone: "13800001234", code: "123456" };
+  const CODE_BODY = { phone: "13800001234", code: "123456", agreed_terms: true };
 
   function phoneResult(over: Partial<LocalLoginResult> = {}): LocalLoginResult {
     return { ...loginResult(), phone: "13800001234", hasPassword: false, ...over };
@@ -304,24 +358,73 @@ describe("AuthController 手机号验证码登录（IKJA4Q）", () => {
     expect(out).toMatchObject({ code: 200, data: { must_change_password: true } });
   });
 
-  it("验证码错误 → 401，不签发会话，且留一条失败登录日志", async () => {
+  it("验证码错误 → 400 code_wrong，不签发会话，且留一条失败登录日志", async () => {
     const { controller, identity, sessions, res } = setup();
-    identity.loginWithPhoneCode.mockRejectedValue(
-      new InvalidVerificationCodeError("验证码错误或已过期"),
-    );
+    identity.loginWithPhoneCode.mockRejectedValue(new CodeWrongError(4));
 
     await expect(controller.loginByCode(CODE_BODY, res)).rejects.toMatchObject({
       name: "NewApiError",
-      status: 401,
+      status: 400,
+      code: ACCOUNT_ERROR_CODE_WRONG,
     });
     expect(sessions.createSession).not.toHaveBeenCalled();
     expect(identity.recordLogin).toHaveBeenCalledWith(
       expect.objectContaining({
         success: false,
-        reason: "验证码错误",
+        reason: "验证码错误，请重新输入（还可尝试4次）",
         username: "13800001234",
       }),
     );
+  });
+
+  it("未勾协议 → 400 terms_required，不碰 identity", async () => {
+    const { controller, identity, res } = setup();
+
+    await expect(
+      controller.loginByCode({ phone: "13800001234", code: "123456" }, res),
+    ).rejects.toMatchObject({
+      name: "NewApiError",
+      status: 400,
+      code: ACCOUNT_ERROR_TERMS_REQUIRED,
+    });
+    expect(identity.loginWithPhoneCode).not.toHaveBeenCalled();
+  });
+
+  it("client_id 透传进会话：同浏览器重登替换旧会话靠它", async () => {
+    const { controller, identity, sessions, res } = setup();
+    identity.loginWithPhoneCode.mockResolvedValue({
+      result: phoneResult(),
+      isNewUser: false,
+    });
+
+    await controller.loginByCode(
+      { ...CODE_BODY, client_id: "browser-client-id-123" },
+      res,
+    );
+
+    expect(sessions.createSession).toHaveBeenCalledWith(
+      "jwt-token",
+      expect.objectContaining({ clientId: "browser-client-id-123" }),
+    );
+  });
+
+  it("client_id 过短/过长按缺失处理，不写进会话", async () => {
+    const { controller, identity, sessions, res } = setup();
+    identity.loginWithPhoneCode.mockResolvedValue({
+      result: phoneResult(),
+      isNewUser: false,
+    });
+
+    await controller.loginByCode({ ...CODE_BODY, client_id: "short" }, res);
+    await controller.loginByCode(
+      { ...CODE_BODY, client_id: "x".repeat(65) },
+      res,
+    );
+
+    expect(sessions.createSession).toHaveBeenCalledTimes(2);
+    for (const call of sessions.createSession.mock.calls) {
+      expect(call[1]).not.toHaveProperty("clientId");
+    }
   });
 
   it("手机号格式不对 / 验证码为空 → 失败信封，不碰 identity", async () => {
@@ -484,5 +587,131 @@ describe("AuthController 上游凭证缺失", () => {
     await controller.login(LOGIN_BODY, res);
 
     expect(prisma.client.user_info?.upsert).toBeUndefined();
+  });
+});
+
+describe("AuthController 内部账号迁移（IKPC9F）", () => {
+  it("原密码通过 → 签发 10 分钟迁移凭证", async () => {
+    const { controller, identity, phoneActions } = setup();
+    identity.verifyMigrationCandidate.mockResolvedValue({ userId: "42" });
+
+    const out = await controller.verifyMigrationPassword({
+      username: "alice",
+      password: "OldPass123",
+    });
+
+    expect(out).toMatchObject({
+      code: 200,
+      data: { migration_token: "pa_token", expires_in: 600 },
+    });
+    expect(phoneActions.issue).toHaveBeenCalledWith({
+      kind: "migration",
+      userId: 42,
+    });
+  });
+
+  it("账号/密码/资格不通过 → 统一提示，不泄露具体原因", async () => {
+    const { controller, identity } = setup();
+    identity.verifyMigrationCandidate.mockRejectedValue(new InvalidCredentialsError());
+
+    await expect(
+      controller.verifyMigrationPassword({ username: "alice", password: "bad" }),
+    ).rejects.toMatchObject({ status: 401, code: "invalid_credentials" });
+  });
+
+  it("凭证无效 → migration_token_expired，不碰 identity", async () => {
+    const { controller, identity, phoneActions } = setup();
+    phoneActions.resolve.mockResolvedValue(null);
+
+    await expect(
+      controller.bindPhoneForMigration({
+        migration_token: "pa_bad",
+        phone: "13800001234",
+        code: "123456",
+        agreed_terms: true,
+      }),
+    ).rejects.toMatchObject({ code: "migration_token_expired" });
+    expect(identity.commitMigrationBind).not.toHaveBeenCalled();
+  });
+
+  it("补绑成功 → 绑定原 ID、签发会话并撤销该账号旧会话", async () => {
+    const { controller, identity, phoneActions, sessions, res } = setup();
+    phoneActions.resolve.mockResolvedValue({ kind: "migration", userId: 42 });
+    identity.commitMigrationBind.mockResolvedValue({
+      id: "42",
+      username: "alice",
+      nickname: null,
+      phone: "13800001234",
+    });
+    identity.getLoginResult.mockResolvedValue({
+      ...loginResult(),
+      phone: "13800001234",
+      hasPassword: true,
+    });
+
+    const out = await controller.bindPhoneForMigration(
+      {
+        migration_token: "pa_ok",
+        phone: "13800001234",
+        code: "123456",
+        agreed_terms: true,
+      },
+      res,
+    );
+
+    expect(out).toMatchObject({ code: 200, data: { user_id: 42 } });
+    expect(phoneActions.revoke).toHaveBeenCalledWith("pa_ok");
+    expect(sessions.revokeAllForUser).toHaveBeenCalledWith(42, "jwt-token");
+    expect(res.cookie).toHaveBeenCalled();
+  });
+});
+
+describe("AuthController 拼图验证（发码前）", () => {
+  it("签发挑战：按号码 + 用途绑定", async () => {
+    const { controller, captcha } = setup();
+    const out = await controller.getCaptcha("13800001234", "login");
+    expect(captcha.issue).toHaveBeenCalledWith("13800001234", "login");
+    expect(out).toMatchObject({ code: 200, data: { id: "cap_test" } });
+  });
+
+  it("未带拼图 → captcha_required，不发短信", async () => {
+    const { controller } = setup();
+    await expect(
+      controller.sendCode({ phone: "13800001234", purpose: "login" }, "1.2.3.4"),
+    ).rejects.toMatchObject({ status: 400, code: "captcha_required" });
+  });
+
+  it("验证码答案错误 → captcha_invalid", async () => {
+    const { controller, captcha } = setup();
+    captcha.verify.mockResolvedValue("invalid");
+
+    await expect(
+      controller.sendCode(
+        {
+          phone: "13800001234",
+          purpose: "login",
+          captcha_id: "cap_test",
+          captcha_answer: "AB2C",
+        },
+        "1.2.3.4",
+      ),
+    ).rejects.toMatchObject({ status: 400, code: "captcha_invalid" });
+  });
+
+  it("挑战过期 → captcha_expired", async () => {
+    const { controller, captcha } = setup();
+    captcha.verify.mockResolvedValue("expired");
+
+    await expect(
+      controller.sendCode(
+        {
+          phone: "13800001234",
+          purpose: "login",
+          captcha_id: "cap_test",
+          captcha_answer: "AB2C",
+        },
+        "1.2.3.4",
+      ),
+    ).rejects.toMatchObject({ status: 400, code: "captcha_expired" });
   });
 });

@@ -2,6 +2,7 @@ import { Injectable } from "@nestjs/common";
 import {
   createHomepageHeroRepo,
   type CreateHomepageHeroInput,
+  type HomepageHeroScene,
   type UpdateHomepageHeroInput,
 } from "@lib/shared/persistence/index.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
@@ -21,12 +22,12 @@ export class HomepageHeroService {
 
   constructor(private readonly prisma: PrismaService) {}
 
-  listAll() {
-    return this.repo.listAll();
+  listAll(scene: HomepageHeroScene) {
+    return this.repo.listAll(scene);
   }
 
-  listEnabled() {
-    return this.repo.listEnabled();
+  listEnabled(scene: HomepageHeroScene) {
+    return this.repo.listEnabled(scene);
   }
 
   getById(id: bigint) {
@@ -49,7 +50,7 @@ export class HomepageHeroService {
     return this.repo.move(id, direction);
   }
 
-  countEnabled() {
-    return this.repo.countEnabled();
+  countEnabled(scene: HomepageHeroScene) {
+    return this.repo.countEnabled(scene);
   }
 }

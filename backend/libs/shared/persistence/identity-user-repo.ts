@@ -3,6 +3,7 @@ import type { PrismaClient } from "@prisma/client";
 export interface IdentityUserRow {
   id: string;
   username: string;
+  nickname: string | null;
   email: string | null;
   phone: string | null;
   status: string;
@@ -29,6 +30,7 @@ export interface IdentityUserRepo {
     mustChangePassword: boolean,
   ): Promise<void>;
   updatePhone(id: string, phone: string): Promise<void>;
+  updateNickname(id: string, nickname: string): Promise<void>;
   updateStatus(id: string, status: IdentityUserStatus): Promise<boolean>;
 }
 
@@ -49,6 +51,7 @@ export class PhoneTakenError extends Error {
 const SELECT = {
   id: true,
   username: true,
+  nickname: true,
   email: true,
   phone: true,
   status: true,
@@ -60,6 +63,7 @@ export function createIdentityUserRepo(prisma: PrismaClient): IdentityUserRepo {
   function hydrate(row: {
     id: bigint;
     username: string;
+    nickname: string | null;
     email: string | null;
     phone: string | null;
     status: string;
@@ -69,6 +73,7 @@ export function createIdentityUserRepo(prisma: PrismaClient): IdentityUserRepo {
     return {
       id: String(row.id),
       username: row.username,
+      nickname: row.nickname,
       email: row.email,
       phone: row.phone,
       status: row.status,
@@ -136,6 +141,13 @@ export function createIdentityUserRepo(prisma: PrismaClient): IdentityUserRepo {
         if (isUniqueViolation(error)) throw new PhoneTakenError();
         throw error;
       }
+    },
+
+    async updateNickname(id, nickname) {
+      await prisma.bw_users.update({
+        where: { id: BigInt(id) },
+        data: { nickname, gmt_modified: new Date() },
+      });
     },
 
     async updateStatus(id, status) {

@@ -62,15 +62,22 @@ export {
   type RequestSmsCodeResult,
   type VerificationCodeRecord,
 } from "./auth/request-sms-code.js";
-export {
-  loginWithCode,
-  InvalidVerificationCodeError,
-  type LoginWithCodeInput,
-  type LoginWithCodeDeps,
-  type LoginResult,
-  type AuthUser,
-} from "./auth/login-with-code.js";
 export { PHONE_RE, isValidPhone } from "./auth/phone.js";
+export {
+  CAPTCHA_TTL_MS,
+  CAPTCHA_CODE_LENGTH,
+  CAPTCHA_WIDTH,
+  CAPTCHA_HEIGHT,
+  CAPTCHA_ALPHABET,
+  normalizeCaptchaAnswer,
+  isCaptchaAnswerCorrect,
+} from "./auth/captcha.js";
+export {
+  normalizeNickname,
+  NICKNAME_MIN_LENGTH,
+  NICKNAME_MAX_LENGTH,
+  type NicknameValidation,
+} from "./auth/nickname.js";
 export { parseSkillMd, serializeSkillMd } from "./skills/skill-md.js";
 export {
   acceptConversationMessage,

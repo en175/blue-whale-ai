@@ -42,8 +42,8 @@ const navItems = [
   { to: '/admin/models', end: false, label: '模型列表', icon: Boxes },
   { to: '/admin/users', end: false, label: '用户管理', icon: Users },
   { to: '/admin/logs', end: false, label: '操作日志', icon: FileText },
-  { to: '/admin/site-config', end: false, label: '通用配置', icon: Images },
-  { to: '/admin/settings', end: false, label: '系统管理', icon: Settings },
+  { to: '/admin/site-config', end: false, label: '站点设置', icon: Images },
+  { to: '/admin/settings', end: false, label: '通用设置', icon: Settings },
 ];
 
 const COLLAPSE_KEY = 'admin-sidebar-collapsed';

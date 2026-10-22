@@ -79,6 +79,28 @@ export const ACCOUNT_ERROR_UNKNOWN_NUMERIC_CODE = 1100;
 export const ACCOUNT_ERROR_PASSWORD_INCORRECT = "password_incorrect";
 export const ACCOUNT_ERROR_PASSWORD_INVALID = "password_invalid";
 export const ACCOUNT_ERROR_PASSWORD_NOT_SET = "password_not_set";
+export const ACCOUNT_ERROR_TERMS_REQUIRED = "terms_required";
+export const ACCOUNT_ERROR_CODE_WRONG = "code_wrong";
+export const ACCOUNT_ERROR_CODE_EXPIRED = "code_expired";
+export const ACCOUNT_ERROR_CODE_ATTEMPTS_EXHAUSTED = "code_attempts_exhausted";
+export const ACCOUNT_ERROR_ACCOUNT_DISABLED = "account_disabled";
+export const ACCOUNT_ERROR_ACCOUNT_DELETED = "account_deleted";
+export const ACCOUNT_ERROR_INVALID_PURPOSE = "invalid_purpose";
+export const ACCOUNT_ERROR_PHONE_TAKEN = "phone_taken";
+export const ACCOUNT_ERROR_SESSION_EXPIRED = "session_expired";
+export const ACCOUNT_ERROR_SESSION_EVICTED = "session_evicted";
+export const ACCOUNT_ERROR_REBIND_TOKEN_EXPIRED = "rebind_token_expired";
+export const ACCOUNT_ERROR_REBIND_TOKEN_INVALID = "rebind_token_invalid";
+export const ACCOUNT_ERROR_REBIND_SAME_PHONE = "rebind_same_phone";
+export const ACCOUNT_ERROR_REBIND_BINDING_CHANGED = "rebind_binding_changed";
+export const ACCOUNT_ERROR_PHONE_NOT_BOUND = "phone_not_bound";
+export const ACCOUNT_ERROR_NICKNAME_INVALID = "nickname_invalid";
+export const ACCOUNT_ERROR_MIGRATION_INELIGIBLE = "migration_ineligible";
+export const ACCOUNT_ERROR_MIGRATION_TOKEN_EXPIRED = "migration_token_expired";
+export const ACCOUNT_ERROR_BIND_SUCCEEDED_LOGIN_FAILED = "bind_succeeded_login_failed";
+export const ACCOUNT_ERROR_CAPTCHA_REQUIRED = "captcha_required";
+export const ACCOUNT_ERROR_CAPTCHA_INVALID = "captcha_invalid";
+export const ACCOUNT_ERROR_CAPTCHA_EXPIRED = "captcha_expired";
 
 export const GENERATION_ERROR_UNKNOWN_NUMERIC_CODE = 1000;
 
@@ -155,6 +177,28 @@ export const ACCOUNT_ERROR_NUMERIC_CODES: Record<string, number> = {
   [ACCOUNT_ERROR_PASSWORD_INCORRECT]: 1101,
   [ACCOUNT_ERROR_PASSWORD_INVALID]: 1102,
   [ACCOUNT_ERROR_PASSWORD_NOT_SET]: 1103,
+  [ACCOUNT_ERROR_TERMS_REQUIRED]: 1104,
+  [ACCOUNT_ERROR_CODE_WRONG]: 1105,
+  [ACCOUNT_ERROR_CODE_EXPIRED]: 1106,
+  [ACCOUNT_ERROR_CODE_ATTEMPTS_EXHAUSTED]: 1107,
+  [ACCOUNT_ERROR_ACCOUNT_DISABLED]: 1108,
+  [ACCOUNT_ERROR_ACCOUNT_DELETED]: 1109,
+  [ACCOUNT_ERROR_INVALID_PURPOSE]: 1110,
+  [ACCOUNT_ERROR_PHONE_TAKEN]: 1111,
+  [ACCOUNT_ERROR_SESSION_EXPIRED]: 1112,
+  [ACCOUNT_ERROR_SESSION_EVICTED]: 1113,
+  [ACCOUNT_ERROR_REBIND_TOKEN_EXPIRED]: 1117,
+  [ACCOUNT_ERROR_REBIND_TOKEN_INVALID]: 1118,
+  [ACCOUNT_ERROR_REBIND_SAME_PHONE]: 1119,
+  [ACCOUNT_ERROR_REBIND_BINDING_CHANGED]: 1120,
+  [ACCOUNT_ERROR_PHONE_NOT_BOUND]: 1121,
+  [ACCOUNT_ERROR_NICKNAME_INVALID]: 1122,
+  [ACCOUNT_ERROR_MIGRATION_INELIGIBLE]: 1123,
+  [ACCOUNT_ERROR_MIGRATION_TOKEN_EXPIRED]: 1124,
+  [ACCOUNT_ERROR_BIND_SUCCEEDED_LOGIN_FAILED]: 1125,
+  [ACCOUNT_ERROR_CAPTCHA_REQUIRED]: 1127,
+  [ACCOUNT_ERROR_CAPTCHA_INVALID]: 1128,
+  [ACCOUNT_ERROR_CAPTCHA_EXPIRED]: 1129,
 };
 
 export function accountErrorToNumeric(code: string): number {
@@ -360,6 +404,30 @@ export const ERROR_CODES: Record<number, string> = {
   1101: "原密码错误，请重试",
   1102: "新密码需为 8-20 位",
   1103: "当前账号未设置密码",
+  1104: "请先阅读并同意用户服务协议和隐私政策",
+  1105: "验证码错误，请重新输入",
+  1106: "验证码已失效，请重新获取",
+  1107: "验证码连续错误5次，已失效，请重新获取",
+  1108: "账号已停用",
+  1109: "该手机号关联的账号已删除，暂无法登录",
+  1110: "验证码用途不正确",
+  1111: "该手机号已绑定其他账号",
+  1112: "登录已过期，请重新验证",
+  1113: "登录已失效，账号已在其他浏览器登录，请重新验证",
+  1115: "暂未找到本次操作记录，请重试核实",
+  1116: "无权查询该操作记录",
+  1117: "原手机号验证已过期，请重新验证",
+  1118: "换绑凭证无效，请重新验证原手机号",
+  1119: "新手机号与当前手机号相同，无需更换",
+  1120: "账号绑定状态已变化，请重新登录",
+  1121: "当前账号尚未绑定手机号",
+  1122: "昵称需为2—20个字符，仅支持中文、英文大小写字母、数字、下划线（_）和短横线（-）",
+  1123: "账号或密码不正确，或当前账号不可迁移",
+  1124: "原账号验证已过期，请重新验证",
+  1125: "手机号已绑定，请重新登录",
+  1127: "请先完成验证码验证",
+  1128: "验证码错误，已换新图，请重新输入",
+  1129: "验证已超时，请换一张后重试",
   100000: "缺少幂等键",
   100100: "资源不存在",
   100202: "资源不可用",

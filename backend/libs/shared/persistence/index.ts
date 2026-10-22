@@ -169,8 +169,11 @@ export {
 export {
   createHomepageHeroRepo,
   HOMEPAGE_HERO_MAX_ENABLED,
+  HOMEPAGE_HERO_SCENES,
+  isHomepageHeroScene,
   HomepageHeroLimitError,
   type HomepageHeroRepo,
+  type HomepageHeroScene,
   type HomepageHeroAdminView,
   type HomepageHeroPublicView,
   type CreateHomepageHeroInput,

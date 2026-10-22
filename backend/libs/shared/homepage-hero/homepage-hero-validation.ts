@@ -1,4 +1,8 @@
-import type { CreateHomepageHeroInput } from "@lib/shared/persistence/index.js";
+import {
+  isHomepageHeroScene,
+  type CreateHomepageHeroInput,
+  type HomepageHeroScene,
+} from "@lib/shared/persistence/index.js";
 
 
 export const HOMEPAGE_HERO_MEDIA_TYPES = ["image", "video"] as const;
@@ -32,6 +36,7 @@ function parseOptionalUrl(
 }
 
 export type HomepageHeroForm = {
+  scene?: unknown;
   media_type?: unknown;
   media_url?: unknown;
   poster_url?: unknown;
@@ -43,9 +48,23 @@ export type HomepageHeroParseResult =
   | { ok: true; input: CreateHomepageHeroInput }
   | { ok: false; error: string };
 
+export const DEFAULT_HOMEPAGE_HERO_SCENE: HomepageHeroScene = "homepage";
+
+export function parseHomepageHeroScene(value: unknown): HomepageHeroScene | null {
+  if (value === undefined || value === null || value === "") {
+    return DEFAULT_HOMEPAGE_HERO_SCENE;
+  }
+  return isHomepageHeroScene(value) ? value : null;
+}
+
 export function parseHomepageHeroForm(
   form: HomepageHeroForm,
 ): HomepageHeroParseResult {
+  const scene = parseHomepageHeroScene(form.scene);
+  if (!scene) {
+    return { ok: false, error: "scene 仅支持 homepage/auth" };
+  }
+
   const mediaType = form.media_type;
   if (
     typeof mediaType !== "string" ||
@@ -86,6 +105,7 @@ export function parseHomepageHeroForm(
   return {
     ok: true,
     input: {
+      scene,
       media_type: mediaType,
       media_url: mediaUrl.value ?? "",
       poster_url: posterUrl.value,

@@ -73,13 +73,23 @@ export function createVolcengineSmsProvider(
   };
 }
 
+export function resolveSmsCredentials(
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): { ak: string; sk: string } {
+  return {
+    ak: env.VOLC_SMS_ACCESS_KEY_ID?.trim() || env.VOLC_ACCESS_KEY_ID || "",
+    sk: env.VOLC_SMS_SECRET_ACCESS_KEY?.trim() || env.VOLC_SECRET_ACCESS_KEY || "",
+  };
+}
+
 export function resolveSmsProvider(
   env: Readonly<Record<string, string | undefined>> = process.env,
 ): SmsProvider {
   if (env.SMS_PROVIDER === "volcengine") {
+    const credentials = resolveSmsCredentials(env);
     return createVolcengineSmsProvider({
-      ak: env.VOLC_ACCESS_KEY_ID ?? "",
-      sk: env.VOLC_SECRET_ACCESS_KEY ?? "",
+      ak: credentials.ak,
+      sk: credentials.sk,
       smsAccount: env.VOLC_SMS_ACCOUNT ?? "",
       sign: env.VOLC_SMS_SIGN ?? "玄浮科技",
       templateId: env.VOLC_SMS_TEMPLATE_ID ?? "",

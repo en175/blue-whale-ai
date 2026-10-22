@@ -599,6 +599,7 @@ model user_skill {
 /// enabled=1 进首页轮播（按 sort_order 升序）；上限 8 条（应用层校验，不设 DB 唯一约束）。
 model homepage_hero {
   id           BigInt   @id @default(autoincrement())
+  scene        String   @default("homepage") @db.VarChar(20)
   media_type   String   @default("video") @db.VarChar(16)
   media_url    String   @db.VarChar(512)
   poster_url   String?  @db.VarChar(512)
@@ -611,6 +612,7 @@ model homepage_hero {
 
   @@index([enabled, is_delete, sort_order], map: "idx_hero_enabled_sort")
   @@index([sort_order, is_delete], map: "idx_hero_sort")
+  @@index([scene, enabled, is_delete, sort_order], map: "idx_hero_scene_enabled_sort")
 }
 
 /// Creative Skill 稳定身份（IK60WS，资产契约 §1）：官方与个人共用一表；
@@ -664,6 +666,7 @@ model bw_users {
   /// （MySQL 唯一索引对 NULL 互不相等，对空串不是）。见 migration 20260925120000。
   email        String?  @unique(map: "uk_bw_users__email") @db.VarChar(50)
   username     String   @db.VarChar(50)
+  nickname     String?  @db.VarChar(50)
   status       String   @default("NORMAL") @db.VarChar(30)
   gmt_create   DateTime @default(now()) @db.DateTime(0)
   gmt_modified DateTime @default(now()) @db.DateTime(0)
@@ -691,15 +694,18 @@ model bw_users {
 model bw_verification_codes {
   id         BigInt   @id @default(autoincrement())
   phone      String   @db.VarChar(20)
+  purpose    String   @default("login") @db.VarChar(20)
   code       String   @db.VarChar(6)
   ip         String   @db.VarChar(50)
   gmt_expire DateTime @db.DateTime(0)
   is_used    Boolean  @default(false)
+  attempts   Int      @default(0)
   gmt_create DateTime @default(now()) @db.DateTime(0)
 
   @@index([ip, gmt_create], map: "idx_ip_created")
   @@index([phone, gmt_create], map: "idx_phone_created")
   @@index([phone, is_used, gmt_expire], map: "idx_phone_unused")
+  @@index([phone, purpose, is_used, gmt_expire], map: "idx_phone_purpose_unused")
 }
 
 
