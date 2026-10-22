@@ -160,6 +160,7 @@ function setup() {
     phoneActions as never,
     captcha as never,
     loginEntry,
+    { isAllowed: () => false } as never,
   );
   const res = {
     cookie: vi.fn(),

@@ -41,6 +41,8 @@ import {
   LOGIN_LOCK_SCOPE,
   LoginFailureTracker,
 } from "@lib/shared/rate-limit/login-failure-tracker.js";
+import { RateLimitAllowlist } from "@lib/shared/rate-limit/rate-limit-allowlist.js";
+import { enforceRateLimit } from "@lib/shared/rate-limit/rate-limit-policy.js";
 import { RateLimiter } from "@lib/shared/rate-limit/rate-limiter.js";
 import {
   IdentityService,
@@ -110,9 +112,19 @@ function authRateLimit(
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 const SMS_PHONE_BUCKETS = [
-  { scope: "send_code_phone_minute", limit: 1, windowMs: 60_000 },
-  { scope: "send_code_phone_day", limit: 10, windowMs: DAY_MS },
-] as const;
+  {
+    scope: "send_code_phone_minute",
+    key: "phone" as const,
+    limit: 1,
+    windowMs: 60_000,
+  },
+  {
+    scope: "send_code_phone_day",
+    key: "phone" as const,
+    limit: 10,
+    windowMs: DAY_MS,
+  },
+];
 
 const SMS_CODE_RATE_LIMIT = RateLimit({
   buckets: [
@@ -132,6 +144,7 @@ export class AuthController {
     private readonly phoneActions: PhoneActionService,
     private readonly captcha: CaptchaService,
     private readonly loginEntry: LoginEntryService,
+    private readonly allowlist: RateLimitAllowlist,
   ) {}
 
   @Public()
@@ -217,17 +230,14 @@ export class AuthController {
       );
     }
 
-    for (const bucket of SMS_PHONE_BUCKETS) {
-      const hit = await this.limiter.take({
-        scope: bucket.scope,
-        key: phone,
-        limit: bucket.limit,
-        windowMs: bucket.windowMs,
-      });
-      if (!hit.allowed) {
-        res?.setHeader("Retry-After", String(hit.retryAfter ?? 1));
-        throw new NewApiError("操作过于频繁，请稍后再试", 429, RATE_LIMITED);
-      }
+    const phoneDecision = await enforceRateLimit(
+      SMS_PHONE_BUCKETS,
+      { ip, allowlistIp: ip, account: null, phone, user: null },
+      { limiter: this.limiter, allowlist: this.allowlist },
+    );
+    if (!phoneDecision.allowed) {
+      res?.setHeader("Retry-After", String(phoneDecision.retryAfter ?? 1));
+      throw new NewApiError("操作过于频繁，请稍后再试", 429, RATE_LIMITED);
     }
 
     try {
