@@ -515,8 +515,8 @@ describe('IKFR51 音频文本参考', () => {
   });
 });
 
-describe('IKJIVN 音频面板报价不带 target_node_id', () => {
-  it('报价请求体为音频定价维度，且无 target_node_id 键', async () => {
+describe('IKJIVN 音频面板报价带当前文本且不带 target_node_id', () => {
+  it('空文本不报价；输入后请求体带 prompt 且无 target_node_id 键', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(
       JSON.stringify({ code: 200, msg: null, data: { credits: 3 } }),
       { status: 200, headers: { 'Content-Type': 'application/json' } },
@@ -524,12 +524,38 @@ describe('IKJIVN 音频面板报价不带 target_node_id', () => {
     fetchGuard.stub(fetchMock);
 
     await renderDialog({ projectId: 'p1' });
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    await typePromptRefText(container, '你好 世界');
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
 
     const body = JSON.parse((fetchMock.mock.calls[0]![1] as RequestInit).body as string);
     expect(body.type).toBe('audio');
+    expect(body.parameters.prompt).toBe('你好 世界');
     expect(body).not.toHaveProperty('target_node_id');
+    expect(container.querySelector('[data-testid="audio-char-count"]')?.textContent).toBe('4');
     fetchGuard.unstubGlobals();
+  });
+
+  it('上限按去空白后的字数判断：100 字 + 空格不误判超限', async () => {
+    const model = (await fetchGenerationModels())[0];
+    fetchGenerationModels.mockResolvedValueOnce([
+      { ...model, features: { max_prompt_length: 100 } },
+    ]);
+    await renderDialog();
+    const spaces = ' '.repeat(20);
+    await typePromptRefText(container, `${'字'.repeat(100)}${spaces}`);
+    expect(container.querySelector('[data-testid="audio-char-count"]')?.textContent).toBe('100/100');
+    expect(container.querySelector<HTMLButtonElement>('[data-testid="audio-send"]')!.disabled).toBe(false);
+
+    await typePromptRefText(container, `${'字'.repeat(101)}${spaces}`);
+    expect(container.querySelector<HTMLButtonElement>('[data-testid="audio-send"]')!.disabled).toBe(true);
+
+    await typePromptRefText(container, `${'字'.repeat(50)}${' '.repeat(5)}${'字'.repeat(50)}`);
+    expect(container.querySelector<HTMLButtonElement>('[data-testid="audio-send"]')!.disabled).toBe(true);
+
+    await typePromptRefText(container, `${'🐋'.repeat(60)}${'字'.repeat(40)}`);
+    expect(container.querySelector<HTMLButtonElement>('[data-testid="audio-send"]')!.disabled).toBe(true);
   });
 });
 

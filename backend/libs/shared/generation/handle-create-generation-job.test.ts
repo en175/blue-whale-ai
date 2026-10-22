@@ -2269,6 +2269,20 @@ const VIDEO_PARAMS_OK = {
   },
 };
 
+const AUDIO_CAPABILITY_ROW = {
+  model_id: "seed-audio-1.0",
+  features: { audio_reference_max: 3, image_reference_max: 1 },
+  channel: "new-api",
+  pricing: {
+    baseUnit: "usage.characters",
+    basePrice: { kind: "const", value: 19000 },
+    unitDenominator: 100,
+    quantityStep: 100,
+    rounding: "halfUp",
+    minCredits: 1,
+  },
+};
+
 describe("handleCreateGenerationJob 视频参数能力目录前置（IKE7JP）", () => {
   it("分辨率不在能力支持范围 → 400 capability_unsupported_resolution + 可用值文案，不建任务", async () => {
     const { deps, createJob } = buildCapabilityDeps([VIDEO_CAPABILITY_ROW]);
@@ -2997,6 +3011,36 @@ describe("handleCreateGenerationJob 计费接线", () => {
       userId: "u1",
       jobId: 501,
       reason: "写库失败",
+    });
+  });
+
+  it("音频 charge 带上本次生效的规则快照（含分档配置）", async () => {
+    const { deps, createJob } = buildCapabilityDeps([AUDIO_CAPABILITY_ROW]);
+    const charge = vi.fn(async () => {});
+    const withBilling = {
+      ...deps,
+      billing: { charge, release: vi.fn(async () => {}) },
+    } as unknown as HandlerDeps;
+
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      AUDIO_BODY,
+      "key-audio",
+      withBilling,
+    );
+    expect(result.code).toBe(200);
+
+    const options = createJob.mock.calls.at(-1)![1] as {
+      billing: { charge: (jobId: number) => Promise<void> };
+    };
+    await options.billing.charge(502);
+
+    const chargeArg = charge.mock.calls[0]![0] as { ruleSnapshot?: string };
+    expect(JSON.parse(chargeArg.ruleSnapshot ?? "{}")).toMatchObject({
+      baseUnit: "usage.characters",
+      unitDenominator: 100,
+      quantityStep: 100,
     });
   });
 });

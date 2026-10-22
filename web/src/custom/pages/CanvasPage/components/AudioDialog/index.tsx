@@ -21,10 +21,10 @@ import { type ImageTextAttachment } from '../ImageDialog';
 import { composeImageSendPrompt } from '../ImageDialog/composeImageSendPrompt';
 import {
   composedPromptLimitError,
-  isPromptOverLimit,
   promptCharCountLabel,
   promptMaxLengthOf,
 } from '@/custom/utils/prompt-max-length';
+import { countPromptCharacters } from '@/custom/utils/prompt-characters';
 import GenerationQuoteBadge from '../GenerationQuoteBadge';
 import styles from './index.module.css';
 type RefKind = 'audio' | 'image';
@@ -129,7 +129,17 @@ export default function AudioDialog({
   const [expanded, setExpanded] = useState(false);
   const [refs, setRefs] = useState<AudioRefItem[]>(initialRefs ?? []);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [quotePrompt, setQuotePrompt] = useState('');
   const sourceWrapRef = useRef<HTMLDivElement>(null);
+
+  const promptDocToSend = promptDoc && docHasAnyRef(promptDoc) ? promptDoc : null;
+  const promptText = text.trim();
+  const billedCharCount = countPromptCharacters(promptText);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setQuotePrompt(promptText), 300);
+    return () => clearTimeout(timer);
+  }, [promptText]);
 
   const durationSources = useMemo(
     () => [...(draftRefs ?? []), ...refs].map((r) => ({ key: `${r.source}-${r.id}`, src: r.src })),
@@ -293,7 +303,8 @@ export default function AudioDialog({
   const mixedStrip = useMixedRefStrip(allRefs.map(r => `${r.source}:${r.id}`), (attachments ?? []).map(a => a.nodeId), { stripOrder, onStripOrderChange });
   const currentRefs = orderRefStripItems(allRefs, r => `media:${r.source}:${r.id}`, mixedStrip.order);
   const orderedAttachments = orderRefStripItems(attachments ?? [], a => `text:${a.nodeId}`, mixedStrip.order);
-  const invalidPrompt = (promptDoc !== null && docHasInvalidRef(promptDoc)) || isPromptOverLimit(text, maxInput);
+  const invalidPrompt = (promptDoc !== null && docHasInvalidRef(promptDoc))
+    || (maxInput != null && promptText.length > maxInput);
   const handleStripReorder = (from: number, to: number) => {
     const { nextMedia: nextRefIds, nextText: nextTextKeys, mediaChanged: refChanged, textChanged } = mixedStrip.reorder(from, to);
     if (refChanged) {
@@ -339,7 +350,6 @@ export default function AudioDialog({
   );
   const handleSend = () => {
     if (!canSend || !currentModel) return;
-    const promptDocToSend = promptDoc && docHasAnyRef(promptDoc) ? promptDoc : null;
     const composedOverLimit = composedPromptLimitError(
       composeImageSendPrompt(attachments, text.trim(), promptDocToSend),
       maxInput,
@@ -533,19 +543,22 @@ export default function AudioDialog({
 
         <div className={styles.barRight}>
           {}
-          {projectId ? (
+          {projectId && quotePrompt ? (
             <GenerationQuoteBadge
               projectId={projectId}
               type="audio"
-              parameters={{ model_id: modelId }}
+              parameters={{ model_id: modelId, prompt: quotePrompt }}
             />
           ) : null}
           {readOnly && (
             <span className={styles.readOnlyHint}>{readOnlyReason}</span>
           )}
           {}
-          <div className={`${styles.charCount} ${maxInput != null && text.length >= maxInput ? styles.charCountWarn : ''}`}>
-            {promptCharCountLabel(text.length, maxInput)}
+          <div
+            data-testid="audio-char-count"
+            className={`${styles.charCount} ${maxInput != null && promptText.length >= maxInput ? styles.charCountWarn : ''}`}
+          >
+            {promptCharCountLabel(billedCharCount, maxInput)}
           </div>
           <button
             className={`${styles.sendBtn} ${canSend ? styles.sendBtnActive : ''}`}
