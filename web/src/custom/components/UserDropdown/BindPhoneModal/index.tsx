@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import Modal from '@/custom/components/Modal';
 import { bindPhone, sendCode } from '@/custom/api/auth';
 import { isApiError } from '@/shared/api/http';
+import { toast } from '@/shared/components/Toast';
+import { isMainlandPhone, PHONE_FORMAT_MESSAGE, SMS_SENT_MESSAGE } from '@/custom/utils/mainlandPhone';
 import styles from './index.module.css';
 
 interface BindPhoneModalProps {
@@ -10,7 +12,6 @@ interface BindPhoneModalProps {
   onBound: (phone: string) => void;
 }
 
-const PHONE_RE = /^1[3-9]\d{9}$/;
 const SEND_CODE_COOLDOWN_SECONDS = 60;
 
 export default function BindPhoneModal({ open, onClose, onBound }: BindPhoneModalProps) {
@@ -27,16 +28,21 @@ export default function BindPhoneModal({ open, onClose, onBound }: BindPhoneModa
     return () => window.clearInterval(timer);
   }, [cooldown]);
 
-  const phoneValid = PHONE_RE.test(phone.trim());
+  const phoneValid = isMainlandPhone(phone);
   const canSubmit = phoneValid && code.trim().length > 0 && !submitting;
 
   const handleSendCode = async () => {
-    if (!phoneValid || cooldown > 0 || sending) return;
+    if (cooldown > 0 || sending) return;
+    if (!phoneValid) {
+      setError(PHONE_FORMAT_MESSAGE);
+      return;
+    }
     setSending(true);
     setError('');
     try {
       await sendCode(phone.trim());
       setCooldown(SEND_CODE_COOLDOWN_SECONDS);
+      toast(SMS_SENT_MESSAGE);
     } catch (e) {
       setError(isApiError(e) ? e.message : '验证码发送失败，请稍后重试');
     } finally {
@@ -45,6 +51,10 @@ export default function BindPhoneModal({ open, onClose, onBound }: BindPhoneModa
   };
 
   const handleSubmit = async () => {
+    if (!phoneValid) {
+      setError(PHONE_FORMAT_MESSAGE);
+      return;
+    }
     if (!canSubmit) return;
     setSubmitting(true);
     setError('');
@@ -103,7 +113,10 @@ export default function BindPhoneModal({ open, onClose, onBound }: BindPhoneModa
           placeholder="请输入手机号"
           inputMode="numeric"
           value={phone}
-          onChange={(e) => setPhone(e.target.value)}
+          onChange={(e) => {
+            setPhone(e.target.value);
+            setError((current) => (current === PHONE_FORMAT_MESSAGE ? '' : current));
+          }}
         />
       </div>
       <div className={styles.field}>
@@ -122,7 +135,7 @@ export default function BindPhoneModal({ open, onClose, onBound }: BindPhoneModa
           <button
             type="button"
             className={styles.sendBtn}
-            disabled={!phoneValid || cooldown > 0 || sending}
+            disabled={cooldown > 0 || sending}
             onClick={handleSendCode}
           >
             {sendLabel}

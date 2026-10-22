@@ -11,13 +11,21 @@ export class ApiError extends Error {
   status: number;
   code: number | string;
   data: unknown;
+  errorCode?: string;
 
-  constructor(status: number, message: string, code: number | string = '', data: unknown = null) {
+  constructor(
+    status: number,
+    message: string,
+    code: number | string = '',
+    data: unknown = null,
+    errorCode?: string,
+  ) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
     this.code = code;
     this.data = data;
+    this.errorCode = errorCode;
   }
 }
 
@@ -48,6 +56,7 @@ interface Envelope<T> {
   msg?: string | null;
   message?: string;
   error?: string;
+  error_code?: string;
   warning?: string;
   data: T | null;
 }
@@ -138,6 +147,7 @@ async function doRequest<T>(path: string, init?: ApiRequestInit): Promise<{ data
       readApiErrorMessage(body, res.status),
       body?.code ?? res.status,
       body?.data,
+      typeof body?.error_code === 'string' ? body.error_code : undefined,
     );
     if (!silent && err.status !== 401) toast.error(err.message);
     throw err;

@@ -1,4 +1,5 @@
 import { useState, useEffect, useSyncExternalStore } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import {
   FileText,
@@ -10,12 +11,12 @@ import DropdownMenu from '@/custom/components/DropdownMenu';
 import { joinClassNames } from '@/custom/utils/class-names';
 import styles from './index.module.css';
 import { getCurrentUser, subscribe, isAdmin, setSession } from '@/shared/utils/auth';
-import { logout, fetchCredits } from '@/custom/api/auth';
+import { accountProfileKeys, logout, fetchCredits } from '@/custom/api/auth';
 import { useAuthStore } from '@/shared/stores/auth';
 import { useRechargeUiStore } from '@/custom/stores/recharge';
 import AccountModal from './AccountModal';
 import RechargeModal from './RechargeModal';
-import LoginModal, { type LoginModalMode } from '@/custom/components/LoginModal';
+import LoginModal from '@/custom/components/LoginModal';
 import { USER_DROPDOWN_MENU_ITEMS } from './menuItems';
 
 const menuIcons = {
@@ -30,15 +31,17 @@ export default function UserDropdown() {
   const [showAccount, setShowAccount] = useState(false);
   const showRecharge = useRechargeUiStore((s) => s.open);
   const closeRecharge = useRechargeUiStore((s) => s.closeRecharge);
-  const [loginMode, setLoginMode] = useState<LoginModalMode | null>(null);
+  const [loginOpen, setLoginOpen] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const credits = useAuthStore((s) => s.credits);
   const setUsage = useAuthStore((s) => s.setUsage);
+  const queryClient = useQueryClient();
   const navigate = useNavigate();
 
   useEffect(() => {
     if (!user) {
       setUsage(null);
+      queryClient.removeQueries({ queryKey: accountProfileKeys.all });
       return;
     }
     let alive = true;
@@ -52,22 +55,17 @@ export default function UserDropdown() {
     return () => {
       alive = false;
     };
-  }, [user, setUsage]);
+  }, [user, setUsage, queryClient]);
 
   if (!user) {
     return (
       <div className={styles.wrapper}>
         <div className={styles.guestActions}>
-          <button className={styles.loginBtn} onClick={() => setLoginMode('password')}>
-            登录
-          </button>
-          <button className={styles.loginBtn} onClick={() => setLoginMode('register')}>
-            注册
+          <button type="button" className={styles.loginBtn} onClick={() => setLoginOpen(true)}>
+            <span className={styles.loginLabel}>注册/登录</span>
           </button>
         </div>
-        {loginMode && (
-          <LoginModal initialMode={loginMode} onClose={() => setLoginMode(null)} />
-        )}
+        {loginOpen && <LoginModal onClose={() => setLoginOpen(false)} />}
       </div>
     );
   }
@@ -149,6 +147,10 @@ export default function UserDropdown() {
           hasPassword={user.hasPassword}
           balance={credits}
           onClose={() => setShowAccount(false)}
+          onRequireLogin={() => {
+            setShowAccount(false);
+            setLoginOpen(true);
+          }}
         />
       )}
       {showRecharge && <RechargeModal onClose={closeRecharge} />}

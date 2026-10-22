@@ -181,7 +181,19 @@ html.canvas-chrome-lock .react-flow__pane {
 }
 
 [data-sonner-toast][data-styled='true'] {
+  justify-content: center;
   font-size: var(--font-size-md);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-md);
+  text-align: center;
+}
+
+[data-sonner-toaster] [data-sonner-toast][data-styled='true'] [data-content] {
+  align-items: center;
+  text-align: center;
+}
+
+[data-sonner-toaster] [data-sonner-toast][data-styled='true'] [data-title],
+[data-sonner-toaster] [data-sonner-toast][data-styled='true'] [data-description] {
+  text-align: center;
 }

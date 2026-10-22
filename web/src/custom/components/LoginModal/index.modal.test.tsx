@@ -1,22 +1,46 @@
 // @vitest-environment jsdom
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { sendCode } from '@/custom/api/auth';
+import { fetchPublicHomepageHeroes } from '@/shared/api/homepageHeroes';
+import {
+  bindMigrationPhone,
+  fetchCaptcha,
+  loginWithCode,
+  sendCode,
+  verifyMigrationPassword,
+} from '@/custom/api/auth';
 import {
   PLATFORM_PRIVACY_POLICY_HREF,
   USER_SERVICES_AGREEMENT_HREF,
 } from './agreements';
+import { toast } from '@/shared/components/Toast';
 import LoginModal from './index';
+import styles from './index.module.css';
+
+vi.mock('@/shared/components/Toast', () => ({
+  showToast: vi.fn(),
+  toast: vi.fn(),
+}));
+
+vi.mock('@/shared/api/homepageHeroes', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/shared/api/homepageHeroes')>();
+  return {
+    ...actual,
+    fetchPublicHomepageHeroes: vi.fn(async () => []),
+  };
+});
 
 vi.mock('@/custom/api/auth', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/custom/api/auth')>();
   return {
     ...actual,
+    fetchCaptcha: vi.fn(async () => ({ id: 'cap_1', image: 'data:image/png;base64,aa', expires_in: 60 })),
     sendCode: vi.fn(async () => null),
-    loginWithPassword: vi.fn(),
     loginWithCode: vi.fn(),
-    registerWithPassword: vi.fn(),
+    verifyMigrationPassword: vi.fn(),
+    bindMigrationPhone: vi.fn(),
     fetchMe: vi.fn(async () => null),
   };
 });
@@ -29,8 +53,17 @@ async function renderLoginModal(props: Partial<Parameters<typeof LoginModal>[0]>
   mountNode = document.createElement('div');
   document.body.appendChild(mountNode);
   root = createRoot(mountNode);
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
   await act(async () => {
-    root.render(createElement(LoginModal, { onClose, ...props }));
+    root.render(
+      createElement(
+        QueryClientProvider,
+        { client: queryClient },
+        createElement(LoginModal, { onClose, ...props }),
+      ),
+    );
   });
   return { onClose };
 }
@@ -38,193 +71,182 @@ async function renderLoginModal(props: Partial<Parameters<typeof LoginModal>[0]>
 function buttonByText(text: string): HTMLButtonElement | null {
   return (
     Array.from(document.body.querySelectorAll<HTMLButtonElement>('button')).find(
-      (b) => b.textContent?.trim() === text,
+      (button) => button.textContent?.trim() === text,
     ) ?? null
   );
 }
 
-function agreementCheckbox(): HTMLInputElement | null {
-  return document.body.querySelector<HTMLInputElement>('input[type="checkbox"]');
+function inputByPlaceholder(placeholder: string): HTMLInputElement | null {
+  return document.body.querySelector<HTMLInputElement>(`input[placeholder="${placeholder}"]`);
 }
 
 function setInputValue(input: HTMLInputElement, value: string) {
-  const setter = Object.getOwnPropertyDescriptor(
-    window.HTMLInputElement.prototype,
-    'value',
-  )?.set;
+  const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
   setter?.call(input, value);
   input.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
 beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  localStorage.clear();
+  vi.mocked(fetchCaptcha).mockClear();
   vi.mocked(sendCode).mockClear();
+  vi.mocked(loginWithCode).mockClear();
+  vi.mocked(verifyMigrationPassword).mockClear();
+  vi.mocked(bindMigrationPhone).mockClear();
 });
 
 afterEach(async () => {
   if (root) await act(async () => root.unmount());
   mountNode?.remove();
+  localStorage.clear();
 });
 
-describe('LoginModal（账号密码 / 手机号验证码 / 注册）', () => {
-  it('通过共用 Modal 以 Portal 渲染，默认是账号密码态并展示创建账号', async () => {
+describe('LoginModal 手机号登录', () => {
+  it('弹出双栏手机号登录，不再展示账号密码和注册表单', async () => {
     await renderLoginModal();
 
-    expect(mountNode.querySelector('[role="dialog"]')).toBeNull();
     expect(document.body.querySelector('[role="dialog"]')).not.toBeNull();
-    expect(document.body.querySelector('[data-semantic="mask"]')).not.toBeNull();
-    expect(document.body.querySelector('input[placeholder="请输入账号"]')).not.toBeNull();
-    expect(document.body.querySelector('input[placeholder="请输入密码"]')).not.toBeNull();
-    expect(buttonByText('创建账号')).not.toBeNull();
+    expect(document.body.textContent).toContain('欢迎来到蓝鲸');
+    expect(document.body.textContent).toContain('手机号验证通过后即可登录，未注册将自动创建账号。');
+    expect(inputByPlaceholder('请输入手机号')).not.toBeNull();
+    expect(inputByPlaceholder('请输入验证码')).not.toBeNull();
+    expect(buttonByText('获取验证码')).not.toBeNull();
+    expect(buttonByText('登录')).not.toBeNull();
+    expect(buttonByText('内部老账号迁移↗')).not.toBeNull();
+    expect(inputByPlaceholder('请输入账号')).toBeNull();
+    expect(buttonByText('创建账号')).toBeNull();
+    expect(document.body.querySelector('a[href="' + USER_SERVICES_AGREEMENT_HREF + '"]')).not.toBeNull();
+    expect(document.body.querySelector('a[href="' + PLATFORM_PRIVACY_POLICY_HREF + '"]')).not.toBeNull();
   });
 
-  it('关闭按钮走统一 onCancel', async () => {
-    const { onClose } = await renderLoginModal();
-
+  it('未勾选协议时不提交登录', async () => {
+    await renderLoginModal();
+    const phone = inputByPlaceholder('请输入手机号');
+    const code = inputByPlaceholder('请输入验证码');
+    expect(phone).not.toBeNull();
+    expect(code).not.toBeNull();
     await act(async () => {
-      document.body.querySelector<HTMLButtonElement>('button[aria-label="关闭"]')?.click();
+      setInputValue(phone!, '13800001234');
+      setInputValue(code!, '123456');
+    });
+    await act(async () => {
+      buttonByText('登录')?.click();
+    });
+    expect(loginWithCode).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain('请先阅读并同意用户服务协议和隐私政策');
+  });
+
+  it('获取验证码先取图形验证码，填入后再按登录用途发送', async () => {
+    await renderLoginModal();
+    const phone = inputByPlaceholder('请输入手机号');
+    const sendButton = buttonByText('获取验证码');
+    expect(sendButton?.className).toBe(styles.textAction);
+    await act(async () => setInputValue(phone!, '13800001234'));
+    expect(buttonByText('获取验证码')?.className).toBe(styles.codeActionReady);
+    await act(async () => buttonByText('获取验证码')?.click());
+    expect(fetchCaptcha).toHaveBeenCalledWith('13800001234', 'login');
+    expect(sendCode).not.toHaveBeenCalled();
+    expect(document.body.querySelector('[aria-label="安全验证"] h2')?.textContent).toBe('安全验证');
+    expect(document.body.textContent).not.toContain('内部老账号迁移');
+
+    await act(async () => buttonByText('← 返回')?.click());
+    expect(document.body.querySelector('[aria-label="安全验证"]')).toBeNull();
+    expect(document.body.textContent).toContain('欢迎来到蓝鲸');
+
+    await act(async () => buttonByText('获取验证码')?.click());
+    const captcha = inputByPlaceholder('请输入图中字符');
+    expect(captcha).not.toBeNull();
+    await act(async () => setInputValue(captcha!, 'ab2c'));
+    expect(sendCode).toHaveBeenCalledWith({
+      phone: '13800001234',
+      purpose: 'login',
+      captchaId: 'cap_1',
+      captchaAnswer: 'ab2c',
+    });
+    expect(buttonByText('60秒后重发')?.className).toBe(styles.codeActionCooldown);
+    expect(toast).toHaveBeenCalledWith('验证码已发送，5分钟内有效');
+    expect(document.body.querySelector('[aria-label="安全验证"]')).toBeNull();
+    expect(document.body.textContent).toContain('内部老账号迁移');
+  });
+
+  it('手机号格式不正确时不取图形验证码', async () => {
+    await renderLoginModal();
+    const phone = inputByPlaceholder('请输入手机号');
+    await act(async () => setInputValue(phone!, '12345'));
+    await act(async () => buttonByText('获取验证码')?.click());
+    expect(fetchCaptcha).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain('请输入正确的手机号');
+  });
+});
+
+describe('LoginModal 内部老账号迁移', () => {
+  it('从底部入口进入验证原账号，并可返回手机号登录', async () => {
+    await renderLoginModal();
+    await act(async () => buttonByText('内部老账号迁移↗')?.click());
+    expect(document.body.textContent).toContain('内部老账号迁移');
+    expect(inputByPlaceholder('请输入原账号')).not.toBeNull();
+    expect(inputByPlaceholder('请输入原密码')).not.toBeNull();
+    expect(buttonByText('验证原账号')).not.toBeNull();
+
+    await act(async () => buttonByText('← 返回手机号登录')?.click());
+    expect(document.body.textContent).toContain('欢迎来到蓝鲸');
+  });
+
+  it('原账号验证通过后进入绑定手机号', async () => {
+    vi.mocked(verifyMigrationPassword).mockResolvedValueOnce({
+      migration_token: 'mig_1',
+      expires_in: 600,
+    });
+    await renderLoginModal();
+    await act(async () => buttonByText('内部老账号迁移↗')?.click());
+    expect(buttonByText('验证原账号')?.className).not.toContain(styles.submitReady);
+    const username = inputByPlaceholder('请输入原账号');
+    const password = inputByPlaceholder('请输入原密码');
+    await act(async () => {
+      setInputValue(username!, 'old_user');
+      setInputValue(password!, 'secret');
+    });
+    expect(buttonByText('验证原账号')?.className).toContain(styles.submitReady);
+    await act(async () => buttonByText('验证原账号')?.click());
+
+    expect(verifyMigrationPassword).toHaveBeenCalledWith('old_user', 'secret');
+    expect(document.body.textContent).toContain('绑定手机号');
+    expect(document.body.textContent).toContain('完成绑定后进入原账号，项目和素材将保留');
+    expect(buttonByText('绑定并进入原账号')).not.toBeNull();
+    expect(buttonByText('取消迁移，返回登录')).not.toBeNull();
+  });
+});
+
+describe('LoginModal 左侧背景', () => {
+  it('先展示首帧，视频加载成功后再切到视频', async () => {
+    vi.mocked(fetchPublicHomepageHeroes).mockResolvedValueOnce([
+      {
+        id: '7',
+        media_type: 'video',
+        media_url: 'https://cdn.example.com/auth.mp4',
+        poster_url: 'https://cdn.example.com/auth.jpg',
+        sort_order: 0,
+      },
+    ]);
+    await renderLoginModal();
+    await act(async () => {
+      await vi.waitFor(() => {
+        expect(document.body.querySelector('img[src="https://cdn.example.com/auth.jpg"]')).not.toBeNull();
+      });
     });
 
-    expect(onClose).toHaveBeenCalledTimes(1);
-  });
-
-  it('密码可在显示与隐藏状态之间切换', async () => {
-    await renderLoginModal();
-    const password = document.body.querySelector<HTMLInputElement>('input[placeholder="请输入密码"]');
-    const toggle = document.body.querySelector<HTMLButtonElement>('button[aria-label="显示密码"]');
-
-    expect(password?.type).toBe('password');
-    expect(toggle?.querySelector('svg.lucide-eye-off')).not.toBeNull();
-
-    await act(async () => toggle?.click());
-
-    expect(password?.type).toBe('text');
-    expect(document.body.querySelector('button[aria-label="隐藏密码"]')).not.toBeNull();
-  });
-
-  it('「其他登录方式」原地切到手机号态，并能切回来', async () => {
-    await renderLoginModal();
-
-    await act(async () => buttonByText('手机号登录')?.click());
-
-    expect(document.body.querySelector('input[placeholder="请输入手机号"]')).not.toBeNull();
-    expect(document.body.querySelector('input[placeholder="请输入验证码"]')).not.toBeNull();
-    expect(buttonByText('发送验证码')).not.toBeNull();
-    expect(document.body.querySelector('input[placeholder="请输入账号"]')).toBeNull();
-
-    await act(async () => buttonByText('账号密码登录')?.click());
-
-    expect(document.body.querySelector('input[placeholder="请输入账号"]')).not.toBeNull();
-    expect(document.body.querySelector('input[placeholder="请输入手机号"]')).toBeNull();
-  });
-
-  it('手机号态：号码不合法时「发送验证码」禁用，合法后可用', async () => {
-    await renderLoginModal({ initialMode: 'phone' });
-
-    const phoneInput = document.body.querySelector<HTMLInputElement>('input[placeholder="请输入手机号"]')!;
-    expect(buttonByText('发送验证码')?.disabled).toBe(true);
-
-    for (const bad of ['12345', '23800001234', '1380000123']) {
-      await act(async () => setInputValue(phoneInput, bad));
-      expect(buttonByText('发送验证码')?.disabled).toBe(true);
-    }
-
-    await act(async () => setInputValue(phoneInput, '13800001234'));
-    expect(buttonByText('发送验证码')?.disabled).toBe(false);
-  });
-
-  it('手机号态：点一次「发送验证码」后进 60 秒冷却，且请求只发一次', async () => {
-    await renderLoginModal({ initialMode: 'phone' });
-    const phoneInput = document.body.querySelector<HTMLInputElement>('input[placeholder="请输入手机号"]')!;
-
-    await act(async () => setInputValue(phoneInput, '13800001234'));
-    await act(async () => buttonByText('发送验证码')?.click());
-
-    expect(sendCode).toHaveBeenCalledWith('13800001234');
-    expect(buttonByText('60 秒后重发')?.disabled).toBe(true);
-
-    await act(async () => buttonByText('60 秒后重发')?.click());
-    expect(sendCode).toHaveBeenCalledTimes(1);
-  });
-
-  it('★ 协议未勾选时，两个态的登录按钮都点不动', async () => {
-    await renderLoginModal();
-    const accountInput = document.body.querySelector<HTMLInputElement>('input[placeholder="请输入账号"]')!;
-    const passwordInput = document.body.querySelector<HTMLInputElement>('input[placeholder="请输入密码"]')!;
-    await act(async () => {
-      setInputValue(accountInput, 'alice');
-      setInputValue(passwordInput, 'secret');
-    });
-    expect(buttonByText('登录')?.disabled).toBe(true);
-
-    await act(async () => agreementCheckbox()?.click());
-    expect(buttonByText('登录')?.disabled).toBe(false);
-
-    await act(async () => buttonByText('手机号登录')?.click());
-    await act(async () => agreementCheckbox()?.click());
-    const phoneInput = document.body.querySelector<HTMLInputElement>('input[placeholder="请输入手机号"]')!;
-    const codeInput = document.body.querySelector<HTMLInputElement>('input[placeholder="请输入验证码"]')!;
-    await act(async () => {
-      setInputValue(phoneInput, '13800001234');
-      setInputValue(codeInput, '123456');
-    });
-    expect(buttonByText('登录')?.disabled).toBe(true);
-  });
-
-  it('协议链接在当前态可用（两个态都渲染同一份）', async () => {
-    await renderLoginModal();
-
-    for (const mode of ['password', 'phone'] as const) {
-      if (mode === 'phone') {
-        await act(async () => buttonByText('手机号登录')?.click());
-      }
-      const links = Array.from(document.body.querySelectorAll<HTMLAnchorElement>('a'));
-      expect(links.map((link) => link.textContent)).toEqual(['《用户协议》', '《隐私政策》']);
-      expect(links.map((link) => link.href)).toEqual([
-        USER_SERVICES_AGREEMENT_HREF,
-        PLATFORM_PRIVACY_POLICY_HREF,
-      ]);
-      expect(links.every((link) => link.target === '_blank' && link.rel === 'noreferrer')).toBe(true);
-    }
-  });
-
-  it('创建账号切到注册态，返回登录切回账号密码态', async () => {
-    await renderLoginModal();
-
-    await act(async () => buttonByText('创建账号')?.click());
-
-    expect(document.body.querySelector('h2')?.textContent).toBe('注册');
-    expect(document.body.querySelector('input[placeholder="账号（至少3位）"]')).not.toBeNull();
-    expect(document.body.querySelector('input[placeholder="密码（8 位以上）"]')).not.toBeNull();
-    expect(document.body.querySelector('input[placeholder="确认密码"]')).not.toBeNull();
-    expect(buttonByText('注册')?.disabled).toBe(true);
-
-    await act(async () => buttonByText('已有账号？返回登录')?.click());
-
-    expect(document.body.querySelector('h2')?.textContent).toBe('登录');
-    expect(document.body.querySelector('input[placeholder="请输入账号"]')).not.toBeNull();
-  });
-
-  it('协议未勾选时注册按钮不可用，勾选且口令合规后可点', async () => {
-    await renderLoginModal({ initialMode: 'register' });
-    const accountInput = document.body.querySelector<HTMLInputElement>(
-      'input[placeholder="账号（至少3位）"]',
-    )!;
-    const passwordInput = document.body.querySelector<HTMLInputElement>(
-      'input[placeholder="密码（8 位以上）"]',
-    )!;
-    const confirmInput = document.body.querySelector<HTMLInputElement>(
-      'input[placeholder="确认密码"]',
-    )!;
+    const poster = document.body.querySelector<HTMLImageElement>('img[src="https://cdn.example.com/auth.jpg"]');
+    const video = document.body.querySelector<HTMLVideoElement>('video[src="https://cdn.example.com/auth.mp4"]');
+    expect(poster?.className).toBe(styles.mediaFill);
+    expect(video).not.toBeNull();
+    expect(video?.preload).toBe('auto');
+    expect(video?.className).toBe(styles.mediaPreload);
 
     await act(async () => {
-      setInputValue(accountInput, 'alice');
-      setInputValue(passwordInput, '12345678');
-      setInputValue(confirmInput, '12345678');
+      video?.dispatchEvent(new Event('loadeddata'));
     });
-    expect(buttonByText('注册')?.disabled).toBe(true);
-
-    await act(async () => agreementCheckbox()?.click());
-    expect(buttonByText('注册')?.disabled).toBe(false);
+    expect(poster?.className).toBe(styles.mediaHidden);
+    expect(video?.className).toBe(styles.mediaFill);
   });
 });
