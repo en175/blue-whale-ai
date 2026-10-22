@@ -15,7 +15,6 @@ export interface LoginData {
   phone: string;
   is_new_user: boolean;
   has_password: boolean;
-  must_change_password?: boolean;
 }
 
 export type SmsPurpose = 'login' | 'bind' | 'rebind_old' | 'rebind_new' | 'recovery';
