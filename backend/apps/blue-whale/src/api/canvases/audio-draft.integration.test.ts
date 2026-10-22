@@ -21,7 +21,7 @@ import { GenerationCommandService } from "@lib/shared/generation/generation-comm
 import { ModelCapabilityReadService } from "@lib/shared/generation/model-capability.service.js";
 import { MaterialService } from "@lib/shared/material/material.service.js";
 import { SystemSettingsService } from "@lib/shared/system-settings/index.js";
-import { IdentityService } from "@lib/shared/identity/identity.service.js";
+import { AccountDirectoryService } from "@lib/shared/identity/account-directory.service.js";
 import { AllExceptionsFilter } from "@lib/infra/filters/all-exceptions.filter.js";
 
 vi.mock("@lib/shared/generation/generation-queue.js", () => ({
@@ -75,7 +75,7 @@ describe.skipIf(!process.env.IKDMQT_DATABASE_URL)("Audio draft public API (IKDMQ
     });
     const canvasService = new CanvasService(prisma, projects);
     Reflect.defineMetadata("design:paramtypes", [CanvasService], CanvasesController);
-    Reflect.defineMetadata("design:paramtypes", [ProjectService, GenerationCommandService, ModelCapabilityReadService, CanvasService, MaterialService, AssetService, AssetStorageService, IdentityService], GenerationJobsController);
+    Reflect.defineMetadata("design:paramtypes", [ProjectService, GenerationCommandService, ModelCapabilityReadService, CanvasService, MaterialService, AssetService, AssetStorageService, AccountDirectoryService], GenerationJobsController);
     Reflect.defineMetadata("design:paramtypes", [ModelCapabilityReadService], GenerationModelsController);
     Reflect.defineMetadata("design:paramtypes", [ProjectService, CanvasService, SnapshotService, PrismaService], ProjectsController);
     Reflect.defineMetadata("design:paramtypes", [JobsService], JobsController);
@@ -95,7 +95,7 @@ describe.skipIf(!process.env.IKDMQT_DATABASE_URL)("Audio draft public API (IKDMQ
       { provide: GenerationCommandService, useValue: new GenerationCommandService(prisma) },
       { provide: ModelCapabilityReadService, useValue: new ModelCapabilityReadService(prisma) },
       { provide: MaterialService, useValue: new MaterialService(prisma, new SystemSettingsService(prisma)) },
-      { provide: IdentityService, useValue: new IdentityService(prisma) },
+      { provide: AccountDirectoryService, useValue: new AccountDirectoryService(prisma) },
     ] })(HarnessModule);
     app = await NestFactory.create(HarnessModule, { logger: false, bodyParser: false });
     app.useGlobalFilters(new AllExceptionsFilter());

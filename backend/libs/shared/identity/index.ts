@@ -1,4 +1,6 @@
 export { IdentityModule } from "./identity.module.js";
+export { AccountDirectoryService } from "./account-directory.service.js";
+export { PhoneBindingService } from "./phone-binding.service.js";
 export {
   IdentityService,
   AccountDeletedError,

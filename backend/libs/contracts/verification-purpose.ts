@@ -3,7 +3,6 @@ export const VERIFICATION_PURPOSES = [
   "bind",
   "rebind_old",
   "rebind_new",
-  "recovery",
 ] as const;
 
 export type VerificationPurpose = (typeof VERIFICATION_PURPOSES)[number];

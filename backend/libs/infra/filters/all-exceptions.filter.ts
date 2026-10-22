@@ -5,7 +5,7 @@ import {
   HttpException,
   HttpStatus,
 } from "@nestjs/common";
-import { NewApiError } from "@lib/core";
+import { ApiError } from "@lib/core";
 import { DomainError } from "@lib/contracts";
 import { AdminException } from "@lib/shared/errors/admin-error.js";
 import type { Request, Response } from "express";
@@ -26,7 +26,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
       return;
     }
 
-    if (exception instanceof NewApiError) {
+    if (exception instanceof ApiError) {
       response.status(exception.status).json({
         code: exception.status,
         msg: exception.message,

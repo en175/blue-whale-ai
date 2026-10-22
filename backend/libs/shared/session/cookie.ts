@@ -1,4 +1,4 @@
-import type { CookieOptions } from "express";
+import type { CookieOptions, Response } from "express";
 
 export const SESSION_COOKIE_NAME = "bw_session";
 
@@ -14,4 +14,20 @@ export function sessionCookieOptions(
     path: "/",
     maxAge: SESSION_TTL_SECONDS * 1000,
   };
+}
+
+export function applySessionCookie(
+  res: Pick<Response, "cookie">,
+  token: string,
+): void {
+  res.cookie(SESSION_COOKIE_NAME, token, sessionCookieOptions());
+}
+
+export function clearSessionCookie(
+  res: Pick<Response, "clearCookie">,
+): void {
+  res.clearCookie(SESSION_COOKIE_NAME, {
+    ...sessionCookieOptions(),
+    maxAge: undefined,
+  });
 }

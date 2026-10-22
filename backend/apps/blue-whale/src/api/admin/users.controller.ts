@@ -25,6 +25,7 @@ import {
   grantCredits,
 } from "@lib/shared/billing/billing-admin-client.js";
 import {
+  AccountDirectoryService,
   IdentityService,
   PasswordPolicyError,
   USER_STATUS_DISABLED,
@@ -53,6 +54,7 @@ export class AdminUsersController {
 
   constructor(
     private readonly identity: IdentityService,
+    private readonly directory: AccountDirectoryService,
     private readonly operationLog: OperationLogService,
     private readonly sessions: SessionService,
   ) {}
@@ -80,7 +82,7 @@ export class AdminUsersController {
     if (status !== undefined) options.status = status;
 
     try {
-      const result = await this.identity.listAdminUsers(options);
+      const result = await this.directory.listAdminUsers(options);
       return { success: true, data: { list: result.items, total: result.total } };
     } catch (error) {
       throw toUserListError(error);
@@ -115,7 +117,7 @@ export class AdminUsersController {
 
     try {
       if (action === "freeze") {
-        const found = await this.identity.setUserStatus(
+        const found = await this.directory.setUserStatus(
           userId,
           USER_STATUS_DISABLED,
         );
@@ -129,7 +131,7 @@ export class AdminUsersController {
           );
         }
       } else if (action === "unfreeze") {
-        const found = await this.identity.setUserStatus(
+        const found = await this.directory.setUserStatus(
           userId,
           USER_STATUS_NORMAL,
         );
@@ -138,10 +140,10 @@ export class AdminUsersController {
         if (userId === Number(user.userId)) {
           throw new AdminException(400, "不能重置自己的密码，请走「修改密码」");
         }
-        if (!(await this.identity.userExists(userId))) {
+        if (!(await this.directory.userExists(userId))) {
           throw new AdminException(404, "用户不存在");
         }
-        if (isSuperAdmin(await this.identity.listRoleCodes(userId))) {
+        if (isSuperAdmin(await this.directory.listRoleCodes(userId))) {
           throw new AdminException(403, "不能重置超级管理员的密码");
         }
         const newPassword = typeof body.password === "string" ? body.password : "";
@@ -169,7 +171,7 @@ export class AdminUsersController {
         }
         const bizId = idempotencyKey?.trim();
         if (!bizId) throw new AdminException(400, "缺少 Idempotency-Key 请求头");
-        if (!(await this.identity.userExists(userId))) {
+        if (!(await this.directory.userExists(userId))) {
           throw new AdminException(404, "用户不存在");
         }
 

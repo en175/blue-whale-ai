@@ -1,17 +1,18 @@
 import { createLogger, type Logger } from "./logger.js";
+import { ApiError } from "./errors/http-error.js";
 import { generateTraceId, getCurrentTraceId } from "./trace.js";
 import type { NewApiClientOptions } from "./new-api-types.js";
 
 const newApiLogger: Logger = createLogger("new-api");
 
-export class NewApiError extends Error {
+export class NewApiError extends ApiError {
   constructor(
     message: string,
-    public readonly status: number,
-    public readonly code?: string | number,
-    public readonly detail?: unknown,
+    status: number,
+    code?: string | number,
+    detail?: unknown,
   ) {
-    super(message);
+    super(message, status, code, detail);
     this.name = "NewApiError";
   }
 }

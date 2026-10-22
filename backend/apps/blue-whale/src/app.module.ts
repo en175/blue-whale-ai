@@ -20,6 +20,7 @@ import { ProjectModule } from "@lib/shared/project/project.module.js";
 import { SceneCardModule } from "@lib/shared/scene-card/scene-card.module.js";
 import { SessionModule } from "@lib/shared/session/session.module.js";
 import { CaptchaModule } from "@lib/shared/auth/captcha.module.js";
+import { PhoneVerificationModule } from "@lib/shared/auth/phone-verification.module.js";
 import { PhoneActionModule } from "@lib/shared/identity/phone-action.module.js";
 import { RateLimitModule } from "@lib/shared/rate-limit/rate-limit.module.js";
 import { RateLimitGuard } from "@lib/shared/rate-limit/rate-limit.guard.js";
@@ -89,6 +90,7 @@ import { IdentityModule } from "@lib/shared/identity/index.js";
     SnapshotModule,
     SessionModule,
     CaptchaModule,
+    PhoneVerificationModule,
     PhoneActionModule,
     RateLimitModule,
     AuthModule,

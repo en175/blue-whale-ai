@@ -15,7 +15,7 @@ import { MaterialService } from "@lib/shared/material/material.service.js";
 import { SystemSettingsService } from "@lib/shared/system-settings/index.js";
 import { AssetService } from "@lib/shared/assets/assets.service.js";
 import { AssetStorageService } from "@lib/shared/assets/storage.service.js";
-import { IdentityService } from "@lib/shared/identity/identity.service.js";
+import { AccountDirectoryService } from "@lib/shared/identity/account-directory.service.js";
 
 vi.mock("@lib/shared/billing/billing-client.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@lib/shared/billing/billing-client.js")>();
@@ -80,7 +80,7 @@ describe.skipIf(!process.env.IKG57P_DATABASE_URL)(
           MaterialService,
           AssetService,
           AssetStorageService,
-          IdentityService,
+          AccountDirectoryService,
           PrismaService,
         ],
         GenerationJobsController,
@@ -109,8 +109,8 @@ describe.skipIf(!process.env.IKG57P_DATABASE_URL)(
             useValue: new AssetService(prisma, new AssetStorageService()),
           },
           {
-            provide: IdentityService,
-            useValue: new IdentityService(prisma),
+            provide: AccountDirectoryService,
+            useValue: new AccountDirectoryService(prisma),
           },
         ],
       })(HarnessModule);

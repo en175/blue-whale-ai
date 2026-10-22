@@ -36,6 +36,7 @@ function createController(overrides: {
   };
   const controller = new AdminUsersController(
     identity as never,
+    identity as never,
     operationLog as never,
     sessions as never,
   );

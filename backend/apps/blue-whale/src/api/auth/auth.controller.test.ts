@@ -71,7 +71,7 @@ vi.mock("ioredis", () => ({
 }));
 
 import { Reflector } from "@nestjs/core";
-import { NewApiError } from "@lib/core";
+import { ApiError } from "@lib/core";
 import {
   ACCOUNT_ERROR_CODE_WRONG,
   ACCOUNT_ERROR_TERMS_REQUIRED,
@@ -79,7 +79,7 @@ import {
   FAILURE_CODE,
 } from "@lib/contracts";
 import type { Response } from "express";
-import type { PrismaService } from "@lib/shared/prisma/prisma.service.js";
+import { LoginEntryService } from "@lib/shared/session/login-entry.service.js";
 import type { SessionService } from "@lib/shared/session/session.service.js";
 import {
   CodeWrongError,
@@ -123,6 +123,7 @@ function setup() {
     revokeAllForUser: vi.fn(async () => 0),
   };
   const prisma = { client: {} };
+  const verification = { issue: vi.fn(async () => undefined) };
   const identity = {
     recordLogin: vi.fn(async () => undefined),
     login: vi.fn(),
@@ -146,16 +147,27 @@ function setup() {
     })),
     verify: vi.fn(async () => "ok"),
   };
+  const loginEntry = new LoginEntryService(
+    sessions as unknown as SessionService,
+    identity as never,
+  );
+  const allowlist = { isAllowed: vi.fn(() => false) };
   const controller = new AuthController(
-    prisma as unknown as PrismaService,
+    verification as never,
     sessions as unknown as SessionService,
     limiter,
     tracker,
     identity as unknown as IdentityService,
+    identity as never,
     phoneActions as never,
     captcha as never,
+    loginEntry,
+    allowlist as never,
   );
-  const res = { cookie: vi.fn() } as unknown as Response;
+  const res = {
+    cookie: vi.fn(),
+    clearCookie: vi.fn(),
+  } as unknown as Response;
   return {
     controller,
     identity,
@@ -164,8 +176,10 @@ function setup() {
     limiter,
     tracker,
     prisma,
+    verification,
     phoneActions,
     captcha,
+    allowlist,
   };
 }
 
@@ -178,14 +192,14 @@ describe("AuthController 登录失败锁定（IKDR4J）", () => {
 
     for (let attempt = 0; attempt < 5; attempt += 1) {
       await expect(controller.login(LOGIN_BODY, res)).rejects.toMatchObject({
-        name: "NewApiError",
+        name: "ApiError",
         status: 401,
       });
     }
     expect(identity.login).toHaveBeenCalledTimes(5);
 
     await expect(controller.login(LOGIN_BODY, res)).rejects.toMatchObject({
-      name: "NewApiError",
+      name: "ApiError",
       status: 429,
       code: ACCOUNT_LOCKED,
     });
@@ -228,12 +242,12 @@ describe("AuthController 登录失败锁定（IKDR4J）", () => {
   it("非账密错误（DB 挂了等）不计入锁定：连败 6 次仍逐次透传且不锁账号", async () => {
     const { controller, identity, res } = setup();
     identity.login.mockRejectedValue(
-      new NewApiError("账户服务暂不可用", 503, "account_service_unavailable"),
+      new ApiError("账户服务暂不可用", 503, "account_service_unavailable"),
     );
 
     for (let attempt = 0; attempt < 6; attempt += 1) {
       await expect(controller.login(LOGIN_BODY, res)).rejects.toMatchObject({
-        name: "NewApiError",
+        name: "ApiError",
         status: 503,
       });
     }
@@ -363,7 +377,7 @@ describe("AuthController 手机号验证码登录（IKJA4Q）", () => {
     identity.loginWithPhoneCode.mockRejectedValue(new CodeWrongError(4));
 
     await expect(controller.loginByCode(CODE_BODY, res)).rejects.toMatchObject({
-      name: "NewApiError",
+      name: "ApiError",
       status: 400,
       code: ACCOUNT_ERROR_CODE_WRONG,
     });
@@ -383,7 +397,7 @@ describe("AuthController 手机号验证码登录（IKJA4Q）", () => {
     await expect(
       controller.loginByCode({ phone: "13800001234", code: "123456" }, res),
     ).rejects.toMatchObject({
-      name: "NewApiError",
+      name: "ApiError",
       status: 400,
       code: ACCOUNT_ERROR_TERMS_REQUIRED,
     });
@@ -408,7 +422,7 @@ describe("AuthController 手机号验证码登录（IKJA4Q）", () => {
     );
   });
 
-  it("client_id 过短/过长按缺失处理，不写进会话", async () => {
+  it("client_id 原样交给会话层，长度策略由 SessionService 统一决定", async () => {
     const { controller, identity, sessions, res } = setup();
     identity.loginWithPhoneCode.mockResolvedValue({
       result: phoneResult(),
@@ -416,15 +430,11 @@ describe("AuthController 手机号验证码登录（IKJA4Q）", () => {
     });
 
     await controller.loginByCode({ ...CODE_BODY, client_id: "short" }, res);
-    await controller.loginByCode(
-      { ...CODE_BODY, client_id: "x".repeat(65) },
-      res,
-    );
 
-    expect(sessions.createSession).toHaveBeenCalledTimes(2);
-    for (const call of sessions.createSession.mock.calls) {
-      expect(call[1]).not.toHaveProperty("clientId");
-    }
+    expect(sessions.createSession).toHaveBeenCalledWith(
+      "jwt-token",
+      expect.objectContaining({ clientId: "short" }),
+    );
   });
 
   it("手机号格式不对 / 验证码为空 → 失败信封，不碰 identity", async () => {
@@ -511,9 +521,7 @@ describe("AuthController 登录日志", () => {
 
   it("账密错误记一条 success=false 并带原因", async () => {
     const { controller, identity, res } = setup();
-    identity.login.mockRejectedValue(
-      new NewApiError("用户名或密码错误", 200, "invalid_credentials"),
-    );
+    identity.login.mockRejectedValue(credentialFailure());
 
     await controller.login(LOGIN_BODY, res, "203.0.113.9").catch(() => undefined);
 
@@ -525,7 +533,7 @@ describe("AuthController 登录日志", () => {
   it("非账密错误不记为账密错误——服务问题不是撞库信号", async () => {
     const { controller, identity, res } = setup();
     identity.login.mockRejectedValue(
-      new NewApiError("账户服务暂不可用", 503, "account_service_unavailable"),
+      new ApiError("账户服务暂不可用", 503, "account_service_unavailable"),
     );
 
     await controller.login(LOGIN_BODY, res, "203.0.113.9").catch(() => undefined);
@@ -713,5 +721,102 @@ describe("AuthController 拼图验证（发码前）", () => {
         "1.2.3.4",
       ),
     ).rejects.toMatchObject({ status: 400, code: "captcha_expired" });
+  });
+});
+
+describe("AuthController 发码（验证码通过后）", () => {
+  it("频控放行 → 交给验证码 module 发码", async () => {
+    const { controller, verification, limiter } = setup();
+    vi.spyOn(limiter, "take").mockResolvedValue({ allowed: true } as never);
+
+    const out = await controller.sendCode(
+      {
+        phone: "13800001234",
+        purpose: "login",
+        captcha_id: "cap_test",
+        captcha_answer: "AB2C",
+      },
+      "1.2.3.4",
+    );
+
+    expect(verification.issue).toHaveBeenCalledWith({
+      phone: "13800001234",
+      purpose: "login",
+      ip: "1.2.3.4",
+    });
+    expect(out).toMatchObject({ code: 200 });
+  });
+
+  it("用途非法 → 返回 invalid_purpose，不进入验证码 module", async () => {
+    const { controller, verification } = setup();
+    const out = await controller.sendCode(
+      { phone: "13800001234", purpose: "forgot" },
+      "1.2.3.4",
+    );
+    expect(out).toMatchObject({
+      code: 400,
+      error_code: "invalid_purpose",
+    });
+    expect(verification.issue).not.toHaveBeenCalled();
+  });
+
+  it("短信渠道失败 → 返回短信发送失败信封", async () => {
+    const { controller, verification, limiter } = setup();
+    vi.spyOn(limiter, "take").mockResolvedValue({ allowed: true } as never);
+    verification.issue.mockRejectedValue(new Error("sms down"));
+
+    const out = await controller.sendCode(
+      {
+        phone: "13800001234",
+        purpose: "login",
+        captcha_id: "cap_test",
+        captcha_answer: "AB2C",
+      },
+      "1.2.3.4",
+    );
+
+    expect(out).toMatchObject({ code: 400, msg: "短信发送失败" });
+  });
+
+  it("豁免只认 X-Real-IP：伪造 X-Forwarded-For 不能跳过手机号频控", async () => {
+    const { controller, limiter, allowlist, verification } = setup();
+    allowlist.isAllowed.mockImplementation((kind, key) => kind === "ip" && key === "10.0.0.1");
+    const take = vi.spyOn(limiter, "take").mockResolvedValue({ allowed: true } as never);
+
+    await controller.sendCode(
+      {
+        phone: "13800001234",
+        purpose: "login",
+        captcha_id: "cap_test",
+        captcha_answer: "AB2C",
+      },
+      "10.0.0.1",
+      undefined,
+      undefined,
+    );
+
+    expect(take).toHaveBeenCalled();
+    expect(verification.issue).toHaveBeenCalled();
+  });
+
+  it("X-Real-IP 命中豁免 → 跳过手机号频控", async () => {
+    const { controller, limiter, allowlist, verification } = setup();
+    allowlist.isAllowed.mockImplementation((kind, key) => kind === "ip" && key === "10.0.0.1");
+    const take = vi.spyOn(limiter, "take").mockResolvedValue({ allowed: true } as never);
+
+    await controller.sendCode(
+      {
+        phone: "13800001234",
+        purpose: "login",
+        captcha_id: "cap_test",
+        captcha_answer: "AB2C",
+      },
+      "203.0.113.9",
+      undefined,
+      "10.0.0.1",
+    );
+
+    expect(take).not.toHaveBeenCalled();
+    expect(verification.issue).toHaveBeenCalled();
   });
 });

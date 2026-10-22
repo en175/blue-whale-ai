@@ -1,12 +1,8 @@
 import { Body, Controller, Get, Patch, Post, Put, Req, Res } from "@nestjs/common";
 import type { Request, Response } from "express";
-import { isValidPhone, NewApiError } from "@lib/core";
+import { ApiError } from "@lib/core";
 import { createLogger } from "@lib/core/logging";
 import {
-  ACCOUNT_ERROR_PHONE_NOT_BOUND,
-  ACCOUNT_ERROR_PHONE_TAKEN,
-  ACCOUNT_ERROR_REBIND_BINDING_CHANGED,
-  ACCOUNT_ERROR_REBIND_SAME_PHONE,
   ACCOUNT_ERROR_REBIND_TOKEN_EXPIRED,
   ACCOUNT_ERROR_REBIND_TOKEN_INVALID,
   ACCOUNT_ERROR_UNKNOWN_NUMERIC_CODE,
@@ -15,30 +11,33 @@ import {
   fail,
   ok,
 } from "@lib/contracts";
-import { projectAccountError } from "@lib/shared/account/change-password-error.js";
-import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
 import {
+  projectAuthFailure,
+  projectPasswordChangeFailure,
+} from "@lib/shared/errors/auth-error.js";
+import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
+import { requirePhoneAndCode } from "@lib/shared/auth/phone-verification.service.js";
+import {
+  AccountDirectoryService,
   IdentityService,
   InvalidCredentialsError,
-  NicknameInvalidError,
   PhoneActionService,
-  PhoneAlreadyBoundError,
-  PhoneNotBoundError,
-  PhoneTakenError,
-  RebindBindingChangedError,
-  RebindSamePhoneError,
+  PhoneBindingService,
 } from "@lib/shared/identity/index.js";
-import { projectPhoneCodeError } from "@lib/shared/auth/phone-code-error.js";
 import { SessionService } from "@lib/shared/session/session.service.js";
-import {
-  SESSION_COOKIE_NAME,
-  sessionCookieOptions,
-} from "@lib/shared/session/cookie.js";
+import { clearSessionCookie } from "@lib/shared/session/cookie.js";
 import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js";
 import type { BindPhoneDto } from "./dto/bind-phone.dto.js";
 import type { NicknameDto } from "./dto/nickname.dto.js";
 import type { RebindDto } from "./dto/rebind.dto.js";
 import type { RebindVerifyCurrentDto } from "./dto/rebind-verify-current.dto.js";
+
+function verificationInputFailure(error: unknown) {
+  const failure = projectAuthFailure(error);
+  return failure
+    ? fail(FAILURE_CODE, failure.message, null, failure.errorCode)
+    : null;
+}
 
 @Controller()
 export class MeController {
@@ -47,6 +46,8 @@ export class MeController {
   constructor(
     private readonly sessions: SessionService,
     private readonly identity: IdentityService,
+    private readonly phoneBinding: PhoneBindingService,
+    private readonly directory: AccountDirectoryService,
     private readonly phoneActions: PhoneActionService,
   ) {}
 
@@ -62,9 +63,9 @@ export class MeController {
       phone: flags?.phone ?? "",
       has_password: flags?.hasPassword ?? false,
       must_change_password: flags?.mustChangePassword ?? false,
-      is_admin: await this.identity.isAdmin(user.userId),
-      tier: await this.identity.resolveTier(user.userId),
-      roles: await this.identity.listRoleCodes(user.userId),
+      is_admin: await this.directory.isAdmin(user.userId),
+      tier: await this.directory.resolveTier(user.userId),
+      roles: await this.directory.listRoleCodes(user.userId),
     });
   }
 
@@ -75,25 +76,29 @@ export class MeController {
   ) {
     const userId = user?.userId;
     if (userId == null) {
-      throw new NewApiError("缺少登录凭证", 401, "unauthorized");
+      throw new ApiError("缺少登录凭证", 401, "unauthorized");
     }
-    const phone = typeof body.phone === "string" ? body.phone.trim() : "";
-    const code = typeof body.code === "string" ? body.code.trim() : "";
-    if (!isValidPhone(phone) || !code) {
-      return fail(FAILURE_CODE, "手机号和验证码不能为空");
-    }
+    let credentials;
     try {
-      await this.identity.bindPhone(userId, { phone, code });
+      credentials = requirePhoneAndCode({
+        phone: body.phone,
+        code: body.code,
+      });
     } catch (error) {
-      const failure = projectPhoneCodeError(error);
+      const failure = verificationInputFailure(error);
+      if (failure) return failure;
+      throw error;
+    }
+    const { phone, code } = credentials;
+    try {
+      await this.phoneBinding.bindPhone(userId, { phone, code });
+    } catch (error) {
+      if (error instanceof InvalidCredentialsError) {
+        throw new ApiError("登录已过期，请重新验证", 401, "unauthorized");
+      }
+      const failure = projectAuthFailure(error);
       if (failure) {
         return fail(FAILURE_CODE, failure.message, null, failure.errorCode);
-      }
-      if (error instanceof PhoneTakenError) {
-        return fail(FAILURE_CODE, error.message, null, ACCOUNT_ERROR_PHONE_TAKEN);
-      }
-      if (error instanceof PhoneAlreadyBoundError) {
-        return fail(FAILURE_CODE, error.message);
       }
       throw error;
     }
@@ -107,14 +112,14 @@ export class MeController {
   ) {
     const userId = user?.userId;
     if (userId == null) {
-      throw new NewApiError("缺少登录凭证", 401, "unauthorized");
+      throw new ApiError("缺少登录凭证", 401, "unauthorized");
     }
     const code = typeof body.code === "string" ? body.code.trim() : "";
     if (!code) {
       return fail(FAILURE_CODE, "验证码已失效，请重新获取");
     }
     try {
-      const { oldPhone } = await this.identity.rebindVerifyCurrent(userId, code);
+      const { oldPhone } = await this.phoneBinding.rebindVerifyCurrent(userId, code);
       const rebindToken = await this.phoneActions.issue({
         kind: "rebind",
         userId: Number(userId),
@@ -122,15 +127,12 @@ export class MeController {
       });
       return ok({ rebind_token: rebindToken, expires_in: 600 });
     } catch (error) {
-      const failure = projectPhoneCodeError(error);
+      if (error instanceof InvalidCredentialsError) {
+        throw new ApiError("登录已过期，请重新验证", 401, "unauthorized");
+      }
+      const failure = projectAuthFailure(error);
       if (failure) {
         return fail(FAILURE_CODE, failure.message, null, failure.errorCode);
-      }
-      if (error instanceof PhoneNotBoundError) {
-        return fail(FAILURE_CODE, error.message, null, ACCOUNT_ERROR_PHONE_NOT_BOUND);
-      }
-      if (error instanceof InvalidCredentialsError) {
-        throw new NewApiError("登录已过期，请重新验证", 401, "unauthorized");
       }
       throw error;
     }
@@ -144,15 +146,21 @@ export class MeController {
   ) {
     const userId = user?.userId;
     if (userId == null) {
-      throw new NewApiError("缺少登录凭证", 401, "unauthorized");
+      throw new ApiError("缺少登录凭证", 401, "unauthorized");
     }
     const token = typeof body.rebind_token === "string" ? body.rebind_token.trim() : "";
-    const phone = typeof body.phone === "string" ? body.phone.trim() : "";
-    const code = typeof body.code === "string" ? body.code.trim() : "";
-
-    if (!isValidPhone(phone) || !code) {
-      return fail(FAILURE_CODE, "手机号和验证码不能为空");
+    let credentials;
+    try {
+      credentials = requirePhoneAndCode({
+        phone: body.phone,
+        code: body.code,
+      });
+    } catch (error) {
+      const failure = verificationInputFailure(error);
+      if (failure) return failure;
+      throw error;
     }
+    const { phone, code } = credentials;
 
     if (!token) {
       return fail(
@@ -174,37 +182,18 @@ export class MeController {
 
     let newPhone: string;
     try {
-      ({ phone: newPhone } = await this.identity.commitRebind(userId, {
+      ({ phone: newPhone } = await this.phoneBinding.commitRebind(userId, {
         oldPhone: action.phone,
         phone,
         code,
       }));
     } catch (error) {
-      const failure = projectPhoneCodeError(error);
+      if (error instanceof InvalidCredentialsError) {
+        throw new ApiError("登录已过期，请重新验证", 401, "unauthorized");
+      }
+      const failure = projectAuthFailure(error);
       if (failure) {
         return fail(FAILURE_CODE, failure.message, null, failure.errorCode);
-      }
-      if (error instanceof PhoneTakenError) {
-        return fail(FAILURE_CODE, error.message, null, ACCOUNT_ERROR_PHONE_TAKEN);
-      }
-      if (error instanceof RebindSamePhoneError) {
-        return fail(
-          FAILURE_CODE,
-          error.message,
-          null,
-          ACCOUNT_ERROR_REBIND_SAME_PHONE,
-        );
-      }
-      if (error instanceof RebindBindingChangedError) {
-        return fail(
-          FAILURE_CODE,
-          error.message,
-          null,
-          ACCOUNT_ERROR_REBIND_BINDING_CHANGED,
-        );
-      }
-      if (error instanceof InvalidCredentialsError) {
-        throw new NewApiError("登录已过期，请重新验证", 401, "unauthorized");
       }
       throw error;
     }
@@ -228,10 +217,7 @@ export class MeController {
         }`,
       );
     }
-    res.clearCookie(SESSION_COOKIE_NAME, {
-      ...sessionCookieOptions(),
-      maxAge: undefined,
-    });
+    clearSessionCookie(res);
     return ok({
       phone: newPhone,
       revoked_sessions: revokedSessions,
@@ -246,22 +232,18 @@ export class MeController {
   ) {
     const userId = user?.userId;
     if (userId == null) {
-      throw new NewApiError("缺少登录凭证", 401, "unauthorized");
+      throw new ApiError("缺少登录凭证", 401, "unauthorized");
     }
     try {
       const result = await this.identity.updateNickname(userId, body.nickname);
       return ok(result);
     } catch (error) {
-      if (error instanceof NicknameInvalidError) {
-        return fail(
-          FAILURE_CODE,
-          error.message,
-          null,
-          "nickname_invalid",
-        );
-      }
       if (error instanceof InvalidCredentialsError) {
-        throw new NewApiError("登录已过期，请重新验证", 401, "unauthorized");
+        throw new ApiError("登录已过期，请重新验证", 401, "unauthorized");
+      }
+      const failure = projectAuthFailure(error);
+      if (failure) {
+        return fail(FAILURE_CODE, failure.message, null, failure.errorCode);
       }
       throw error;
     }
@@ -278,11 +260,11 @@ export class MeController {
   ) {
     const parsed = changePasswordRequestSchema.safeParse(body);
     if (!parsed.success) {
-      throw new NewApiError("新密码不能为空", 400, "invalid_params");
+      throw new ApiError("新密码不能为空", 400, "invalid_params");
     }
     const userId = user?.userId;
     if (userId == null) {
-      throw new NewApiError("缺少登录凭证", 401, "unauthorized");
+      throw new ApiError("缺少登录凭证", 401, "unauthorized");
     }
     const currentToken = (req as Request & { loginToken?: string }).loginToken;
     let wasForced = false;
@@ -292,7 +274,7 @@ export class MeController {
         newPassword: parsed.data.password,
       });
     } catch (error) {
-      const projected = projectAccountError(error, "修改密码失败");
+      const projected = projectPasswordChangeFailure(error, "修改密码失败");
       if (projected.code === ACCOUNT_ERROR_UNKNOWN_NUMERIC_CODE) {
         this.logger.error(
           `changePassword 未归类错误: ${
@@ -322,7 +304,7 @@ export class MeController {
       }
       try {
         if (currentToken) await this.sessions.revoke(currentToken);
-        res.clearCookie(SESSION_COOKIE_NAME, sessionCookieOptions());
+        clearSessionCookie(res);
       } catch (fallbackError) {
         this.logger.error(
           `changePassword fallback revoke failed: ${

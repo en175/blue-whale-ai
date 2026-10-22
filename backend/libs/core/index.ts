@@ -24,6 +24,7 @@ export {
   type ArkImageRequest,
   type ArkImageResult,
 } from "./ark-image-client.js";
+export { ApiError } from "./errors/http-error.js";
 export {
   createNewApiClient,
   createNewApiRawRequest,

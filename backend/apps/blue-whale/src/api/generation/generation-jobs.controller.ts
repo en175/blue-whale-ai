@@ -6,7 +6,7 @@ import {
   type BillingRelease,
 } from "@lib/shared/billing/billing-release.js";
 import { createBillingQuote, type BillingQuote } from "@lib/shared/billing/billing-quote.js";
-import { IdentityService } from "@lib/shared/identity/index.js";
+import { AccountDirectoryService } from "@lib/shared/identity/index.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 import { Body, Controller, Headers, HttpCode, Param, Post, Res } from "@nestjs/common";
 import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
@@ -60,7 +60,7 @@ export class GenerationJobsController {
     private readonly material: MaterialService,
     private readonly assets: AssetService,
     private readonly storage: AssetStorageService,
-    private readonly identity: IdentityService,
+    private readonly directory: AccountDirectoryService,
     private readonly prisma: PrismaService,
   ) {}
 
@@ -71,7 +71,7 @@ export class GenerationJobsController {
       this.billingDep = {
         charge: createBillingCharge({
           client: sharedBillingClient(),
-          resolveTier: (userId) => this.identity.resolveTier(userId),
+          resolveTier: (userId) => this.directory.resolveTier(userId),
           logger,
         }),
         release: createBillingRelease({
@@ -89,7 +89,7 @@ export class GenerationJobsController {
     if (this.billingQuoteDep === undefined) {
       this.billingQuoteDep = createBillingQuote({
         client: sharedBillingClient(),
-        resolveTier: (userId) => this.identity.resolveTier(userId),
+        resolveTier: (userId) => this.directory.resolveTier(userId),
         logger,
       });
     }

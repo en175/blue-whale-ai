@@ -64,6 +64,8 @@ function createController(overrides: {
   const controller = new MeController(
     sessions as never,
     identity as never,
+    identity as never,
+    identity as never,
     phoneActions as never,
   );
   return { controller, sessions, identity, phoneActions };
