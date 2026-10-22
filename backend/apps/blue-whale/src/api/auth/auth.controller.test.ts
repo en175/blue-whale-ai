@@ -107,7 +107,6 @@ function loginResult(): LocalLoginResult {
     email: null,
     phone: null,
     hasPassword: true,
-    mustChangePassword: false,
     role: 1,
     status: 1,
   };
@@ -357,19 +356,6 @@ describe("AuthController 手机号验证码登录（IKJA4Q）", () => {
       code: 200,
       data: { is_new_user: false, has_password: true },
     });
-    expect(out).toMatchObject({ data: { must_change_password: false } });
-  });
-
-  it("★ 被管理员重置过：登录响应带 must_change_password=true", async () => {
-    const { controller, identity, res } = setup();
-    identity.loginWithPhoneCode.mockResolvedValue({
-      result: phoneResult({ mustChangePassword: true }),
-      isNewUser: false,
-    });
-
-    const out = await controller.loginByCode(CODE_BODY, res);
-
-    expect(out).toMatchObject({ code: 200, data: { must_change_password: true } });
   });
 
   it("验证码错误 → 400 code_wrong，不签发会话，且留一条失败登录日志", async () => {

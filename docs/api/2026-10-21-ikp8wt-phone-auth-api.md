@@ -157,8 +157,7 @@
     "email": null,
     "phone": "13800001234",
     "is_new_user": true,                // 本次是否自动建号
-    "has_password": false,
-    "must_change_password": false
+    "has_password": false
   }
 }
 ```
@@ -169,7 +168,6 @@
 
 - 弹窗关闭，回原目标页；无目标/无权限回首页
 - 用 `token` 或 cookie 继续访问业务接口，两者后端都认
-- `must_change_password = true` 时仍按现有逻辑强制改密
 
 ---
 
@@ -198,7 +196,6 @@
     "email": null,
     "phone": "13800001234",
     "has_password": false,
-    "must_change_password": false,
     "is_admin": false,
     "tier": "free",
     "roles": ["user"]

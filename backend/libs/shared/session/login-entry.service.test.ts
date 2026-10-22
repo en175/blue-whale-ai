@@ -11,7 +11,6 @@ function result(over: Partial<LocalLoginResult> = {}): LocalLoginResult {
     email: "a@example.com",
     phone: "13800001234",
     hasPassword: true,
-    mustChangePassword: false,
     role: 1,
     status: 1,
     ...over,
@@ -65,7 +64,6 @@ describe("LoginEntryService", () => {
       phone: "13800001234",
       is_new_user: true,
       has_password: true,
-      must_change_password: false,
     });
     expect(identity.recordLogin).toHaveBeenCalledWith(
       expect.objectContaining({

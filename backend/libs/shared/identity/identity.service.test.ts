@@ -47,7 +47,6 @@ function userRow(over: Partial<IdentityUserRow> = {}): IdentityUserRow {
     phone: null,
     status: "NORMAL",
     password: null,
-    mustChangePassword: false,
     ...over,
   };
 }
@@ -80,19 +79,19 @@ describe("IdentityService.changePassword", () => {
 
     await expect(
       service.changePassword("42", { newPassword: "BrandNew456" }),
-    ).resolves.toBe(false);
-    expect(users.updatePassword).toHaveBeenCalledWith("42", expect.any(String), false);
+    ).resolves.toBeUndefined();
+    expect(users.updatePassword).toHaveBeenCalledWith("42", expect.any(String));
   });
 
-  it("有口令且原密码正确 → 写新口令，并清掉强制改密标记", async () => {
+  it("有口令且原密码正确 → 写新口令", async () => {
     const { service, users } = await buildService(
-      userRow({ password: await hashPassword(OLD_PASSWORD), mustChangePassword: true }),
+      userRow({ password: await hashPassword(OLD_PASSWORD) }),
     );
 
     await expect(
       service.changePassword("42", { oldPassword: OLD_PASSWORD, newPassword: "NewPass456" }),
-    ).resolves.toBe(true);
-    expect(users.updatePassword).toHaveBeenCalledWith("42", expect.any(String), false);
+    ).resolves.toBeUndefined();
+    expect(users.updatePassword).toHaveBeenCalledWith("42", expect.any(String));
   });
 
   it("用户不存在 → InvalidCredentialsError", async () => {
@@ -106,14 +105,14 @@ describe("IdentityService.changePassword", () => {
 });
 
 describe("IdentityService.resetPassword", () => {
-  it("★ 不验原密码，写新口令并**置上**强制改密标记", async () => {
+  it("★ 不验原密码，直接写新口令", async () => {
     const { service, users } = await buildService(
       userRow({ password: await hashPassword(OLD_PASSWORD) }),
     );
 
     await service.resetPassword(42, "TempPass123");
 
-    expect(users.updatePassword).toHaveBeenCalledWith("42", expect.any(String), true);
+    expect(users.updatePassword).toHaveBeenCalledWith("42", expect.any(String));
   });
 
   it("目标用户不存在 → InvalidCredentialsError（管理员端据此回 404）", async () => {

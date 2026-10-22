@@ -62,7 +62,6 @@ export class MeController {
       email: user.email,
       phone: flags?.phone ?? "",
       has_password: flags?.hasPassword ?? false,
-      must_change_password: flags?.mustChangePassword ?? false,
       is_admin: await this.directory.isAdmin(user.userId),
       tier: await this.directory.resolveTier(user.userId),
       roles: await this.directory.listRoleCodes(user.userId),
@@ -267,9 +266,8 @@ export class MeController {
       throw new ApiError("缺少登录凭证", 401, "unauthorized");
     }
     const currentToken = (req as Request & { loginToken?: string }).loginToken;
-    let wasForced = false;
     try {
-      wasForced = await this.identity.changePassword(userId, {
+      await this.identity.changePassword(userId, {
         oldPassword: parsed.data.original_password,
         newPassword: parsed.data.password,
       });
@@ -286,22 +284,13 @@ export class MeController {
     }
     let revokedSessions = 0;
     try {
-      revokedSessions = await this.sessions.revokeAllForUser(
-        Number(userId),
-        wasForced ? currentToken : undefined,
-      );
+      revokedSessions = await this.sessions.revokeAllForUser(Number(userId));
     } catch (error) {
       this.logger.error(
         `changePassword user=${userId} session revoke failed: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );
-      if (wasForced) {
-        this.logger.error(
-          `changePassword user=${userId} 强制改密会话枚举失败，已保留当前会话（其余会话待后续吊销）`,
-        );
-        return ok({ revokedSessions });
-      }
       try {
         if (currentToken) await this.sessions.revoke(currentToken);
         clearSessionCookie(res);

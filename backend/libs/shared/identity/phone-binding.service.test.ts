@@ -42,7 +42,6 @@ function row(over: Record<string, unknown> = {}) {
     phone: null,
     status: "NORMAL",
     password: null,
-    mustChangePassword: false,
     ...over,
   };
 }
