@@ -619,6 +619,19 @@ describe("AuthController 内部账号迁移（IKPC9F）", () => {
     });
   });
 
+  it("原账号或密码为空 → 请输入原账号和密码", async () => {
+    const { controller, identity } = setup();
+
+    await expect(
+      controller.verifyMigrationPassword({ username: "", password: "" }),
+    ).rejects.toMatchObject({
+      status: 401,
+      code: "invalid_credentials",
+      message: "请输入原账号和密码",
+    });
+    expect(identity.verifyMigrationCandidate).not.toHaveBeenCalled();
+  });
+
   it("密码错误 → 账号或密码不正确", async () => {
     const { controller, identity } = setup();
     identity.verifyMigrationCandidate.mockRejectedValue(new InvalidCredentialsError());

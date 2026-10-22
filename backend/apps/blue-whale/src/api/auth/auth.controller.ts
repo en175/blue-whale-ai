@@ -432,7 +432,7 @@ export class AuthController {
           username,
           ip,
           userAgent,
-          reason: error.message,
+          reason: "迁移资格不符",
         });
         throw new ApiError(
           error.message,

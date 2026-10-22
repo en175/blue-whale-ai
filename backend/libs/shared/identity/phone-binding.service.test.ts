@@ -187,6 +187,20 @@ describe("PhoneBindingService 补绑 / 换绑", () => {
     });
   });
 
+  it("原号带空白的存量数据：验证后提交换绑仍能通过", async () => {
+    const { service, users } = build({ user: row({ phone: " 13800001234 " }) });
+    const { oldPhone } = await service.rebindVerifyCurrent("42", "123456");
+    expect(oldPhone).toBe("13800001234");
+
+    const out = await service.commitRebind("42", {
+      oldPhone,
+      phone: "13700000000",
+      code: "123456",
+    });
+    expect(out).toEqual({ phone: "13700000000" });
+    expect(users.updatePhone).toHaveBeenCalledWith("42", "13700000000");
+  });
+
   it("提交换绑：原绑定已变化 / 同号分别拒绝", async () => {
     await expect(
       build({ user: row({ phone: "13900000000" }) }).service.commitRebind("42", {
@@ -249,7 +263,10 @@ describe("PhoneBindingService 内部账号迁移", () => {
         username: "alice",
         password: "Passw0rd!",
       }),
-    ).rejects.toThrow("该账号已绑定手机号，请直接使用手机号登录");
+    ).rejects.toMatchObject({
+      name: "MigrationIneligibleError",
+      message: "该账号已绑定手机号，请直接使用手机号登录",
+    });
   });
 
   it("停用账号 → 提示无法迁移", async () => {
@@ -262,7 +279,10 @@ describe("PhoneBindingService 内部账号迁移", () => {
         username: "alice",
         password: "Passw0rd!",
       }),
-    ).rejects.toThrow("账号已停用，无法迁移");
+    ).rejects.toMatchObject({
+      name: "MigrationIneligibleError",
+      message: "账号已停用，无法迁移",
+    });
   });
 
   it("phone 为空字符串或纯空白时视为未绑定，可迁移", async () => {
@@ -314,7 +334,10 @@ describe("PhoneBindingService 内部账号迁移", () => {
         phone: "13700000000",
         code: "123456",
       }),
-    ).rejects.toThrow("该账号已绑定手机号，请直接使用手机号登录");
+    ).rejects.toMatchObject({
+      name: "MigrationIneligibleError",
+      message: "该账号已绑定手机号，请直接使用手机号登录",
+    });
   });
 
   it("补绑时账号停用 → 提示无法迁移", async () => {
@@ -324,6 +347,9 @@ describe("PhoneBindingService 内部账号迁移", () => {
         phone: "13700000000",
         code: "123456",
       }),
-    ).rejects.toThrow("账号已停用，无法迁移");
+    ).rejects.toMatchObject({
+      name: "MigrationIneligibleError",
+      message: "账号已停用，无法迁移",
+    });
   });
 });

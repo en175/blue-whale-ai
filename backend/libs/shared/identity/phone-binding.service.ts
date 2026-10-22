@@ -147,8 +147,9 @@ export class PhoneBindingService {
   ): Promise<{ phone: string }> {
     const self = await this.users.findById(String(userId));
     if (!self) throw new InvalidCredentialsError();
-    if (self.phone !== input.oldPhone) throw new RebindBindingChangedError();
-    if (self.phone === input.phone) throw new RebindSamePhoneError();
+    const currentPhone = (self.phone ?? "").trim();
+    if (currentPhone !== input.oldPhone) throw new RebindBindingChangedError();
+    if (currentPhone === input.phone) throw new RebindSamePhoneError();
 
     const verified = await this.verification.verify({
       phone: input.phone,
