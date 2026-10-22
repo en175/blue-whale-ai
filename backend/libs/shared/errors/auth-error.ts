@@ -1,4 +1,4 @@
-import { NewApiError } from "@lib/core";
+import { ApiError } from "@lib/core";
 import {
   ACCOUNT_ERROR_ACCOUNT_DELETED,
   ACCOUNT_ERROR_ACCOUNT_DISABLED,
@@ -22,6 +22,7 @@ import {
   CodeAttemptsExhaustedError,
   CodeExpiredError,
   CodeWrongError,
+  InvalidPhoneCodeInputError,
   InvalidPhoneError,
   InvalidPurposeError,
 } from "@lib/shared/auth/phone-verification.service.js";
@@ -61,6 +62,9 @@ export function projectAuthFailure(
   error: unknown,
 ): AuthFailureProjection | null {
   if (error instanceof InvalidPhoneError) {
+    return { status: 400, message: error.message };
+  }
+  if (error instanceof InvalidPhoneCodeInputError) {
     return { status: 400, message: error.message };
   }
   if (error instanceof InvalidPurposeError) {
@@ -188,12 +192,12 @@ export function projectPasswordChangeFailure(
   };
 }
 
-export function toAuthError(error: unknown): NewApiError {
-  if (error instanceof NewApiError) {
+export function toAuthError(error: unknown): ApiError {
+  if (error instanceof ApiError) {
     const message = AUTH_MESSAGES.get(error.status);
     if (message) {
-      return new NewApiError(message, error.status, error.code);
+      return new ApiError(message, error.status, error.code);
     }
   }
-  return new NewApiError(FALLBACK_MESSAGE, 502, "account_service_error");
+  return new ApiError(FALLBACK_MESSAGE, 502, "account_service_error");
 }

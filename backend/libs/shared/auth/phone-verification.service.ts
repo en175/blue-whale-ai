@@ -18,6 +18,25 @@ export class InvalidPhoneError extends Error {
   }
 }
 
+export class InvalidPhoneCodeInputError extends Error {
+  constructor() {
+    super("手机号和验证码不能为空");
+    this.name = "InvalidPhoneCodeInputError";
+  }
+}
+
+export function requirePhoneAndCode(input: {
+  phone: unknown;
+  code: unknown;
+}): { phone: string; code: string } {
+  const phone = typeof input.phone === "string" ? input.phone.trim() : "";
+  const code = typeof input.code === "string" ? input.code.trim() : "";
+  if (!isValidPhone(phone) || !code) {
+    throw new InvalidPhoneCodeInputError();
+  }
+  return { phone, code };
+}
+
 export class InvalidPurposeError extends Error {
   constructor() {
     super("验证码用途不正确");

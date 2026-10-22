@@ -9,6 +9,12 @@ const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const ROLE_STATUS_RECHECK_MS = 5 * 60 * 1000;
 export const MAX_SESSIONS_PER_USER = 3;
 
+export function normalizeClientId(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed.length >= 8 && trimmed.length <= 64 ? trimmed : undefined;
+}
+
 export interface ResolvedSession {
   userId: number;
   username: string;
@@ -191,15 +197,12 @@ export class SessionService implements OnModuleDestroy {
       role: number;
       status: number;
       email: string | null;
-      clientId?: string | undefined;
+      clientId?: unknown | undefined;
     },
   ): Promise<void> {
     const hash = this.hashOf(token);
     const createdAt = Date.now();
-    const clientId =
-      typeof input.clientId === "string" && input.clientId.trim().length > 0
-        ? input.clientId.trim()
-        : undefined;
+    const clientId = normalizeClientId(input.clientId);
 
     if (clientId) {
       const sameBrowser = (await this.listIndexed(input.userId)).filter(

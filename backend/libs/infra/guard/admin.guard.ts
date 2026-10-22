@@ -1,5 +1,5 @@
 import { CanActivate, ExecutionContext, Injectable } from "@nestjs/common";
-import { NewApiError } from "@lib/core";
+import { ApiError } from "@lib/core";
 import type { Request } from "express";
 import { IdentityService } from "@lib/shared/identity/index.js";
 import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js";
@@ -14,10 +14,10 @@ export class AdminGuard implements CanActivate {
     const request = context.switchToHttp().getRequest<RequestWithUser>();
     const user = request.user;
     if (!user) {
-      throw new NewApiError("缺少登录凭证", 401, "unauthorized");
+      throw new ApiError("缺少登录凭证", 401, "unauthorized");
     }
     if (!(await this.identity.isAdmin(user.userId))) {
-      throw new NewApiError("需要管理员权限", 403, "forbidden");
+      throw new ApiError("需要管理员权限", 403, "forbidden");
     }
     user.isAdmin = true;
     return true;

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { NewApiError } from "@lib/core";
+import { ApiError } from "@lib/core";
 import {
   ACCOUNT_ERROR_CODE_WRONG,
   ACCOUNT_ERROR_PASSWORD_INCORRECT,
@@ -107,7 +107,7 @@ describe("projectPasswordChangeFailure", () => {
 
 describe("toAuthError", () => {
   it("401 统一为登录凭证无效", () => {
-    expect(toAuthError(new NewApiError("x", 401))).toMatchObject({
+    expect(toAuthError(new ApiError("x", 401))).toMatchObject({
       status: 401,
       message: "登录凭证无效",
     });

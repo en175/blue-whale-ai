@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { SessionService } from "./session.service.js";
+import { SessionService, normalizeClientId } from "./session.service.js";
 
 const { FakeRedis } = vi.hoisted(() => {
   class FakeRedis {
@@ -410,5 +410,20 @@ describe("SessionService 会话数量与同浏览器替换（PRD 7.5）", () => 
     expect(await service.resolveSession(legacy)).toBeNull();
     expect(await service.wasEvicted(legacy)).toBe(true);
     expect(await service.resolveSession(keep)).not.toBeNull();
+  });
+});
+
+describe("normalizeClientId（同浏览器标识契约）", () => {
+  it("8–64 字符的原样保留（去首尾空白）", () => {
+    expect(normalizeClientId("  abcdefgh  ")).toBe("abcdefgh");
+    expect(normalizeClientId("x".repeat(64))).toBe("x".repeat(64));
+  });
+
+  it("过短、过长、非字符串、空白 → undefined", () => {
+    expect(normalizeClientId("short")).toBeUndefined();
+    expect(normalizeClientId("x".repeat(65))).toBeUndefined();
+    expect(normalizeClientId("        ")).toBeUndefined();
+    expect(normalizeClientId(123)).toBeUndefined();
+    expect(normalizeClientId(undefined)).toBeUndefined();
   });
 });

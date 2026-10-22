@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Patch, Post, Put, Req, Res } from "@nestjs/common";
 import type { Request, Response } from "express";
-import { isValidPhone, NewApiError } from "@lib/core";
+import { ApiError } from "@lib/core";
 import { createLogger } from "@lib/core/logging";
 import {
   ACCOUNT_ERROR_REBIND_TOKEN_EXPIRED,
@@ -16,6 +16,7 @@ import {
   projectPasswordChangeFailure,
 } from "@lib/shared/errors/auth-error.js";
 import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
+import { requirePhoneAndCode } from "@lib/shared/auth/phone-verification.service.js";
 import {
   IdentityService,
   InvalidCredentialsError,
@@ -28,6 +29,13 @@ import type { BindPhoneDto } from "./dto/bind-phone.dto.js";
 import type { NicknameDto } from "./dto/nickname.dto.js";
 import type { RebindDto } from "./dto/rebind.dto.js";
 import type { RebindVerifyCurrentDto } from "./dto/rebind-verify-current.dto.js";
+
+function verificationInputFailure(error: unknown) {
+  const failure = projectAuthFailure(error);
+  return failure
+    ? fail(FAILURE_CODE, failure.message, null, failure.errorCode)
+    : null;
+}
 
 @Controller()
 export class MeController {
@@ -64,13 +72,20 @@ export class MeController {
   ) {
     const userId = user?.userId;
     if (userId == null) {
-      throw new NewApiError("缺少登录凭证", 401, "unauthorized");
+      throw new ApiError("缺少登录凭证", 401, "unauthorized");
     }
-    const phone = typeof body.phone === "string" ? body.phone.trim() : "";
-    const code = typeof body.code === "string" ? body.code.trim() : "";
-    if (!isValidPhone(phone) || !code) {
-      return fail(FAILURE_CODE, "手机号和验证码不能为空");
+    let credentials;
+    try {
+      credentials = requirePhoneAndCode({
+        phone: body.phone,
+        code: body.code,
+      });
+    } catch (error) {
+      const failure = verificationInputFailure(error);
+      if (failure) return failure;
+      throw error;
     }
+    const { phone, code } = credentials;
     try {
       await this.identity.bindPhone(userId, { phone, code });
     } catch (error) {
@@ -90,7 +105,7 @@ export class MeController {
   ) {
     const userId = user?.userId;
     if (userId == null) {
-      throw new NewApiError("缺少登录凭证", 401, "unauthorized");
+      throw new ApiError("缺少登录凭证", 401, "unauthorized");
     }
     const code = typeof body.code === "string" ? body.code.trim() : "";
     if (!code) {
@@ -106,7 +121,7 @@ export class MeController {
       return ok({ rebind_token: rebindToken, expires_in: 600 });
     } catch (error) {
       if (error instanceof InvalidCredentialsError) {
-        throw new NewApiError("登录已过期，请重新验证", 401, "unauthorized");
+        throw new ApiError("登录已过期，请重新验证", 401, "unauthorized");
       }
       const failure = projectAuthFailure(error);
       if (failure) {
@@ -124,15 +139,21 @@ export class MeController {
   ) {
     const userId = user?.userId;
     if (userId == null) {
-      throw new NewApiError("缺少登录凭证", 401, "unauthorized");
+      throw new ApiError("缺少登录凭证", 401, "unauthorized");
     }
     const token = typeof body.rebind_token === "string" ? body.rebind_token.trim() : "";
-    const phone = typeof body.phone === "string" ? body.phone.trim() : "";
-    const code = typeof body.code === "string" ? body.code.trim() : "";
-
-    if (!isValidPhone(phone) || !code) {
-      return fail(FAILURE_CODE, "手机号和验证码不能为空");
+    let credentials;
+    try {
+      credentials = requirePhoneAndCode({
+        phone: body.phone,
+        code: body.code,
+      });
+    } catch (error) {
+      const failure = verificationInputFailure(error);
+      if (failure) return failure;
+      throw error;
     }
+    const { phone, code } = credentials;
 
     if (!token) {
       return fail(
@@ -161,7 +182,7 @@ export class MeController {
       }));
     } catch (error) {
       if (error instanceof InvalidCredentialsError) {
-        throw new NewApiError("登录已过期，请重新验证", 401, "unauthorized");
+        throw new ApiError("登录已过期，请重新验证", 401, "unauthorized");
       }
       const failure = projectAuthFailure(error);
       if (failure) {
@@ -204,14 +225,14 @@ export class MeController {
   ) {
     const userId = user?.userId;
     if (userId == null) {
-      throw new NewApiError("缺少登录凭证", 401, "unauthorized");
+      throw new ApiError("缺少登录凭证", 401, "unauthorized");
     }
     try {
       const result = await this.identity.updateNickname(userId, body.nickname);
       return ok(result);
     } catch (error) {
       if (error instanceof InvalidCredentialsError) {
-        throw new NewApiError("登录已过期，请重新验证", 401, "unauthorized");
+        throw new ApiError("登录已过期，请重新验证", 401, "unauthorized");
       }
       const failure = projectAuthFailure(error);
       if (failure) {
@@ -232,11 +253,11 @@ export class MeController {
   ) {
     const parsed = changePasswordRequestSchema.safeParse(body);
     if (!parsed.success) {
-      throw new NewApiError("新密码不能为空", 400, "invalid_params");
+      throw new ApiError("新密码不能为空", 400, "invalid_params");
     }
     const userId = user?.userId;
     if (userId == null) {
-      throw new NewApiError("缺少登录凭证", 401, "unauthorized");
+      throw new ApiError("缺少登录凭证", 401, "unauthorized");
     }
     const currentToken = (req as Request & { loginToken?: string }).loginToken;
     let wasForced = false;

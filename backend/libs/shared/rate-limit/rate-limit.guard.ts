@@ -1,6 +1,6 @@
 import { CanActivate, ExecutionContext, Injectable, Logger } from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
-import { NewApiError } from "@lib/core";
+import { ApiError } from "@lib/core";
 import { RATE_LIMITED } from "@lib/contracts";
 import type { Request } from "express";
 import { RateLimitAllowlist } from "./rate-limit-allowlist.js";
@@ -61,7 +61,7 @@ export class RateLimitGuard implements CanActivate {
         } catch {
         }
       }
-      throw new NewApiError("操作过于频繁，请稍后再试", 429, RATE_LIMITED);
+      throw new ApiError("操作过于频繁，请稍后再试", 429, RATE_LIMITED);
     }
     return true;
   }

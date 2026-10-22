@@ -9,7 +9,7 @@ import {
   Res,
 } from "@nestjs/common";
 import type { Request, Response } from "express";
-import { isValidPhone, NewApiError } from "@lib/core";
+import { ApiError } from "@lib/core";
 import {
   ACCOUNT_ERROR_BIND_SUCCEEDED_LOGIN_FAILED,
   ACCOUNT_ERROR_CAPTCHA_EXPIRED,
@@ -30,6 +30,7 @@ import { logger } from "@lib/infra/logging/blue-whale-logger.js";
 import {
   normalizeVerificationInput,
   PhoneVerificationService,
+  requirePhoneAndCode,
 } from "@lib/shared/auth/phone-verification.service.js";
 import { CaptchaService } from "@lib/shared/auth/captcha.service.js";
 import {
@@ -64,16 +65,10 @@ import type { MigrationBindDto } from "./dto/migration-bind.dto.js";
 import type { MigrationVerifyDto } from "./dto/migration-verify.dto.js";
 import type { RegisterDto } from "./dto/register.dto.js";
 
-function normalizeClientId(value: unknown): string | undefined {
-  if (typeof value !== "string") return undefined;
-  const trimmed = value.trim();
-  return trimmed.length >= 8 && trimmed.length <= 64 ? trimmed : undefined;
-}
-
-function phoneCodeFailure(error: unknown): NewApiError | null {
+function phoneCodeFailure(error: unknown): ApiError | null {
   const failure = projectAuthFailure(error);
   if (!failure) return null;
-  return new NewApiError(failure.message, failure.status, failure.errorCode);
+  return new ApiError(failure.message, failure.status, failure.errorCode);
 }
 
 function verificationInputFailure(error: unknown) {
@@ -207,7 +202,7 @@ export class AuthController {
     const captchaId =
       typeof body?.captcha_id === "string" ? body.captcha_id.trim() : "";
     if (!captchaId) {
-      throw new NewApiError("请先完成验证码验证", 400, ACCOUNT_ERROR_CAPTCHA_REQUIRED);
+      throw new ApiError("请先完成验证码验证", 400, ACCOUNT_ERROR_CAPTCHA_REQUIRED);
     }
     const verdict = await this.captcha.verify({
       id: captchaId,
@@ -216,14 +211,14 @@ export class AuthController {
       purpose,
     });
     if (verdict === "expired") {
-      throw new NewApiError(
+      throw new ApiError(
         "验证已超时，请换一张后重试",
         400,
         ACCOUNT_ERROR_CAPTCHA_EXPIRED,
       );
     }
     if (verdict === "invalid") {
-      throw new NewApiError(
+      throw new ApiError(
         "验证码错误，已换新图，请重新输入",
         400,
         ACCOUNT_ERROR_CAPTCHA_INVALID,
@@ -237,7 +232,7 @@ export class AuthController {
     );
     if (!phoneDecision.allowed) {
       res?.setHeader("Retry-After", String(phoneDecision.retryAfter ?? 1));
-      throw new NewApiError("操作过于频繁，请稍后再试", 429, RATE_LIMITED);
+      throw new ApiError("操作过于频繁，请稍后再试", 429, RATE_LIMITED);
     }
 
     try {
@@ -259,7 +254,6 @@ export class AuthController {
   ) {
     const username = typeof body.username === "string" ? body.username.trim() : "";
     const password = typeof body.password === "string" ? body.password : "";
-    const clientId = normalizeClientId(body.client_id);
     const ip = forwardedFor?.split(",")[0]?.trim() ?? "unknown";
 
     if (!username || !password) {
@@ -268,7 +262,7 @@ export class AuthController {
     }
     if (await this.limiter.isBlocked(LOGIN_LOCK_SCOPE, username)) {
       await this.loginEntry.fail({ username, ip, userAgent, reason: "账号锁定" });
-      throw new NewApiError(
+      throw new ApiError(
         "尝试次数过多，账号已锁定，请稍后再试",
         429,
         ACCOUNT_LOCKED,
@@ -280,7 +274,7 @@ export class AuthController {
       const entry = await this.loginEntry.succeed({
         result,
         isNewUser: false,
-        clientId: clientId || undefined,
+        clientId: body.client_id,
         ip,
         userAgent,
       });
@@ -290,7 +284,7 @@ export class AuthController {
       if (error instanceof InvalidCredentialsError) {
         await this.loginFailures.recordFailure(username);
         await this.loginEntry.fail({ username, ip, userAgent, reason: "账密错误" });
-        throw new NewApiError(error.message, 401, "invalid_credentials");
+        throw new ApiError(error.message, 401, "invalid_credentials");
       }
       throw toAuthError(error);
     }
@@ -305,16 +299,21 @@ export class AuthController {
     @Headers("x-forwarded-for") forwardedFor?: string,
     @Headers("user-agent") userAgent?: string,
   ) {
-    const phone = typeof body.phone === "string" ? body.phone.trim() : "";
-    const code = typeof body.code === "string" ? body.code.trim() : "";
-    const clientId = normalizeClientId(body.client_id);
     const ip = forwardedFor?.split(",")[0]?.trim() ?? "unknown";
-
-    if (!isValidPhone(phone) || !code) {
-      return fail(FAILURE_CODE, "手机号和验证码不能为空");
+    let credentials;
+    try {
+      credentials = requirePhoneAndCode({
+        phone: body.phone,
+        code: body.code,
+      });
+    } catch (error) {
+      const failure = verificationInputFailure(error);
+      if (failure) return failure;
+      throw error;
     }
+    const { phone, code } = credentials;
     if (body.agreed_terms !== true) {
-      throw new NewApiError(
+      throw new ApiError(
         "请先阅读并同意用户服务协议和隐私政策",
         400,
         ACCOUNT_ERROR_TERMS_REQUIRED,
@@ -326,7 +325,7 @@ export class AuthController {
       const entry = await this.loginEntry.succeed({
         result,
         isNewUser,
-        clientId,
+        clientId: body.client_id,
         ip,
         userAgent,
       });
@@ -376,10 +375,10 @@ export class AuthController {
     const uniformMessage = "账号或密码不正确，或当前账号不可迁移";
 
     if (!username || !password) {
-      throw new NewApiError(uniformMessage, 401, "invalid_credentials");
+      throw new ApiError(uniformMessage, 401, "invalid_credentials");
     }
     if (await this.limiter.isBlocked(MIGRATION_LOCK_SCOPE, username)) {
-      throw new NewApiError(
+      throw new ApiError(
         "尝试次数过多，账号已锁定，请稍后再试",
         429,
         ACCOUNT_LOCKED,
@@ -422,7 +421,7 @@ export class AuthController {
           userAgent,
           reason: "迁移密码错误",
         });
-        throw new NewApiError(uniformMessage, 401, "invalid_credentials");
+        throw new ApiError(uniformMessage, 401, "invalid_credentials");
       }
       if (error instanceof MigrationIneligibleError) {
         await this.loginEntry.fail({
@@ -431,7 +430,7 @@ export class AuthController {
           userAgent,
           reason: "迁移资格不符",
         });
-        throw new NewApiError(
+        throw new ApiError(
           uniformMessage,
           400,
           ACCOUNT_ERROR_MIGRATION_INELIGIBLE,
@@ -452,23 +451,29 @@ export class AuthController {
   ) {
     const token =
       typeof body.migration_token === "string" ? body.migration_token.trim() : "";
-    const phone = typeof body.phone === "string" ? body.phone.trim() : "";
-    const code = typeof body.code === "string" ? body.code.trim() : "";
-    const clientId = normalizeClientId(body.client_id);
     const ip = forwardedFor?.split(",")[0]?.trim() ?? "unknown";
 
     if (!token) {
-      throw new NewApiError(
+      throw new ApiError(
         "原账号验证已过期，请重新验证",
         400,
         ACCOUNT_ERROR_MIGRATION_TOKEN_EXPIRED,
       );
     }
-    if (!isValidPhone(phone) || !code) {
-      return fail(FAILURE_CODE, "手机号和验证码不能为空");
+    let credentials;
+    try {
+      credentials = requirePhoneAndCode({
+        phone: body.phone,
+        code: body.code,
+      });
+    } catch (error) {
+      const failure = verificationInputFailure(error);
+      if (failure) return failure;
+      throw error;
     }
+    const { phone, code } = credentials;
     if (body.agreed_terms !== true) {
-      throw new NewApiError(
+      throw new ApiError(
         "请先阅读并同意用户服务协议和隐私政策",
         400,
         ACCOUNT_ERROR_TERMS_REQUIRED,
@@ -477,7 +482,7 @@ export class AuthController {
 
     const action = await this.phoneActions.resolve("migration", token);
     if (!action) {
-      throw new NewApiError(
+      throw new ApiError(
         "原账号验证已过期，请重新验证",
         400,
         ACCOUNT_ERROR_MIGRATION_TOKEN_EXPIRED,
@@ -533,7 +538,7 @@ export class AuthController {
       const entry = await this.loginEntry.succeed({
         result,
         isNewUser: false,
-        clientId,
+        clientId: body.client_id,
         ip,
         userAgent,
         revokeOthers: true,
@@ -546,7 +551,7 @@ export class AuthController {
           error instanceof Error ? error.message : String(error)
         }`,
       );
-      throw new NewApiError(
+      throw new ApiError(
         "手机号已绑定，请重新登录",
         500,
         ACCOUNT_ERROR_BIND_SUCCEEDED_LOGIN_FAILED,

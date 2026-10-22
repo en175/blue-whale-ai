@@ -1,6 +1,6 @@
 import { Injectable } from "@nestjs/common";
 
-import { NewApiError } from "@lib/core";
+import { ApiError } from "@lib/core";
 import { createLogger } from "@lib/core/logging";
 import {
   IdentityService,
@@ -92,14 +92,14 @@ export class LoginEntryService {
   async succeed(input: {
     result: LocalLoginResult;
     isNewUser: boolean;
-    clientId?: string | undefined;
+    clientId?: unknown | undefined;
     ip: string;
     userAgent?: string | undefined;
     revokeOthers?: boolean;
   }): Promise<LoginEntry> {
     const { result } = input;
     if (result.userId == null || !result.username) {
-      throw new NewApiError("账户服务响应异常", 502, "invalid_identity");
+      throw new ApiError("账户服务响应异常", 502, "invalid_identity");
     }
     const token = await this.sessions.issueToken(String(result.userId));
     await this.sessions.createSession(token, {
