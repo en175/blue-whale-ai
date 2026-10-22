@@ -30,6 +30,7 @@ import {
   verifyPassword,
 } from "@lib/shared/identity/password.js";
 import { normalizeNickname } from "@lib/core";
+import { PhoneVerificationService } from "@lib/shared/auth/phone-verification.service.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 
 export interface LocalLoginResult {
@@ -51,28 +52,11 @@ export interface AccountFlags {
   mustChangePassword: boolean;
 }
 
-const MAX_CODE_ATTEMPTS = 5;
-
-export class CodeExpiredError extends Error {
-  constructor() {
-    super("验证码已失效，请重新获取");
-    this.name = "CodeExpiredError";
-  }
-}
-
-export class CodeWrongError extends Error {
-  constructor(readonly remaining: number) {
-    super("验证码错误，请重新输入");
-    this.name = "CodeWrongError";
-  }
-}
-
-export class CodeAttemptsExhaustedError extends Error {
-  constructor() {
-    super("验证码连续错误5次，已失效，请重新获取");
-    this.name = "CodeAttemptsExhaustedError";
-  }
-}
+export {
+  CodeAttemptsExhaustedError,
+  CodeExpiredError,
+  CodeWrongError,
+} from "@lib/shared/auth/phone-verification.service.js";
 
 export class AccountDisabledError extends Error {
   constructor() {
@@ -149,7 +133,12 @@ export class IdentityService {
   private readonly users;
   private readonly authCodes;
 
-  constructor(prisma: PrismaService) {
+  constructor(
+    prisma: PrismaService,
+    private readonly verification: PhoneVerificationService = new PhoneVerificationService(
+      prisma,
+    ),
+  ) {
     this.memberships = createIdentityMembershipRepo(prisma.client);
     this.roles = createIdentityRoleRepo(prisma.client);
     this.loginLogs = createIdentityLoginLogRepo(prisma.client);
@@ -211,46 +200,20 @@ export class IdentityService {
     return this.toLoginResult(created);
   }
 
-  private async validatePhoneCode(
-    phone: string,
-    purposes: readonly string[],
-    code: string,
-  ): Promise<string> {
-    const record = await this.authCodes.findActiveCode(phone, purposes);
-    if (!record) {
-      throw new CodeExpiredError();
-    }
-    if (record.code !== code) {
-      const attempts = await this.authCodes.incrementAttempts(record.id);
-      if (attempts >= MAX_CODE_ATTEMPTS) {
-        await this.authCodes.consumeCode(record.id);
-        throw new CodeAttemptsExhaustedError();
-      }
-      throw new CodeWrongError(MAX_CODE_ATTEMPTS - attempts);
-    }
-    return record.id;
-  }
-
-  private async consumePhoneCode(codeId: string): Promise<void> {
-    if (!(await this.authCodes.consumeCode(codeId))) {
-      throw new CodeExpiredError();
-    }
-  }
-
   async loginWithPhoneCode(input: {
     phone: string;
     code: string;
     purpose?: VerificationPurpose;
   }): Promise<{ result: LocalLoginResult; isNewUser: boolean }> {
     const purpose = input.purpose ?? "login";
-    const codeId = await this.validatePhoneCode(
-      input.phone,
-      [purpose, LEGACY_VERIFICATION_PURPOSE],
-      input.code,
-    );
+    const verified = await this.verification.verify({
+      phone: input.phone,
+      code: input.code,
+      purposes: [purpose, LEGACY_VERIFICATION_PURPOSE],
+    });
 
     await this.assertPhoneAccountUsable(input.phone);
-    await this.consumePhoneCode(codeId);
+    await this.verification.consume(verified);
 
     const user = await this.authCodes.upsertUser(input.phone);
     if (user.isDelete) throw new AccountDeletedError();
@@ -293,12 +256,12 @@ export class IdentityService {
     if (!self) throw new InvalidCredentialsError();
     if (self.phone) throw new PhoneAlreadyBoundError();
 
-    const codeId = await this.validatePhoneCode(
-      input.phone,
-      ["bind", LEGACY_VERIFICATION_PURPOSE],
-      input.code,
-    );
-    await this.consumePhoneCode(codeId);
+    const verified = await this.verification.verify({
+      phone: input.phone,
+      code: input.code,
+      purposes: ["bind", LEGACY_VERIFICATION_PURPOSE],
+    });
+    await this.verification.consume(verified);
     await this.users.updatePhone(String(userId), input.phone);
   }
 
@@ -307,8 +270,12 @@ export class IdentityService {
     if (!self) throw new InvalidCredentialsError();
     if (!self.phone) throw new PhoneNotBoundError();
 
-    const codeId = await this.validatePhoneCode(self.phone, ["rebind_old"], code);
-    await this.consumePhoneCode(codeId);
+    const verified = await this.verification.verify({
+      phone: self.phone,
+      code,
+      purposes: ["rebind_old"],
+    });
+    await this.verification.consume(verified);
     return { oldPhone: self.phone };
   }
 
@@ -321,8 +288,12 @@ export class IdentityService {
     if (self.phone !== input.oldPhone) throw new RebindBindingChangedError();
     if (self.phone === input.phone) throw new RebindSamePhoneError();
 
-    const codeId = await this.validatePhoneCode(input.phone, ["rebind_new"], input.code);
-    await this.consumePhoneCode(codeId);
+    const verified = await this.verification.verify({
+      phone: input.phone,
+      code: input.code,
+      purposes: ["rebind_new"],
+    });
+    await this.verification.consume(verified);
     await this.users.updatePhone(String(userId), input.phone);
     return { phone: input.phone };
   }
@@ -354,12 +325,12 @@ export class IdentityService {
     if (self.phone !== null || self.status !== USER_STATUS_NORMAL) {
       throw new MigrationIneligibleError();
     }
-    const codeId = await this.validatePhoneCode(
-      input.phone,
-      ["bind", LEGACY_VERIFICATION_PURPOSE],
-      input.code,
-    );
-    await this.consumePhoneCode(codeId);
+    const verified = await this.verification.verify({
+      phone: input.phone,
+      code: input.code,
+      purposes: ["bind", LEGACY_VERIFICATION_PURPOSE],
+    });
+    await this.verification.consume(verified);
     await this.users.updatePhone(String(userId), input.phone);
     const updated = await this.users.findById(String(userId));
     if (!updated) throw new MigrationIneligibleError();

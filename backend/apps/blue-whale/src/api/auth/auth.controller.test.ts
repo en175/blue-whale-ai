@@ -79,7 +79,6 @@ import {
   FAILURE_CODE,
 } from "@lib/contracts";
 import type { Response } from "express";
-import type { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 import type { SessionService } from "@lib/shared/session/session.service.js";
 import {
   CodeWrongError,
@@ -123,6 +122,7 @@ function setup() {
     revokeAllForUser: vi.fn(async () => 0),
   };
   const prisma = { client: {} };
+  const verification = { issue: vi.fn(async () => undefined) };
   const identity = {
     recordLogin: vi.fn(async () => undefined),
     login: vi.fn(),
@@ -147,7 +147,7 @@ function setup() {
     verify: vi.fn(async () => "ok"),
   };
   const controller = new AuthController(
-    prisma as unknown as PrismaService,
+    verification as never,
     sessions as unknown as SessionService,
     limiter,
     tracker,
@@ -164,6 +164,7 @@ function setup() {
     limiter,
     tracker,
     prisma,
+    verification,
     phoneActions,
     captcha,
   };
@@ -713,5 +714,60 @@ describe("AuthController 拼图验证（发码前）", () => {
         "1.2.3.4",
       ),
     ).rejects.toMatchObject({ status: 400, code: "captcha_expired" });
+  });
+});
+
+describe("AuthController 发码（验证码通过后）", () => {
+  it("频控放行 → 交给验证码 module 发码", async () => {
+    const { controller, verification, limiter } = setup();
+    vi.spyOn(limiter, "take").mockResolvedValue({ allowed: true } as never);
+
+    const out = await controller.sendCode(
+      {
+        phone: "13800001234",
+        purpose: "login",
+        captcha_id: "cap_test",
+        captcha_answer: "AB2C",
+      },
+      "1.2.3.4",
+    );
+
+    expect(verification.issue).toHaveBeenCalledWith({
+      phone: "13800001234",
+      purpose: "login",
+      ip: "1.2.3.4",
+    });
+    expect(out).toMatchObject({ code: 200 });
+  });
+
+  it("用途非法 → 返回 invalid_purpose，不进入验证码 module", async () => {
+    const { controller, verification } = setup();
+    const out = await controller.sendCode(
+      { phone: "13800001234", purpose: "forgot" },
+      "1.2.3.4",
+    );
+    expect(out).toMatchObject({
+      code: 400,
+      error_code: "invalid_purpose",
+    });
+    expect(verification.issue).not.toHaveBeenCalled();
+  });
+
+  it("短信渠道失败 → 返回短信发送失败信封", async () => {
+    const { controller, verification, limiter } = setup();
+    vi.spyOn(limiter, "take").mockResolvedValue({ allowed: true } as never);
+    verification.issue.mockRejectedValue(new Error("sms down"));
+
+    const out = await controller.sendCode(
+      {
+        phone: "13800001234",
+        purpose: "login",
+        captcha_id: "cap_test",
+        captcha_answer: "AB2C",
+      },
+      "1.2.3.4",
+    );
+
+    expect(out).toMatchObject({ code: 400, msg: "短信发送失败" });
   });
 });

@@ -3,7 +3,6 @@ import {
   Controller,
   Get,
   Headers,
-  Param,
   Post,
   Query,
   Req,
@@ -25,18 +24,18 @@ import {
   ACCOUNT_ERROR_TERMS_REQUIRED,
   ACCOUNT_LOCKED,
   FAILURE_CODE,
-  LEGACY_VERIFICATION_PURPOSE,
   RATE_LIMITED,
   fail,
-  isVerificationPurpose,
   ok,
 } from "@lib/contracts";
-import { createAuthRepo } from "@lib/shared/persistence/index.js";
 import { Public } from "@lib/infra/decorators/public.decorator.js";
-import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
 import { logger } from "@lib/infra/logging/blue-whale-logger.js";
-import { handleSendCode } from "@lib/shared/auth/handle-send-code.js";
-import { resolveSmsProvider, type SmsProvider } from "@lib/shared/auth/sms.js";
+import {
+  InvalidPhoneError,
+  InvalidPurposeError,
+  normalizeVerificationInput,
+  PhoneVerificationService,
+} from "@lib/shared/auth/phone-verification.service.js";
 import { projectPhoneCodeError } from "@lib/shared/auth/phone-code-error.js";
 import { CaptchaService } from "@lib/shared/auth/captcha.service.js";
 import {
@@ -67,8 +66,6 @@ import {
   SESSION_COOKIE_NAME,
   sessionCookieOptions,
 } from "@lib/shared/session/cookie.js";
-import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js";
-import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 import type { LoginByCodeDto } from "./dto/login-by-code.dto.js";
 import type { LoginDto } from "./dto/login.dto.js";
 import type { MigrationBindDto } from "./dto/migration-bind.dto.js";
@@ -99,6 +96,21 @@ function phoneCodeFailure(error: unknown): NewApiError | null {
   const failure = projectPhoneCodeError(error);
   if (!failure) return null;
   return new NewApiError(failure.message, failure.status, failure.errorCode);
+}
+
+function verificationInputFailure(error: unknown) {
+  if (error instanceof InvalidPhoneError) {
+    return fail(FAILURE_CODE, error.message);
+  }
+  if (error instanceof InvalidPurposeError) {
+    return fail(
+      FAILURE_CODE,
+      error.message,
+      null,
+      ACCOUNT_ERROR_INVALID_PURPOSE,
+    );
+  }
+  return null;
 }
 
 const AUTH_RATE_LIMIT_WINDOW_MS = 60_000;
@@ -144,10 +156,8 @@ const SMS_CODE_RATE_LIMIT = RateLimit({
 
 @Controller("auth")
 export class AuthController {
-  private smsInstance?: SmsProvider;
-
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly verification: PhoneVerificationService,
     private readonly sessions: SessionService,
     private readonly limiter: RateLimiter,
     private readonly loginFailures: LoginFailureTracker,
@@ -155,11 +165,6 @@ export class AuthController {
     private readonly phoneActions: PhoneActionService,
     private readonly captcha: CaptchaService,
   ) {}
-
-  private get sms(): SmsProvider {
-    if (!this.smsInstance) this.smsInstance = resolveSmsProvider();
-    return this.smsInstance;
-  }
 
   @Public()
   @Get("captcha")
@@ -177,18 +182,18 @@ export class AuthController {
     @Query("phone") phoneRaw: string | undefined,
     @Query("purpose") purposeRaw: string | undefined,
   ) {
-    const phone = typeof phoneRaw === "string" ? phoneRaw.trim() : "";
-    const purpose =
-      purposeRaw === undefined || purposeRaw === "" || purposeRaw === null
-        ? LEGACY_VERIFICATION_PURPOSE
-        : purposeRaw;
-    if (!isValidPhone(phone)) {
-      return fail(FAILURE_CODE, "手机号格式不正确");
+    let request;
+    try {
+      request = normalizeVerificationInput({
+        phone: phoneRaw,
+        purpose: purposeRaw,
+      });
+    } catch (error) {
+      const failure = verificationInputFailure(error);
+      if (failure) return failure;
+      throw error;
     }
-    if (purpose !== LEGACY_VERIFICATION_PURPOSE && !isVerificationPurpose(purpose)) {
-      return fail(FAILURE_CODE, "验证码用途不正确", null, ACCOUNT_ERROR_INVALID_PURPOSE);
-    }
-    return ok(await this.captcha.issue(phone, purpose));
+    return ok(await this.captcha.issue(request.phone, request.purpose));
   }
 
   @Public()
@@ -206,17 +211,18 @@ export class AuthController {
     @Res({ passthrough: true }) res?: Response,
   ) {
     const ip = forwardedFor?.split(",")[0]?.trim() ?? "unknown";
-    const phone = typeof body?.phone === "string" ? body.phone.trim() : "";
-    const purpose =
-      body?.purpose === undefined || body?.purpose === null || body?.purpose === ""
-        ? LEGACY_VERIFICATION_PURPOSE
-        : body.purpose;
-    if (!isValidPhone(phone)) {
-      return fail(FAILURE_CODE, "手机号格式不正确");
+    let request;
+    try {
+      request = normalizeVerificationInput({
+        phone: body?.phone,
+        purpose: body?.purpose,
+      });
+    } catch (error) {
+      const failure = verificationInputFailure(error);
+      if (failure) return failure;
+      throw error;
     }
-    if (purpose !== LEGACY_VERIFICATION_PURPOSE && !isVerificationPurpose(purpose)) {
-      return fail(FAILURE_CODE, "验证码用途不正确", null, ACCOUNT_ERROR_INVALID_PURPOSE);
-    }
+    const { phone, purpose } = request;
     const captchaId =
       typeof body?.captcha_id === "string" ? body.captcha_id.trim() : "";
     if (!captchaId) {
@@ -256,12 +262,12 @@ export class AuthController {
       }
     }
 
-    const result = await handleSendCode(
-      { phone, purpose, ip },
-      { db: createAuthRepo(this.prisma.client), sms: this.sms },
-    );
-    if (result.code === 200) return ok();
-    return result;
+    try {
+      await this.verification.issue({ phone, purpose, ip });
+      return ok();
+    } catch {
+      return fail(FAILURE_CODE, "短信发送失败");
+    }
   }
 
   private async establishSession(
