@@ -2,7 +2,9 @@ import * as Slider from '@radix-ui/react-slider';
 import { useCallback } from 'react';
 import { joinClassNames } from '@/custom/utils/class-names';
 import styles from './index.module.css';
-import { snapValue } from './dragSliderModel';
+import { snapValue, type SliderScale } from './dragSliderModel';
+
+const DRAG_STEPS = 1000;
 
 export interface DragSliderProps {
   value: number;
@@ -15,6 +17,7 @@ export interface DragSliderProps {
   ariaValueText?: string;
   testId?: string;
   className?: string;
+  scale?: SliderScale;
   onKeyDown?: (event: React.KeyboardEvent<HTMLElement>) => void;
 }
 
@@ -29,19 +32,24 @@ export default function DragSlider({
   ariaValueText,
   testId,
   className,
+  scale,
   onKeyDown,
 }: DragSliderProps) {
   const sliderMax = max < min ? min : max;
-  const sliderValue = snapValue(value, min, sliderMax, step);
+  const sliderValue = scale
+    ? Math.round(scale.ratioFromValue(Math.min(Math.max(value, min), sliderMax)) * DRAG_STEPS)
+    : snapValue(value, min, sliderMax, step);
 
   const commit = useCallback(
     (raw: number) => {
       if (disabled) return;
-      const next = snapValue(raw, min, sliderMax, step);
+      const next = scale
+        ? scale.stepValue(scale.valueFromRatio(raw / DRAG_STEPS))
+        : snapValue(raw, min, sliderMax, step);
       if (next === value) return;
       onChange(next);
     },
-    [disabled, min, onChange, sliderMax, step, value],
+    [disabled, min, onChange, scale, sliderMax, step, value],
   );
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLElement>) => {
@@ -53,9 +61,9 @@ export default function DragSlider({
       <input
         type="range"
         className={styles.native}
-        min={min}
-        max={sliderMax}
-        step={step}
+        min={scale ? 0 : min}
+        max={scale ? DRAG_STEPS : sliderMax}
+        step={scale ? 1 : step}
         value={sliderValue}
         disabled={disabled}
         tabIndex={-1}
@@ -66,9 +74,9 @@ export default function DragSlider({
       />
       <Slider.Root
         className={styles.hit}
-        min={min}
-        max={sliderMax}
-        step={step}
+        min={scale ? 0 : min}
+        max={scale ? DRAG_STEPS : sliderMax}
+        step={scale ? 1 : step}
         value={[sliderValue]}
         disabled={disabled}
         onValueChange={(next) => {

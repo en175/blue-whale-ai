@@ -1,6 +1,12 @@
 export const SPRING_STIFFNESS = 110;
 export const SPRING_DAMPING = 16;
 
+export interface SliderScale {
+  ratioFromValue: (value: number) => number;
+  valueFromRatio: (ratio: number) => number;
+  stepValue: (value: number) => number;
+}
+
 export function clampValue(value: number, min: number, max: number): number {
   if (!Number.isFinite(value)) return min;
   return Math.min(max, Math.max(min, value));

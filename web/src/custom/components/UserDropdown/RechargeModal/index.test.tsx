@@ -251,8 +251,8 @@ describe('RechargeModal', () => {
 
     expect(rechargeApi.createRechargeOrder).toHaveBeenCalledWith(TIER_ID);
     expect(document.body.textContent).toContain('等待支付结果...');
-    expect(document.body.textContent).toContain('请用微信 / 支付宝 / 云闪付 扫码支付');
-    expect(document.body.textContent).toContain('获得 100 积分');
+    expect(document.body.textContent).toContain('请于十分钟内使用微信 / 支付宝 扫码支付');
+    expect(document.body.textContent).toContain('100 积分');
     expect(document.body.textContent).not.toContain('二维码不可用');
     expect(document.body.textContent).not.toContain('取消支付');
   });
@@ -529,7 +529,27 @@ describe('RechargeModal — 自定义充值', () => {
     expect(rechargeApi.createCustomRechargeOrder).toHaveBeenCalledWith(600);
     expect(rechargeApi.createRechargeOrder).not.toHaveBeenCalled();
     expect(document.body.textContent).toContain('等待支付结果...');
-    expect(document.body.textContent).toContain('获得 600 积分');
+    expect(document.body.textContent).toContain('自定义充值 600 积分');
+  });
+
+  it('收银台展示倒计时、金额与一次性支付说明', async () => {
+    const now = Date.now();
+    rechargeApi.createRechargeOrder.mockResolvedValue({
+      trade_no: 'trade-1',
+      qr_code_url: 'https://example.com/cashier',
+      expire_time: new Date(now + 10 * 60 * 1000).toISOString(),
+      amount: 10,
+      points: 100,
+    });
+
+    await renderRechargeModal();
+    await flush();
+    await clickButton('立即购买');
+    await flush();
+
+    expect(document.body.textContent).toContain('请于十分钟内使用微信 / 支付宝 扫码支付');
+    expect(document.body.textContent).toContain('¥10');
+    expect(document.body.textContent).toContain('本订单为一次性支付，后续不会产生自动代扣');
   });
 
   it('自定义充值下单失败：就地展示错误，不出二维码', async () => {
