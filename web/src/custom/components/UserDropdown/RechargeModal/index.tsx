@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Check, CreditCard, CheckCircle2, XCircle, Clock } from 'lucide-react';
+import { Check, CheckCircle2, Clock, XCircle, Zap } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { toast } from '@/custom/components/Toast';
 import Modal from '@/custom/components/Modal';
@@ -29,18 +29,12 @@ const GRANT_FAILED_HINT = '积分发放异常，请联系客服';
 
 type Phase = 'idle' | 'creating' | 'waiting' | 'paid' | 'expired' | 'failed';
 
-type Mode = 'tier' | 'custom';
+type PaySource = { kind: 'tier'; id: string; shownFen: number } | { kind: 'custom'; credits: number; shownFen: number | null };
 
 const RECHARGE_AGREEMENT_HREF =
   'https://static-bluewhale.yunjizi.cn/agreement/recharge-agreement.html';
 
 const fmtPrice = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(2));
-
-function fmtDiscount(discount?: number | null) {
-  if (!discount || discount >= 1) return '';
-  const pct = Math.round(discount * 100);
-  return `现价 ${pct}%`;
-}
 
 function fmtExpiry(iso: string) {
   const d = new Date(iso);
@@ -69,11 +63,10 @@ export default function RechargeModal({ onClose }: RechargeModalProps) {
   const [catalog, setCatalog] = useState<RechargeTierCatalog | null>(null);
   const [tiersLoading, setTiersLoading] = useState(true);
   const [tiersError, setTiersError] = useState('');
-  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [phase, setPhase] = useState<Phase>('idle');
   const [order, setOrder] = useState<RechargeOrder | null>(null);
   const [orderError, setOrderError] = useState('');
-  const [mode, setMode] = useState<Mode>('tier');
+  const [paySource, setPaySource] = useState<PaySource | null>(null);
   const [customConfig, setCustomConfig] = useState<RechargeCustomConfig | null>(null);
   const [customSubmitting, setCustomSubmitting] = useState(false);
   const [customError, setCustomError] = useState('');
@@ -81,17 +74,12 @@ export default function RechargeModal({ onClose }: RechargeModalProps) {
   const [grantFailed, setGrantFailed] = useState(false);
   const [priceChanged, setPriceChanged] = useState(false);
 
-  const credits = useAuthStore((s) => s.credits);
-
+  const user = useAuthStore((s) => s.user);
   const tiers = catalog?.tiers ?? [];
-  const selected = tiers.find((t) => t.id === selectedId) ?? null;
   const paying = phase === 'creating' || phase === 'waiting';
-  const selectedDenied = selected?.can_purchase === false;
-  const showQrPanel =
-    phase === 'waiting' || phase === 'paid' || phase === 'expired' || phase === 'failed';
-  const locked = paying;
+  const showPayDialog = phase !== 'idle';
   const customAvailable = customConfig?.enabled === true;
-  const showCustomPanel = mode === 'custom' && customConfig !== null;
+  const guest = !user;
 
   useEffect(() => {
     let alive = true;
@@ -158,18 +146,25 @@ export default function RechargeModal({ onClose }: RechargeModalProps) {
     };
   }, [phase, order]);
 
-  const handleConfirm = () => {
-    if (!selected || paying || phase === 'paid' || selectedDenied) return;
+  const startPay = () => {
     setOrderError('');
+    setCustomError('');
     setPriceChanged(false);
     setCreditsPending(false);
     setGrantFailed(false);
     setPhase('creating');
-    const shownFen = toFen(selected.price);
-    createRechargeOrder(selected.id)
+  };
+
+  const handleBuyTier = (tierId: string, shownPrice: number) => {
+    if (paying || phase === 'paid') return;
+    const tier = tiers.find((item) => item.id === tierId);
+    if (!tier || tier.can_purchase === false) return;
+    startPay();
+    setPaySource({ kind: 'tier', id: tierId, shownFen: toFen(shownPrice) });
+    createRechargeOrder(tierId)
       .then((o) => {
         setOrder(o);
-        setPriceChanged(toFen(o.amount) !== shownFen);
+        setPriceChanged(toFen(o.amount) !== toFen(shownPrice));
         setPhase('waiting');
       })
       .catch((e) => {
@@ -180,16 +175,12 @@ export default function RechargeModal({ onClose }: RechargeModalProps) {
 
   const handleCustomConfirm = (customCredits: number) => {
     if (paying) return;
-    setCustomError('');
-    setOrderError('');
-    setPriceChanged(false);
-    setCreditsPending(false);
-    setGrantFailed(false);
-    setCustomSubmitting(true);
-    setPhase('creating');
+    startPay();
     const shownFen = customConfig
       ? customPriceFen(customCredits, customConfig.credits_per_yuan)
       : null;
+    setPaySource({ kind: 'custom', credits: customCredits, shownFen });
+    setCustomSubmitting(true);
     createCustomRechargeOrder(customCredits)
       .then((o) => {
         setOrder(o);
@@ -203,256 +194,138 @@ export default function RechargeModal({ onClose }: RechargeModalProps) {
       .finally(() => setCustomSubmitting(false));
   };
 
+  const handleRetry = () => {
+    if (!paySource) return;
+    if (paySource.kind === 'tier') {
+      const tier = tiers.find((item) => item.id === paySource.id);
+      if (!tier) return;
+      handleBuyTier(paySource.id, tier.price);
+      return;
+    }
+    handleCustomConfirm(paySource.credits);
+  };
+
+  const resetPay = () => {
+    if (phase === 'waiting') void refreshCredits();
+    setPhase('idle');
+    setOrder(null);
+    setPaySource(null);
+    setCreditsPending(false);
+    setGrantFailed(false);
+    setPriceChanged(false);
+  };
+
   const handleClose = () => {
     if (phase === 'waiting') void refreshCredits();
     onClose();
   };
-
-  const confirmLabel = !selected
-    ? '确认支付'
-    : paying
-      ? '支付中...'
-      : phase === 'paid'
-        ? '支付成功'
-        : selectedDenied
-          ? '暂不可购买'
-          : phase === 'expired' || phase === 'failed'
-            ? '重新支付'
-            : `确认支付 ¥${fmtPrice(selected.price)}`;
 
   return (
     <Modal
       open
       footer={null}
       onCancel={handleClose}
-      width={showQrPanel ? 'min(1600px, calc(100vw - 48px))' : 'min(1200px, calc(100vw - 48px))'}
-      ariaLabel="积分充值"
+      width="min(1120px, calc(100vw - 48px))"
+      ariaLabel="积分超市"
       classNames={{
         container: styles.modal,
         body: styles.body,
       }}
     >
       <div className={styles.content}>
-        {}
         <div className={styles.main}>
-          <h2 className={styles.title}>积分充值</h2>
-          <p className={styles.subtitle}>
-            {customAvailable ? '请选择充值方式' : '请选择充值套餐'}
-          </p>
+          <h2 className={styles.title}>积分超市 / 通用积分卡</h2>
 
-          {}
-          {customAvailable && (
-            <div className={styles.modeTabs} role="tablist" aria-label="充值方式">
-              <button
-                type="button"
-                role="tab"
-                aria-selected={mode === 'tier'}
-                disabled={locked}
-                className={`${styles.modeTab} ${mode === 'tier' ? styles.modeTabActive : ''}`}
-                onClick={() => setMode('tier')}
-              >
-                固定积分卡
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={mode === 'custom'}
-                disabled={locked}
-                className={`${styles.modeTab} ${mode === 'custom' ? styles.modeTabActive : ''}`}
-                onClick={() => setMode('custom')}
-              >
-                自定义充值
-              </button>
+          <section className={styles.hero} aria-label="通用积分卡">
+            <div className={styles.heroMain}>
+              <h3 className={styles.heroTitle}>通用积分卡</h3>
+              <p className={styles.heroDesc}>全模型可用，图片、视频、音频和 Agent 任务都能用</p>
+              <div className={styles.heroBullets}>
+                <span>固定积分卡</span>
+                {customAvailable && <span>自定义充值</span>}
+                <span>付款后到账</span>
+              </div>
             </div>
-          )}
+            {guest && (
+              <aside className={styles.heroSide}>
+                <strong>登录后可购买全部上架商品</strong>
+                <span>价格与积分以后台配置为准，下单时冻结快照；配置变更只影响新订单。</span>
+              </aside>
+            )}
+          </section>
 
-          {!showCustomPanel ? (
-            <>
-              {}
-              <p className={styles.unitHint}>
-                到账积分与有效期以各档位标注为准
-              </p>
+          <section className={styles.tierSection} aria-label="固定积分卡">
+            <div className={styles.sectionHead}>
+              <h3 className={styles.sectionTitle}>固定积分卡</h3>
+              <p className={styles.sectionDesc}>到账积分与有效期以各档位标注为准</p>
+            </div>
 
-              {}
-              {tiersLoading ? (
-                <div className={styles.emptyHint}>档位加载中…</div>
-              ) : tiersError ? (
-                <div className={styles.emptyHint}>{tiersError}</div>
-              ) : (
-                <div className={`${styles.planRow} ${showQrPanel ? styles.planRowPaying : ''}`}>
-                  {tiers.map((t) => {
-                    const discount = fmtDiscount(t.discount);
-                    const denied = t.can_purchase === false;
-                    return (
-                      <button
-                        key={t.id}
-                        className={`${styles.planCard} ${t.is_recommended ? styles.planRecommended : ''} ${t.id === selectedId ? styles.planSelected : ''} ${denied ? styles.planDisabled : ''}`}
-                        disabled={denied}
-                        aria-disabled={denied}
-                        onClick={() => {
-                          if (!paying && !denied) setSelectedId(t.id);
-                        }}
-                      >
-                        {t.is_recommended && <span className={styles.recBadge}>推荐</span>}
-                        {t.id === selectedId && (
-                          <span className={styles.selectedBadge}>
-                            <Check size={12} strokeWidth={3} />
-                            已选
+            {tiersLoading ? (
+              <div className={styles.emptyHint}>档位加载中…</div>
+            ) : tiersError ? (
+              <div className={styles.emptyHint}>{tiersError}</div>
+            ) : (
+              <div className={styles.planRow}>
+                {tiers.map((t) => {
+                  const denied = t.can_purchase === false;
+                  return (
+                    <article
+                      key={t.id}
+                      className={`${styles.planCard} ${t.is_recommended ? styles.planRecommended : ''} ${denied ? styles.planDisabled : ''}`}
+                    >
+                      {t.is_recommended && <span className={styles.recBadge}>推荐</span>}
+                      <div className={styles.planPoints}>
+                        <Zap size={18} strokeWidth={2.4} className={styles.planBolt} />
+                        <strong>{t.amount.toLocaleString()} 积分</strong>
+                      </div>
+                      <div className={styles.planPrice}>¥{fmtPrice(t.price)}</div>
+                      {denied ? (
+                        <span className={styles.planDeniedHint}>{t.denied_hint}</span>
+                      ) : (
+                        <>
+                          <span className={styles.planValidity}>
+                            有效期 {fmtValidMonths(t.credits_valid_months)}
                           </span>
-                        )}
-                        <span className={styles.planTitle}>{t.amount.toLocaleString()} 积分</span>
-                        <span className={styles.planPriceRow}>
-                          <span className={styles.planPrice}>¥{fmtPrice(t.price)}</span>
-                          {discount && <span className={styles.discountTag}>{discount}</span>}
-                        </span>
-                        {t.original_price != null && (
-                          <span className={styles.planOriginal}>
-                            原价 ¥{fmtPrice(t.original_price)}
-                          </span>
-                        )}
-                        {denied ? (
-                          <span className={styles.planDeniedHint}>{t.denied_hint}</span>
-                        ) : (
-                          <>
-                            {}
-                            <span className={styles.planValidity}>
-                              有效期 {fmtValidMonths(t.credits_valid_months)}
-                            </span>
-                            <div className={styles.perkList}>
-                              {PERKS.map((perk) => (
-                                <span key={perk} className={styles.perkItem}>
-                                  <Check size={14} strokeWidth={2.5} className={styles.perkCheck} />
-                                  {perk}
-                                </span>
-                              ))}
-                            </div>
-                          </>
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-            </>
-          ) : (
+                          <div className={styles.perkList}>
+                            {PERKS.map((perk) => (
+                              <span key={perk} className={styles.perkItem}>
+                                <Check size={14} strokeWidth={2.5} className={styles.perkCheck} />
+                                {perk}
+                              </span>
+                            ))}
+                          </div>
+                          <button
+                            type="button"
+                            className={`${styles.planBuy} ${t.is_recommended ? styles.planBuyPrimary : ''}`}
+                            disabled={paying}
+                            onClick={() => handleBuyTier(t.id, t.price)}
+                          >
+                            {paying && paySource?.kind === 'tier' && paySource.id === t.id
+                              ? '支付中...'
+                              : '立即购买'}
+                          </button>
+                        </>
+                      )}
+                    </article>
+                  );
+                })}
+              </div>
+            )}
+            {orderError && <p className={styles.barError}>{orderError}</p>}
+          </section>
+
+          {customAvailable && customConfig && (
             <CustomRecharge
               config={customConfig}
               onConfirm={handleCustomConfirm}
               submitting={customSubmitting}
               error={customError}
+              locked={paying}
             />
           )}
-
-          {}
-          {!showCustomPanel && (
-            <div className={styles.bottomBar}>
-              {!selected ? (
-                <div className={styles.barLeft}>
-                  <CreditCard size={18} strokeWidth={2} className={styles.emptyIcon} />
-                  <span className={styles.emptyHintText}>请先选择上方套餐</span>
-                </div>
-              ) : (
-                <div className={styles.barLeft}>
-                  <span className={styles.balance}>
-                    {credits === null ? '--' : credits.toLocaleString()} 积分
-                  </span>
-                  <span className={styles.selectedInfo}>
-                    {selected.amount.toLocaleString()} 积分&nbsp;&nbsp;¥
-                    {fmtPrice(selected.price)}
-                  </span>
-                  {selected.original_price != null && (
-                    <span className={styles.barOriginal}>
-                      ¥{fmtPrice(selected.original_price)}
-                    </span>
-                  )}
-                  {fmtDiscount(selected.discount) && (
-                    <span className={styles.barDiscount}>{fmtDiscount(selected.discount)}</span>
-                  )}
-                  {orderError && <span className={styles.barError}>{orderError}</span>}
-                </div>
-              )}
-              <div className={styles.barRight}>
-                {}
-                <button
-                  className={`${styles.confirmBtn} ${!selected || paying || phase === 'paid' || selectedDenied ? styles.confirmBtnDisabled : ''}`}
-                  onClick={handleConfirm}
-                  disabled={!selected || paying || phase === 'paid' || selectedDenied}
-                >
-                  {confirmLabel}
-                </button>
-              </div>
-            </div>
-          )}
         </div>
-
-        {}
-        {showQrPanel && (
-          <div className={styles.qrPanel}>
-            {order && phase === 'waiting' && (
-              <>
-                <div className={styles.qrBox}>
-                  {order.qr_code_url ? (
-                    <QRCodeSVG value={order.qr_code_url} size={192} />
-                  ) : (
-                    <span className={styles.qrPlaceholder}>二维码不可用</span>
-                  )}
-                </div>
-                <span className={styles.qrExpiry}>{fmtExpiry(order.expire_time)}</span>
-                {}
-                <span className={styles.qrHint}>请用微信 / 支付宝 / 云闪付 扫码支付</span>
-                {}
-                {priceChanged && (
-                  <span className={styles.qrPriceChanged}>
-                    价格已更新为 ¥{fmtPrice(order.amount)}，请确认后再支付
-                  </span>
-                )}
-                <span className={styles.qrAmount}>¥{fmtPrice(order.amount)}</span>
-                <span className={styles.qrPoints}>
-                  获得 {order.points.toLocaleString()} 积分
-                </span>
-                <div className={styles.dots}>
-                  <span />
-                  <span />
-                  <span />
-                </div>
-                <span className={grantFailed ? styles.waitingBad : styles.waiting}>
-                  {grantFailed
-                    ? GRANT_FAILED_HINT
-                    : creditsPending
-                      ? '已收到付款，积分发放中…'
-                      : '等待支付结果...'}
-                </span>
-              </>
-            )}
-
-            {phase === 'paid' && order && (
-              <div className={styles.payState}>
-                <CheckCircle2 size={56} strokeWidth={2} className={styles.payStateOk} />
-                <span className={styles.payStateTitle}>支付成功</span>
-                <span className={styles.qrPoints}>
-                  +{order.points.toLocaleString()} 积分已到账
-                </span>
-              </div>
-            )}
-
-            {(phase === 'expired' || phase === 'failed') && (
-              <div className={styles.payState}>
-                {phase === 'expired' ? (
-                  <Clock size={56} strokeWidth={2} className={styles.payStateBad} />
-                ) : (
-                  <XCircle size={56} strokeWidth={2} className={styles.payStateBad} />
-                )}
-                <span className={styles.payStateTitle}>
-                  {phase === 'expired' ? '二维码已过期' : '支付失败'}
-                </span>
-                <span className={styles.qrHint}>请点击「重新支付」创建新订单</span>
-              </div>
-            )}
-          </div>
-        )}
       </div>
 
-      {}
       <div className={styles.agreement}>
         <span>充值即视为同意</span>
         <a
@@ -464,6 +337,85 @@ export default function RechargeModal({ onClose }: RechargeModalProps) {
           《充值协议》
         </a>
       </div>
+
+      <Modal
+        open={showPayDialog}
+        footer={null}
+        onCancel={resetPay}
+        width={440}
+        zIndex={260}
+        ariaLabel="扫码支付"
+        classNames={{
+          container: styles.payDialog,
+          body: styles.body,
+        }}
+      >
+        <div className={styles.payDialogBody}>
+          {phase === 'creating' && <span className={styles.waiting}>正在创建订单...</span>}
+
+          {order && phase === 'waiting' && (
+            <>
+              <div className={styles.qrBox}>
+                {order.qr_code_url ? (
+                  <QRCodeSVG value={order.qr_code_url} size={192} />
+                ) : (
+                  <span className={styles.qrPlaceholder}>二维码不可用</span>
+                )}
+              </div>
+              <span className={styles.qrExpiry}>{fmtExpiry(order.expire_time)}</span>
+              <span className={styles.qrHint}>请用微信 / 支付宝 / 云闪付 扫码支付</span>
+              {priceChanged && (
+                <span className={styles.qrPriceChanged}>
+                  价格已更新为 ¥{fmtPrice(order.amount)}，请确认后再支付
+                </span>
+              )}
+              <span className={styles.qrAmount}>¥{fmtPrice(order.amount)}</span>
+              <span className={styles.qrPoints}>获得 {order.points.toLocaleString()} 积分</span>
+              <div className={styles.dots}>
+                <span />
+                <span />
+                <span />
+              </div>
+              <span className={grantFailed ? styles.waitingBad : styles.waiting}>
+                {grantFailed
+                  ? GRANT_FAILED_HINT
+                  : creditsPending
+                    ? '已收到付款，积分发放中…'
+                    : '等待支付结果...'}
+              </span>
+            </>
+          )}
+
+          {phase === 'paid' && order && (
+            <div className={styles.payState}>
+              <CheckCircle2 size={56} strokeWidth={2} className={styles.payStateOk} />
+              <span className={styles.payStateTitle}>支付成功</span>
+              <span className={styles.qrPoints}>+{order.points.toLocaleString()} 积分已到账</span>
+            </div>
+          )}
+
+          {(phase === 'expired' || phase === 'failed') && (
+            <div className={styles.payState}>
+              {phase === 'expired' ? (
+                <Clock size={56} strokeWidth={2} className={styles.payStateBad} />
+              ) : (
+                <XCircle size={56} strokeWidth={2} className={styles.payStateBad} />
+              )}
+              <span className={styles.payStateTitle}>
+                {phase === 'expired' ? '二维码已过期' : '支付失败'}
+              </span>
+              <span className={styles.qrHint}>请点击「重新支付」创建新订单</span>
+              <button
+                type="button"
+                className={`${styles.planBuy} ${styles.planBuyPrimary}`}
+                onClick={handleRetry}
+              >
+                重新支付
+              </button>
+            </div>
+          )}
+        </div>
+      </Modal>
     </Modal>
   );
 }

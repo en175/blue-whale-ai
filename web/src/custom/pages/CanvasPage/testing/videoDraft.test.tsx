@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Node } from '@xyflow/react';
 import CanvasPage from '../index';
 import { Toaster, toast } from 'sonner';
-import { clickSelectOption, selectOptionByText } from './radixSelect';
+import { clickSelectOption, selectOptionByText, selectOptionElements } from './radixSelect';
 
 vi.setConfig({ testTimeout: 20_000, hookTimeout: 60_000 });
 const WAIT_TIMEOUT_MS = 10_000;
@@ -112,7 +112,45 @@ vi.mock('../components/PromptRefEditor', async () => {
   };
 });
 
-const apiMocks = vi.hoisted(() => ({
+const apiMocks = vi.hoisted(() => {
+  const defaultCatalogModel = () => ({
+    model_id: 'seedance-2',
+    provider_id: 'prov',
+    model_label: '测试视频模型',
+    icon: null,
+    supported_sizes: [{ id: '720p', label: '720p', api_value: '720p' }],
+    supported_aspect_ratios: [{ id: '16:9', label: '16:9' }],
+    supported_formats: [],
+    supported_durations: { min: 4, max: 12, step: 1 },
+    default_size: '720p',
+    default_format: null,
+    default_aspect_ratio: '16:9',
+    default_duration: 5,
+    features: {
+      reference_image: true,
+      image_reference_max: 10,
+      watermark: false,
+      quantity_max: 1,
+      sequential_image_generation: false,
+      stream: false,
+      tools: false,
+      first_frame: true,
+      last_frame: true,
+      first_last_frame: true,
+      task_types: {
+        text2video: {},
+        omni: {},
+        image_reference: {},
+        first_frame: {},
+        first_last_frame: {},
+      },
+      audio: false,
+    },
+    version: 1,
+    digest: '',
+  });
+  return {
+  defaultCatalogModel,
   fetchProjects: vi.fn(async () => [
     { id: 'p1', name: '项目一' },
     { id: 'p2', name: '项目二' },
@@ -142,45 +180,9 @@ const apiMocks = vi.hoisted(() => ({
   createMediaExtraction: vi.fn(),
   createAudioTrim: vi.fn(),
   readJobFailText: vi.fn((error: { msg?: string } | null | undefined) => error?.msg ?? ''),
-  fetchGenerationModels: vi.fn(async () => [
-    {
-      model_id: 'seedance-2',
-      provider_id: 'prov',
-      model_label: '测试视频模型',
-      icon: null,
-      supported_sizes: [{ id: '720p', label: '720p', api_value: '720p' }],
-      supported_aspect_ratios: [{ id: '16:9', label: '16:9' }],
-      supported_formats: [],
-      supported_durations: { min: 4, max: 12, step: 1 },
-      default_size: '720p',
-      default_format: null,
-      default_aspect_ratio: '16:9',
-      default_duration: 5,
-      features: {
-        reference_image: true,
-        image_reference_max: 10,
-        watermark: false,
-        quantity_max: 1,
-        sequential_image_generation: false,
-        stream: false,
-        tools: false,
-        first_frame: true,
-        last_frame: true,
-        first_last_frame: true,
-        task_types: {
-          text2video: {},
-          omni: {},
-          image_reference: {},
-          first_frame: {},
-          first_last_frame: {},
-        },
-        audio: false,
-      },
-      version: 1,
-      digest: '',
-    },
-  ]),
-}));
+  fetchGenerationModels: vi.fn(async () => [defaultCatalogModel()]),
+};
+});
 
 vi.mock('@/custom/api/projects', () => ({
   touchProjectLastOpened: vi.fn(async () => undefined),
@@ -361,10 +363,7 @@ async function waitModelReady() {
 }
 
 async function selectMode(label: string) {
-  const modeLabels = ['文生视频', '全能参考', '图片参考', '图生视频', '首尾帧', '视频编辑', '视频延长'];
-  await act(async () => {
-    [...container.querySelectorAll('button')].find((b) => modeLabels.includes(b.textContent ?? ''))!.click();
-  });
+  await act(async () => { modeButton().click(); });
   await clickSelectOption(label);
 }
 
@@ -411,11 +410,14 @@ beforeEach(() => {
   localStorage.clear();
   sessionStorage.clear();
   seedDoc();
+  apiMocks.fetchGenerationModels.mockReset();
+  apiMocks.fetchGenerationModels.mockResolvedValue([apiMocks.defaultCatalogModel()]);
 });
 
 afterEach(async () => {
   if (root) await act(async () => root.unmount());
   container?.remove();
+  document.querySelectorAll('[data-radix-popper-content-wrapper], [role="listbox"]').forEach((node) => node.remove());
   vi.clearAllMocks();
   quoteMock.current = null;
 });
@@ -861,7 +863,7 @@ function modeButton(): HTMLButtonElement {
     MODE_LABELS.includes(button.textContent ?? ''),
   );
   if (combobox) return combobox;
-  return [...container.querySelectorAll('button')].find((b) => MODE_LABELS.includes(b.textContent ?? ''))!;
+  throw new Error('未找到视频模式选择器');
 }
 
 async function expectMode(label: string) {
@@ -869,9 +871,8 @@ async function expectMode(label: string) {
 }
 
 async function openModeMenu() {
-  const modeButtons = () => [...container.querySelectorAll('button')].filter((b) => MODE_LABELS.includes(b.textContent ?? ''));
-  if (modeButtons().length > 1) return;
-  await act(async () => { modeButtons()[0]!.click(); });
+  if (selectOptionElements().length > 0) return;
+  await act(async () => { modeButton().click(); });
 }
 
 function modeOption(label: string): HTMLElement | undefined {
