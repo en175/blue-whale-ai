@@ -61,6 +61,7 @@ export interface MeData {
 export const toSessionUser = (m: MeData): SessionUser => ({
   userId: m.id,
   username: m.username,
+  nickname: m.nickname || m.username,
   email: m.email,
   phone: m.phone,
   avatar: m.avatar ?? undefined,

@@ -145,7 +145,7 @@ export default function AdminLayout() {
 
         {}
         <div className={styles.footer}>
-          <div className={styles.avatar}>{user.username.charAt(0).toUpperCase()}</div>
+          <div className={styles.avatar}>{(user.nickname || user.username).charAt(0).toUpperCase()}</div>
           {!collapsed && (
             <div className={styles.footerText}>
               <div className={styles.footerName}>管理员</div>

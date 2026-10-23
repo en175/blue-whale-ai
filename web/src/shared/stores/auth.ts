@@ -30,6 +30,7 @@ export function totalCreditsOf(data: UsageTokenData): number {
 export interface SessionUser {
   userId: number;
   username: string;
+  nickname?: string;
   email: string;
   phone: string;
   avatar?: string;

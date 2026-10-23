@@ -8,6 +8,7 @@ import {
   type MeData,
 } from '@/custom/api/auth';
 import { isApiError } from '@/shared/api/http';
+import { updateUser } from '@/shared/utils/auth';
 import styles from './index.module.css';
 import AccountRecordsModal from '../AccountRecordsModal';
 import RebindPhoneModal, { maskPhone } from '../RebindPhoneModal';
@@ -56,6 +57,7 @@ export default function AccountModal({
     onSuccess: (result) => {
       setConfirmedNickname(result.nickname);
       exitNicknameEdit();
+      updateUser({ nickname: result.nickname });
       queryClient.setQueryData<MeData>(accountProfileKeys.detail(userId), (current) =>
         current ? { ...current, nickname: result.nickname } : current,
       );
