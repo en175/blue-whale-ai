@@ -7,7 +7,7 @@ import type { GenerationRecoveryRecord } from '@/custom/api/canvasRecovery';
 import { isAudioMixNodeId, buildAudioMixPlaceholderNode, audioMixSourceError, AUDIO_MIX_EDGE_ORIGIN, AUDIO_MIX_FORMATS, type AudioMixFormat } from '../tools/audio/audioMix';
 import { audioVideoMuxIdentityOf, buildAudioVideoMuxPlaceholderNode } from '../tools/audio/audioVideoMux';
 import type { Node } from '@xyflow/react';
-import { isJobInFlight } from './types';
+import { isJobInFlight, isRecoveryTargetRestorable } from './types';
 import type {
   CreateJobOutcome, GenerationRuntimeHost, GenerationTaskDefinition, RecoveryCardPlan,
   RuntimeNodeView, TaskSubmissionInput,
@@ -113,6 +113,7 @@ function planMixMuxRecovery(
       },
     };
   }
+  if (jobStatus !== 'succeeded' && !isRecoveryTargetRestorable(record)) return { kind: 'none' };
   if (isJobInFlight(jobStatus)) {
     if (!targetExists) {
       const node = buildRestore(record);

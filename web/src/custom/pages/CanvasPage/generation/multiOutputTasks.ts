@@ -13,7 +13,7 @@ import {
 } from '../tools/audio/vocalSplit';
 import type { VocalSplitTrackType } from '@lib/contracts/vocal-split';
 import { mediaContentBox } from '../components/MediaNode/mediaContentSize';
-import { isJobInFlight, isRecoveryOutputOnCanvas } from './types';
+import { isJobInFlight, isRecoveryOutputOnCanvas, isRecoveryTargetRestorable } from './types';
 import type {
   CreateJobOutcome, FanoutCardPlan, FanoutContext, GenerationRuntimeHost,
   GenerationTaskDefinition, RecoveryCardPlan, TaskSubmissionInput,
@@ -187,6 +187,7 @@ function multiResultPlanRecovery(
       },
     };
   }
+  if (jobStatus !== 'succeeded' && !isRecoveryTargetRestorable(record)) return { kind: 'none' };
   if (isJobInFlight(jobStatus)) {
     if (!targetExists) return { kind: 'restore-target', node: buildMultiResultTargetNode(record, options), edges: recoverySourceEdges(record, host, options.edgeOrigin) };
     return { kind: 'resume-polling' };

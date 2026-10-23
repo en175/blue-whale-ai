@@ -149,6 +149,23 @@ it('音频混合节点被删：同步 ref 并触发落盘', async () => {
   expect(host.flushCanvasSave).toHaveBeenCalledWith('p1');
 });
 
+it('删除失败卡：运行时认领的节点登记本地移除，本轮恢复扫描不再补回', async () => {
+  const noteRemovedOutput = vi.fn();
+  const markLocallyRemoved = vi.fn();
+  const claims = vi.fn(() => true);
+  const failed = node('media-extract-1', { genStatus: 'failed', jobId: '1', mediaExtract: {} });
+  const host = buildHost({
+    mediaNodesRef: ref([failed]),
+    generationRuntimeRef: ref({ noteRemovedOutput, markLocallyRemoved, claims } as never),
+  });
+  await render(host);
+  latest.removeCanvasNodes(['media-extract-1']);
+  expect(claims).toHaveBeenCalledWith('media-extract-1', expect.objectContaining({ genStatus: 'failed' }));
+  expect(noteRemovedOutput).toHaveBeenCalledWith('media-extract-1', expect.objectContaining({ genStatus: 'failed' }));
+  expect(markLocallyRemoved).toHaveBeenCalledWith('media-extract-1');
+  expect(host.flushCanvasSave).toHaveBeenCalledWith('p1');
+});
+
 it('removeAudioMixCardNow：清 ref、清在途任务并落盘', async () => {
   const m = node('audio-mix-1');
   const inFlight = new Map([['audio-mix-1', 'job']]);

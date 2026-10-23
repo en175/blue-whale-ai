@@ -420,6 +420,20 @@ describe('恢复落卡规划（planRecovery）', () => {
     expect(plan.node.data).toMatchObject({ genStatus: 'failed', errorText: '供应商超时', jobId: '73' });
   });
 
+  it('失败或进行中但目标恢复项已被删除（removed）：不补卡', () => {
+    const removedTarget = {
+      recovery_item_id: 'gcr:sub-1:$target', output_key: '$target', node_id: 'audio-mix-1',
+      state: 'removed' as const, revision: 8, node_binding_revision: 1, asset_id: null, slot_id: null,
+    };
+    const failed = audioMixTask.planRecovery!(record({
+      job: { job_id: '73', type: 'audio_mix', status: 'failed', progress: 0, output_asset_ids: null, stored_error: { msg: '供应商超时' }, created_at: '2026-10-01T00:00:00Z' },
+      items: [removedTarget],
+    }), createFakeHost().host);
+    expect(failed).toEqual({ kind: 'none' });
+    const inFlight = audioMixTask.planRecovery!(record({ items: [removedTarget] }), createFakeHost().host);
+    expect(inFlight).toEqual({ kind: 'none' });
+  });
+
   it('失败记录：缺卡身份不可信无画布动作；在场已收敛终态不重轮询；仅未确认占位接续', () => {
     const failedRecord = record({
       target_node_id: 'm1', job_id: '79', task_type: 'audio_video_mux',

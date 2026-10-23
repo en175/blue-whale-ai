@@ -8,7 +8,7 @@ import { isMediaExtractNodeId } from '../media/mediaExtract';
 import { isVocalSplitNodeId } from '../tools/audio/vocalSplit';
 import { audioVideoMuxIdentityOf } from '../tools/audio/audioVideoMux';
 import type { Node } from '@xyflow/react';
-import { isJobInFlight, isRecoveryTargetSettled, readMarker } from './types';
+import { isJobInFlight, isRecoveryTargetRestorable, isRecoveryTargetSettled, readMarker } from './types';
 import type {
   CreateJobOutcome, GenerationRuntimeHost, GenerationTaskDefinition, RecoveryCardPlan, TaskSubmissionInput,
 } from './types';
@@ -97,10 +97,7 @@ export const normalGenerationTask: GenerationTaskDefinition<NormalGenerationPayl
         },
       };
     }
-    const targetItem = record.items.find((item) => item.output_key === TARGET_OUTPUT_KEY);
-    if (targetItem && targetItem.state !== 'pending' && targetItem.state !== 'present') {
-      return { kind: 'none' };
-    }
+    if (jobStatus !== 'succeeded' && !isRecoveryTargetRestorable(record)) return { kind: 'none' };
     if (isJobInFlight(jobStatus)) {
       if (!targetExists) return { kind: 'restore-target', node: buildRecoveryTargetNode(record) };
       return { kind: 'resume-polling' };

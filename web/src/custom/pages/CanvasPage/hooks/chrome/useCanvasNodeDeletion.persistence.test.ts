@@ -63,7 +63,7 @@ async function renderDeletion() {
   const mediaNodesRef = { current: [SOURCE, TARGET] };
   const edgesRef = { current: [{ id: 'wire', source: SOURCE.id, target: TARGET.id }] as Edge[] };
   const epoch = {};
-  const { host } = createControlledHost({
+  const { host, nodes } = createControlledHost({
     getProjectId: () => 'p1', getLoadEpoch: () => epoch,
     fetchRecoveryPage: async () => ({ protocol_version: 1, canvas_version: 1, records: [record], next_cursor: null }),
   });
@@ -105,7 +105,7 @@ async function renderDeletion() {
     return null;
   }
   await act(async () => { root.render(createElement(Probe)); });
-  return { saveHost, runtime, remove: () => deletion.removeCanvasNodes([TARGET.id]), flush: () => save.flushCanvasSave('p1') };
+  return { saveHost, runtime, nodes, remove: () => deletion.removeCanvasNodes([TARGET.id]), flush: () => save.flushCanvasSave('p1') };
 }
 
 it.each([false, true])('失败抠图卡删除立即排队保存删除后的节点和连线，在途保存=%s', async (inFlight) => {
@@ -133,5 +133,14 @@ it.each([false, true])('失败抠图卡删除立即排队保存删除后的节�
   await act(async () => { await vi.advanceTimersByTimeAsync(800); });
   expect(putCanvasDocWithRecovery).toHaveBeenCalledTimes(1);
   expect(saveCanvasDoc).toHaveBeenCalledTimes(inFlight ? 1 : 0);
+  runtime.reset();
+});
+
+it('删除失败卡后同一载入内的再次恢复扫描不补回', async () => {
+  const { runtime, nodes, remove } = await renderDeletion();
+  await act(async () => { remove(); });
+  expect(nodes.has(TARGET.id)).toBe(false);
+  await act(async () => { await runtime.recover('p1'); });
+  expect(nodes.has(TARGET.id)).toBe(false);
   runtime.reset();
 });

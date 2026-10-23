@@ -1,6 +1,6 @@
 import type { JobDetail } from '@/custom/api/jobs';
 import type { GenerationRecoveryRecord } from '@/custom/api/canvasRecovery';
-import type { RuntimeNodeView } from './types';
+import { isRecoveryTargetRestorable, type RuntimeNodeView } from './types';
 import { TARGET_OUTPUT_KEY, PRIMARY_OUTPUT_KEY, type ActiveExecution, type RuntimeContext } from './runtimeState';
 
 const POLL_INTERVAL_MS = 2500;
@@ -129,8 +129,7 @@ export function createPolling(ctx: RuntimeContext) {
       if (views.length !== outputs.length) {
         for (const item of outputs) unavailableOutputItems.add(item.recovery_item_id);
         if (host.findNode(nodeId) == null) {
-          const targetItem = record?.items.find((item) => item.output_key === TARGET_OUTPUT_KEY);
-          if (targetItem && targetItem.state !== 'pending' && targetItem.state !== 'present') {
+          if (record != null && !isRecoveryTargetRestorable(record)) {
             active.delete(nodeId);
             host.clearActiveJob(nodeId);
             return;
