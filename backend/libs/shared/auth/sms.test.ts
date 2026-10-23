@@ -19,6 +19,7 @@ function stubSmsFetch(): () => string {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 describe("短信签名 — 电信走独立签名", () => {
@@ -94,6 +95,87 @@ describe("短信签名 — 电信走独立签名", () => {
     expect(sentSign()).toBe("杭州玄浮科技");
     await provider.send("13812345678", "123456");
     expect(sentSign()).toBe("玄浮科技");
+  });
+});
+
+describe("发送失败 — 记录上游可用的失败原因", () => {
+  function provider() {
+    return createVolcengineSmsProvider({
+      ak: "ak",
+      sk: "sk",
+      smsAccount: "8c026cce",
+      sign: "玄浮科技",
+      templateId: "tpl",
+    });
+  }
+
+  it("上游业务错误 → warn 带错误码与信息", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.stubGlobal("fetch", async () =>
+      new Response(
+        JSON.stringify({
+          ResponseMetadata: {
+            Error: { Code: "InvalidTemplate", Message: "模板不存在" },
+          },
+        }),
+        { status: 400 },
+      ),
+    );
+
+    await expect(provider().send("13812345678", "123456")).rejects.toThrow(
+      "InvalidTemplate: 模板不存在",
+    );
+
+    const record = JSON.parse(String(warn.mock.calls[0]?.[0]));
+    expect(record).toMatchObject({
+      body: "[sms] send failed",
+      stage: "upstream",
+      http_status: 400,
+      upstream_code: "InvalidTemplate",
+      upstream_message: "模板不存在",
+    });
+  });
+
+  it("网络异常 → warn 带异常类型与信息", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.stubGlobal("fetch", async () => {
+      throw new TypeError("fetch failed");
+    });
+
+    await expect(provider().send("13812345678", "123456")).rejects.toThrow(
+      "fetch failed",
+    );
+
+    const record = JSON.parse(String(warn.mock.calls[0]?.[0]));
+    expect(record).toMatchObject({
+      body: "[sms] send failed",
+      stage: "network",
+      error_type: "TypeError",
+      error_message: "fetch failed",
+    });
+  });
+
+  it("上游返回非 JSON → warn 带 HTTP 状态", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.stubGlobal("fetch", async () => new Response("<html>bad gateway</html>", { status: 502 }));
+
+    await expect(provider().send("13812345678", "123456")).rejects.toThrow();
+
+    const record = JSON.parse(String(warn.mock.calls[0]?.[0]));
+    expect(record).toMatchObject({
+      body: "[sms] send failed",
+      stage: "response",
+      http_status: 502,
+    });
+  });
+
+  it("发送成功不写 warn", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    stubSmsFetch();
+
+    await provider().send("13812345678", "123456");
+
+    expect(warn).not.toHaveBeenCalled();
   });
 });
 
