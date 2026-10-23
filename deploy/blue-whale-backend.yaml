@@ -33,7 +33,7 @@ spec:
             topologyKey: kubernetes.io/hostname
       containers:
       - name: blue-whale-backend
-        image: xf-bluewhale-cn-beijing.cr.volces.com/bluewhale/bluewhale-backend:$(parameters.image_tag)
+        image: "xf-bluewhale-cn-beijing.cr.volces.com/bluewhale/bluewhale-backend:$(tag)"
         imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 3100

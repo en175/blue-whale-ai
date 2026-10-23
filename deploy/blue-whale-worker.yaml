@@ -22,7 +22,7 @@ spec:
       - name: ccr-secret
       containers:
       - name: blue-whale-worker
-        image: xf-bluewhale-cn-beijing.cr.volces.com/bluewhale/bluewhale-worker:$(parameters.image_tag)
+        image: "xf-bluewhale-cn-beijing.cr.volces.com/bluewhale/bluewhale-worker:$(tag)"
         imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 4002
