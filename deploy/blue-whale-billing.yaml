@@ -23,7 +23,7 @@ spec:
       - name: ccr-secret
       containers:
       - name: blue-whale-billing
-        image: "xf-bluewhale-cn-beijing.cr.volces.com/bluewhale/bluewhale-billing:$(parameters.image_tag)"
+        image: "xf-bluewhale-cn-beijing.cr.volces.com/bluewhale/bluewhale-billing:$(tag)"
         imagePullPolicy: IfNotPresent
         ports:
         - name: http
