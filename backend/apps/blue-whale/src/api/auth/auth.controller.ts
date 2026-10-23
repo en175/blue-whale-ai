@@ -125,8 +125,8 @@ const SMS_PHONE_BUCKETS = [
 
 const SMS_CODE_RATE_LIMIT = RateLimit({
   buckets: [
-    { scope: "send_code_ip_minute", key: "ip" as const, limit: 5, windowMs: 60_000 },
-    { scope: "send_code_ip_day", key: "ip" as const, limit: 50, windowMs: DAY_MS },
+    { scope: "send_code_ip_minute", key: "ip" as const, limit: 50, windowMs: 60_000 },
+    { scope: "send_code_ip_day", key: "ip" as const, limit: 500, windowMs: DAY_MS },
   ],
 });
 
