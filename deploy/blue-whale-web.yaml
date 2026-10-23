@@ -1,0 +1,73 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: blue-whale-web
+  namespace: default
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: blue-whale-web
+  template:
+    metadata:
+      labels:
+        app: blue-whale-web
+    spec:
+      imagePullSecrets:
+      - name: ccr-secret
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+              - key: app
+                operator: In
+                values:
+                - blue-whale-web
+            topologyKey: kubernetes.io/hostname
+      containers:
+      - name: blue-whale-web
+        image: xf-bluewhale-cn-beijing.cr.volces.com/bluewhale/bluewhale-web:$(parameters.image_tag)
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 80
+          protocol: TCP
+        env:
+        - name: BACKEND_UPSTREAM
+          value: "http://blue-whale-backend-svc:3100"
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 80
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 2
+          failureThreshold: 3
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: blue-whale-web-svc
+  namespace: default
+spec:
+  type: NodePort
+  selector:
+    app: blue-whale-web
+  ports:
+  - name: http
+    port: 80
+    targetPort: 80
+    nodePort: 30081
+    protocol: TCP
