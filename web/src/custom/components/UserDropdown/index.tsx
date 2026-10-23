@@ -121,7 +121,7 @@ export default function UserDropdown() {
                     onClick={() => {
                       setMenuOpen(false);
                       if (item.key === 'account') setShowAccount(true);
-                      if (item.key === 'credits') window.open('/account/credits', '_blank', 'noopener,noreferrer');
+                      // if (item.key === 'credits') window.open('/account/credits', '_blank', 'noopener,noreferrer');
                       if (item.key === 'settings') navigate('/admin');
                     }}
                   >

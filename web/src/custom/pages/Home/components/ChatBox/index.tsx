@@ -489,7 +489,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
   const videoModelOptions = videoModelList.map((m) => ({ key: m.model_id, label: m.model_label }));
   const imageModelOptions = imageModelList.map((m) => ({ key: m.model_id, label: m.model_label }));
 
-  const creationModelOptions = videoModelOptions;
+  // const creationModelOptions = videoModelOptions;
 
   const isVideoTab = activeTab === 'video';
   const isImageTab = activeTab === 'image';
