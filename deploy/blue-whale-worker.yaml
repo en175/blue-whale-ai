@@ -58,6 +58,11 @@ spec:
             secretKeyRef:
               name: blue-whale-secrets
               key: GENERATION_CREDENTIAL_SECRET
+        - name: SYSTEM_SETTINGS_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: blue-whale-secrets
+              key: SYSTEM_SETTINGS_SECRET
         - name: VOLC_ACCESS_KEY_ID
           valueFrom:
             secretKeyRef:
