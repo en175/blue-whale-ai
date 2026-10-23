@@ -9,6 +9,7 @@ import CreditsShopButton from './index';
 const USER: SessionUser = {
   userId: 1,
   username: 'alice',
+  nickname: 'alice',
   email: '',
   phone: '',
   hasPassword: true,

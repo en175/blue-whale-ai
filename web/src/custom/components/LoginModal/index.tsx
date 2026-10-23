@@ -195,6 +195,7 @@ export default function LoginModal({ onClose, onSuccess, notice }: LoginModalPro
       : {
           userId: login.user_id,
           username: login.nickname || login.username,
+          nickname: login.nickname || login.username,
           email: login.email ?? '',
           phone: login.phone,
           hasPassword: login.has_password,

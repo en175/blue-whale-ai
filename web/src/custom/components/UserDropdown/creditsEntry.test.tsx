@@ -20,6 +20,7 @@ vi.mock('@/custom/components/LoginModal', () => ({ default: () => null }));
 const USER: SessionUser = {
   userId: 1,
   username: 'alice',
+  nickname: 'alice',
   email: '',
   phone: '',
   hasPassword: true,
@@ -67,6 +68,19 @@ describe('UserDropdown 未登录入口', () => {
     expect([...document.body.querySelectorAll('button')].map((button) => button.textContent?.trim())).toEqual([
       '注册/登录',
     ]);
+  });
+});
+
+describe('UserDropdown 头像占位', () => {
+  it('优先用昵称首字母，缺昵称回退用户名', async () => {
+    setSession({ ...USER, username: 'alice', nickname: '蓝鲸用户' });
+    await renderMenu();
+    expect(document.body.querySelector('button[aria-label="蓝鲸用户"]')?.textContent).toBe('蓝');
+    await act(async () => root.unmount());
+    mountNode.remove();
+    setSession({ ...USER, username: 'alice' });
+    await renderMenu();
+    expect(document.body.querySelector('button[aria-label="alice"]')?.textContent).toBe('A');
   });
 });
 

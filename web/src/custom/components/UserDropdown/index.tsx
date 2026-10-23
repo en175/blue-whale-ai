@@ -94,14 +94,14 @@ export default function UserDropdown() {
         wrapClassName={styles.wrapper}
         contentClassName={styles.dropdown}
         trigger={
-          <button type="button" className={styles.trigger} aria-label={user.username}>
-            <div className={styles.triggerAvatar}>{user.username.charAt(0).toUpperCase()}</div>
+          <button type="button" className={styles.trigger} aria-label={user.nickname || user.username}>
+            <div className={styles.triggerAvatar}>{(user.nickname || user.username).charAt(0).toUpperCase()}</div>
           </button>
         }
         panel={
           <>
             <div className={styles.userHeader}>
-              <div className={styles.avatar}>{user.username.charAt(0).toUpperCase()}</div>
+              <div className={styles.avatar}>{(user.nickname || user.username).charAt(0).toUpperCase()}</div>
               <div className={styles.userHeaderInfo}>
                 <span className={styles.username}>{user.username}</span>
                 <span className={styles.userMeta}>ID：{user.userId}</span>
@@ -147,7 +147,7 @@ export default function UserDropdown() {
       {showAccount && (
         <AccountModal
           userId={user.userId}
-          nickname={user.username}
+          nickname={user.nickname || user.username}
           phone={user.phone ?? ''}
           hasPassword={user.hasPassword}
           balance={credits}
