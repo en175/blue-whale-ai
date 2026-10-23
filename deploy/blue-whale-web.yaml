@@ -32,7 +32,7 @@ spec:
             topologyKey: kubernetes.io/hostname
       containers:
       - name: blue-whale-web
-        image: xf-bluewhale-cn-beijing.cr.volces.com/bluewhale/bluewhale-web:$(parameters.image_tag)
+        image: "xf-bluewhale-cn-beijing.cr.volces.com/bluewhale/bluewhale-web:$(tag)"
         imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 80
