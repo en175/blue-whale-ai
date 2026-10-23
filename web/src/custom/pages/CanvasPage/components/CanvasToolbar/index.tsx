@@ -24,6 +24,8 @@ import { lockChromeSelection, registerCanvasChrome } from '../Canvas/chromeHitGu
 
 type ToolMode = 'drag' | 'select';
 
+const SHOW_TOOL_MENUS = false;
+
 export type ToolMenuKey = 'assets' | 'goods';
 
 interface ToolMenuItem {
@@ -279,13 +281,13 @@ export default function CanvasToolbar({
       </button>
 
       {}
-      <div className={styles.divider} />
-
-      {}
-      {renderMenuTool('assets')}
-
-      {}
-      {renderMenuTool('goods')}
+      {SHOW_TOOL_MENUS && (
+        <>
+          <div className={styles.divider} />
+          {renderMenuTool('assets')}
+          {renderMenuTool('goods')}
+        </>
+      )}
     </div>,
     document.body,
   );
