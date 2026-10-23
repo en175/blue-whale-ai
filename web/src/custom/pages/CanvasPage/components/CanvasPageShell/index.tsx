@@ -29,7 +29,6 @@ import { AssetImageRefLimitProvider } from '../../generation/modelCaps';
 import { assetCardToolbarVisible } from '../AssetCardNode/toolbarVisibility';
 import { availableGenKinds } from '../../graph/connectAbility';
 import { assetsPickerMediaTypes } from '../../assets/assetsPickerTargets';
-import { isFileRejected } from '@/custom/utils/fileSignature';
 import pageStyles from '../../index.module.css';
 
 const ASSET_TOOLBAR_LIFT = 42;
@@ -481,9 +480,7 @@ export default function CanvasPageShell(props: CanvasPageShellProps) {
             files.forEach((file, index) => {
               void menus.placeFileOnCanvas(file, {
                 position: pos ? { x: pos.x + index * 24, y: pos.y + index * 24 } : undefined,
-              }).catch((err) => {
-                menus.showToast('error', isFileRejected(err) ? err.message : `「${file.name}」添加失败，请重试`);
-              });
+              }).catch(() => undefined);
             });
             e.target.value = '';
             menus.paneUploadPosRef.current = null;

@@ -63,6 +63,10 @@ export function useCanvasUploadDrop(host: CanvasUploadDropHost): CanvasUploadDro
     showToast,
   } = host;
 
+  const toastUploadFailure = (file: File, err: unknown) => {
+    showToast('error', isFileRejected(err) ? err.message : `「${file.name}」添加失败，请重试`);
+  };
+
   const placeFileOnCanvas = (
     file: File,
     opts?: { position?: { x: number; y: number }; replaceNodeId?: string },
@@ -190,16 +194,14 @@ export function useCanvasUploadDrop(host: CanvasUploadDropHost): CanvasUploadDro
         } else {
           setMediaNodes((prev) => prev.filter((n) => n.id !== nodeId));
         }
-        showToast('error', isFileRejected(err) ? err.message : `「${file.name}」添加失败，请重试`);
+        toastUploadFailure(file, err);
         throw err instanceof Error ? err : new Error('上传失败');
       });
   };
 
   const handleUploadFile = (files: File[]) => {
     files.forEach((file) => {
-      void placeFileOnCanvas(file).catch((err) => {
-        showToast('error', isFileRejected(err) ? err.message : `「${file.name}」添加失败，请重试`);
-      });
+      void placeFileOnCanvas(file).catch(() => undefined);
     });
   };
 
@@ -210,11 +212,7 @@ export function useCanvasUploadDrop(host: CanvasUploadDropHost): CanvasUploadDro
       return;
     }
     if (payload.kind === 'image') {
-      try {
-        await placeFileOnCanvas(payload.file, { position });
-      } catch (err) {
-        showToast('error', err instanceof Error ? err.message : '粘贴失败');
-      }
+      await placeFileOnCanvas(payload.file, { position }).catch(() => undefined);
       return;
     }
     handleAddTextNode(position, payload.text);
@@ -236,9 +234,7 @@ export function useCanvasUploadDrop(host: CanvasUploadDropHost): CanvasUploadDro
   };
 
   const handleFillEmptyShell = (id: string, file: File) => {
-    void placeFileOnCanvas(file, { replaceNodeId: id }).catch((err) => {
-      showToast('error', isFileRejected(err) ? err.message : `「${file.name}」添加失败，请重试`);
-    });
+    void placeFileOnCanvas(file, { replaceNodeId: id }).catch(() => undefined);
   };
 
   return { placeFileOnCanvas, handleUploadFile, handleCopyImage, handleFillEmptyShell, applyClipboardAtFlow };
