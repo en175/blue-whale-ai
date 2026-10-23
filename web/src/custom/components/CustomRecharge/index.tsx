@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Zap } from 'lucide-react';
 import DragSlider from '@/custom/components/DragSlider';
+import type { SliderScale } from '@/custom/components/DragSlider/dragSliderModel';
 import { fetchRechargeCustomConfig, type RechargeCustomConfig } from '@/custom/api/recharge';
 import {
   customPriceFen,
@@ -10,6 +11,19 @@ import {
   validateCredits,
 } from '@/shared/utils/customRecharge';
 import styles from './index.module.css';
+
+export function createCreditsScale(config: RechargeCustomConfig): SliderScale {
+  const min = Math.max(1, config.min_credits);
+  const max = Math.max(min + 1, config.max_credits);
+  const logSpan = Math.log(max / min);
+  return {
+    ratioFromValue: (value) =>
+      Math.min(1, Math.max(0, Math.log(Math.max(min, value) / min) / logSpan)),
+    valueFromRatio: (ratio) =>
+      Math.round(min * Math.exp(logSpan * Math.min(1, Math.max(0, ratio)))),
+    stepValue: (value) => snapCredits(value, config),
+  };
+}
 
 export interface CustomRechargeProps {
   onConfirm: (credits: number) => void;
@@ -69,6 +83,7 @@ export default function CustomRecharge({
 
   const preview = draft === null ? credits : snapCredits(Number(draft), config);
   const previewFen = customPriceFen(preview, config.credits_per_yuan);
+  const sliderScale = createCreditsScale(config);
 
   const commitDraft = () => {
     if (draft === null) return;
@@ -95,7 +110,6 @@ export default function CustomRecharge({
     onConfirm(final);
   };
 
-  const invalid = draft !== null && validateCredits(Number(draft), config) !== null;
   const buyLabel = tourist
     ? '登录后购买'
     : denied
@@ -103,7 +117,6 @@ export default function CustomRecharge({
       : paying
         ? '下单中…'
         : `¥${formatPriceYuan(previewFen)} 购买`;
-  const minFen = customPriceFen(config.min_credits, config.credits_per_yuan);
   const validity =
     config.credits_valid_months > 0 && config.credits_valid_months % 12 === 0
       ? `${config.credits_valid_months / 12} 年长期有效`
@@ -115,10 +128,6 @@ export default function CustomRecharge({
     <section className={styles.section} aria-label="自定义充值">
       <div className={styles.sectionHead}>
         <h3 className={styles.sectionTitle}>自定义充值</h3>
-        <p className={styles.sectionDesc}>
-          {formatCredits(config.min_credits)} 积分（¥{formatPriceYuan(minFen)}）起 · 按当前配置 1 元 ={' '}
-          {config.credits_per_yuan} 积分实时算价
-        </p>
       </div>
       <article className={styles.card}>
         <div className={styles.summary}>
@@ -136,7 +145,8 @@ export default function CustomRecharge({
               min={config.min_credits}
               max={config.max_credits}
               step={config.step_credits}
-              value={credits}
+              value={preview}
+              scale={sliderScale}
               disabled={interactionLocked}
               ariaLabel="积分数量"
               onChange={(next) => {
@@ -145,7 +155,7 @@ export default function CustomRecharge({
                 setCredits(next);
               }}
             />
-            <div className={`${styles.inputWrap} ${invalid ? styles.inputWrapInvalid : ''}`}>
+            <div className={styles.inputWrap}>
               <input
                 className={styles.input}
                 type="text"

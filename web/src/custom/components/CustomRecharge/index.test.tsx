@@ -2,7 +2,7 @@
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import CustomRecharge from './index';
+import CustomRecharge, { createCreditsScale } from './index';
 
 
 const rechargeApi = vi.hoisted(() => ({ fetchRechargeCustomConfig: vi.fn() }));
@@ -97,7 +97,7 @@ describe('CustomRecharge — 展示（PRD §7.2 / §7.6「默认值」）', () =
     await render();
 
     expect(numberInput().value).toBe('600');
-    expect(slider().value).toBe('600');
+    expect(slider().value).toBe('0');
     expect(mountNode.textContent).toContain('¥40');
   });
 
@@ -132,11 +132,12 @@ describe('CustomRecharge — 输入与计算（PRD §7.3）', () => {
     await act(async () => {
       const el = slider();
       const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
-      setter?.call(el, '1500');
+      setter?.call(el, '1000');
       el.dispatchEvent(new Event('input', { bubbles: true }));
     });
 
-    expect(mountNode.textContent).toContain('¥100');
+    expect(numberInput().value).toBe('499995');
+    expect(mountNode.textContent).toContain('¥33333');
   });
 
   it('★ 手动输入合法值：失焦后生效，价格跟着变', async () => {
@@ -186,6 +187,20 @@ describe('CustomRecharge — 输入与计算（PRD §7.3）', () => {
     await blur();
 
     expect(numberInput().value).toBe('600');
+  });
+
+  it('★ 手动输入时进度条同步跟随，失焦后保持一致', async () => {
+    await render();
+
+    type('1200');
+
+    const expected = String(Math.round(createCreditsScale(CONFIG).ratioFromValue(1200) * 1000));
+    expect(slider().value).toBe(expected);
+
+    await blur();
+
+    expect(slider().value).toBe(expected);
+    expect(numberInput().value).toBe('1200');
   });
 
   it('合法值不弹修正提示（别对没改的东西说「已修正」）', async () => {

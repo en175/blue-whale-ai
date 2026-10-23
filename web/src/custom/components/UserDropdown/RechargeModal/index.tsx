@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Check, CheckCircle2, Clock, XCircle, Zap } from 'lucide-react';
+import { Check, CheckCircle2, Clock, ScanLine, XCircle, Zap } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { toast } from '@/custom/components/Toast';
 import Modal from '@/custom/components/Modal';
@@ -35,14 +35,6 @@ const RECHARGE_AGREEMENT_HREF =
   'https://static-bluewhale.yunjizi.cn/agreement/recharge-agreement.html';
 
 const fmtPrice = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(2));
-
-function fmtExpiry(iso: string) {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return '';
-  const hh = String(d.getHours()).padStart(2, '0');
-  const mm = String(d.getMinutes()).padStart(2, '0');
-  return `${hh}:${mm} 后过期`;
-}
 
 function fmtValidMonths(months: number) {
   if (!Number.isFinite(months) || months <= 0) return '';
@@ -346,7 +338,7 @@ export default function RechargeModal({ onClose }: RechargeModalProps) {
         zIndex={260}
         ariaLabel="扫码支付"
         classNames={{
-          container: styles.payDialog,
+          container: `${styles.payDialog} ${showPayDialog ? styles.checkout : ''}`,
           body: styles.body,
         }}
       >
@@ -355,26 +347,26 @@ export default function RechargeModal({ onClose }: RechargeModalProps) {
 
           {order && phase === 'waiting' && (
             <>
-              <div className={styles.qrBox}>
-                {order.qr_code_url ? (
-                  <QRCodeSVG value={order.qr_code_url} size={192} />
-                ) : (
-                  <span className={styles.qrPlaceholder}>二维码不可用</span>
-                )}
-              </div>
-              <span className={styles.qrExpiry}>{fmtExpiry(order.expire_time)}</span>
-              <span className={styles.qrHint}>请用微信 / 支付宝 / 云闪付 扫码支付</span>
+              <h3 className={styles.checkoutTitle}>自定义充值 {order.points.toLocaleString()} 积分</h3>
+              <span className={styles.checkoutCountdown}>
+                <ScanLine size={18} strokeWidth={2} className={styles.countdownIcon} />
+                <span className={styles.countdownText}>请于十分钟内使用微信 / 支付宝 扫码支付</span>
+              </span>
               {priceChanged && (
                 <span className={styles.qrPriceChanged}>
                   价格已更新为 ¥{fmtPrice(order.amount)}，请确认后再支付
                 </span>
               )}
-              <span className={styles.qrAmount}>¥{fmtPrice(order.amount)}</span>
-              <span className={styles.qrPoints}>获得 {order.points.toLocaleString()} 积分</span>
-              <div className={styles.dots}>
-                <span />
-                <span />
-                <span />
+              <span className={styles.checkoutAmount}>
+                <i>¥</i>
+                {fmtPrice(order.amount)}
+              </span>
+              <div className={styles.qrBox}>
+                {order.qr_code_url ? (
+                  <QRCodeSVG value={order.qr_code_url} size={180} />
+                ) : (
+                  <span className={styles.qrPlaceholder}>二维码不可用</span>
+                )}
               </div>
               <span className={grantFailed ? styles.waitingBad : styles.waiting}>
                 {grantFailed
@@ -383,6 +375,7 @@ export default function RechargeModal({ onClose }: RechargeModalProps) {
                     ? '已收到付款，积分发放中…'
                     : '等待支付结果...'}
               </span>
+              <p className={styles.checkoutNote}>本订单为一次性支付，后续不会产生自动代扣</p>
             </>
           )}
 
