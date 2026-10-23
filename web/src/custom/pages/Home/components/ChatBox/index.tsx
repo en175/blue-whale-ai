@@ -1406,7 +1406,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                 </button>
 
                 { }
-                <Select
+                {/* <Select
                   value={creationModel}
                   onChange={setCreationModel}
                   size="sm"
@@ -1414,7 +1414,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                   ariaLabel="选择生成模型"
                   triggerClassName={styles.modelBtn}
                   options={creationModelOptions.map((m) => ({ value: m.key, label: m.label }))}
-                />
+                /> */}
               </div>
 
               { }
