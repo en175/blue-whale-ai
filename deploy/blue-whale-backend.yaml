@@ -144,6 +144,21 @@ spec:
             secretKeyRef:
               name: blue-whale-secrets
               key: NEW_API_AGENT_BILLING_TOKEN
+        - name: VOLC_SMS_ACCESS_KEY_ID
+          valueFrom:
+            secretKeyRef:
+              name: blue-whale-secrets
+              key: VOLC_SMS_ACCESS_KEY_ID
+        - name: VOLC_SMS_SECRET_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: blue-whale-secrets
+              key: VOLC_SMS_SECRET_ACCESS_KEY
+        - name: SYSTEM_SETTINGS_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: blue-whale-secrets
+              key: SYSTEM_SETTINGS_SECRET
         - name: PORT
           value: "3100"
         - name: NEW_API_BASE_URL
@@ -154,6 +169,16 @@ spec:
           value: "http://blue-whale-billing-svc:4004"
         - name: BILLING_ADMIN_URL
           value: "http://blue-whale-billing-svc:4003"
+        - name: PAY_SERVER_BASE_URL
+          value: "http://192.168.0.148:9216"
+        - name: SMS_PROVIDER
+          value: "volcengine"
+        - name: VOLC_SMS_ACCOUNT
+          value: "8c026cce"
+        - name: VOLC_SMS_SIGN
+          value: "玄浮科技"
+        - name: VOLC_SMS_TEMPLATE_ID
+          value: "S1T_1y2pbbfa2t4oy"
         - name: AGENT_MODEL_DRAIN_TIMEOUT_MS
           value: "90000"
         readinessProbe:
