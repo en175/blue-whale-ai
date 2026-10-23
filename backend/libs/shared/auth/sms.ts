@@ -1,4 +1,4 @@
-import { signVolcengineRequest } from "@lib/core";
+import { isTelecomPhone, signVolcengineRequest } from "@lib/core";
 import { logger } from "@lib/infra/logging/blue-whale-logger.js";
 
 export interface SmsProvider {
@@ -16,6 +16,7 @@ export interface VolcengineSmsConfig {
   sk: string;
   smsAccount: string;
   sign: string;
+  signTelecom?: string | undefined;
   templateId: string;
   region?: string;
 }
@@ -29,9 +30,13 @@ export function createVolcengineSmsProvider(
   return {
     async send(phone, code) {
       const templateParam = JSON.stringify({ code });
+      const sign =
+        config.signTelecom && isTelecomPhone(phone)
+          ? config.signTelecom
+          : config.sign;
       const body = JSON.stringify({
         SmsAccount: config.smsAccount,
-        Sign: config.sign,
+        Sign: sign,
         TemplateID: config.templateId,
         TemplateParam: templateParam,
         PhoneNumbers: phone,
@@ -92,6 +97,7 @@ export function resolveSmsProvider(
       sk: credentials.sk,
       smsAccount: env.VOLC_SMS_ACCOUNT ?? "",
       sign: env.VOLC_SMS_SIGN ?? "玄浮科技",
+      signTelecom: env.VOLC_SMS_SIGN_TELECOM?.trim() || "杭州玄浮科技",
       templateId: env.VOLC_SMS_TEMPLATE_ID ?? "",
     });
   }
