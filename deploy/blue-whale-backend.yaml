@@ -150,6 +150,10 @@ spec:
           value: "http://blue-whale-api-svc:3000"
         - name: AGENT_SERVICE_BASE_URL
           value: "http://blue-whale-agent-svc:4112"
+        - name: BILLING_GRPC_URL
+          value: "http://blue-whale-billing-svc:4004"
+        - name: BILLING_ADMIN_URL
+          value: "http://blue-whale-billing-svc:4003"
         - name: AGENT_MODEL_DRAIN_TIMEOUT_MS
           value: "90000"
         readinessProbe:
