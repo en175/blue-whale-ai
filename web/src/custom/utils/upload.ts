@@ -65,6 +65,10 @@ export function fileToAssetType(file: File): AssetType | null {
   return null;
 }
 
+export function uploadSizeLimitMessage(fileName: string, limit: number): string {
+  return `「${fileName}」超过${Math.floor(limit / 1024 / 1024)}MB上限，请压缩或更换文件后上传。`;
+}
+
 export async function uploadAssetFile(
   file: File,
   opts?: { projectId?: string; assetSource?: 'mask_erase'; silent?: boolean },
@@ -73,7 +77,7 @@ export async function uploadAssetFile(
   if (!type) throw new FileRejectedError(`${file.name} 的格式不支持，请用 JPG、PNG、WebP、MP4 或常见音频格式。`);
   const limit = UPLOAD_SIZE_LIMIT[type];
   if (file.size > limit) {
-    throw new FileRejectedError(`${file.name} 超过 ${Math.floor(limit / 1024 / 1024)}MB 上限，请换一份小一些的。`);
+    throw new FileRejectedError(uploadSizeLimitMessage(file.name, limit));
   }
 
   const rejection = await checkFileBeforeUpload(file, type);

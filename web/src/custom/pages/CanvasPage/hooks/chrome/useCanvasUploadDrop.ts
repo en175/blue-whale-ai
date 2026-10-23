@@ -2,9 +2,9 @@ import type { Dispatch, RefObject, SetStateAction } from 'react';
 import type { Node } from '@xyflow/react';
 import { UPLOAD_SIZE_LIMIT } from '@/custom/api/assets';
 import type { SnapshotAsset } from '@/custom/api/projects';
-import { uploadAssetFile } from '@/custom/utils/upload';
+import { uploadAssetFile, uploadSizeLimitMessage } from '@/custom/utils/upload';
 import { compliancePatchFromMaterialStatus } from '@/custom/utils/video-reference-compliance';
-import { isFileRejected } from '@/custom/utils/fileSignature';
+import { FileRejectedError, isFileRejected } from '@/custom/utils/fileSignature';
 import type { MediaDims } from '../../components/MediaNode/mediaContentSize';
 import { copyImageToClipboard, readCanvasClipboard } from './clipboardPaste';
 import { hasCustomName } from '../../graph/canvasNodeUtils';
@@ -67,6 +67,11 @@ export function useCanvasUploadDrop(host: CanvasUploadDropHost): CanvasUploadDro
     showToast('error', isFileRejected(err) ? err.message : `「${file.name}」添加失败，请重试`);
   };
 
+  const rejectFile = (file: File, err: Error) => {
+    toastUploadFailure(file, err);
+    return Promise.reject(err);
+  };
+
   const placeFileOnCanvas = (
     file: File,
     opts?: { position?: { x: number; y: number }; replaceNodeId?: string },
@@ -75,11 +80,11 @@ export function useCanvasUploadDrop(host: CanvasUploadDropHost): CanvasUploadDro
     const isVideo = file.type.startsWith('video/');
     const isAudio = file.type.startsWith('audio/');
     if (!isImage && !isVideo && !isAudio) {
-      return Promise.reject(new Error('只支持图片、视频或音频'));
+      return rejectFile(file, new Error('只支持图片、视频或音频'));
     }
     const limit = UPLOAD_SIZE_LIMIT[isImage ? 'image' : isVideo ? 'video' : 'audio'];
     if (file.size > limit) {
-      return Promise.reject(new Error(`文件超过 ${Math.round(limit / 1024 / 1024)}MB 上限`));
+      return rejectFile(file, new FileRejectedError(uploadSizeLimitMessage(file.name, limit)));
     }
     const nodeId = opts?.replaceNodeId ?? newNodeId('media');
     const localSrc = URL.createObjectURL(file);

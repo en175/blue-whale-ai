@@ -1,6 +1,7 @@
 import { type AssetType } from '@/custom/enums';
 import { UPLOAD_SIZE_LIMIT, completeUpload, dedupUpload, fetchUploadPresign, putToPresignedUrl, type AssetRecord, type UploadCompleteData } from '@/custom/api/assets';
-import { computeFileMd5, probeMediaMeta } from '@/custom/utils/upload';
+import { computeFileMd5, probeMediaMeta, uploadSizeLimitMessage } from '@/custom/utils/upload';
+import { FileRejectedError } from '@/custom/utils/fileSignature';
 import { fetchRemoteMedia } from '../media/fetchRemoteMedia';
 import { isMaterialLibraryId } from '../media/mediaRefs';
 
@@ -67,7 +68,7 @@ export async function importLivenessLibraryAsset(
   const type: AssetType = mediaType;
   const limit = UPLOAD_SIZE_LIMIT[type];
   if (file.size > limit) {
-    throw new Error(`超过 ${Math.floor(limit / 1024 / 1024)}MB 上限`);
+    throw new FileRejectedError(uploadSizeLimitMessage(fileName, limit));
   }
 
   const mime = mimeOf(file.type, mediaType);
