@@ -26,6 +26,7 @@ export function createGenerationRuntime(host: GenerationRuntimeHost, deps: Gener
     cancel: actions.cancel,
     remove: actions.remove,
     noteRemovedOutput: ctx.noteRemovedOutput,
+    markLocallyRemoved: ctx.host.markLocallyRemoved,
     recover: recovery.recover,
     isRecoverySettled: recovery.isRecoverySettled,
     resumeFromHydration: recovery.resumeFromHydration,

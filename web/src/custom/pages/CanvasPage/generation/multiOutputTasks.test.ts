@@ -246,6 +246,16 @@ describe('多结果家族：成功判定与恢复规划', () => {
     if (plan.kind !== 'restore-target') return;
     expect(plan.node.data).toMatchObject({ genStatus: 'failed', errorText: '切分失败' });
   });
+
+  it('planRecovery：失败但目标恢复项已被删除（removed）→ 不补卡', () => {
+    const plan = sceneSplitTask.planRecovery!(record({
+      job: { job_id: 'sj1', type: 'video_scene_split', status: 'failed', progress: 0, output_asset_ids: [], stored_error: { code: 1, msg: '切分失败' }, created_at: '2026-10-01T00:00:00Z' },
+      items: [
+        { recovery_item_id: `gcr:${SUBMISSION}:$target`, output_key: '$target', node_id: 'ph-1', state: 'removed', revision: 8, node_binding_revision: 1, asset_id: null, slot_id: null },
+      ],
+    }), hostOf([]));
+    expect(plan).toEqual({ kind: 'none' });
+  });
 });
 
 describe('多结果家族：扇出落卡（既有排列规则）', () => {

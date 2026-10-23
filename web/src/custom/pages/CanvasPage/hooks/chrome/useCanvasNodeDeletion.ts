@@ -94,9 +94,12 @@ export function useCanvasNodeDeletion(host: CanvasNodeDeletionHost): CanvasNodeD
     const removedEdges = edgesRef.current.filter((e) => idSet.has(e.source) || idSet.has(e.target));
     const remainingEdges = releaseRemovedPromptSources(edgesRef.current, edgesRef.current.filter((e) => !idSet.has(e.source) && !idSet.has(e.target)));
     removedNodes.forEach((n) => {
-      const src = (n.data as Record<string, unknown> | undefined)?.src;
+      const data = n.data as Record<string, unknown> | undefined;
+      const src = data?.src;
       if (typeof src === 'string' && src.startsWith('blob:')) URL.revokeObjectURL(src);
-      generationRuntimeRef.current?.noteRemovedOutput(n.id, n.data as Record<string, unknown> | undefined);
+      const runtime = generationRuntimeRef.current;
+      runtime?.noteRemovedOutput(n.id, data);
+      if (runtime?.claims(n.id, data ?? {})) runtime.markLocallyRemoved(n.id);
     });
     const undoableNodes = removedNodes.filter((n) => {
       const src = (n.data as Record<string, unknown> | undefined)?.src;

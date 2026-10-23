@@ -23,6 +23,11 @@ export function isRecoveryTargetSettled(target: RuntimeNodeView, record: Generat
       || (target.data?.genStatus === 'failed' && String(target.data?.jobId) === record.job_id));
 }
 
+export function isRecoveryTargetRestorable(record: GenerationRecoveryRecord): boolean {
+  const targetItem = record.items.find((item) => item.output_key === '$target');
+  return targetItem == null || targetItem.state === 'pending' || targetItem.state === 'present';
+}
+
 export interface GenerationRecoveryMarker {
   protocolVersion: 1;
   submissionId: string;
@@ -214,6 +219,7 @@ export interface GenerationRuntime {
   cancel(nodeId: string): boolean;
   remove(nodeId: string): boolean;
   noteRemovedOutput(nodeId: string, nodeData: Record<string, unknown> | undefined): void;
+  markLocallyRemoved(nodeId: string): void;
   recover(projectId: string): Promise<void>;
   isRecoverySettled(): boolean;
   resumeFromHydration(

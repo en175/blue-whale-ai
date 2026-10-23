@@ -13,7 +13,7 @@ import { isAudioTrimNodeId } from '../tools/audio/audioTrim';
 import { isMediaExtractNodeId } from '../media/mediaExtract';
 import { buildFrameInterpolationInput, restoreFrameInterpolationRetryFps } from '../tools/video/frameInterpolation';
 import { buildVideoEnhanceInput, restoreVideoEnhanceResolution } from '../tools/video/videoEnhance';
-import { isRecoveryTargetSettled } from './types';
+import { isRecoveryTargetRestorable, isRecoveryTargetSettled } from './types';
 import type {
   GenerationRuntimeHost, GenerationTaskDefinition, RecoveryCardPlan, TaskSubmissionInput,
 } from './types';
@@ -189,6 +189,7 @@ export const videoToolsTask: GenerationTaskDefinition<VideoToolPayload> = {
     const target = host.findNode(record.target_node_id);
     if (status !== 'queued' && status !== 'processing' && status !== 'checking'
       && status !== 'succeeded' && status !== 'failed') return { kind: 'none' };
+    if (status !== 'succeeded' && !isRecoveryTargetRestorable(record)) return { kind: 'none' };
     if (status === 'succeeded' || status === 'failed') {
       const primary = record.items.find((item) => item.output_key !== TARGET_OUTPUT_KEY);
       if (status === 'succeeded' && (primary == null || primary.state !== 'pending')) return { kind: 'none' };

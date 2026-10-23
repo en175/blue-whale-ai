@@ -269,6 +269,29 @@ describe('视频处理家族：恢复落卡规划（受理回执丢失补卡 + �
     expect(typeof node.data.errorText).toBe('string');
   });
 
+  it('已失败且目标恢复项已被删除（removed）→ 不补卡', () => {
+    const host = hostOf();
+    const record = recordOf({
+      job: { job_id: 'j1', type: 'media_extract', status: 'failed', progress: 0, output_asset_ids: null, stored_error: { code: 1023, msg: '视频没有音轨' }, created_at: '2026-10-01T00:00:00Z' },
+      items: [
+        { recovery_item_id: 'gcr:sub-1:$target', output_key: '$target', node_id: 'media-extract-uuid1', state: 'removed', revision: 8, node_binding_revision: 1, asset_id: null, slot_id: null },
+      ],
+    });
+    expect(videoToolsTask.planRecovery!(record, host)).toEqual({ kind: 'none' });
+    expect(host.inserted).toHaveLength(0);
+  });
+
+  it('进行中但目标恢复项已被删除（removed）→ 不补卡', () => {
+    const host = hostOf();
+    const record = recordOf({
+      items: [
+        { recovery_item_id: 'gcr:sub-1:$target', output_key: '$target', node_id: 'media-extract-uuid1', state: 'removed', revision: 8, node_binding_revision: 1, asset_id: null, slot_id: null },
+      ],
+    });
+    expect(videoToolsTask.planRecovery!(record, host)).toEqual({ kind: 'none' });
+    expect(host.inserted).toHaveLength(0);
+  });
+
   it('已取消 → 不猜卡（无画布动作）', () => {
     const host = hostOf();
     const record = recordOf({

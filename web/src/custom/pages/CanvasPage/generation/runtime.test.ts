@@ -3,6 +3,7 @@ import { QueryClient } from '@tanstack/react-query';
 import { ApiError } from '@/shared/api/http';
 import { createGenerationRuntime, type GenerationRuntimeDeps } from './runtime';
 import { normalGenerationTask } from './normalGeneration';
+import { videoToolsTask } from './videoTools';
 import type { GenerationRuntimeHost, GenerationTaskDefinition, RuntimeNodeView } from './types';
 import { generationRecoveryKeys, generationRecoveryPageOptions, type GenerationRecoveryPage, type GenerationRecoveryRecord } from '@/custom/api/canvasRecovery';
 
@@ -574,6 +575,27 @@ describe('生成任务运行时：recover', () => {
     releaseFirst({ protocol_version: 1, canvas_version: 1, records: [], next_cursor: null });
     await Promise.all([first, second]);
     expect(secondSettled).toBe(true);
+  });
+
+  it('媒体工具失败卡已被删除（removed）：恢复扫描不补卡、不触发保存', async () => {
+    const { fake, runtime, page, status } = setup();
+    runtime.register(videoToolsTask);
+    fake.nodes.set('src1', { id: 'src1', type: 'mediaNode', position: { x: 0, y: 0 }, data: { assetId: '5' } });
+    page.mockImplementation(async () => ({
+      protocol_version: 1, canvas_version: 1, next_cursor: null,
+      records: [record({
+        task_type: 'media_extract',
+        target_node_id: 'media-extract-uuid1',
+        recovery_seed: { target: { role: 'result-placeholder', x: 5, y: 6, width: 320, height: 320, name: '源视频(audio).m4a' }, sources: [{ node_id: 'src1', x: 0, y: 0, width: 320, height: 320, name: '源视频' }] },
+        job: { job_id: '501', type: 'media_extract', status: 'failed', progress: 0, output_asset_ids: [], stored_error: { code: 1023, msg: '视频没有音轨' }, created_at: '2026-10-01T00:00:00Z' },
+        items: [{ recovery_item_id: 'gcr:sub-1:$target', output_key: '$target', node_id: 'media-extract-uuid1', state: 'removed', revision: 8, node_binding_revision: 1, asset_id: null, slot_id: null }],
+      })],
+    }) as never);
+    await runtime.recover('p1');
+    expect(fake.inserts).toHaveLength(0);
+    expect(fake.edges).toHaveLength(0);
+    expect(fake.saves).toHaveLength(0);
+    expect(status.calls).toHaveLength(0);
   });
 
   it('进行中但卡不在（受理回执丢失）：按恢复种子补卡一次，不重复建卡', async () => {
