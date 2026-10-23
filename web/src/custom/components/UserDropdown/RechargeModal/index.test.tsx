@@ -3,6 +3,7 @@ import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import RechargeModal from './index';
+import styles from './index.module.css';
 
 const rechargeApi = vi.hoisted(() => ({
   createRechargeOrder: vi.fn(),
@@ -15,6 +16,10 @@ const rechargeApi = vi.hoisted(() => ({
 const authApi = vi.hoisted(() => ({ fetchCredits: vi.fn() }));
 
 const setUsage = vi.hoisted(() => vi.fn());
+const authState = vi.hoisted(() => ({
+  credits: 500 as number | null,
+  user: { userId: 1 } as { userId: number } | null,
+}));
 
 const toastApi = vi.hoisted(() => ({ error: vi.fn(), success: vi.fn() }));
 
@@ -22,7 +27,8 @@ vi.mock('@/custom/api/recharge', () => rechargeApi);
 vi.mock('@/custom/api/auth', () => authApi);
 vi.mock('@/shared/stores/auth', () => {
   const store = Object.assign(
-    <T,>(selector: (state: { credits: number | null }) => T) => selector({ credits: 500 }),
+    <T,>(selector: (state: { credits: number | null; user: { userId: number } | null }) => T) =>
+      selector({ credits: authState.credits, user: authState.user }),
     { getState: () => ({ setUsage }) },
   );
   return { useAuthStore: store };
@@ -66,6 +72,8 @@ async function clickButton(text: string) {
 
 beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  authState.credits = 500;
+  authState.user = { userId: 1 };
   onClose = vi.fn();
   rechargeApi.fetchRechargeTierCatalog.mockResolvedValue({
     credits_per_yuan: 10,
@@ -134,13 +142,30 @@ describe('RechargeModal', () => {
     expect(document.body.querySelector('[role="dialog"]')).not.toBeNull();
     expect(document.body.querySelector('[data-semantic="mask"]')).not.toBeNull();
 
+    expect(document.body.textContent).toContain('积分超市 / 通用积分卡');
+    expect(document.body.textContent).toContain('通用积分卡');
+    expect(document.body.textContent).toContain('固定积分卡');
+    expect(document.body.querySelector('[role="tab"]')).toBeNull();
     expect(document.body.textContent).toContain('到账积分与有效期以各档位标注为准');
     expect(document.body.textContent).not.toContain('积分自到账起');
     expect(document.body.textContent).not.toContain('永久有效');
-    expect(document.body.textContent).not.toContain('1 元 =');
+    expect(document.body.querySelector('[aria-label="固定积分卡"]')?.textContent).not.toContain('1 元 =');
     expect(document.body.textContent).toContain('有效期 2 年');
     expect(document.body.textContent).toContain('100 积分');
     expect(document.body.textContent).toContain('¥10');
+    expect(document.body.textContent).not.toContain('登录后可购买全部上架商品');
+    expect(document.body.textContent).not.toContain('价格与积分以后台配置为准');
+  });
+
+  it('未登录才展示购买说明，已登录不展示右侧说明卡', async () => {
+    authState.user = null;
+    await renderRechargeModal();
+    await flush();
+
+    expect(document.body.textContent).toContain('登录后可购买全部上架商品');
+    expect(document.body.textContent).toContain(
+      '价格与积分以后台配置为准，下单时冻结快照；配置变更只影响新订单。',
+    );
   });
 
   it('★ 有效期按档位可配：配 6 个月的档位，卡片上出现的是 6 个月而不是 2 年', async () => {
@@ -166,7 +191,7 @@ describe('RechargeModal', () => {
     await flush();
 
     expect(document.body.textContent).toContain('有效期 6 个月');
-    expect(document.body.textContent).not.toContain('2 年');
+    expect(document.body.querySelector('[aria-label="固定积分卡"]')?.textContent).not.toContain('2 年');
     expect(document.body.textContent).not.toContain('积分自到账起');
   });
 
@@ -222,9 +247,7 @@ describe('RechargeModal', () => {
     await renderRechargeModal();
     await flush();
 
-    await clickButton('100 积分');
-    expect(document.body.textContent).toContain('500 积分');
-    await clickButton('确认支付 ¥10');
+    await clickButton('立即购买');
 
     expect(rechargeApi.createRechargeOrder).toHaveBeenCalledWith(TIER_ID);
     expect(document.body.textContent).toContain('等待支付结果...');
@@ -241,10 +264,8 @@ describe('RechargeModal', () => {
 
     await renderRechargeModal();
     await flush();
-    await clickButton('100 积分');
-
     vi.useFakeTimers();
-    await clickButton('确认支付 ¥10');
+    await clickButton('立即购买');
     await flush();
     expect(document.body.textContent).toContain('等待支付结果...');
 
@@ -269,8 +290,7 @@ describe('RechargeModal', () => {
 
     await renderRechargeModal();
     await flush();
-    await clickButton('100 积分');
-    await clickButton('确认支付 ¥10');
+    await clickButton('立即购买');
     await flush();
 
     expect(document.body.textContent).toContain('已收到付款，积分发放中…');
@@ -289,8 +309,7 @@ describe('RechargeModal', () => {
 
     await renderRechargeModal();
     await flush();
-    await clickButton('100 积分');
-    await clickButton('确认支付 ¥10');
+    await clickButton('立即购买');
     await flush();
 
     expect(document.body.textContent).toContain('积分发放异常，请联系客服');
@@ -311,9 +330,8 @@ describe('RechargeModal', () => {
 
     await renderRechargeModal();
     await flush();
-    await clickButton('100 积分');
     vi.useFakeTimers();
-    await clickButton('确认支付 ¥10');
+    await clickButton('立即购买');
     await flush();
     expect(document.body.textContent).toContain('积分发放异常，请联系客服');
 
@@ -337,8 +355,7 @@ describe('RechargeModal', () => {
 
     await renderRechargeModal();
     await flush();
-    await clickButton('100 积分');
-    await clickButton('确认支付 ¥10');
+    await clickButton('立即购买');
     await flush();
 
     expect(document.body.textContent).toContain('价格已更新为 ¥12，请确认后再支付');
@@ -348,8 +365,7 @@ describe('RechargeModal', () => {
   it('B-1：价没变就不提示（正常的下单不该多出一句吓人的话）', async () => {
     await renderRechargeModal();
     await flush();
-    await clickButton('100 积分');
-    await clickButton('确认支付 ¥10');
+    await clickButton('立即购买');
     await flush();
 
     expect(document.body.textContent).not.toContain('价格已更新');
@@ -364,8 +380,7 @@ describe('RechargeModal', () => {
 
     await renderRechargeModal();
     await flush();
-    await clickButton('100 积分');
-    await clickButton('确认支付 ¥10');
+    await clickButton('立即购买');
     await flush();
 
     expect(document.body.textContent).toContain('二维码已过期');
@@ -377,8 +392,7 @@ describe('RechargeModal', () => {
     rechargeApi.createRechargeOrder.mockRejectedValue(new Error('该档位已下架'));
     await renderRechargeModal();
     await flush();
-    await clickButton('100 积分');
-    await clickButton('确认支付 ¥10');
+    await clickButton('立即购买');
     await flush();
 
     expect(document.body.textContent).toContain('该档位已下架');
@@ -389,16 +403,16 @@ describe('RechargeModal', () => {
   it('等待支付时关闭弹窗会补拉一次余额', async () => {
     await renderRechargeModal();
     await flush();
-    await clickButton('100 积分');
-    await clickButton('确认支付 ¥10');
+    await clickButton('立即购买');
     await flush();
 
     await act(async () => {
-      document.body.querySelector<HTMLButtonElement>('button[aria-label="关闭"]')?.click();
+      const closeButtons = [...document.body.querySelectorAll<HTMLButtonElement>('button[aria-label="关闭"]')];
+      closeButtons[closeButtons.length - 1]?.click();
       await Promise.resolve();
     });
 
-    expect(onClose).toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
     expect(authApi.fetchCredits).toHaveBeenCalledWith({ fresh: true });
   });
 
@@ -444,14 +458,14 @@ describe('RechargeModal — 档位购买权限', () => {
     await renderRechargeModal();
     await flush();
 
-    const card = [...document.body.querySelectorAll<HTMLButtonElement>('button')].find(
-      (button) => button.textContent?.includes('100 积分'),
-    );
-    expect(card?.disabled).toBe(true);
     expect(document.body.textContent).toContain('该档位仅限内测用户');
+    expect(
+      [...document.body.querySelectorAll<HTMLButtonElement>('button')].some(
+        (button) => button.textContent === '立即购买',
+      ),
+    ).toBe(false);
 
-    await clickButton('100 积分');
-    expect(document.body.textContent).not.toContain('确认支付 ¥10');
+    await clickButton('立即购买');
     expect(rechargeApi.createRechargeOrder).not.toHaveBeenCalled();
   });
 
@@ -485,38 +499,29 @@ describe('RechargeModal — 档位购买权限', () => {
     await renderRechargeModal();
     await flush();
 
-    await clickButton('100 积分');
-    await clickButton('确认支付 ¥10');
+    await clickButton('立即购买');
 
     expect(rechargeApi.createRechargeOrder).toHaveBeenCalledWith(TIER_ID);
   });
 });
 
 describe('RechargeModal — 自定义充值', () => {
-  async function switchToCustom() {
-    await clickButton('自定义充值');
-    await flush();
-  }
-
-  it('★ 两种方式并列：默认仍是固定积分卡，切过去才换成自定义面板', async () => {
+  it('固定积分卡和自定义充值同屏展示，没有页签', async () => {
     await renderRechargeModal();
     await flush();
 
     expect(document.body.textContent).toContain('100 积分');
-    expect(document.body.textContent).not.toContain('600 积分');
-
-    await switchToCustom();
-
     expect(document.body.textContent).toContain('600 积分');
     expect(document.body.textContent).toContain('¥40');
-    expect(document.body.textContent).not.toContain('100 积分');
+    expect(document.body.textContent).toContain('立即购买');
     expect(document.body.textContent).not.toContain('确认支付');
+    expect(document.body.textContent).toContain('自定义充值');
+    expect(document.body.querySelector('[role="tab"]')).toBeNull();
   });
 
   it('★ 下单只传积分数，成功后复用同一个二维码面板与轮询', async () => {
     await renderRechargeModal();
     await flush();
-    await switchToCustom();
 
     await clickButton('¥40 购买');
     await flush();
@@ -533,7 +538,6 @@ describe('RechargeModal — 自定义充值', () => {
     );
     await renderRechargeModal();
     await flush();
-    await switchToCustom();
 
     await clickButton('¥40 购买');
     await flush();
@@ -542,16 +546,23 @@ describe('RechargeModal — 自定义充值', () => {
     expect(document.body.textContent).not.toContain('等待支付结果...');
   });
 
-  it('★ 支付进行中锁住页签：不允许同时开出两张待付订单', async () => {
+  it('★ 支付进行中锁住另一条购买路径：不允许同时开出两张待付订单', async () => {
     await renderRechargeModal();
     await flush();
-    await switchToCustom();
     await clickButton('¥40 购买');
     await flush();
 
-    const tabs = [...document.body.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
-    expect(tabs).toHaveLength(2);
-    expect(tabs.every((tab) => tab.disabled)).toBe(true);
+    const tierCard = [...document.body.querySelectorAll<HTMLButtonElement>('button')].find(
+      (button) => button.textContent === '立即购买',
+    );
+    const customBuy = [...document.body.querySelectorAll<HTMLButtonElement>('button')].find(
+      (button) => button.textContent?.includes('¥40 购买'),
+    );
+    const slider = document.body.querySelector<HTMLInputElement>('input[type="range"]');
+    expect(tierCard?.disabled).toBe(true);
+    expect(customBuy?.disabled).toBe(true);
+    expect(slider?.disabled).toBe(true);
+    expect(document.body.querySelector('[role="tab"]')).toBeNull();
   });
 
   it('★ 后台关掉自定义充值：入口与面板都不出现（点开是空白的页签比没有更糟）', async () => {
@@ -572,5 +583,61 @@ describe('RechargeModal — 自定义充值', () => {
     expect(document.body.querySelector('[role="tab"]')).toBeNull();
     expect(document.body.textContent).not.toContain('自定义充值');
     expect(document.body.textContent).toContain('100 积分');
+    expect(document.body.textContent).toContain('固定积分卡');
+  });
+
+  it('卡片不展示档位名称、原价和折扣，推荐与选中各自可辨', async () => {
+    rechargeApi.fetchRechargeTierCatalog.mockResolvedValue({
+      credits_per_yuan: 10,
+      tiers: [
+        {
+          id: 'plain',
+          name: '入门档',
+          amount: 100,
+          price: 10,
+          original_price: 12,
+          discount: 0.8,
+          is_recommended: false,
+          sort_order: 1,
+          can_purchase: true,
+          denied_hint: '不可购买',
+          credits_valid_months: 24,
+        },
+        {
+          id: 'hot',
+          name: '进阶档',
+          amount: 200,
+          price: 20,
+          original_price: 30,
+          discount: 0.8,
+          is_recommended: true,
+          sort_order: 2,
+          can_purchase: true,
+          denied_hint: '不可购买',
+          credits_valid_months: 24,
+        },
+      ],
+    });
+    await renderRechargeModal();
+    await flush();
+
+    expect(document.body.textContent).not.toContain('入门档');
+    expect(document.body.textContent).not.toContain('进阶档');
+    expect(document.body.textContent).not.toContain('原价');
+    expect(document.body.textContent).not.toContain('现价');
+
+    const recommended = [...document.body.querySelectorAll('article')].find((card) =>
+      card.textContent?.includes('200'),
+    );
+    expect(recommended?.textContent).toContain('推荐');
+    expect(recommended?.classList.contains(styles.planRecommended)).toBe(true);
+    expect(recommended?.textContent).toContain('立即购买');
+
+    const plain = [...document.body.querySelectorAll('article')].find((card) =>
+      card.textContent?.includes('100'),
+    );
+    expect(plain?.textContent).not.toContain('推荐');
+    expect(plain?.classList.contains(styles.planRecommended)).toBe(false);
+    expect(plain?.textContent).toContain('立即购买');
   });
 });

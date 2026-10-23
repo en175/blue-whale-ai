@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Zap } from 'lucide-react';
 import DragSlider from '@/custom/components/DragSlider';
 import { fetchRechargeCustomConfig, type RechargeCustomConfig } from '@/custom/api/recharge';
 import {
@@ -14,6 +15,7 @@ export interface CustomRechargeProps {
   onConfirm: (credits: number) => void;
   onRequireLogin?: () => void;
   submitting?: boolean;
+  locked?: boolean;
   error?: string;
   config?: RechargeCustomConfig;
 }
@@ -22,6 +24,7 @@ export default function CustomRecharge({
   onConfirm,
   onRequireLogin,
   submitting = false,
+  locked = false,
   error = '',
   config: injected,
 }: CustomRechargeProps) {
@@ -62,7 +65,7 @@ export default function CustomRecharge({
   const tourist = config.can_purchase === null;
   const denied = config.can_purchase === false;
   const paying = submitting;
-  const locked = paying || denied;
+  const interactionLocked = locked || paying || denied;
 
   const preview = draft === null ? credits : snapCredits(Number(draft), config);
   const previewFen = customPriceFen(preview, config.credits_per_yuan);
@@ -87,7 +90,7 @@ export default function CustomRecharge({
       onRequireLogin?.();
       return;
     }
-    if (denied || paying) return;
+    if (denied || paying || locked) return;
     if (validateCredits(final, config) !== null) return;
     onConfirm(final);
   };
@@ -100,71 +103,94 @@ export default function CustomRecharge({
       : paying
         ? '下单中…'
         : `¥${formatPriceYuan(previewFen)} 购买`;
+  const minFen = customPriceFen(config.min_credits, config.credits_per_yuan);
+  const validity =
+    config.credits_valid_months > 0 && config.credits_valid_months % 12 === 0
+      ? `${config.credits_valid_months / 12} 年长期有效`
+      : config.credits_valid_months > 0
+        ? `${config.credits_valid_months} 个月长期有效`
+        : '';
 
   return (
     <section className={styles.section} aria-label="自定义充值">
-      <div className={styles.header}>
-        <h3 className={styles.title}>自定义充值</h3>
-        {}
-        <span className={styles.rangeHint}>
-          {formatCredits(config.min_credits)} – {formatCredits(config.max_credits)} 积分
-        </span>
+      <div className={styles.sectionHead}>
+        <h3 className={styles.sectionTitle}>自定义充值</h3>
+        <p className={styles.sectionDesc}>
+          {formatCredits(config.min_credits)} 积分（¥{formatPriceYuan(minFen)}）起 · 按当前配置 1 元 ={' '}
+          {config.credits_per_yuan} 积分实时算价
+        </p>
       </div>
-
-      <div className={styles.controlRow}>
-        {}
-        <DragSlider
-          className={styles.slider}
-          min={config.min_credits}
-          max={config.max_credits}
-          step={config.step_credits}
-          value={credits}
-          disabled={locked}
-          ariaLabel="积分数量"
-          onChange={(next) => {
-            setCorrection('');
-            setDraft(null);
-            setCredits(next);
-          }}
-        />
-        <div className={`${styles.inputWrap} ${invalid ? styles.inputWrapInvalid : ''}`}>
-          <input
-            className={styles.input}
-            type="text"
-            inputMode="numeric"
-            aria-label="手动输入积分数量"
-            disabled={locked}
-            value={draft ?? String(credits)}
-            onChange={(e) => {
-              setCorrection('');
-              setDraft(e.target.value);
-            }}
-            onBlur={commitDraft}
-          />
-          <span className={styles.inputSuffix}>积分</span>
+      <article className={styles.card}>
+        <div className={styles.summary}>
+          <h4 className={styles.title}>自定义充值</h4>
+          <div className={styles.pointsLine}>
+            <Zap size={22} strokeWidth={2.4} className={styles.bolt} />
+            <strong className={styles.pointsValue}>{formatCredits(preview)}</strong>
+          </div>
         </div>
-      </div>
 
-      {correction && <span className={styles.correction}>{correction}</span>}
-      {denied && <span className={styles.denied}>{config.denied_hint}</span>}
-      {error && <span className={styles.error}>{error}</span>}
+        <div className={styles.controls}>
+          <div className={styles.controlRow}>
+            <DragSlider
+              className={styles.slider}
+              min={config.min_credits}
+              max={config.max_credits}
+              step={config.step_credits}
+              value={credits}
+              disabled={interactionLocked}
+              ariaLabel="积分数量"
+              onChange={(next) => {
+                setCorrection('');
+                setDraft(null);
+                setCredits(next);
+              }}
+            />
+            <div className={`${styles.inputWrap} ${invalid ? styles.inputWrapInvalid : ''}`}>
+              <input
+                className={styles.input}
+                type="text"
+                inputMode="numeric"
+                aria-label="手动输入积分数量"
+                disabled={interactionLocked}
+                value={draft ?? String(credits)}
+                onChange={(e) => {
+                  setCorrection('');
+                  setDraft(e.target.value);
+                }}
+                onBlur={commitDraft}
+              />
+            </div>
+          </div>
+          <div className={styles.rangeLabels}>
+            <span>{formatCredits(config.min_credits)} 积分</span>
+            <span>
+              {formatCredits(config.max_credits)} 积分 · 步长 {formatCredits(config.step_credits)}
+            </span>
+          </div>
+          {correction && <span className={styles.correction}>{correction}</span>}
+          {denied && <span className={styles.denied}>{config.denied_hint}</span>}
+          {error && <span className={styles.error}>{error}</span>}
+        </div>
 
-      <div className={styles.footer}>
-        {}
-        <span className={styles.price} aria-label="应付金额">
-          ¥{formatPriceYuan(previewFen)}
-          <span className={styles.priceUnit}>{formatCredits(preview)} 积分</span>
-        </span>
-        {}
-        <button
-          className={styles.buyBtn}
-          type="button"
-          onClick={handleBuy}
-          disabled={paying || denied}
-        >
-          {buyLabel}
-        </button>
-      </div>
+        <div className={styles.side}>
+          {tourist && (
+            <span className={styles.livePrice} aria-label="应付金额">
+              ¥{formatPriceYuan(previewFen)}
+            </span>
+          )}
+          <button
+            className={styles.buyBtn}
+            type="button"
+            onClick={handleBuy}
+            disabled={interactionLocked}
+          >
+            {buyLabel}
+          </button>
+          <span className={styles.hint}>
+            全模型可用{validity ? ` · ${validity}` : ''}
+          </span>
+        </div>
+      </article>
     </section>
   );
 }

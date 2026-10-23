@@ -33,58 +33,107 @@
   color: #fff;
 }
 
-.subtitle {
+.hero {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-xl);
+  margin-top: var(--spacing-xl);
+  padding: 40px 42px;
+  border: 1px solid #1e314b;
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 70% 25%, rgba(62, 142, 252, 0.28), transparent 28%),
+    linear-gradient(135deg, rgba(62, 142, 252, 0.2), transparent 44%),
+    #101010;
+}
+
+.heroMain {
+  min-width: 0;
+}
+
+.heroTitle {
   margin: 0;
-  font-size: var(--font-size-md);
-  color: #ccc;
+  font-size: var(--font-size-3xl);
+  font-weight: 700;
+  color: var(--color-text-primary);
 }
 
-.modeTabs {
+.heroDesc {
+  margin: 14px 0 0;
+  color: #d6d6d6;
+  font-size: 15px;
+}
+
+.heroBullets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-sm);
+  margin-top: var(--spacing-lg);
+}
+
+.heroBullets span {
   display: inline-flex;
-  align-self: flex-start;
-  gap: 4px;
-  margin: 16px 0 0;
-  padding: 4px;
-  background-color: #1c1c1c;
-  border: 1px solid #2a2a2a;
-  border-radius: 10px;
+  align-items: center;
+  height: 30px;
+  padding: 0 var(--spacing-md);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-full);
+  background-color: rgba(255, 255, 255, 0.08);
+  color: #e8e8e8;
+  font-size: var(--font-size-sm);
 }
 
-.modeTab {
-  padding: 8px 18px;
-  background: transparent;
-  border: none;
-  border-radius: 7px;
+.heroSide {
+  flex: none;
+  width: 280px;
+  padding: var(--spacing-lg);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 16px;
+  background-color: rgba(0, 0, 0, 0.26);
+}
+
+.heroSide strong {
+  display: block;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-lg);
+}
+
+.heroSide span {
+  display: block;
+  margin-top: 8px;
   color: #aaa;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.tierSection {
+  margin-top: 34px;
+}
+
+.sectionHead {
+  margin-bottom: var(--spacing-lg);
+  text-align: center;
+}
+
+.sectionTitle {
+  margin: 0;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-2xl);
+  font-weight: 700;
+}
+
+.sectionDesc {
+  margin: var(--spacing-sm) 0 0;
+  color: var(--color-text-secondary);
   font-size: var(--font-size-md);
-  font-weight: 600;
-  cursor: pointer;
-  transition: background-color var(--transition-fast), color var(--transition-fast);
-}
-
-.modeTab:hover:not(:disabled) {
-  color: #fff;
-}
-
-.modeTab:disabled {
-  cursor: not-allowed;
-  opacity: 0.6;
-}
-
-.modeTabActive {
-  background-color: #1e2a4a;
-  color: #fff;
-  box-shadow: 0 0 0 1px #3e63c4 inset;
 }
 
 .planRow {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  gap: 20px;
-}
-
-.planRowPaying {
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--spacing-lg);
 }
 
 .planCard {
@@ -92,107 +141,62 @@
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 12px;
-  padding: 24px 20px 22px;
-  background-color: #1c1c1c;
+  gap: 10px;
+  min-height: 232px;
+  padding: 20px;
+  background: linear-gradient(145deg, rgba(62, 142, 252, 0.14), transparent 42%), #161616;
   border: 1px solid #2a2a2a;
-  border-radius: 12px;
-  cursor: pointer;
+  border-radius: 16px;
   text-align: left;
-  transition: border-color var(--transition-fast);
   overflow: hidden;
 }
 
-.planCard:hover {
-  border-color: #3a3a3a;
+.planRecommended {
+  border-color: #32c8ff;
+  background: linear-gradient(145deg, rgba(50, 200, 255, 0.22), transparent 48%), #142025;
 }
 
-.planRecommended::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 2px;
-  background-color: #3e63c4;
-}
-
-.planSelected {
-  border-color: #3e63c4;
-  background-color: #1e2a4a;
-  box-shadow: 0 0 0 1px #3e63c4 inset;
-}
-
-.planSelected:hover {
-  border-color: #3e63c4;
-  background-color: #1e2a4a;
-}
-
-.planTitle {
-  font-size: 24px;
-  font-weight: 700;
+.planPoints {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
   color: #fff;
-  line-height: 1.2;
+}
+
+.planPoints strong {
+  font-size: 29px;
+  line-height: 1;
+}
+
+.planBolt {
+  color: #8fd9ff;
+  flex-shrink: 0;
 }
 
 .recBadge {
   position: absolute;
   top: 8px;
   right: 10px;
-  background-color: #3e63c4;
-  color: #fff;
-  font-size: 11px;
-  padding: 2px 10px;
-  border-radius: 6px;
-}
-
-.selectedBadge {
-  position: absolute;
-  right: 10px;
-  bottom: 8px;
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  background-color: #3e63c4;
-  color: #fff;
-  font-size: 11px;
+  background-color: rgba(62, 142, 252, 0.14);
+  border: 1px solid rgba(62, 142, 252, 0.52);
+  color: #8fd9ff;
+  font-size: 12px;
+  font-weight: 800;
   padding: 2px 8px;
   border-radius: 6px;
 }
 
-.unitHint {
-  font-size: var(--font-size-sm);
-  color: #888;
-  margin: 8px 0 32px;
-}
-
-.planPriceRow {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-}
-
 .planPrice {
-  font-size: 28px;
+  margin-top: auto;
+  font-size: 22px;
   font-weight: 700;
-  color: #3e8efc;
+  color: #fff;
   line-height: 1.2;
 }
 
-.discountTag {
-  font-size: 12px;
-  font-weight: 600;
-  color: #3e8efc;
-}
-
-.planOriginal {
-  font-size: var(--font-size-sm);
-  color: #777;
-  text-decoration: line-through;
-}
-
 .planValidity {
-  font-size: var(--font-size-sm);
+  font-size: 13px;
   color: #9aa7bd;
 }
 
@@ -214,6 +218,29 @@
   flex-shrink: 0;
 }
 
+.planBuy {
+  height: 38px;
+  width: 100%;
+  margin-top: 14px;
+  border-radius: 9px;
+  border: 1px solid #4fc3ff;
+  color: #79d7ff;
+  background: transparent;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.planBuy:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.planBuyPrimary {
+  border: none;
+  background: linear-gradient(180deg, #66cfff, #3e8efc);
+  color: #061321;
+}
+
 .planDisabled {
   cursor: not-allowed;
   opacity: 0.45;
@@ -229,19 +256,6 @@
   line-height: 1.5;
 }
 
-.bottomBar {
-  margin-top: 36px;
-  padding: 20px 24px;
-  background-color: #1e1e1e;
-  border: 1px solid #2a2a2a;
-  border-radius: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 24px;
-  min-height: 52px;
-}
-
 .emptyHint {
   flex: 1;
   display: flex;
@@ -252,95 +266,27 @@
   font-size: var(--font-size-md);
 }
 
-.emptyIcon {
-  color: #3e8efc;
-}
-
-.emptyHintText {
-  color: #999;
-  font-size: var(--font-size-sm);
-}
-
-.barLeft {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-}
-
-.balance {
-  font-size: var(--font-size-md);
-  color: #888;
-}
-
-.selectedInfo {
-  font-size: var(--font-size-lg);
-  font-weight: 700;
-  color: #fff;
-}
-
-.barOriginal {
-  font-size: var(--font-size-sm);
-  color: #777;
-  text-decoration: line-through;
-}
-
-.barDiscount {
-  font-size: var(--font-size-sm);
-  font-weight: 600;
-  color: #3e8efc;
-}
-
 .barError {
+  margin-top: 12px;
   font-size: var(--font-size-sm);
   color: #e5636c;
 }
 
-.barRight {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.confirmBtn {
-  height: 44px;
-  padding: 0 28px;
-  border-radius: 10px;
-  border: none;
-  background-color: #3e63c4;
-  color: #fff;
-  font-size: var(--font-size-md);
-  font-weight: 600;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: background-color var(--transition-fast);
-}
-
-.confirmBtn:hover {
-  background-color: #4a70d8;
-}
-
-.confirmBtnDisabled {
-  background-color: #2a2a2a;
-  color: #777;
-  cursor: not-allowed;
-}
-
-.confirmBtnDisabled:hover {
-  background-color: #2a2a2a;
-}
-
-.qrPanel {
-  width: 420px;
-  flex-shrink: 0;
+.payDialog {
+  background-color: #161616;
   border: 1px solid #2a2a2a;
-  border-radius: 12px;
-  padding: 36px 28px;
+  border-radius: 16px;
+  padding: 24px;
+}
+
+.payDialogBody {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 14px;
-  box-sizing: border-box;
+  min-height: 280px;
+  text-align: center;
 }
 
 .qrBox {
@@ -393,7 +339,7 @@
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background-color: #3e63c4;
+  background-color: #3e8efc;
   animation: dotBlink 1.2s infinite ease-in-out;
 }
 
@@ -461,7 +407,7 @@
 }
 
 .agreementLink {
-  color: #3e8efc;
+  color: #9bdfff;
   text-decoration: none;
 }
 
