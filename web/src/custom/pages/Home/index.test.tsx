@@ -56,16 +56,12 @@ afterEach(async () => {
 });
 
 describe('Home 顶栏', () => {
-  it('登录态下三件套顺序为 积分超市 → 积分余额 → 头像', async () => {
+  it('登录态下积分超市与积分余额已隐藏，顶栏只剩头像', async () => {
     await renderHome();
 
     const topBar = mountNode.firstElementChild?.firstElementChild;
-    expect(topBar?.children).toHaveLength(3);
-
-    const [shop, badge, avatar] = Array.from(topBar?.children ?? []);
-    expect(shop.textContent).toBe('积分超市');
-    expect(badge.textContent).toBe('100');
-    expect(avatar.getAttribute('data-testid')).toBe('user-dropdown');
+    expect(topBar?.textContent).toBe('');
+    expect(topBar?.querySelector('[data-testid="user-dropdown"]')).not.toBeNull();
   });
 
   it('未登录时顶栏只剩用户入口占位', async () => {
