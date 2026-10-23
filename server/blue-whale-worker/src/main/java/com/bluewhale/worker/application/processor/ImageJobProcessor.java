@@ -300,7 +300,8 @@ public class ImageJobProcessor implements JobProcessor {
                     finalSize, finalQuality,
                     input.get("web_search") instanceof Boolean b && b,
                     input.get("sequential_image_generation") instanceof Boolean b && b,
-                    sourceImageUrls
+                    sourceImageUrls,
+                    channel == ImageChannel.SEEDREAM_IMAGE
             );
             allImages.addAll(batch);
             if (batch.isEmpty()) break;

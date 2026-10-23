@@ -291,6 +291,74 @@ describe("SystemSettingsService — 上游凭证（new-api 项目统一 key）",
   });
 });
 
+describe("SystemSettingsService — 生成水印（全项目唯一开关）", () => {
+  it("缺行 → 默认关闭", async () => {
+    const { service } = serviceWith();
+    await expect(service.read()).resolves.toMatchObject({
+      watermark: { enabled: false },
+    });
+  });
+
+  it("★ 打开后明文入库，读点立即看到 true", async () => {
+    const { service, rows } = serviceWith();
+    await service.update({ watermark: { enabled: true } });
+
+    expect(rows.get("watermark")?.is_secret).toBe(false);
+    expect(JSON.parse(String(rows.get("watermark")?.setting_value))).toEqual({ enabled: true });
+    await expect(service.read()).resolves.toMatchObject({
+      watermark: { enabled: true },
+    });
+  });
+
+  it("★ 再次关闭 → 回读 false；不传字段时保持当前值", async () => {
+    const { service } = serviceWith();
+    await service.update({ watermark: { enabled: true } });
+    await service.update({ watermark: {} });
+    await expect(service.read()).resolves.toMatchObject({
+      watermark: { enabled: true },
+    });
+
+    await service.update({ watermark: { enabled: false } });
+    await expect(service.read()).resolves.toMatchObject({
+      watermark: { enabled: false },
+    });
+  });
+
+  it("改水印不影响其他模块", async () => {
+    const { service } = serviceWith();
+    await service.update({ policy: { refund_text: "7 天内可退", invoice_text: "联系客服开票" } });
+    await service.update({ watermark: { enabled: true } });
+
+    const view = await service.read();
+    expect(view.policy).toEqual({ refund_text: "7 天内可退", invoice_text: "联系客服开票" });
+    expect(view.watermark.enabled).toBe(true);
+  });
+
+  it("坏 JSON → 抛配置错误，不静默当成关闭", async () => {
+    const { service, rows } = serviceWith();
+    rows.set("watermark", {
+      setting_key: "watermark",
+      setting_value: "{not-json",
+      is_secret: false,
+    });
+
+    await expect(service.read()).rejects.toThrow(SystemSettingsConfigError);
+  });
+
+  it("enabled 不是布尔值 → 按关闭读（上游只接受 true 才加）", async () => {
+    const { service, rows } = serviceWith();
+    rows.set("watermark", {
+      setting_key: "watermark",
+      setting_value: JSON.stringify({ enabled: "true" }),
+      is_secret: false,
+    });
+
+    await expect(service.read()).resolves.toMatchObject({
+      watermark: { enabled: false },
+    });
+  });
+});
+
 describe("maskSecret", () => {
   it("留尾 4 位；空值保持空串；短值全星", () => {
     expect(maskSecret("")).toBe("");

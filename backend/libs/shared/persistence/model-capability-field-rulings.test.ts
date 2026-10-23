@@ -25,7 +25,7 @@ const RULINGS: Record<string, Ruling> = {
       "backend/libs/shared/generation/prompt-plan-snapshot.test.ts",
   },
   watermark: {
-    consumer: "当前无读取点（仅 handle-list-models 透出消费端 + 后台表单位）",
+    consumer: "当前无读取点（仅 handle-list-models 透出消费端；后台表单位已删，水印行为改读 system_settings.watermark）",
     fallback: "false",
     configWinsTest: null,
     inert: "目录透出键：仓库内无任何消费方，不驱动行为，故无「配置赢」可言",

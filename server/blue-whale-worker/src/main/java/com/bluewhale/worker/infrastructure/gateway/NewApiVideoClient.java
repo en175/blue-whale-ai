@@ -2,6 +2,7 @@ package com.bluewhale.worker.infrastructure.gateway;
 import com.bluewhale.common.http.NewApiHttpSupport;
 
 import com.bluewhale.worker.infrastructure.config.NewApiUpstreamConfig.UpstreamBaseUrl;
+import com.bluewhale.worker.infrastructure.config.GenerationWatermarkConfig.GenerationWatermarkPolicy;
 import com.bluewhale.worker.domain.contract.VideoSampleContract;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.VideoProviderError;
@@ -44,9 +45,15 @@ public class NewApiVideoClient {
     private final OkHttpClient submitClient;
     private final OkHttpClient pollClient;
     private final String baseUrl;
+    private final GenerationWatermarkPolicy watermarkPolicy;
 
     public NewApiVideoClient(UpstreamBaseUrl baseUrl) {
+        this(baseUrl, GenerationWatermarkPolicy.disabled());
+    }
+
+    public NewApiVideoClient(UpstreamBaseUrl baseUrl, GenerationWatermarkPolicy watermarkPolicy) {
         this.baseUrl = baseUrl.normalized();
+        this.watermarkPolicy = watermarkPolicy;
         this.submitClient = NewApiHttpSupport.buildClient(10_000, SUBMIT_TIMEOUT_MS, SUBMIT_TIMEOUT_MS);
         this.pollClient = NewApiHttpSupport.buildClient(10_000, POLL_TIMEOUT_MS, POLL_TIMEOUT_MS);
     }
@@ -93,6 +100,7 @@ public class NewApiVideoClient {
         if (effectiveRatio != null) metadata.put("ratio", effectiveRatio);
         if (omniTaskType != null) metadata.put("omni_reference_task_type", omniTaskType);
         if (input.generateAudio() != null) metadata.put("generate_audio", input.generateAudio());
+        if (watermarkPolicy.enabled()) metadata.put("watermark", true);
         metadata.set("content", content);
 
         ObjectNode body = JSON.createObjectNode();
@@ -165,6 +173,7 @@ public class NewApiVideoClient {
 
         ObjectNode body = JSON.createObjectNode();
         body.put("resolution", VideoSampleContract.VIDEO_FINAL_RESOLUTION);
+        if (watermarkPolicy.enabled()) body.put("watermark", true);
 
         String bodyJson;
         try {

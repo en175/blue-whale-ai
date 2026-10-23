@@ -170,7 +170,7 @@ class ImageJobProcessorErrorMappingTest {
         when(capabilityMapper.findByModelId("gpt-image-1")).thenReturn(cap);
         when(upstreamCredential.requireKey()).thenReturn("token");
         when(imageClient.generate(anyString(), any(ImageProtocol.class), anyString(),
-                anyString(), anyInt(), any(), any(), anyBoolean(), anyBoolean(), anyList()))
+                anyString(), anyInt(), any(), any(), anyBoolean(), anyBoolean(), anyList(), anyBoolean()))
                 .thenReturn(List.of());
 
         processor.handle("100");
@@ -190,7 +190,7 @@ class ImageJobProcessorErrorMappingTest {
         when(capabilityMapper.findByModelId("gpt-image-1")).thenReturn(cap);
         when(upstreamCredential.requireKey()).thenReturn("token");
         when(imageClient.generate(anyString(), any(ImageProtocol.class), anyString(),
-                anyString(), anyInt(), any(), any(), anyBoolean(), anyBoolean(), anyList()))
+                anyString(), anyInt(), any(), any(), anyBoolean(), anyBoolean(), anyList(), anyBoolean()))
                 .thenReturn(List.of(new GeneratedImage(
                         null, "abc".getBytes(java.nio.charset.StandardCharsets.UTF_8),
                         "image/png", 1, 1, "req-1")));
@@ -223,7 +223,7 @@ class ImageJobProcessorErrorMappingTest {
         when(capabilityMapper.findByModelId("gpt-image-1")).thenReturn(cap);
         when(upstreamCredential.requireKey()).thenReturn("token");
         when(imageClient.generate(anyString(), any(ImageProtocol.class), anyString(),
-                anyString(), anyInt(), any(), any(), anyBoolean(), anyBoolean(), anyList()))
+                anyString(), anyInt(), any(), any(), anyBoolean(), anyBoolean(), anyList(), anyBoolean()))
                 .thenThrow(new ImageProviderError(
                         GenerationError.ERROR_PROVIDER_FAILED, "network error"));
         when(stateMachine.requeueImageJobForRetry(eq("100"), any(LocalDateTime.class)))
@@ -255,7 +255,7 @@ class ImageJobProcessorErrorMappingTest {
         when(capabilityMapper.findByModelId("gpt-image-1")).thenReturn(cap);
         when(upstreamCredential.requireKey()).thenReturn("token");
         when(imageClient.generate(anyString(), any(ImageProtocol.class), anyString(),
-                anyString(), anyInt(), any(), any(), anyBoolean(), anyBoolean(), anyList()))
+                anyString(), anyInt(), any(), any(), anyBoolean(), anyBoolean(), anyList(), anyBoolean()))
                 .thenThrow(new ImageProviderError(
                         GenerationError.ERROR_PROVIDER_FAILED, "network error"));
         when(stateMachine.requeueImageJobForRetry(eq("100"), any(LocalDateTime.class)))
@@ -284,7 +284,7 @@ class ImageJobProcessorErrorMappingTest {
         when(capabilityMapper.findByModelId("gpt-image-1")).thenReturn(cap);
         when(upstreamCredential.requireKey()).thenReturn("token");
         when(imageClient.generate(anyString(), any(ImageProtocol.class), anyString(),
-                anyString(), anyInt(), any(), any(), anyBoolean(), anyBoolean(), anyList()))
+                anyString(), anyInt(), any(), any(), anyBoolean(), anyBoolean(), anyList(), anyBoolean()))
                 .thenThrow(new ImageProviderError(
                         GenerationError.ERROR_PROVIDER_FAILED, "network error"));
         when(stateMachine.requeueImageJobForRetry(eq("100"), any(LocalDateTime.class)))
@@ -313,7 +313,7 @@ class ImageJobProcessorErrorMappingTest {
         when(capabilityMapper.findByModelId("gpt-image-1")).thenReturn(cap);
         when(upstreamCredential.requireKey()).thenReturn("token");
         when(imageClient.generate(anyString(), any(ImageProtocol.class), anyString(),
-                anyString(), anyInt(), any(), any(), anyBoolean(), anyBoolean(), anyList()))
+                anyString(), anyInt(), any(), any(), anyBoolean(), anyBoolean(), anyList(), anyBoolean()))
                 .thenThrow(new ImageProviderError(
                         GenerationError.ERROR_PROVIDER_FAILED, "network error"));
 
@@ -337,7 +337,7 @@ class ImageJobProcessorErrorMappingTest {
         when(capabilityMapper.findByModelId("gpt-image-1")).thenReturn(cap);
         when(upstreamCredential.requireKey()).thenReturn("token");
         when(imageClient.generate(anyString(), any(ImageProtocol.class), anyString(),
-                anyString(), anyInt(), any(), any(), anyBoolean(), anyBoolean(), anyList()))
+                anyString(), anyInt(), any(), any(), anyBoolean(), anyBoolean(), anyList(), anyBoolean()))
                 .thenThrow(new ImageProviderError(
                         GenerationError.ERROR_CONTENT_REJECTED, "copyright"));
 

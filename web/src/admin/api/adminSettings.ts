@@ -24,11 +24,16 @@ export interface SystemRateLimit {
   burst: number;
 }
 
+export interface SystemWatermark {
+  enabled: boolean;
+}
+
 export interface SystemSettings {
   credentials: SystemCredentials;
   upstream: SystemUpstream;
   policy: SystemPolicy;
   rateLimit: SystemRateLimit;
+  watermark: SystemWatermark;
 }
 
 export function fetchAdminSettings() {
@@ -41,6 +46,7 @@ export function updateAdminSettings(
     upstream: Partial<SystemUpstream>;
     policy: Partial<SystemPolicy>;
     rateLimit: Partial<SystemRateLimit>;
+    watermark: Partial<SystemWatermark>;
   }>
 ) {
   return apiRequest<null>('/api/admin/settings', {

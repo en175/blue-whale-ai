@@ -15,6 +15,7 @@ function createController() {
       upstream: { new_api_key: "****1234" },
       policy: { refund_text: "", invoice_text: "" },
       rateLimit: { rate_per_min: 0, rate_per_hour: 0, concurrent: 0, burst: 0 },
+      watermark: { enabled: false },
     }),
     update: vi.fn().mockResolvedValue(undefined),
   };
@@ -29,7 +30,7 @@ beforeEach(() => {
 });
 
 describe("AdminSettingsController", () => {
-  it("GET 返回四个模块（凭证类字段为服务端脱敏值）", async () => {
+  it("GET 返回全部模块（凭证类字段为服务端脱敏值）", async () => {
     const { controller } = createController();
 
     await expect(controller.read()).resolves.toMatchObject({
@@ -62,6 +63,33 @@ describe("AdminSettingsController", () => {
     const { controller } = createController();
     await expect(
       controller.update({ upstreamKey: { new_api_key: "x" } }),
+    ).rejects.toMatchObject({ status: 400 });
+  });
+
+  it("★ 水印开关：true/false 透传", async () => {
+    const { controller, settings } = createController();
+
+    await controller.update({ watermark: { enabled: true } });
+    expect(settings.update).toHaveBeenLastCalledWith({ watermark: { enabled: true } });
+
+    await controller.update({ watermark: { enabled: false } });
+    expect(settings.update).toHaveBeenLastCalledWith({ watermark: { enabled: false } });
+  });
+
+  it("水印开关：非布尔值 → 400，不静默存下", async () => {
+    const { controller, settings } = createController();
+
+    await expect(
+      controller.update({ watermark: { enabled: "true" } }),
+    ).rejects.toMatchObject({ status: 400 });
+    expect(settings.update).not.toHaveBeenCalled();
+  });
+
+  it("水印开关：拼错的字段 → 400", async () => {
+    const { controller } = createController();
+
+    await expect(
+      controller.update({ watermark: { enable: true } }),
     ).rejects.toMatchObject({ status: 400 });
   });
 

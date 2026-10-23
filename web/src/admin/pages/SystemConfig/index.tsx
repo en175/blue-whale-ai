@@ -10,6 +10,7 @@ import {
   type SystemRateLimit,
   type SystemSettings,
   type SystemUpstream,
+  type SystemWatermark,
 } from '@/admin/api/adminSettings';
 import { isApiError } from '@/shared/api/http';
 import {
@@ -18,6 +19,7 @@ import {
   Badge,
   Button,
   Card,
+  Checkbox,
   Empty,
   Input,
   Page,
@@ -32,6 +34,7 @@ const TABS = [
   { key: 'cred', label: '支付凭证' },
   { key: 'policy', label: '充值政策文案' },
   { key: 'rate', label: '限流配置' },
+  { key: 'watermark', label: '生成水印' },
 ] as const;
 
 type TabKey = (typeof TABS)[number]['key'];
@@ -76,11 +79,16 @@ export default function SystemConfig() {
     await loadSettings();
   };
 
+  const saveWatermark = async (watermark: SystemWatermark) => {
+    await updateAdminSettings({ watermark });
+    await loadSettings();
+  };
+
   return (
     <Page>
       <PageHeader
         title="通用设置"
-        subtitle="上游凭证 · 支付凭证安全配置 · 充值政策文案 · 限流参数"
+        subtitle="上游凭证 · 支付凭证安全配置 · 充值政策文案 · 限流参数 · 生成水印"
       />
 
       <Tabs items={TABS} value={tab} onChange={(key) => setTab(key as TabKey)} />
@@ -95,6 +103,9 @@ export default function SystemConfig() {
           {tab === 'cred' && <CredTab credentials={settings?.credentials ?? null} onSave={saveCredential} />}
           {tab === 'policy' && <PolicyTab policy={settings?.policy ?? null} onSave={savePolicy} />}
           {tab === 'rate' && <RateTab rateLimit={settings?.rateLimit ?? null} onSave={saveRateLimit} />}
+          {tab === 'watermark' && (
+            <WatermarkTab watermark={settings?.watermark ?? null} onSave={saveWatermark} />
+          )}
         </>
       )}
     </Page>
@@ -435,6 +446,68 @@ function RateTab({
       <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
         <Button variant="primary" disabled={saving} onClick={() => void save()}>
           {saving ? '保存中…' : '保存'}
+        </Button>
+        {saved && <Badge tone="success">已保存 ✓</Badge>}
+      </div>
+    </div>
+  );
+}
+
+function WatermarkTab({
+  watermark,
+  onSave,
+}: {
+  watermark: SystemWatermark | null;
+  onSave: (w: SystemWatermark) => Promise<void>;
+}) {
+  const [enabled, setEnabled] = useState(watermark?.enabled ?? false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    if (watermark) setEnabled(watermark.enabled);
+  }, [watermark]);
+
+  const save = async () => {
+    if (saving) return;
+    setSaving(true);
+    setError('');
+    setSaved(false);
+    try {
+      await onSave({ enabled });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 3000);
+    } catch (e) {
+      setError(errMsg(e, '保存失败，请稍后重试'));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div style={tabBodyStyle}>
+      <Card title="AI 生成水印">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <Checkbox
+            checked={enabled}
+            onChange={setEnabled}
+            label="为生成的图片和视频添加「AI生成」水印"
+          />
+          <p style={{ margin: 0 }}>
+            开启后，之后执行的图片/视频生成请求会要求上游添加水印；已生成内容不受影响。
+          </p>
+          <Hint>
+            <div>全项目只读这一份配置：backend 管理端与 worker-java 生成链路共用。</div>
+            <div>图片仅对 Seedream 渠道生效；官方 OpenAI Images 协议不支持该参数，不会下发。</div>
+          </Hint>
+        </div>
+      </Card>
+
+      {error && <Alert tone="danger">{error}</Alert>}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+        <Button variant="primary" disabled={saving} onClick={() => void save()}>
+          {saving ? '保存中…' : '保存设置'}
         </Button>
         {saved && <Badge tone="success">已保存 ✓</Badge>}
       </div>

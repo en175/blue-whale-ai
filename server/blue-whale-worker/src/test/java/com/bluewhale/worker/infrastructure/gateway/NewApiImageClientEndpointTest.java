@@ -2,6 +2,7 @@ package com.bluewhale.worker.infrastructure.gateway;
 import com.bluewhale.common.http.NewApiHttpSupport;
 
 import com.bluewhale.worker.infrastructure.config.NewApiUpstreamConfig.UpstreamBaseUrl;
+import com.bluewhale.worker.infrastructure.config.GenerationWatermarkConfig.GenerationWatermarkPolicy;
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.ImageProviderError;
 import com.bluewhale.worker.infrastructure.gateway.NewApiImageClient.GeneratedImage;
@@ -95,7 +96,7 @@ class NewApiImageClientEndpointTest {
     @DisplayName("官方协议·无参考图 → generations JSON，只发官方字段（不含 response_format/stream/tools）")
     void openAiNoRefsUsesGenerationsWithOfficialFieldsOnly() {
         new NewApiImageClient(new UpstreamBaseUrl(baseUrl)).generate("t", ImageProtocol.OPENAI_IMAGES,
-                "gpt-image-2", "猫", 1, "2048x2048", null, false, false, List.of());
+                "gpt-image-2", "猫", 1, "2048x2048", null, false, false, List.of(), false);
 
         assertThat(lastPath.get()).isEqualTo("/v1/images/generations");
         String body = lastBody.get();
@@ -118,7 +119,7 @@ class NewApiImageClientEndpointTest {
     void openAiWithRefsUsesEditsMultipart() {
         new NewApiImageClient(new UpstreamBaseUrl(baseUrl)).generate("t", ImageProtocol.OPENAI_IMAGES,
                 "gpt-image-2", "改成蓝色调", 1, "1024x1024", null, false, false,
-                List.of(baseUrl + "/ref.png"));
+                List.of(baseUrl + "/ref.png"), false);
 
         assertThat(lastPath.get()).isEqualTo("/v1/images/edits");
         assertThat(lastContentType.get()).startsWith("multipart/form-data; boundary=");
@@ -138,7 +139,7 @@ class NewApiImageClientEndpointTest {
         try {
             new NewApiImageClient(new UpstreamBaseUrl(baseUrl)).generate("t", ImageProtocol.OPENAI_IMAGES,
                     "gpt-image-2", "猫", 1, null, null, false, false,
-                    List.of(baseUrl + "/missing.png"));
+                    List.of(baseUrl + "/missing.png"), false);
         } catch (ImageProviderError e) {
             error = e;
         }
@@ -154,7 +155,7 @@ class NewApiImageClientEndpointTest {
 
         List<GeneratedImage> images = new NewApiImageClient(new UpstreamBaseUrl(baseUrl)).generate("t",
                 ImageProtocol.OPENAI_IMAGES, "gpt-image-2", "猫", 1, null, null, false, false,
-                List.of());
+                List.of(), false);
 
         assertThat(images).hasSize(1);
         assertThat(images.get(0).url()).isNull();
@@ -170,7 +171,7 @@ class NewApiImageClientEndpointTest {
 
         List<GeneratedImage> images = new NewApiImageClient(new UpstreamBaseUrl(baseUrl)).generate("t",
                 ImageProtocol.OPENAI_IMAGES, "gpt-image-2", "猫", 1, null, null, false, false,
-                List.of());
+                List.of(), false);
 
         assertThat(images).hasSize(1);
         assertThat(images.get(0).mime()).isEqualTo("image/png");
@@ -182,7 +183,7 @@ class NewApiImageClientEndpointTest {
     void inlineNoRefsUsesGenerationsWithoutImage() {
         List<GeneratedImage> images = new NewApiImageClient(new UpstreamBaseUrl(baseUrl))
                 .generate("t", ImageProtocol.INLINE_IMAGE, "gpt-image-2", "猫", 1,
-                        "1024x1024", null, false, false, List.of());
+                        "1024x1024", null, false, false, List.of(), false);
 
         assertThat(lastPath.get()).isEqualTo("/v1/images/generations");
         assertThat(lastBody.get()).doesNotContain("\"image\"");
@@ -194,7 +195,7 @@ class NewApiImageClientEndpointTest {
     void inlineSingleRefKeepsGenerationsWithStringImage() {
         new NewApiImageClient(new UpstreamBaseUrl(baseUrl)).generate("t", ImageProtocol.INLINE_IMAGE,
                 "nano-banana-2-i2i", "猫", 1,
-                "1024x1024", null, false, false, List.of("https://a/1.png"));
+                "1024x1024", null, false, false, List.of("https://a/1.png"), false);
 
         assertThat(lastPath.get()).isEqualTo("/v1/images/generations");
         assertThat(lastBody.get()).contains("\"image\":\"https://a/1.png\"");
@@ -205,7 +206,7 @@ class NewApiImageClientEndpointTest {
     void inlineMultiRefsUseArrayImage() {
         new NewApiImageClient(new UpstreamBaseUrl(baseUrl)).generate("t", ImageProtocol.INLINE_IMAGE,
                 "nano-banana-2-i2i", "猫", 1,
-                null, "hd", false, false, List.of("https://a/1.png", "https://a/2.png"));
+                null, "hd", false, false, List.of("https://a/1.png", "https://a/2.png"), false);
 
         assertThat(lastPath.get()).isEqualTo("/v1/images/generations");
         String body = lastBody.get();
@@ -216,13 +217,52 @@ class NewApiImageClientEndpointTest {
 
 
     @Test
+    @DisplayName("水印开关开启 + 支持渠道 → inline body 带 watermark:true")
+    void inlineAddsWatermarkWhenEnabled() {
+        NewApiImageClient client = new NewApiImageClient(
+                new UpstreamBaseUrl(baseUrl),
+                new GenerationWatermarkPolicy(key -> "{\"enabled\":true}"));
+
+        client.generate("t", ImageProtocol.INLINE_IMAGE, "doubao-seedream-4-0", "猫", 1,
+                "1024x1024", null, false, false, List.of(), true);
+
+        assertThat(lastBody.get()).contains("\"watermark\":true");
+    }
+
+    @Test
+    @DisplayName("水印开关开启但渠道不支持 → inline body 不带 watermark")
+    void inlineSkipsWatermarkWhenChannelUnsupported() {
+        NewApiImageClient client = new NewApiImageClient(
+                new UpstreamBaseUrl(baseUrl),
+                new GenerationWatermarkPolicy(key -> "{\"enabled\":true}"));
+
+        client.generate("t", ImageProtocol.INLINE_IMAGE, "gpt-image-2-light", "猫", 1,
+                "1024x1024", null, false, false, List.of(), false);
+
+        assertThat(lastBody.get()).doesNotContain("watermark");
+    }
+
+    @Test
+    @DisplayName("水印开关开启 + 官方 OpenAI 协议 → 永不带 watermark（上游会 400）")
+    void openAiNeverAddsWatermark() {
+        NewApiImageClient client = new NewApiImageClient(
+                new UpstreamBaseUrl(baseUrl),
+                new GenerationWatermarkPolicy(key -> "{\"enabled\":true}"));
+
+        client.generate("t", ImageProtocol.OPENAI_IMAGES, "gpt-image-2", "猫", 1,
+                "1024x1024", null, false, false, List.of(), true);
+
+        assertThat(lastBody.get()).doesNotContain("watermark");
+    }
+
+    @Test
     @DisplayName("读超时 → provider_timeout 终态不重试（2026-09-11 政策：重试=双扣风险）")
     void readTimeoutIsTerminalProviderTimeout() {
         NewApiImageClient client = new NewApiImageClient(new UpstreamBaseUrl(baseUrl), 300);
         ImageProviderError error = null;
         try {
             client.generate("t", ImageProtocol.INLINE_IMAGE, "nano-banana-2-i2i",
-                    "sleep-trig 猫", 1, null, null, false, false, List.of());
+                    "sleep-trig 猫", 1, null, null, false, false, List.of(), false);
         } catch (ImageProviderError e) {
             error = e;
         }
@@ -237,7 +277,7 @@ class NewApiImageClientEndpointTest {
         ImageProviderError error = null;
         try {
             client.generate("t", ImageProtocol.INLINE_IMAGE, "nano-banana-2-i2i", "猫", 1,
-                    null, null, false, false, List.of());
+                    null, null, false, false, List.of(), false);
         } catch (ImageProviderError e) {
             error = e;
         }
