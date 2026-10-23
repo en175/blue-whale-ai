@@ -9,7 +9,7 @@ import {
   Res,
 } from "@nestjs/common";
 import type { Request, Response } from "express";
-import { ApiError } from "@lib/core";
+import { ApiError, maskPhone } from "@lib/core";
 import {
   ACCOUNT_ERROR_BIND_SUCCEEDED_LOGIN_FAILED,
   ACCOUNT_ERROR_CAPTCHA_EXPIRED,
@@ -33,6 +33,7 @@ import {
   requirePhoneAndCode,
 } from "@lib/shared/auth/phone-verification.service.js";
 import { CaptchaService } from "@lib/shared/auth/captcha.service.js";
+import { SmsUpstreamError } from "@lib/shared/auth/sms.js";
 import {
   projectAuthFailure,
   toAuthError,
@@ -242,9 +243,31 @@ export class AuthController {
     try {
       await this.verification.issue({ phone, purpose, ip });
       return ok();
-    } catch {
+    } catch (error) {
+      this.logSendFailure(phone, ip, purpose, error);
       return fail(FAILURE_CODE, "短信发送失败");
     }
+  }
+
+  private logSendFailure(
+    phone: string,
+    ip: string,
+    purpose: string,
+    error: unknown,
+  ): void {
+    logger.warn("[sms] send failed", {
+      stage: "send-code",
+      phone: maskPhone(phone),
+      ip,
+      purpose,
+      error_type: error instanceof Error ? error.name : typeof error,
+      ...(error instanceof SmsUpstreamError
+        ? { upstream_code: error.code, upstream_message: error.upstreamMessage }
+        : {
+            error_message:
+              error instanceof Error ? error.message : String(error),
+          }),
+    });
   }
 
   @Public()

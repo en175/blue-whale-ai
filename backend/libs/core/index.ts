@@ -63,7 +63,7 @@ export {
   type RequestSmsCodeResult,
   type VerificationCodeRecord,
 } from "./auth/request-sms-code.js";
-export { PHONE_RE, isValidPhone } from "./auth/phone.js";
+export { PHONE_RE, isValidPhone, maskPhone } from "./auth/phone.js";
 export { isTelecomPhone } from "./auth/carrier.js";
 export {
   CAPTCHA_TTL_MS,

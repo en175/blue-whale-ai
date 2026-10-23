@@ -94,6 +94,7 @@ import {
 } from "@lib/shared/rate-limit/decorators/rate-limit.decorator.js";
 import { LoginFailureTracker } from "@lib/shared/rate-limit/login-failure-tracker.js";
 import { RateLimiter } from "@lib/shared/rate-limit/rate-limiter.js";
+import { SmsUpstreamError } from "@lib/shared/auth/sms.js";
 import { AuthController } from "./auth.controller.js";
 
 function credentialFailure(): InvalidCredentialsError {
@@ -816,6 +817,39 @@ describe("AuthController 发码（验证码通过后）", () => {
     );
 
     expect(out).toMatchObject({ code: 400, msg: "短信发送失败" });
+  });
+
+  it("短信渠道失败 → 记录上游错误码与脱敏手机号，对外不泄漏原文", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { controller, verification, limiter } = setup();
+    vi.spyOn(limiter, "take").mockResolvedValue({ allowed: true } as never);
+    verification.issue.mockRejectedValue(
+      new SmsUpstreamError("InvalidTemplate", "模板不存在", 400),
+    );
+
+    const out = await controller.sendCode(
+      {
+        phone: "13800001234",
+        purpose: "login",
+        captcha_id: "cap_test",
+        captcha_answer: "AB2C",
+      },
+      "1.2.3.4",
+    );
+
+    expect(out).toMatchObject({ code: 400, msg: "短信发送失败" });
+    expect(JSON.stringify(out)).not.toContain("InvalidTemplate");
+    const record = JSON.parse(String(warn.mock.calls.at(-1)?.[0]));
+    expect(record).toMatchObject({
+      body: "[sms] send failed",
+      stage: "send-code",
+      phone: "138****1234",
+      ip: "1.2.3.4",
+      purpose: "login",
+      upstream_code: "InvalidTemplate",
+      upstream_message: "模板不存在",
+    });
+    warn.mockRestore();
   });
 
   it("豁免只认 X-Real-IP：伪造 X-Forwarded-For 不能跳过手机号频控", async () => {

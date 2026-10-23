@@ -21,7 +21,35 @@ export interface VolcengineSmsConfig {
   region?: string;
 }
 
+export class SmsUpstreamError extends Error {
+  constructor(
+    readonly code: string,
+    readonly upstreamMessage: string,
+    readonly httpStatus: number,
+  ) {
+    super(`${code}: ${upstreamMessage}`);
+    this.name = "SmsUpstreamError";
+  }
+}
+
 const SMS_HOST = "open.volcengineapi.com";
+
+type SmsResponse = {
+  ResponseMetadata?: { Error?: { Code: string; Message: string } };
+};
+
+async function readSmsResponse(res: Response): Promise<SmsResponse> {
+  try {
+    return (await res.json()) as SmsResponse;
+  } catch (error) {
+    logger.warn("[sms] send failed", {
+      stage: "response",
+      http_status: res.status,
+      error_type: error instanceof Error ? error.name : typeof error,
+    });
+    throw error;
+  }
+}
 
 export function createVolcengineSmsProvider(
   config: VolcengineSmsConfig,
@@ -55,25 +83,41 @@ export function createVolcengineSmsProvider(
         ak: config.ak,
         sk: config.sk,
       });
-      const res = await fetch(
-        `https://${SMS_HOST}/?Action=SendSms&Version=2020-01-01`,
-        {
-          method: "POST",
-          body,
-          headers: {
-            Host: SMS_HOST,
-            "X-Date": signed.xDate,
-            "X-Content-Sha256": signed.contentHash,
-            "Content-Type": "application/json",
-            Authorization: signed.authorization,
+      let res: Response;
+      try {
+        res = await fetch(
+          `https://${SMS_HOST}/?Action=SendSms&Version=2020-01-01`,
+          {
+            method: "POST",
+            body,
+            headers: {
+              Host: SMS_HOST,
+              "X-Date": signed.xDate,
+              "X-Content-Sha256": signed.contentHash,
+              "Content-Type": "application/json",
+              Authorization: signed.authorization,
+            },
           },
-        },
-      );
-      const json = (await res.json()) as {
-        ResponseMetadata?: { Error?: { Code: string; Message: string } };
-      };
+        );
+      } catch (error) {
+        logger.warn("[sms] send failed", {
+          stage: "network",
+          error_type: error instanceof Error ? error.name : typeof error,
+          error_message: error instanceof Error ? error.message : String(error),
+        });
+        throw error;
+      }
+      const json = await readSmsResponse(res);
       const err = json?.ResponseMetadata?.Error;
-      if (err) throw new Error(`${err.Code}: ${err.Message}`);
+      if (err) {
+        logger.warn("[sms] send failed", {
+          stage: "upstream",
+          http_status: res.status,
+          upstream_code: err.Code,
+          upstream_message: err.Message,
+        });
+        throw new SmsUpstreamError(err.Code, err.Message, res.status);
+      }
     },
   };
 }
