@@ -1,0 +1,121 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: blue-whale-billing
+  namespace: default
+spec:
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: blue-whale-billing
+  template:
+    metadata:
+      labels:
+        app: blue-whale-billing
+    spec:
+      terminationGracePeriodSeconds: 60
+      imagePullSecrets:
+      - name: ccr-secret
+      containers:
+      - name: blue-whale-billing
+        image: xf-bluewhale-cn-beijing.cr.volces.com/bluewhale/bluewhale-billing:$(parameters.image_tag)
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: http
+          containerPort: 4003
+          protocol: TCP
+        - name: grpc
+          containerPort: 4004
+          protocol: TCP
+        env:
+        - name: BILLING_DB_URL
+          valueFrom:
+            secretKeyRef:
+              name: blue-whale-secrets
+              key: BILLING_DB_URL
+        - name: BILLING_DB_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: blue-whale-secrets
+              key: BILLING_DB_USERNAME
+        - name: BILLING_DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: blue-whale-secrets
+              key: BILLING_DB_PASSWORD
+        - name: ROCKETMQ_ENDPOINTS
+          valueFrom:
+            secretKeyRef:
+              name: blue-whale-secrets
+              key: ROCKETMQ_ENDPOINTS
+        - name: ROCKETMQ_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: blue-whale-secrets
+              key: ROCKETMQ_ACCESS_KEY
+        - name: ROCKETMQ_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: blue-whale-secrets
+              key: ROCKETMQ_SECRET_KEY
+        - name: BILLING_PORT
+          value: "4003"
+        - name: BILLING_GRPC_PORT
+          value: "4004"
+        - name: BILLING_MQ_ENABLED
+          value: "true"
+        - name: BILLING_MQ_TOPIC_TERMINAL
+          value: "generation-job-terminal"
+        - name: BILLING_ADMIN_ENABLED
+          value: "true"
+        startupProbe:
+          httpGet:
+            path: /ready
+            port: 4003
+          periodSeconds: 5
+          failureThreshold: 36
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 4003
+          periodSeconds: 10
+          timeoutSeconds: 2
+          failureThreshold: 3
+        livenessProbe:
+          httpGet:
+            path: /ready
+            port: 4003
+          periodSeconds: 20
+          timeoutSeconds: 2
+          failureThreshold: 3
+        resources:
+          requests:
+            cpu: 500m
+            memory: 512Mi
+          limits:
+            cpu: "2"
+            memory: 2Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: blue-whale-billing-svc
+  namespace: default
+spec:
+  type: ClusterIP
+  selector:
+    app: blue-whale-billing
+  ports:
+  - name: http
+    port: 4003
+    targetPort: 4003
+    protocol: TCP
+  - name: grpc
+    port: 4004
+    targetPort: 4004
+    protocol: TCP

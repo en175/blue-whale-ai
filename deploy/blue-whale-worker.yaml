@@ -1,0 +1,111 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: blue-whale-worker
+  namespace: default
+spec:
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: blue-whale-worker
+  template:
+    metadata:
+      labels:
+        app: blue-whale-worker
+    spec:
+      imagePullSecrets:
+      - name: ccr-secret
+      containers:
+      - name: blue-whale-worker
+        image: xf-bluewhale-cn-beijing.cr.volces.com/bluewhale/bluewhale-worker:$(parameters.image_tag)
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 4002
+          protocol: TCP
+        env:
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: blue-whale-secrets
+              key: DATABASE_URL
+        - name: REDIS_CONN_STRING
+          valueFrom:
+            secretKeyRef:
+              name: blue-whale-secrets
+              key: REDIS_CONN_STRING
+        - name: ROCKETMQ_ENDPOINTS
+          valueFrom:
+            secretKeyRef:
+              name: blue-whale-secrets
+              key: ROCKETMQ_ENDPOINTS
+        - name: ROCKETMQ_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: blue-whale-secrets
+              key: ROCKETMQ_ACCESS_KEY
+        - name: ROCKETMQ_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: blue-whale-secrets
+              key: ROCKETMQ_SECRET_KEY
+        - name: GENERATION_CREDENTIAL_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: blue-whale-secrets
+              key: GENERATION_CREDENTIAL_SECRET
+        - name: VOLC_ACCESS_KEY_ID
+          valueFrom:
+            secretKeyRef:
+              name: blue-whale-secrets
+              key: VOLC_ACCESS_KEY_ID
+        - name: VOLC_SECRET_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: blue-whale-secrets
+              key: VOLC_SECRET_ACCESS_KEY
+        - name: VOLC_TOS_ENDPOINT
+          valueFrom:
+            secretKeyRef:
+              name: blue-whale-secrets
+              key: VOLC_TOS_ENDPOINT
+        - name: VOLC_TOS_BUCKET
+          valueFrom:
+            secretKeyRef:
+              name: blue-whale-secrets
+              key: VOLC_TOS_BUCKET
+        - name: VOLC_TOS_REGION
+          valueFrom:
+            secretKeyRef:
+              name: blue-whale-secrets
+              key: VOLC_TOS_REGION
+        - name: GENERATION_WORKER_PORT
+          value: "4002"
+        - name: NEW_API_BASE_URL
+          value: "http://blue-whale-api-svc:3000"
+        - name: NODE_ENV
+          value: "production"
+        resources:
+          requests:
+            cpu: 500m
+            memory: 512Mi
+          limits:
+            cpu: "2"
+            memory: 2Gi
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 4002
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /ready
+            port: 4002
+          initialDelaySeconds: 15
+          periodSeconds: 20
+      terminationGracePeriodSeconds: 45
