@@ -167,9 +167,9 @@ export default function AccountModal({
             <span className={styles.balance}>
               {balance === null ? '--' : balance.toLocaleString()}
             </span>
-            <button type="button" className={styles.link} onClick={() => setShowRecords(true)}>
+            {/* <button type="button" className={styles.link} onClick={() => setShowRecords(true)}>
               账户记录
-            </button>
+            </button> */}
           </div>
         </div>
       </Modal>
