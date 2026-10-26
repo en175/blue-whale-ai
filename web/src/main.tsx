@@ -1,12 +1,12 @@
-/* ============================================
- * main 应用入口：挂载根组件与全局样式
- * ============================================ */
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import App from './App';
-import { isApiError } from '@/api/http';
-import '@/styles/global.css';
+import { isApiError } from '@/shared/api/http';
+import { installChunkReloadGuard } from '@/custom/utils/chunkReload';
+import '@/custom/styles/global.css';
+
+installChunkReloadGuard();
 
 const queryClient = new QueryClient({
   defaultOptions: {

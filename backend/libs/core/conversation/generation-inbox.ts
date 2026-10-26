@@ -52,10 +52,6 @@ export interface GenerationInboxStore {
 export type AcceptGenerationInboxMessageResult =
   ConversationCommandStoreResult | { kind: "invalid"; message: string };
 
-/**
- * 收件箱消息接纳（IK67GG）：forced 选择随消息一起交给持久层，
- * 由同一事务完成权限校验、RunPin 冻结、消息接纳和激活事实写入。
- */
 export async function acceptGenerationInboxMessage(
   input: {
     userId: string;

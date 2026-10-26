@@ -1,0 +1,46 @@
+-- 退役 `recharge_orders.grant_lot_id`：billing 批次表在本地的一份**副本**。
+--
+-- ── 这一列是什么、为什么删 ────────────────────────────────────────────────────
+-- 它存「本金批次的编号」。035 建它时写的用途是**对账**（「本地这条订单 ↔ 账本那一批积分」）。
+-- 而批次的权威在 billing：`billing_credit_lots` 的 `biz_id` 填的就是**订单号**
+-- （`RechargeService.fulfill` 里本金那笔的 `bizId` = `order.tradeNo`），行上还自带
+-- `source`（purchased / bonus / …）把角色分好了。
+-- ADR-0114 的规矩是每个服务只认自己库里的数据、**不建副本** —— 这一列就是那个副本。
+-- 对账那件事因此不再需要它：关系仍可从 billing 重建（查询见下）。
+--
+-- ── 为什么安全（删之前核过全仓）───────────────────────────────────────────────
+-- 引用只有三种形态：写入路径（`RechargeService.fulfill` → `markPaid`）、类型声明
+-- （`RechargeOrderView.grantLotId` / `AdminRechargeRecord.grantLotId`）与测试。
+-- **没有任何读方**：管理端列表页不渲染它；用户侧接口根本不暴露它
+-- （`recharge.controller.ts` 对用户侧是白名单投影，只放 trade_no/status/credits_after）。
+--
+-- ── 删掉不丢数据：怎么反查这一单进了哪个批次 ──────────────────────────────────
+-- ⚠️ 用 **`grant_key`**，不要用 `biz_id`：
+--   · `grant_key` 上有唯一索引（`uk_lots__grant_key`），本金那笔的键就是
+--     `purchased:<订单号>`（billing 未显式给 grantKey 时按 `{source}:{bizId}` 生成）；
+--   · `biz_id` 上**没有索引**（走全表扫），而且本金与首购赠送**共用同一个 bizId = 订单号**，
+--     按它查会同时返回赠送那一批 —— 光看结果分不出哪批是本金。
+--
+--   SELECT id, source, amount, expires_at
+--   FROM billing_credit_lots
+--   WHERE grant_key = CONCAT('purchased:', '<订单号>');
+--
+-- ── ⚠️ 上线顺序：破坏性 DDL，与**旧镜像**不兼容 ────────────────────────────────
+-- 这是**反方向**的不兼容：Prisma 客户端会 SELECT 模型里声明的每一列，所以
+-- **新库 + 旧镜像**会让 `recharge_orders` 的每次读直接报 P2022 / ER_BAD_FIELD_ERROR ——
+-- 管理端充值记录页、用户侧订单状态轮询、到账补发扫描**三条路一起挂**。
+-- （测试站已经吃过一次同形的亏：库先迁、镜像没跟上 → 整站 500。）
+-- 本镜像**不会**自动跑迁移（Dockerfile 的 CMD 只有 `node main.js`，没有 `migrate deploy`），
+-- 所以顺序必须由发布流程保证：**新镜像全量起来之后，再执行本迁移**。
+-- 做不到就把这件事拆成两步：本次只停写（保留列），下一次发布再 DROP。
+--
+-- ── 不可逆 ────────────────────────────────────────────────────────────────────
+-- DROP 之后只能重建。要留档就在执行前取一份：
+--   SELECT id, trade_no, grant_lot_id FROM recharge_orders WHERE grant_lot_id IS NOT NULL;
+--
+-- ── 回读验证（执行后）────────────────────────────────────────────────────────
+--   SHOW COLUMNS FROM `recharge_orders` LIKE 'grant_lot_id';  -- 应为空
+--   SHOW COLUMNS FROM `recharge_orders` LIKE 'paid_at';       -- 应有值（相邻列，不该被误伤）
+SET NAMES utf8mb4;
+
+ALTER TABLE `recharge_orders` DROP COLUMN `grant_lot_id`;

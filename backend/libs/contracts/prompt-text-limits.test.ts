@@ -7,8 +7,6 @@ import {
   type PromptLengthType,
 } from "./prompt-text-limits.js";
 
-// IKH4B8：提示词上限的**唯一**取值口径 = 模型配置优先，未配置回落缺省。
-// ADR-0088 起正文由提交方给全，服务端不再组合，所以只有这一档缺省，没有「正文档 / 组合档」之分。
 describe("resolvePromptMaxLength 取值口径（IKH4B8）", () => {
   const MATRIX: Array<[PromptLengthType, number]> = [
     ["image", DEFAULT_PROMPT_MAX_LENGTH],
@@ -35,8 +33,6 @@ describe("resolvePromptMaxLength 取值口径（IKH4B8）", () => {
     expect(resolvePromptMaxLength("image", 1)).toBe(1);
   });
 
-  // 读取侧 pickPositiveInt 与写入口 1–65535 已挡在前面，这里是 public 导出的自防：
-  // 尤其 NaN —— `length > NaN` 恒为 false，会让闸静默失效。
   it.each([0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY])(
     "脏值 %s 当未配置处理，回落缺省",
     (dirty) => {

@@ -1,0 +1,46 @@
+.input {
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--admin-border);
+  border-radius: var(--admin-radius-control);
+  background: var(--admin-surface);
+  color: var(--admin-text);
+  font-size: var(--admin-font-sm);
+  font-family: inherit;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.input::placeholder {
+  color: var(--admin-text-faint);
+}
+
+.input:hover:not(:disabled) {
+  border-color: var(--admin-border-strong);
+}
+
+.input:focus {
+  outline: none;
+  border-color: var(--admin-accent);
+  box-shadow: var(--admin-focus);
+}
+
+.input:disabled {
+  color: var(--admin-text-disabled);
+  cursor: not-allowed;
+}
+
+.input[type='number']::-webkit-outer-spin-button,
+.input[type='number']::-webkit-inner-spin-button {
+  appearance: none;
+  margin: 0;
+}
+.input[type='number'] {
+  appearance: textfield;
+}
+
+.sm {
+  height: 26px;
+  font-size: var(--admin-font-xs);
+}

@@ -1,7 +1,3 @@
-// IKCKOW：旧内嵌 Agent 引擎的 acceptConversationMessageInTransaction /
-// createConversationRepo 已随旧 Agent 运行表删除（用户确认 6 表删除 + 2 表保留）。
-// 本文件仅保留 transactionWithUniqueRetry（live，被 generation-command /
-// plan-application / scene-card-* / storyboard-preview-repo 使用）。
 import type { Prisma, PrismaClient } from "@prisma/client";
 
 function isUniqueConstraintError(error: unknown): boolean {

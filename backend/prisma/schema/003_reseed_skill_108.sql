@@ -1,28 +1,15 @@
--- ============================================================
--- IK6GXG reseed：skill 表 → 0710 版 108 条（cn01-cn108）+ 新增 skill_code 列（生产迁移脚本）
--- 生成时间：2026-08-05 | 依据 docs/skills/library/raw/ + 最新库快照（69 行基线）
--- 概览：ALTER(加列+唯一索引) + 69 UPDATE + 39 INSERT，无删除，事务包裹
--- 已在测试库验证（115.190.244.91）：执行后 skill=108 行（is_delete=0）、skill_code 108/108 有值、
---   33 张封面按 skill_code 正确挂载、cn81 漂移已修
--- 生产执行：mysql -h<生产地址> -uroot -p<口令> --default-character-set=utf8mb4 blue_whale < 003_reseed_skill_108.sql
---   注：生产库当前若已是 108 基线则直接跳过；若为旧 60/69 基线则按此脚本对齐
--- ============================================================
 SET NAMES utf8mb4;
 USE blue_whale;
 
--- ---------- 0. 确保 skill_code 列存在（幂等） ----------
 SET @ddl = IF(EXISTS(SELECT 1 FROM information_schema.COLUMNS
   WHERE TABLE_SCHEMA='blue_whale' AND TABLE_NAME='skill' AND COLUMN_NAME='skill_code'),
   'SELECT 1',
   'ALTER TABLE skill ADD COLUMN skill_code VARCHAR(32) NULL DEFAULT NULL COMMENT ''skill cnXX 稳定编号'' AFTER name, ADD UNIQUE KEY uk_skill_code (skill_code)');
 PREPARE s FROM @ddl; EXECUTE s; DEALLOCATE PREPARE s;
 
--- 若列已存在但缺唯一索引（二次执行场景）：
--- ALTER TABLE skill ADD UNIQUE KEY uk_skill_code (skill_code);
 
 START TRANSACTION;
 
--- ---------- A. UPDATE 已有行（69 条，id 稳定保留） ----------
 UPDATE skill SET name='Tvc Product Ad', description='使用此技能将电商产品视频结构化为精致、高端的电视广告（TVC）。在需要高端品牌影片、电影级产品广告或美学产品叙事时触发。不适用于随意、快节奏或用户生成内容（UGC）风格。', content='---
 name: custom-ecom-tvc-product-ad
 description: 使用此技能将电商产品视频结构化为精致、高端的电视广告（TVC）。在需要高端品牌影片、电影级产品广告或美学产品叙事时触发。不适用于随意、快节奏或用户生成内容（UGC）风格。
@@ -8395,7 +8382,6 @@ version: 0.1.0
 ',
   source='official', sort_order=101, cover_url='https://bluewhale-assets.tos-cn-beijing.volces.com/blue-whale/assets/23/skill_image/cn101-ip-talking.png', skill_code='cn101', version=0, is_delete=0, gmt_modified=NOW() WHERE id=69;
 
--- ---------- B. INSERT 缺失技能（39 条） ----------
 INSERT INTO skill (name, description, content, source, sort_order, cover_url, skill_code, version, is_delete, gmt_create, gmt_modified)
 VALUES ('Deadpan Ad Creator', '制作简约、面无表情的喜剧广告的指南，这些广告通过简单、冷幽默和电影复古风格脱颖而出。', '---
 name: deadpan-ad-creator

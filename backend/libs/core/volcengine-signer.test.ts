@@ -2,11 +2,6 @@ import { describe, expect, it } from "vitest";
 
 import { signVolcengineRequest } from "./volcengine-signer.js";
 
-// Golden vector produced by a faithful standalone copy of Java's
-// VolcengineSigner (blue_whale_server/.../user/sms/VolcengineSigner.java),
-// compiled + run on JDK 17 with the fixed inputs below. The Node port MUST
-// reproduce the Authorization header byte-for-byte — this is the independent
-// source of truth, not a value re-derived the same way the impl does.
 describe("signVolcengineRequest", () => {
   it("matches Java VolcengineSigner Authorization for a fixed SMS request", () => {
     const result = signVolcengineRequest({

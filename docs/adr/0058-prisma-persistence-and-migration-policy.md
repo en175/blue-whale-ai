@@ -34,3 +34,46 @@
 
 - **从第一次就用 `prisma migrate dev --name init`，永不 `db push`**（技术更干净、无 history 空档）。拒绝理由：用户明确希望首次保留 `db push` 的灵活度以便敲定表结构；本 ADR 用 `migrate resolve --applied` 弥补 `db push` 留下的 history 空档，既尊重用户工作流又保留可审查迁移史。
 - **保留 `mysql2` 裸 SQL**。拒绝理由：用户要求换 Prisma；裸 SQL 在多表/多 slice 演进时缺乏类型安全与迁移治理。
+
+## 修正（2026-10-10，IKKNMZ）：SQL 变更只走「手写 + 人工审批」，Prisma 迁移路已断
+
+**决定**：本仓的 SQL 变更口径是**手写 SQL、人工审批后手工执行**，**不使用 Prisma 的迁移执行**。上文「决策 2 迁移铁律」的第 4 条与「决策 3 `pnpm db:fresh`」按本节作废。
+
+**为什么**：上文写于 2026-07-27，早于 `backend/` 这套结构；三处描述与当前实际相反：
+
+| 上文写的 | 实际（2026-10-10 实测） |
+| --- | --- |
+| 改表只准 `prisma migrate dev --name <xxx>` | **手写**编号 SQL（owner 确认） |
+| `pnpm db:fresh` = `migrate deploy` + 灌 seed | 根 `package.json` 里**没有这个入口** |
+| 迭代中**绝对禁** `db push` | `db push` 是 DB 门控集成测试的**常规建库配方**（适用范围见下） |
+
+全仓调用 `prisma migrate deploy` / `migrate dev` 的地方**为零处**（唯一命中是 parity 测试里的字符串断言与迁移文件里的注释）。
+
+**真陷阱（改前的实测输出）**：
+
+```text
+$ prisma migrate status
+78 migrations found in prisma/migrations
+Following migrations have not yet been applied:
+20261008120000_scrub_frozen_provider_credential
+20261009180000_ikkh81_drop_asset_material_group
+To apply migrations in production run prisma migrate deploy.
+```
+
+`_prisma_migrations` 与实际的手工执行进度不一致，所以 Prisma **主动叫人去跑 `migrate deploy`** —— 一跑就把存量当没跑过**重放**。
+
+**处置**：`prisma.config.ts` 的 `migrations.path` 指向 `prisma/disabled-prisma-migrations`，且该路径上放了一个**普通文件**。两份机制分别拦 `deploy` 与 `dev`（`migrations.path` 拦前者；后者对缺失目录会自己建，靠普通文件的 `ENOTDIR` 拦）—— 细节与实测输出见 `backend/prisma/README.md`。改后：
+
+```text
+$ prisma migrate deploy
+No migration found in prisma/migrations
+No pending migrations to apply.
+```
+
+**为什么用「指走路径」而不是删 `migration_lock.toml`**：后者 Prisma 会自动重建，删了只是「下次又长出来」；指走路径是**每次命令都拦**。
+
+**三轨保留不变**：`prisma/migrations/`（78）/ `prisma/schema/`（71）/ `docs/sql/`（56），文本逐字一致，由各自的 `*-parity.test.ts` 守。目录名沿用 Prisma 命名，**但内容手写、无自动执行器**；`migrations/` 那一轨**不删** —— 它是三轨里的一轨，也是几十个 parity 测试的比对基准。
+
+**`db push` 的适用范围**：**仅限一次性测试库**（DB 门控集成测试的建库配方）。**不得对测试站 / 生产库使用** —— 对上文的「绝对禁」按此收窄，而不是全禁。
+
+**给下次读到上文的人的提示**：上文「决策 2 第 4 条」与「决策 3」已作废，照它办事**会去跑 `migrate deploy`**。现状以本节与 `backend/prisma/README.md` 为准。

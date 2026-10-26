@@ -3,9 +3,9 @@ import { describe, expect, it } from "vitest";
 import {
   availableAspectRatiosForSize,
   mapImageChannelRequest,
+  validateRequestMapping,
 } from "./image-channel-parser.js";
 
-/** 工单 IKDBYY 灌数：GPT 全量交叉格。空串 = 未填。 */
 const GPT_FULL_MATRIX = {
   "1k": {
     "1:1": "1024x1024",
@@ -114,59 +114,133 @@ describe("mapImageChannelRequest banana", () => {
 });
 
 describe("availableAspectRatiosForSize", () => {
-  const configured = ["1:1", "16:9", "9:16", "3:2", "2:3", "4:3", "3:4", "21:9"];
+  const configured = ["1:1", "16:9", "9:16", "3:2", "2:3", "4:3", "3:4", "21:9"].map(
+    (id) => ({ id, label: id }),
+  );
+  const ids = (list: { id: string }[]) => list.map((ratio) => ratio.id);
+  const GPT = {
+    parser: "gpt" as const,
+    matrix: GPT_FULL_MATRIX,
+    defaultSizeId: "1k",
+    defaultRatioId: "1:1",
+  };
 
   it("GPT 全量 1K 不露出未填的 16:9 / 9:16", () => {
-    expect(
-      availableAspectRatiosForSize(
-        {
-          parser: "gpt",
-          matrix: GPT_FULL_MATRIX,
-          defaultSizeId: "1k",
-          defaultRatioId: "1:1",
-        },
-        "1k",
-        configured,
-      ),
-    ).toEqual(["1:1", "3:2", "2:3", "4:3", "3:4"]);
+    expect(ids(availableAspectRatiosForSize(GPT, "1k", configured))).toEqual([
+      "1:1",
+      "3:2",
+      "2:3",
+      "4:3",
+      "3:4",
+    ]);
   });
 
   it("GPT 全量 2K 露出已填的 16:9", () => {
-    expect(
-      availableAspectRatiosForSize(
-        {
-          parser: "gpt",
-          matrix: GPT_FULL_MATRIX,
-          defaultSizeId: "1k",
-          defaultRatioId: "1:1",
-        },
-        "2k",
-        configured,
-      ),
-    ).toContain("16:9");
+    expect(ids(availableAspectRatiosForSize(GPT, "2k", configured))).toContain(
+      "16:9",
+    );
   });
 
   it("GPT light 格子填 auto 仍按已填组合展示", () => {
     expect(
-      availableAspectRatiosForSize(
-        {
-          parser: "gpt",
-          matrix: { "1k": { "1:1": "auto", "16:9": "auto" } },
-          defaultSizeId: "1k",
-          defaultRatioId: "1:1",
-        },
-        "1k",
-        configured,
+      ids(
+        availableAspectRatiosForSize(
+          {
+            parser: "gpt",
+            matrix: { "1k": { "1:1": "auto", "16:9": "auto" } },
+            defaultSizeId: "1k",
+            defaultRatioId: "1:1",
+          },
+          "1k",
+          configured,
+        ),
       ),
     ).toEqual(["1:1", "16:9"]);
   });
 
   it("seedream 不读目录交叉格，配置过的比例全部可用", () => {
     expect(
-      availableAspectRatiosForSize({ parser: "seedream" }, "1k", [
-        "1:1",
-        "16:9",
-      ]),
+      ids(
+        availableAspectRatiosForSize({ parser: "seedream" }, "1k", [
+          { id: "1:1", label: "1:1" },
+          { id: "16:9", label: "16:9" },
+        ]),
+      ),
     ).toEqual(["1:1", "16:9"]);
+  });
+
+  it("★ 展示名随子集一起过滤出来，不需要回查（ADR-0123）", () => {
+    expect(
+      availableAspectRatiosForSize(
+        {
+          parser: "gpt",
+          matrix: { "1k": { "1:1": "1024x1024", "16:9": "1024x576" } },
+          defaultSizeId: "1k",
+          defaultRatioId: "1:1",
+        },
+        "1k",
+        [
+          { id: "1:1", label: "方形" },
+          { id: "16:9", label: "横屏" },
+          { id: "9:16", label: "竖屏" },
+        ],
+      ),
+    ).toEqual([
+      { id: "1:1", label: "方形" },
+      { id: "16:9", label: "横屏" },
+    ]);
+  });
+});
+
+describe("validateRequestMapping seedream 矩阵键", () => {
+  const SIZES = [
+    { id: "1k", label: "1K", api_value: "1K" },
+    { id: "1.5k", label: "1.5K", api_value: "1.5K" },
+    { id: "2k", label: "2K", api_value: "2K" },
+  ];
+
+  it("键等于 api_value：放行（大小写不敏感）", () => {
+    expect(
+      validateRequestMapping(
+        "seedream",
+        { matrix: { "1K": { "1:1": "1024x1024" }, "2k": { "1:1": "2048x2048" } } },
+        SIZES,
+      ),
+    ).toBeNull();
+  });
+
+  it("★ 陈旧拼写（既不是 id 也不是 api_value）：拒绝，且报错点出那个键", () => {
+    const error = validateRequestMapping(
+      "seedream",
+      { matrix: { "1k": { "1:1": "1024x1024" }, "2": { "1:1": "2048x2048" } } },
+      SIZES,
+    );
+    expect(error).toContain("2");
+    expect(error).toContain("api_value");
+  });
+
+  it("api_value 缺失时回落 id", () => {
+    expect(
+      validateRequestMapping("seedream", { matrix: { "1k": { "1:1": "1024x1024" } } }, [
+        { id: "1k", label: "1K" },
+      ]),
+    ).toBeNull();
+  });
+
+  it("拿不到 supported_sizes 时不拦（宁可不查，也不把正常保存拦死）", () => {
+    expect(
+      validateRequestMapping("seedream", { matrix: { 任意: { "1:1": "1x1" } } }),
+    ).toBeNull();
+  });
+
+  it("矩阵横排不是对象：拒绝", () => {
+    expect(
+      validateRequestMapping("seedream", { matrix: { "1k": "1024x1024" } }, SIZES),
+    ).toContain("须为对象");
+  });
+
+  it("没有 matrix（或整个 mapping 为空）：放行 —— seedream 的矩阵是可选的", () => {
+    expect(validateRequestMapping("seedream", null, SIZES)).toBeNull();
+    expect(validateRequestMapping("seedream", {}, SIZES)).toBeNull();
   });
 });

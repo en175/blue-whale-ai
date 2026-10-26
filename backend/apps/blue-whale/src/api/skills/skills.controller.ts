@@ -16,6 +16,7 @@ import {
   handleRemoveSkill,
 } from "@lib/shared/skills/skill-writes.js";
 import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js";
+import { SystemSettingsService } from "@lib/shared/system-settings/index.js";
 
 const LIBRARY_SORTS = new Set(["featured", "most_used", "newest"]);
 const LIBRARY_LANGS = new Set(["zh", "en"]);
@@ -53,9 +54,9 @@ export class SkillsController {
   constructor(
     private readonly skills: SkillService,
     private readonly skillAdmin: SkillAdminService,
+    private readonly settings: SystemSettingsService,
   ) {}
 
-  /** IKA64P：用户侧分类列表（后台维护的现有分类，旧码由前端映射中文） */
   @Get("categories")
   async categories() {
     const cats = await this.skillAdmin.listCategories();
@@ -136,7 +137,6 @@ export class SkillsController {
     return handleAddSkill(user.userId, id, this.skills);
   }
 
-  /** IKA64P：官方技能全文（「直接使用」填入首页对话框） */
   @Get("library/:id/content")
   async libraryContent(@Param("id") id: string) {
     const content = await this.skills.getOfficialContent(id);
@@ -173,7 +173,7 @@ export class SkillsController {
     if (!content || typeof content !== "string") {
       throw skillError("SKILL_PARAM_INVALID", "content 参数缺失");
     }
-    const deps = createSkillFormatDeps();
+    const deps = await createSkillFormatDeps(this.settings);
     if (!deps) throw skillError("SKILL_FORMAT_FAILED", "AI 格式化未配置");
     return handleFormatSkillDraft(content, deps);
   }

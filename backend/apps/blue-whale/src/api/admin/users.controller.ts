@@ -8,31 +8,43 @@ import {
   Query,
   UseGuards,
 } from "@nestjs/common";
-import { NewApiError } from "@lib/core";
 import { createLogger } from "@lib/core/logging";
+import { isSuperAdmin } from "@lib/core/identity/roles.js";
 import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
 import { AdminGuard } from "@lib/infra/guard/admin.guard.js";
-import { AccountService } from "@lib/shared/account/account.service.js";
 import {
-  mapAdminUser,
   parsePageParam,
   parsePageSizeParam,
-} from "@lib/shared/account/admin-mapper.js";
+} from "@lib/shared/account/admin-paging.js";
 import { OperationLogService } from "@lib/shared/operation-log/operation-log.service.js";
 import { SessionService } from "@lib/shared/session/session.service.js";
 import { AdminException, toAdminError } from "@lib/shared/errors/admin-error.js";
-import { parseBearerToken } from "@lib/shared/errors/bearer-token.js";
+import {
+  BillingAdminConfigError,
+  BillingAdminError,
+  grantCredits,
+} from "@lib/shared/billing/billing-admin-client.js";
+import {
+  AccountDirectoryService,
+  IdentityService,
+  PasswordPolicyError,
+  USER_STATUS_DISABLED,
+  USER_STATUS_NORMAL,
+} from "@lib/shared/identity/index.js";
 import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js";
 
-const USER_MANAGE_ACTIONS = new Set(["freeze", "unfreeze", "adjustBalance"]);
-
-/** IK9VZ0：管理端「调整积分」输入按积分（展示口径统一），转 Go add_quota 前换算 quota：1 积分 = 50,000 quota。 */
-const CREDITS_TO_QUOTA_MULTIPLIER = 50_000;
+const USER_MANAGE_ACTIONS = new Set([
+  "freeze",
+  "unfreeze",
+  "adjustBalance",
+  "reset_password",
+]);
 
 const ACTION_LOG_MAP: Record<string, string> = {
   freeze: "user.freeze",
   unfreeze: "user.unfreeze",
   adjustBalance: "user.adjust_balance",
+  reset_password: "user.reset_password",
 };
 
 @Controller("admin/users")
@@ -41,7 +53,8 @@ export class AdminUsersController {
   private readonly logger = createLogger("admin-users");
 
   constructor(
-    private readonly account: AccountService,
+    private readonly identity: IdentityService,
+    private readonly directory: AccountDirectoryService,
     private readonly operationLog: OperationLogService,
     private readonly sessions: SessionService,
   ) {}
@@ -49,24 +62,16 @@ export class AdminUsersController {
   @Get()
   async list(
     @CurrentUser() user: AuthenticatedUser,
-    @Headers("authorization") authorization?: string,
     @Query() query: Record<string, string> = {},
   ) {
-    const token = parseBearerToken(authorization);
-    if (!token) throw new NewApiError("缺少登录凭证", 401, "unauthorized");
-
     const keyword = query.keyword?.trim() || undefined;
     const statusParam = query.status;
-    const roleParam = query.role;
     const status =
       statusParam === "active" ? 1 : statusParam === "disabled" ? 0 : undefined;
-    const role =
-      roleParam && roleParam.trim() !== "" ? Number(roleParam) : undefined;
 
     const options: {
       keyword?: string;
       status?: number;
-      role?: number;
       page?: number;
       pageSize?: number;
     } = {
@@ -75,20 +80,12 @@ export class AdminUsersController {
     };
     if (keyword) options.keyword = keyword;
     if (status !== undefined) options.status = status;
-    if (role !== undefined) options.role = role;
 
     try {
-      const result = await this.account.listAdminUsers(
-        token,
-        Number(user.userId),
-        options,
-      );
-      return {
-        success: true,
-        data: { list: result.items.map(mapAdminUser), total: result.total },
-      };
+      const result = await this.directory.listAdminUsers(options);
+      return { success: true, data: { list: result.items, total: result.total } };
     } catch (error) {
-      throw toAdminError(error);
+      throw toUserListError(error);
     }
   }
 
@@ -97,34 +94,34 @@ export class AdminUsersController {
     @CurrentUser() user: AuthenticatedUser,
     @Param("userId") rawUserId: string,
     @Body() body: Record<string, unknown>,
-    @Headers("authorization") authorization?: string,
     @Headers("x-forwarded-for") xForwardedFor?: string,
+    @Headers("idempotency-key") idempotencyKey?: string,
   ) {
-    const token = parseBearerToken(authorization);
-    if (!token) throw new NewApiError("缺少登录凭证", 401, "unauthorized");
-
     const userId = Number(rawUserId);
     if (!Number.isInteger(userId) || userId <= 0) {
       throw new AdminException(400, "userId 须为正整数");
     }
     const action = body.action;
     if (typeof action !== "string" || !USER_MANAGE_ACTIONS.has(action)) {
-      throw new AdminException(400, "action 须为 freeze/unfreeze/adjustBalance");
+      throw new AdminException(
+        400,
+        "action 须为 freeze/unfreeze/adjustBalance/reset_password",
+      );
     }
     const reason = typeof body.reason === "string" ? body.reason.trim() : "";
     if (!reason) throw new AdminException(400, "reason 必填");
 
-    // 冻结时吊销会话的统计（best-effort）：冻结成功后踢该用户全部登录会话，立即生效。
     let revokedSessions = 0;
     let revokeError: string | null = null;
+    let granted: { credits: number | null; duplicated: boolean } | null = null;
 
     try {
       if (action === "freeze") {
-        await this.account.manageAdminUser(token, Number(user.userId), {
-          id: userId,
-          action: "disable",
-        });
-        // 上游 disable 成功后再踢会话（禁用先行，最小化并发登录窗口）。
+        const found = await this.directory.setUserStatus(
+          userId,
+          USER_STATUS_DISABLED,
+        );
+        if (!found) throw new AdminException(404, "用户不存在");
         try {
           revokedSessions = await this.sessions.revokeAllForUser(userId);
         } catch (error) {
@@ -132,37 +129,86 @@ export class AdminUsersController {
           this.logger.error(
             `freeze user=${userId} session revoke failed: ${revokeError}`,
           );
-          // best-effort：上游 disable 已保证禁登录/禁继续用（≤5min 复核兜底），
-          // 会话清除失败不阻断冻结，落在审计里可见。
         }
       } else if (action === "unfreeze") {
-        await this.account.manageAdminUser(token, Number(user.userId), {
-          id: userId,
-          action: "enable",
-        });
-      } else {
-        // IK9VZ0：value 语义为积分（管理员输入，与展示口径一致）→ 换算 quota 后调 Go add_quota。
-        const valueCredits = Number(body.value);
-        if (!Number.isFinite(valueCredits) || valueCredits === 0) {
-          throw new AdminException(400, "value 须为非零数值（单位：积分）");
-        }
-        const valueQuota = Math.abs(
-          Math.round(valueCredits * CREDITS_TO_QUOTA_MULTIPLIER),
+        const found = await this.directory.setUserStatus(
+          userId,
+          USER_STATUS_NORMAL,
         );
-        if (valueQuota === 0) {
-          throw new AdminException(400, "value 换算后为 0，请确认输入");
+        if (!found) throw new AdminException(404, "用户不存在");
+      } else if (action === "reset_password") {
+        if (userId === Number(user.userId)) {
+          throw new AdminException(400, "不能重置自己的密码，请走「修改密码」");
         }
-        await this.account.manageAdminUser(token, Number(user.userId), {
-          id: userId,
-          action: "add_quota",
-          value: valueQuota,
-          mode: valueCredits > 0 ? "add" : "subtract",
-        });
+        if (!(await this.directory.userExists(userId))) {
+          throw new AdminException(404, "用户不存在");
+        }
+        if (isSuperAdmin(await this.directory.listRoleCodes(userId))) {
+          throw new AdminException(403, "不能重置超级管理员的密码");
+        }
+        const newPassword = typeof body.password === "string" ? body.password : "";
+        if (!newPassword) throw new AdminException(400, "password 必填");
+        try {
+          await this.identity.resetPassword(userId, newPassword);
+        } catch (error) {
+          if (error instanceof PasswordPolicyError) {
+            throw new AdminException(400, error.message);
+          }
+          throw error;
+        }
+        try {
+          revokedSessions = await this.sessions.revokeAllForUser(userId);
+        } catch (error) {
+          revokeError = error instanceof Error ? error.message : String(error);
+          this.logger.error(
+            `reset_password user=${userId} session revoke failed: ${revokeError}`,
+          );
+        }
+      } else {
+        const value = body.value;
+        if (typeof value !== "number" || !Number.isSafeInteger(value) || value <= 0) {
+          throw new AdminException(400, "value 须为正整数积分（本接口只加不减）");
+        }
+        const bizId = idempotencyKey?.trim();
+        if (!bizId) throw new AdminException(400, "缺少 Idempotency-Key 请求头");
+        if (!(await this.directory.userExists(userId))) {
+          throw new AdminException(404, "用户不存在");
+        }
+
+        try {
+          const { duplicated } = await grantCredits({
+            userId,
+            credits: value,
+            source: "gift",
+            bizId,
+            bizType: "grant",
+          });
+          granted = duplicated
+            ? { credits: null, duplicated: true }
+            : { credits: value, duplicated: false };
+        } catch (error) {
+          if (error instanceof BillingAdminConfigError) {
+            throw new AdminException(503, `发放积分失败：计费服务未配置（${error.message}）`);
+          }
+          if (error instanceof BillingAdminError) {
+            throw new AdminException(502, `发放积分失败：${error.message}`);
+          }
+          throw new AdminException(
+            502,
+            `发放积分失败：计费服务不可达（${error instanceof Error ? error.message : "未知错误"}）`,
+          );
+        }
       }
     } catch (error) {
       if (error instanceof AdminException) throw error;
       throw toAdminError(error);
     }
+
+    const adjustAudit = granted
+      ? granted.duplicated
+        ? { duplicated: true }
+        : { value: granted.credits }
+      : {};
 
     try {
       await this.operationLog.create({
@@ -172,23 +218,35 @@ export class AdminUsersController {
         targetUserId: String(userId),
         detail: JSON.stringify({
           reason,
-          ...(action === "adjustBalance" ? { value: Number(body.value) } : {}),
-          ...(action === "freeze"
+          ...(action === "freeze" || action === "reset_password"
             ? { revokedSessions, ...(revokeError ? { revokeError } : {}) }
             : {}),
+          ...adjustAudit,
         }),
         operator: user.username,
         operatorId: user.userId,
         ipAddress: xForwardedFor?.split(",")[0]?.trim() ?? null,
       });
-    } catch {
-      // best-effort 审计，失败不阻断
+    } catch (error) {
+      this.logger.error(
+        `审计写入失败 ${action} user=${userId}: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
 
-    // freeze 额外返回吊销会话数，供前端展示（其余 action 维持 data: null）。
-    return {
-      success: true,
-      data: action === "freeze" ? { revokedSessions } : null,
-    };
+    if (action === "freeze" || action === "reset_password") {
+      return { success: true, data: { revokedSessions } };
+    }
+    if (granted) return { success: true, data: granted };
+    return { success: true, data: null };
   }
+}
+
+function toUserListError(error: unknown): AdminException {
+  if (error instanceof BillingAdminConfigError) {
+    return new AdminException(503, `用户列表不可用：${error.message}`);
+  }
+  if (error instanceof BillingAdminError) {
+    return new AdminException(502, `用户列表查询失败：${error.message}`);
+  }
+  throw error;
 }

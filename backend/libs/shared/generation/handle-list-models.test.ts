@@ -16,18 +16,16 @@ function imageView(
         id: "1k",
         label: "1K",
         api_value: "1024x1024",
-        width: 1024,
-        height: 1024,
       },
       {
         id: "2k",
         label: "2K",
         api_value: "2048x2048",
-        width: 2048,
-        height: 2048,
       },
     ],
-    supported_aspect_ratios: ["1:1", "16:9", "9:16", "3:2", "2:3", "4:3", "3:4"],
+    supported_aspect_ratios: ["1:1", "16:9", "9:16", "3:2", "2:3", "4:3", "3:4"].map(
+      (id) => ({ id, label: id }),
+    ),
     supported_formats: ["png"],
     supported_durations: null,
     default_size: "1k",
@@ -51,7 +49,7 @@ function imageView(
     },
     version: 1,
     digest: "sha256:abc",
-    channel_parser: "gpt",
+    channel: "gpt-image",
     request_mapping: {
       matrix: {
         "1k": { "1:1": "1024x1024", "3:2": "1536x1024" },
@@ -77,27 +75,28 @@ describe("handleListModels 消费端剥调用值", () => {
       supported_sizes: Array<{
         id: string;
         label: string;
-        available_aspect_ratios: string[];
+        available_aspect_ratios: Array<{ id: string; label: string }>;
         api_value?: unknown;
       }>;
       request_mapping?: unknown;
-      channel_parser?: unknown;
+      channel?: unknown;
     };
     expect(gpt.supported_sizes[0]).toEqual({
       id: "1k",
       label: "1K",
-      available_aspect_ratios: ["1:1", "3:2"],
+      available_aspect_ratios: [
+        { id: "1:1", label: "1:1" },
+        { id: "3:2", label: "3:2" },
+      ],
     });
     expect(gpt.supported_sizes[1]?.available_aspect_ratios).toEqual([
-      "1:1",
-      "16:9",
+      { id: "1:1", label: "1:1" },
+      { id: "16:9", label: "16:9" },
     ]);
     expect(gpt.request_mapping).toBeUndefined();
-    expect(gpt.channel_parser).toBeUndefined();
+    expect(gpt.channel).toBeUndefined();
   });
 
-  // IKESD6 / ADR-0085：消费端透出 max_prompt_length（前端动态上限用），
-  // i2i_model_name 属出站调用值，与像素/request_mapping 同哲学剥除。
   it("features：max_prompt_length 透出，i2i_model_name 剥除", async () => {
     const result = await handleListModels("image", {
       models: {
@@ -129,9 +128,6 @@ describe("handleListModels 消费端剥调用值", () => {
     expect(models[0]!.features.i2i_model_name).toBeUndefined();
   });
 
-  // IKH8AU：下发的是**已算好的生效值**——配了用配置，未配置回落缺省，消费端不必知道缺省口径。
-  // 下列用例复用 imageView() 只是当「一条能力行」使：回落档由 handleListModels 的第一个参数
-  // （capability）决定，与夹具的 model_id / 标签无关。
   it("未配置时下发图片缺省上限 4000", async () => {
     const result = await handleListModels("image", {
       models: { listEnabledByType: vi.fn().mockResolvedValue([imageView()]) },
@@ -162,7 +158,7 @@ describe("handleListModels 消费端剥调用值", () => {
         listEnabledByType: vi.fn().mockResolvedValue([
           imageView({
             model_id: "nano-banana",
-            channel_parser: "banana",
+            channel: "banana-image",
             request_mapping: {
               quality: { "1k": "1k", "2k": "2k" },
               size: { "1:1": "1x1", "16:9": "16x9" },
@@ -176,13 +172,15 @@ describe("handleListModels 消费端剥调用值", () => {
     const banana = (
       result as {
         data: Array<{
-          supported_sizes: Array<{ available_aspect_ratios: string[] }>;
+          supported_sizes: Array<{
+            available_aspect_ratios: Array<{ id: string; label: string }>;
+          }>;
         }>;
       }
     ).data[0];
     expect(banana?.supported_sizes[0]?.available_aspect_ratios).toEqual([
-      "1:1",
-      "16:9",
+      { id: "1:1", label: "1:1" },
+      { id: "16:9", label: "16:9" },
     ]);
   });
 });

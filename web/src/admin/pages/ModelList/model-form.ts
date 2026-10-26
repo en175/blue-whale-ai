@@ -1,30 +1,26 @@
-import type { AdminModel, CreateAdminModelParams, DurationRange, ModelSize } from '@/api/admin';
+import type { AdminModel, CreateAdminModelParams, DurationRange, ModelSize } from '@/admin/api/adminModels';
+import { TYPE_TABS, type ModelType } from '@/admin/enums';
 
-export type ModelType = 'image' | 'video' | 'text' | 'audio';
-
-/** IKHBDO：表单态尺寸行。库里 `supported_sizes` 元素除 id/label 外还带出站值与像素宽高
- *  （字段集见 backend `model-capability-repo.ts` 的 `SizeJson`），原先表单只认 id/label，
- *  保存时整包覆盖 → 这三个字段每次保存都被抹掉。宽高是**输入框字符串**（空串 = 不写）。 */
 export interface SizeForm {
   id: string;
   label?: string;
-  /** 出站实际用到的档位值（如 `4k`）；留空时消费端回落用 id。 */
-  apiValue?: string;
-  /** 像素宽（仅 generation worker 消费）。 */
-  width?: string;
-  height?: string;
 }
 
-/** `supported_sizes` 元素：id/label 之外允许任意扩展字段（wire 形态）。 */
+export interface RatioForm {
+  id: string;
+  label?: string;
+}
+
+
 export type ModelSizeWire = ModelSize & Record<string, unknown>;
 
-/** snake_case → camelCase。读侧（backend `toFeatures` / worker-java）两种键形都认，
- *  且**优先认 camelCase**——表单只认 snake_case 时，camel 行会显空白并让 camel 值继续生效。 */
+
+
 export function camelFeatureKey(key: string): string {
   return key.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase());
 }
 
-/** features 中由结构化控件承载的键：命中即不进「高级 JSON」，避免同一键两处各写一份。 */
+
 export const KNOWN_FEATURE_KEYS = [
   'reference_image',
   'watermark',
@@ -44,24 +40,121 @@ export const KNOWN_FEATURE_KEYS = [
   'audio_reference_max',
   'max_reference_duration_sec',
   'i2i_model_name',
-  'image_protocol',
+
+
+
+
+
+  'task_types',
+
+
+
+
+  'video_dimensions',
 ] as const;
 
-/** ADR-0086：按任务类型的比例约束（`features.task_types`）。只有视频任务会带 task_type。 */
-export const TASK_TYPE_KEYS = ['default', 'first_frame', 'first_last_frame', 'edit', 'prolong'] as const;
+
+export const TASK_TYPE_KEYS = ['text2video', 'omni', 'image_reference', 'first_frame', 'first_last_frame', 'edit', 'extend'] as const;
 export type TaskTypeKey = (typeof TASK_TYPE_KEYS)[number];
 
-export const TYPE_TABS: { key: ModelType; label: string }[] = [
-  { key: 'image', label: '图片' },
-  { key: 'video', label: '视频' },
-  { key: 'text', label: '文生文' },
-  { key: 'audio', label: '音频' },
+export type TaskTypeDurationStrategy = 'follow' | 'auto-or-specified' | 'specified';
+
+export const TASK_TYPE_DURATION_OPTIONS: { value: TaskTypeDurationStrategy; label: string }[] = [
+  { value: 'specified', label: '指定秒数' },
+  { value: 'follow', label: '仅自动' },
+  { value: 'auto-or-specified', label: '自动或指定' },
 ];
 
 export const DEFAULT_PROVIDER_ID = 'new-api';
 
+
 export const IMAGE_CHANNEL_PARSERS = ['seedream', 'gpt', 'banana'] as const;
 export type ImageChannelParserId = (typeof IMAGE_CHANNEL_PARSERS)[number];
+
+
+export const IMAGE_PROTOCOLS = ['inline-image', 'openai-images'] as const;
+export type ImageProtocol = (typeof IMAGE_PROTOCOLS)[number];
+
+export const CHANNEL_MEDIA = ['image', 'video', 'audio', 'text'] as const;
+export type ChannelMedia = (typeof CHANNEL_MEDIA)[number];
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+export interface ChannelOption {
+  id: string;
+  label: string;
+  media: ChannelMedia;
+
+  parser: ImageChannelParserId | null;
+
+  protocol: ImageProtocol | null;
+}
+
+export const CHANNELS = [
+  { id: 'seedream-image', label: 'Seedream 图片（内联）', media: 'image', parser: 'seedream', protocol: 'inline-image' },
+  { id: 'gpt-image', label: 'GPT 图片（内联）', media: 'image', parser: 'gpt', protocol: 'inline-image' },
+  { id: 'gpt-image-openai', label: 'GPT 图片（官方 openai images 协议）', media: 'image', parser: 'gpt', protocol: 'openai-images' },
+  { id: 'banana-image', label: 'Banana 图片（内联）', media: 'image', parser: 'banana', protocol: 'inline-image' },
+  { id: 'seedream-video', label: 'Seedream 视频', media: 'video', parser: null, protocol: null },
+  { id: 'seedream-audio', label: 'Seedream 音频', media: 'audio', parser: null, protocol: null },
+  { id: 'seedream-text', label: 'Seedream 文生文', media: 'text', parser: null, protocol: null },
+] as const satisfies readonly ChannelOption[];
+
+export type ChannelId = (typeof CHANNELS)[number]['id'];
+
+
+export function isChannelId(value: unknown): value is ChannelId {
+  return typeof value === 'string' && CHANNELS.some((channel) => channel.id === value);
+}
+
+
+export function channelOf(id: ChannelId): ChannelOption {
+  return CHANNELS.find((channel) => channel.id === id) ?? CHANNELS[0];
+}
+
+
+
+
+export function defaultChannelFor(capabilityType: unknown): ChannelId {
+  switch (capabilityType) {
+    case 'video':
+      return 'seedream-video';
+    case 'audio':
+      return 'seedream-audio';
+    case 'text':
+      return 'seedream-text';
+    default:
+      return 'seedream-image';
+  }
+}
+
+
+
+export function parseStoredChannel(raw: unknown, capabilityType: unknown): ChannelId {
+  if (typeof raw === 'string') {
+    const normalized = raw.trim().toLowerCase();
+    if (isChannelId(normalized)) return normalized;
+  }
+  return defaultChannelFor(capabilityType);
+}
+
+
+export function channelsForMedia(media: unknown): ChannelOption[] {
+  return CHANNELS.filter((channel) => channel.media === media);
+}
 
 export const GPT_PROVIDER_SIZES = [
   '1024x1024',
@@ -91,7 +184,9 @@ export const DEFAULT_IMAGE_SIZES: ModelSize[] = [
   { id: '4K', label: '4K' },
 ];
 
-export const DEFAULT_IMAGE_RATIOS = ['1:1', '16:9', '9:16', '3:2', '2:3', '4:3', '3:4'];
+export const DEFAULT_IMAGE_RATIOS: RatioForm[] = ['1:1', '16:9', '9:16', '3:2', '2:3', '4:3', '3:4'].map(
+  (id) => ({ id }),
+);
 
 export type GptMatrix = Record<string, Record<string, string>>;
 
@@ -101,13 +196,13 @@ export type FormSnapshot = {
   label: string;
   icon: string;
   sizes: SizeForm[];
-  ratios: string[];
+  ratios: RatioForm[];
   durationMin: string;
   durationMax: string;
   durationStep: string;
-  /** IKG4UR：该行 `supported_durations` 原本的形态。保存时按原形态写回——
-   *  两种形态在读侧语义不同（数组被 durationInRange 当档位列表、对象当区间），
-   *  擅自改形态会悄悄改掉该行的时长约束。新建行用 'object'（区间语义无歧义）。 */
+
+
+
   durationShape: 'array' | 'object';
   formats: string[];
   defaultSize: string;
@@ -116,19 +211,29 @@ export type FormSnapshot = {
   defaultDuration: string;
   enabled: boolean;
   features: Record<string, unknown>;
-  parser: ImageChannelParserId;
-  /** 打开表单时该行的解析器（新建行 = parser 初值）。用来判断「本次是否在切换解析器」——
-   *  切到 seedream 时旧族的矩阵必须显式清掉，而 seedream→seedream 则没有任何可表达的意图。 */
-  originalParser: ImageChannelParserId;
-  /** 该行原本是否**有** request_mapping。seedream 行把矩阵清空等于让 worker 回落直传
-   *  provider size（上游 400），故「原本有矩阵 → 现在全空」要拦下来而不是静默保留/清空。 */
+
+
+  channel: ChannelId;
+
+
+  originalChannel: ChannelId;
+
+
   originalHadRequestMapping: boolean;
   gptMatrix: GptMatrix;
-  /** IKHBDO：seedream 行的尺寸换算矩阵（`request_mapping.matrix`，形状与 gpt 行的 matrix
-   *  一致，格子填像素尺寸如 `2048x2048`）。原先没有编辑器，运营改不了任何 seedream 尺寸档。 */
+
+
   seedreamMatrix: GptMatrix;
   bananaQuality: Record<string, string>;
   bananaSize: Record<string, string>;
+
+
+
+
+
+
+
+  pricing?: unknown;
 };
 
 export function isImageChannelParserId(value: string): value is ImageChannelParserId {
@@ -139,81 +244,109 @@ export function isGptProviderSize(value: string): boolean {
   return (GPT_PROVIDER_SIZES as readonly string[]).includes(value);
 }
 
-export function emptyGptMatrix(sizes: SizeForm[], ratios: string[]): GptMatrix {
+export function emptyGptMatrix(sizes: SizeForm[], ratios: RatioForm[]): GptMatrix {
+  const ratioIds = ratios.map((ratio) => ratio.id);
   const matrix: GptMatrix = {};
   for (const size of sizes) {
     if (!size.id.trim()) continue;
-    matrix[size.id] = Object.fromEntries(ratios.map((ratio) => [ratio, '']));
+    matrix[size.id] = Object.fromEntries(ratioIds.map((ratioId) => [ratioId, '']));
   }
   return matrix;
 }
 
-/** 尺寸/比例集合变化时**合并**已有矩阵，而不是重建。
- *  只保留仍存在的行与列，其余格子原样保位——重建会把整张表清零（IKHBDO：
- *  删一个尺寸行 / 删一个比例 chip 曾让整个交叉格归零）。 */
-export function mergeMatrix(prev: GptMatrix, sizes: SizeForm[], ratios: string[]): GptMatrix {
+
+
+
+export function mergeMatrix(prev: GptMatrix, sizes: SizeForm[], ratios: RatioForm[]): GptMatrix {
   const rebuilt = emptyGptMatrix(sizes, ratios);
+  const ratioIds = ratios.map((ratio) => ratio.id);
   for (const [sizeId, row] of Object.entries(prev)) {
     const target = rebuilt[sizeId];
     if (!target) continue;
-    for (const ratio of ratios) {
-      const cell = row[ratio];
-      if (cell !== undefined) target[ratio] = cell;
+    for (const ratioId of ratioIds) {
+      const cell = row[ratioId];
+      if (cell !== undefined) target[ratioId] = cell;
     }
   }
   return rebuilt;
 }
 
-/** 库里 `supported_sizes` 原始 JSON → 表单行。读侧兼容 camelCase `apiValue`
- *  （与 backend `toSizes` 的 `o.apiValue ?? o.api_value` 同口径）。 */
+
+
 export function sizesFromModel(raw: unknown): SizeForm[] {
   if (!Array.isArray(raw)) return [];
   const out: SizeForm[] = [];
   for (const item of raw) {
     if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
     const o = item as Record<string, unknown>;
-    const apiValue = o.apiValue ?? o.api_value;
     out.push({
       id: typeof o.id === 'string' ? o.id : '',
       label: typeof o.label === 'string' ? o.label : '',
-      apiValue: typeof apiValue === 'string' ? apiValue : '',
-      width: typeof o.width === 'number' && Number.isFinite(o.width) ? String(o.width) : '',
-      height: typeof o.height === 'number' && Number.isFinite(o.height) ? String(o.height) : '',
     });
   }
   return out;
 }
 
-function positiveInt(value?: string): number | null {
-  const raw = (value ?? '').trim();
-  if (!raw) return null;
-  const n = Number(raw);
-  return Number.isInteger(n) && n > 0 ? n : null;
-}
 
-/** 表单尺寸行 → 提交形态。留空的扩展字段直接**不写该键**（读侧回落 id / null），
- *  这样「清空输入框」才是真的有出口。 */
+
 export function sizeToWire(size: SizeForm): ModelSizeWire {
-  const out: ModelSizeWire = { id: size.id.trim() };
+  const id = size.id.trim();
+  const out: ModelSizeWire = { id, api_value: id };
   const label = (size.label ?? '').trim();
   if (label) out.label = label;
-  const apiValue = (size.apiValue ?? '').trim();
-  if (apiValue) out.api_value = apiValue;
-  const width = positiveInt(size.width);
-  if (width !== null) out.width = width;
-  const height = positiveInt(size.height);
-  if (height !== null) out.height = height;
   return out;
 }
 
-export function parseGptMatrix(mapping: unknown, sizes: SizeForm[], ratios: string[]): GptMatrix {
+export function ratiosFromModel(raw: unknown): RatioForm[] {
+  if (!Array.isArray(raw)) return [];
+  const out: RatioForm[] = [];
+  for (const item of raw) {
+    if (typeof item === 'string') {
+      if (item) out.push({ id: item });
+      continue;
+    }
+    if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
+    const o = item as Record<string, unknown>;
+    if (typeof o.id !== 'string' || !o.id) continue;
+    const label = typeof o.label === 'string' && o.label.trim() && o.label !== o.id ? o.label : '';
+    out.push({ id: o.id, label });
+  }
+  return out;
+}
+
+export function ratioToWire(ratio: RatioForm): { id: string; label?: string } {
+  const id = ratio.id.trim();
+  const label = (ratio.label ?? '').trim();
+  return label && label !== id ? { id, label } : { id };
+}
+
+
+
+
+
+
+function matchFormKey(formKeys: string[], raw: string): string | undefined {
+  if (formKeys.includes(raw)) return raw;
+  const lower = raw.toLowerCase();
+  return formKeys.find((key) => key.toLowerCase() === lower);
+}
+
+export function parseGptMatrix(mapping: unknown, sizes: SizeForm[], ratios: RatioForm[]): GptMatrix {
   const base = emptyGptMatrix(sizes, ratios);
   if (!mapping || typeof mapping !== 'object' || Array.isArray(mapping)) return base;
   const matrix = (mapping as { matrix?: unknown }).matrix;
   if (!matrix || typeof matrix !== 'object' || Array.isArray(matrix)) return base;
-  for (const [sizeId, row] of Object.entries(matrix as Record<string, unknown>)) {
+  const sizeIds = sizes.map((size) => size.id).filter((id) => id.trim());
+  const ratioIds = ratios.map((ratio) => ratio.id);
+  for (const [rawSizeId, row] of Object.entries(matrix as Record<string, unknown>)) {
     if (!row || typeof row !== 'object' || Array.isArray(row)) continue;
-    base[sizeId] = { ...(base[sizeId] ?? {}), ...(row as Record<string, string>) };
+
+    const sizeId = matchFormKey(sizeIds, rawSizeId) ?? rawSizeId;
+    const cells: Record<string, string> = {};
+    for (const [rawRatio, cell] of Object.entries(row as Record<string, string>)) {
+      cells[matchFormKey(ratioIds, rawRatio) ?? rawRatio] = cell;
+    }
+    base[sizeId] = { ...(base[sizeId] ?? {}), ...cells };
   }
   return base;
 }
@@ -269,8 +402,8 @@ export function validateGptMatrix(matrix: GptMatrix): string | null {
   return null;
 }
 
-/** seedream 矩阵格子：像素尺寸（`2048x2048`）；`auto` 放行（与 gpt 枚举同名的透传值）。
- *  写成 `1k` 这类非像素值会被上游 400，且界面上看不出问题，所以保存前拦下。 */
+
+
 export function validateSeedreamMatrix(matrix: GptMatrix): string | null {
   for (const row of Object.values(matrix)) {
     for (const cell of Object.values(row)) {
@@ -285,20 +418,28 @@ export function validateSeedreamMatrix(matrix: GptMatrix): string | null {
   return null;
 }
 
-/** 提交用的 request_mapping 意图（IKHBDO，与 backend `parseParserAndMapping` 契约对齐）：
- *  - `undefined`：本次**不提交**该字段——库里原样保留（seedream→seedream 的唯一正确表达：
- *    界面上没有「清空矩阵」入口，diff 提交里那个 null 不是运营意图）；
- *  - `null`：显式清空——只用于「从别的解析器切到 seedream」，此时旧族的矩阵必须消失，
- *    否则 worker 会拿 gpt 的矩阵去算 seedream 尺寸，而界面上再也清不掉；
- *  - 对象：写入新映射表。 */
-export function buildRequestMapping(form: FormSnapshot): unknown | undefined {
+
+
+
+
+
+
+
+
+
+export function buildRequestMapping(
+  form: FormSnapshot,
+  parser: ImageChannelParserId = channelOf(form.channel).parser ?? 'seedream',
+): unknown | undefined {
   if (form.type !== 'image') return undefined;
-  if (form.parser === 'seedream') {
+  if (parser === 'seedream') {
+
+
     const matrix = compactGptMatrix(form.seedreamMatrix);
     if (Object.keys(matrix).length) return { matrix };
-    return form.originalParser === 'seedream' ? undefined : null;
+    return channelOf(form.originalChannel).parser === 'seedream' ? undefined : null;
   }
-  if (form.parser === 'gpt') return { matrix: compactGptMatrix(form.gptMatrix) };
+  if (parser === 'gpt') return { matrix: compactGptMatrix(form.gptMatrix) };
   return {
     quality: compactStringMap(form.bananaQuality),
     size: compactStringMap(form.bananaSize),
@@ -310,9 +451,9 @@ function parseDurationFields(form: FormSnapshot): number[] | DurationRange | nul
   const max = form.durationMax.trim();
   const step = form.durationStep.trim();
   if (!min && !max && !step) return null;
-  // IKHBDO：按**位置**取三项，不能 `[min,max,step].filter(Boolean)`——「只填 min + step、
-  // 留空 max」会让 step 顶到第 2 位被写成 max，区间被静默改错（4~30 变成「4 起、每 1 秒一档」的谎）。
-  // 任一项缺失/非数字/为负 → null，由调用方给出可读报错，绝不半写。
+
+
+
   if (!min || !max) return null;
   const minN = Number(min);
   const maxN = Number(max);
@@ -320,9 +461,9 @@ function parseDurationFields(form: FormSnapshot): number[] | DurationRange | nul
   if (minN > maxN) return null;
   const stepN = step ? Number(step) : undefined;
   if (stepN !== undefined && (!Number.isFinite(stepN) || stepN <= 0)) return null;
-  // IKG4UR：按**原形态**写回——数组行写数组、对象行写对象。
-  // 两种形态在读侧语义不同（数组被 durationInRange 当档位列表用、对象当区间用），
-  // 保存时若擅自改形态，会把该行的时长约束悄悄改掉（如 4–30 缩成 {1,4,30}）。
+
+
+
   if (form.durationShape === 'array') {
     return stepN === undefined ? [minN, maxN] : [minN, maxN, stepN];
   }
@@ -334,19 +475,21 @@ export function typeName(type: ModelType) {
 }
 
 export function buildCreateParams(form: FormSnapshot): { ok: true; value: CreateAdminModelParams } | { ok: false; error: string } {
+  const parser = channelOf(form.channel).parser ?? 'seedream';
+  const originalParser = channelOf(form.originalChannel).parser ?? 'seedream';
   if (!form.modelId.trim() || !form.label.trim()) {
     return { ok: false, error: '模型 ID、展示名为必填项。' };
   }
-  if (form.type === 'image' && form.parser === 'gpt') {
+  if (form.type === 'image' && parser === 'gpt') {
     const gptErr = validateGptMatrix(form.gptMatrix);
     if (gptErr) return { ok: false, error: gptErr };
   }
-  if (form.type === 'image' && form.parser === 'seedream') {
+  if (form.type === 'image' && parser === 'seedream') {
     const seedreamErr = validateSeedreamMatrix(form.seedreamMatrix);
     if (seedreamErr) return { ok: false, error: seedreamErr };
-    // 把矩阵整张清空 = 让 worker 回落成「直传 provider size」（IK629 之前的老毛病，
-    // 上游 400 Invalid size）。库里本来有矩阵时这绝不是运营意图，拦下并说明。
-    if (form.originalParser === 'seedream' && form.originalHadRequestMapping && !Object.keys(compactGptMatrix(form.seedreamMatrix)).length) {
+
+
+    if (originalParser === 'seedream' && form.originalHadRequestMapping && !Object.keys(compactGptMatrix(form.seedreamMatrix)).length) {
       return {
         ok: false,
         error: 'Seedream 尺寸矩阵不能整张清空（清空后该模型出站尺寸会回落成 provider 原值，上游会 400）。至少保留一格。',
@@ -354,12 +497,12 @@ export function buildCreateParams(form: FormSnapshot): { ok: true; value: Create
     }
   }
 
-  // IKG4UR：时长只对视频可配（音频上游无 duration 参数、库里已置 NULL）——
-  // 在代码层钉死不变式「supported_durations 非空 ⟺ 该模型时长可配」。
+
+
   const durations = form.type === 'video' ? parseDurationFields(form) : null;
-  // IKG4UR：**任一时长字段有值就必须成对**——原先的条件是 `min && max`，
-  // 只在两端都填时才可能进入，而「只填一端」恰恰是它文案说的场景（条件恒假 = 校验形同虚设）：
-  // 视频行清空「最大秒」会被静默存成「不配时长」（滑杆消失、服务端放行任意正数）。
+
+
+
   if (form.type === 'video' && (form.durationMin || form.durationMax || form.durationStep)) {
     if (durations == null) {
       return {
@@ -370,7 +513,10 @@ export function buildCreateParams(form: FormSnapshot): { ok: true; value: Create
   }
 
   const sizes = form.type === 'text' || form.type === 'audio' ? [] : form.sizes.filter((s) => s.id.trim()).map(sizeToWire);
-  const ratios = form.type === 'text' || form.type === 'audio' ? [] : form.ratios.filter(Boolean);
+  const ratios =
+    form.type === 'text' || form.type === 'audio'
+      ? []
+      : form.ratios.filter((ratio) => ratio.id.trim()).map(ratioToWire);
   const formats = form.type === 'text' ? [] : form.formats.filter(Boolean);
 
   let defaultDuration: number | null = null;
@@ -391,8 +537,8 @@ export function buildCreateParams(form: FormSnapshot): { ok: true; value: Create
     supported_aspect_ratios: ratios,
     supported_durations: durations,
     supported_formats: formats,
-    // IKHEXG：这两列在后端是 NOT NULL（VarChar），「未配」的形态是**空串**——
-    // 发 null 会被写闸门拒（保存必然 400，实测症状）。非图片/视频行没有尺寸/比例概念，同样发空串。
+
+
     default_size: form.type === 'image' || form.type === 'video' ? form.defaultSize.trim() : '',
     default_aspect_ratio: form.type === 'image' || form.type === 'video' ? form.defaultRatio.trim() : '',
     default_format: form.type === 'text' ? null : form.defaultFormat.trim() || null,
@@ -401,13 +547,39 @@ export function buildCreateParams(form: FormSnapshot): { ok: true; value: Create
     enabled: form.enabled,
   };
   if (form.type === 'image') {
-    params.channel_parser = form.parser;
-    // IKHBDO：`undefined` = 本次不提交该字段（库里原样保留），不能写成 null——
-    // seedream 行的 null 在更新侧被后端当「不改」，而在新建/切族场景两者含义不同。
-    const mapping = buildRequestMapping(form);
+
+    params.channel = form.channel;
+
+
+    const mapping = buildRequestMapping(form, parser);
     if (mapping !== undefined) params.request_mapping = mapping;
   }
+
+
+  if (form.pricing !== undefined) params.pricing = form.pricing;
   return { ok: true, value: params };
+}
+
+
+
+
+function sizesForDiff(raw: unknown): string {
+  const rows = Array.isArray(raw) ? raw : [];
+  return JSON.stringify(
+    rows.map((item) => {
+      const o = (item ?? {}) as Record<string, unknown>;
+      return [
+        typeof o.id === 'string' ? o.id.trim() : '',
+        typeof o.label === 'string' ? o.label.trim() : '',
+      ];
+    }),
+  );
+}
+
+function ratiosForDiff(raw: unknown): string {
+  return JSON.stringify(
+    ratiosFromModel(raw).map((ratio) => [ratio.id, ratio.label || ratio.id]),
+  );
 }
 
 export function diffUpdateParams(
@@ -417,12 +589,12 @@ export function diffUpdateParams(
   const changes: Partial<CreateAdminModelParams> = {};
   if (created.model_label !== initial.model_label) changes.model_label = created.model_label;
   if ((created.icon ?? null) !== (initial.icon ?? null)) changes.icon = created.icon ?? null;
-  if (JSON.stringify(created.supported_sizes ?? []) !== JSON.stringify(initial.supported_sizes ?? [])) {
+  if (sizesForDiff(created.supported_sizes) !== sizesForDiff(initial.supported_sizes)) {
     changes.supported_sizes = created.supported_sizes;
   }
   if (
-    JSON.stringify(created.supported_aspect_ratios ?? []) !==
-    JSON.stringify(initial.supported_aspect_ratios ?? [])
+    ratiosForDiff(created.supported_aspect_ratios) !==
+    ratiosForDiff(initial.supported_aspect_ratios)
   ) {
     changes.supported_aspect_ratios = created.supported_aspect_ratios;
   }
@@ -435,8 +607,8 @@ export function diffUpdateParams(
   if (JSON.stringify(created.features ?? {}) !== JSON.stringify(initial.features ?? {})) {
     changes.features = created.features;
   }
-  // IKHEXG：两侧都归一到空串再比。库里是 ''、create 侧对非图片/视频行恒为 ''，用 `?? null` 比会把
-  // 「其实等价」判成变更，进而把 null 塞进提交体被写闸门拒——非图片/视频行保存必然 400 的根因。
+
+
   if ((created.default_size ?? '') !== (initial.default_size ?? '')) changes.default_size = created.default_size ?? '';
   if ((created.default_aspect_ratio ?? '') !== (initial.default_aspect_ratio ?? '')) {
     changes.default_aspect_ratio = created.default_aspect_ratio ?? '';
@@ -448,25 +620,48 @@ export function diffUpdateParams(
     changes.default_duration = created.default_duration ?? null;
   }
   if (created.enabled !== initial.enabled) changes.enabled = created.enabled;
-  if ((created.channel_parser ?? 'seedream') !== (initial.channel_parser ?? 'seedream')) {
-    changes.channel_parser = created.channel_parser;
-  }
-  // IKHBDO：`undefined` = 表单没有可表达的映射意图（seedream 行），既不算变更也不要覆盖——
-  // 原先无条件比较 `?? null`，让每个 seedream 行的「原样保存」都提交一次 null。
+
+
   if (
-    created.request_mapping !== undefined &&
-    JSON.stringify(created.request_mapping) !== JSON.stringify(initial.request_mapping ?? null)
+    parseStoredChannel(created.channel, initial.capability_type) !==
+    parseStoredChannel(initial.channel, initial.capability_type)
   ) {
+    changes.channel = created.channel;
+  }
+
+
+  const mappingChanged =
+    created.request_mapping !== undefined &&
+    JSON.stringify(created.request_mapping) !== JSON.stringify(initial.request_mapping ?? null);
+  if (mappingChanged) {
     changes.request_mapping = created.request_mapping;
+  }
+
+
+
+
+
+
+  if (mappingChanged) {
+    changes.supported_sizes = created.supported_sizes;
+  }
+
+
+
+  if (
+    created.pricing !== undefined &&
+    JSON.stringify(created.pricing) !== JSON.stringify(initial.pricing ?? null)
+  ) {
+    changes.pricing = created.pricing;
   }
   return changes;
 }
 
 export function durationsFromModel(model?: AdminModel): { min: string; max: string; step: string } {
   const raw = model?.supported_durations;
-  // IKG4UR：库里 `supported_durations` 有数组与对象两种形态——管理端提交用数组，
-  // 而消费端契约、种子与迁移写入的是 `{min,max,step}`。只认数组会让表单把对象行读成空串，
-  // 保存时整列被覆盖成 null（静默数据损坏）。两种形态都要认，往返才无损。
+
+
+
   if (raw != null && typeof raw === 'object' && !Array.isArray(raw)) {
     const range = raw as { min?: unknown; max?: unknown; step?: unknown };
     return {
@@ -483,29 +678,36 @@ export function durationsFromModel(model?: AdminModel): { min: string; max: stri
   };
 }
 
+
+
 export function parserFromModel(model?: AdminModel): ImageChannelParserId {
-  const value = model?.channel_parser;
-  return typeof value === 'string' && isImageChannelParserId(value) ? value : 'seedream';
+  return channelOf(channelFromModel(model)).parser ?? 'seedream';
 }
 
-/** features 取值：优先 snake_case，缺失回落 camelCase。
- *  读侧（backend `toFeatures` / worker-java）**优先 camelCase**，只认 snake_case 会让
- *  camel 行的结构化控件显空白，而实际生效的仍是 camel 值。 */
+
+
+export function channelFromModel(model?: AdminModel): ChannelId {
+  return parseStoredChannel(model?.channel, model?.capability_type);
+}
+
+
+
+
 export function readFeature(features: Record<string, unknown> | undefined, key: string): unknown {
   if (!features) return undefined;
   const snake = features[key];
   return snake !== undefined ? snake : features[camelFeatureKey(key)];
 }
 
-/** 该 features 对象里是否出现过这个键（含 camelCase 写法）。
- *  用来判断「结构化控件关掉一个布尔位」要不要显式写 false。 */
+
+
 export function hasFeatureKey(features: Record<string, unknown> | undefined, key: string): boolean {
   if (!features) return false;
   return key in features || camelFeatureKey(key) in features;
 }
 
-/** 结构化控件能承载的取值类型。类型不符的脏值不归控件管，留在高级 JSON 里原样回写，
- *  避免「读成空白 → 保存把整个键删掉」这种静默数据丢失（写侧闸门会拒，报错好过丢数据）。 */
+
+
 const FEATURE_NUMBER_KEYS = new Set([
   'image_reference_max',
   'quantity_max',
@@ -514,7 +716,11 @@ const FEATURE_NUMBER_KEYS = new Set([
   'audio_reference_max',
   'max_reference_duration_sec',
 ]);
-const FEATURE_STRING_KEYS = new Set(['i2i_model_name', 'image_protocol']);
+
+
+
+
+const FEATURE_STRING_KEYS = new Set(['i2i_model_name']);
 
 export function featureValueTypeOk(key: string, value: unknown): boolean {
   if (FEATURE_NUMBER_KEYS.has(key)) return typeof value === 'number' && Number.isFinite(value);
@@ -522,8 +728,6 @@ export function featureValueTypeOk(key: string, value: unknown): boolean {
   return typeof value === 'boolean';
 }
 
-/** `features.task_types` → 每个任务类型的 allowed_ratios（表单态）。
- *  其它子键（如已退役的 allowed_durations）与未列出的任务类型不进表单，由 `buildTaskTypes` 原样带回。 */
 export function pickTaskTypeRatios(features: Record<string, unknown> | undefined): Record<string, string[]> {
   const raw = readFeature(features, 'task_types');
   const map = raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
@@ -539,14 +743,47 @@ export function pickTaskTypeRatios(features: Record<string, unknown> | undefined
   return out;
 }
 
-/** 表单的 task_types 编辑态 + 原对象 → 提交用的 task_types。
- *  只动 `allowed_ratios`：其它子键、其它任务类型原样保留（整包替换会把它们抹掉）。 */
+export function pickTaskTypeEnabled(features: Record<string, unknown> | undefined): Record<string, boolean> {
+  const raw = readFeature(features, 'task_types');
+  const map = raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
+  const out: Record<string, boolean> = {};
+  for (const taskType of TASK_TYPE_KEYS) {
+    out[taskType] = Object.prototype.hasOwnProperty.call(map, taskType);
+  }
+  return out;
+}
+
+export function pickTaskTypeDuration(features: Record<string, unknown> | undefined): Record<string, TaskTypeDurationStrategy> {
+  const raw = readFeature(features, 'task_types');
+  const map = raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
+  const out: Record<string, TaskTypeDurationStrategy> = {};
+  for (const taskType of TASK_TYPE_KEYS) {
+    const entry = map[taskType];
+    const record =
+      entry && typeof entry === 'object' && !Array.isArray(entry)
+        ? (entry as Record<string, unknown>)
+        : null;
+    const durations = record?.allowed_durations;
+    if (Array.isArray(durations) && durations.length === 1 && durations[0] === -1) {
+      out[taskType] = 'follow';
+    } else if (record?.allow_auto_duration === true) {
+      out[taskType] = 'auto-or-specified';
+    } else {
+      out[taskType] = 'specified';
+    }
+  }
+  return out;
+}
+
 export function buildTaskTypes(
   base: Record<string, unknown>,
   ratios: Record<string, string[]>,
+  enabled: Record<string, boolean>,
+  duration: Record<string, TaskTypeDurationStrategy> = {},
 ): Record<string, unknown> {
-  const out: Record<string, unknown> = { ...base };
+  const out: Record<string, unknown> = {};
   for (const taskType of TASK_TYPE_KEYS) {
+    if (!enabled[taskType]) continue;
     const list = (ratios[taskType] ?? []).map((s) => s.trim()).filter(Boolean);
     const entry = base[taskType];
     const rest =
@@ -554,9 +791,14 @@ export function buildTaskTypes(
         ? { ...(entry as Record<string, unknown>) }
         : {};
     delete rest.allowed_ratios;
-    if (list.length) out[taskType] = { ...rest, allowed_ratios: list };
-    else if (Object.keys(rest).length) out[taskType] = rest;
-    else delete out[taskType];
+    delete rest.allowed_durations;
+    delete rest.allow_auto_duration;
+    const next: Record<string, unknown> = { ...rest };
+    if (list.length) next.allowed_ratios = list;
+    const strategy = duration[taskType] ?? 'specified';
+    if (strategy === 'follow') next.allowed_durations = [-1];
+    else if (strategy === 'auto-or-specified') next.allow_auto_duration = true;
+    out[taskType] = next;
   }
   return out;
 }

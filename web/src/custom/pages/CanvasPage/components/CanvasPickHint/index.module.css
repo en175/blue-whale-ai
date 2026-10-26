@@ -1,0 +1,40 @@
+.pickHint {
+  position: absolute;
+  top: var(--spacing-lg);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: var(--spacing-xs) var(--spacing-lg);
+  border-radius: var(--radius-full);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  background-color: rgba(26, 26, 26, 0.9);
+  border: 1px solid var(--color-border-hover);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  z-index: 30;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.pickHintSession {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  padding: 6px 18px;
+  pointer-events: auto;
+}
+
+.pickHintFinish {
+  padding: 2px 6px;
+  font-size: var(--font-size-sm);
+  color: #1a1a1a;
+  background: #d4d4d4;
+  border: none;
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.pickHintFinish:hover {
+  background: #e8e8e8;
+}

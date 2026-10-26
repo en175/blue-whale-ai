@@ -1,6 +1,6 @@
 import "reflect-metadata";
 import { Module } from "@nestjs/common";
-import { NestFactory } from "@nestjs/core";
+import { APP_FILTER, NestFactory } from "@nestjs/core";
 import { json } from "express";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { CanvasesController } from "./canvases.controller.js";
@@ -15,12 +15,14 @@ import { ProjectService } from "@lib/shared/project/project.service.js";
 import { JobsService } from "@lib/shared/jobs/jobs.service.js";
 import { GenerationCommandService } from "@lib/shared/generation/generation-command.service.js";
 import { ModelCapabilityReadService } from "@lib/shared/generation/model-capability.service.js";
-import { GenerationCostEstimatorService } from "@lib/shared/generation/cost-estimator.service.js";
+import { MaterialService } from "@lib/shared/material/material.service.js";
+import { SystemSettingsService } from "@lib/shared/system-settings/index.js";
+import { AssetService } from "@lib/shared/assets/assets.service.js";
+import { AssetStorageService } from "@lib/shared/assets/storage.service.js";
+import { AccountDirectoryService } from "@lib/shared/identity/account-directory.service.js";
 import { textInputSignatureOf, VIDEO_TEXT_INDEX_FRAME_CONFLICT_MESSAGE } from "@lib/contracts";
+import { AllExceptionsFilter } from "@lib/infra/filters/all-exceptions.filter.js";
 
-// 入队函数在测试中被 stub（对齐 audio-draft.integration.test.ts 先例）：任务停在 queued，
-// 终态由测试直接翻 DB——音频 IKCR78 fail-fast（无 MQ 入队异常 → markFailed「任务入队失败」）
-// 会终止前端轮询、阻断签名回写断言；图片/视频入队失败仅记日志不受影响。
 vi.mock("@lib/shared/generation/generation-queue.js", () => ({
   enqueueVideoGenerationJob: vi.fn(async () => {}),
   enqueueImageGenerationJob: vi.fn(async () => {}),
@@ -31,14 +33,19 @@ vi.mock("@lib/shared/generation/generation-queue.js", () => ({
   closeGenerationQueue: vi.fn(async () => {}),
 }));
 
-/* IKFM3S 文本索引下游同步契约 v1 集成（隔离 MySQL，IKFM3S_DATABASE_URL 门控）：
-   真实保存 + 提交 API → 数据库核对——契约见 docs/specs/2026-09-14-ikfm3s-text-index-sync-contract.md。
-   - 权威并入：文本带入素材追加 input_asset_ids 尾部、text_attachments[].media 与 text_input_signature 冻结；
-   - 同源预演：body 已含文本素材时序不变；同 assetId 去重；
-   - 阻止发送：失效索引 / 不支持媒体类型 / 合并超限 400 且零建任务；
-   - 回归：无媒体索引的普通文本连线行为不变。
-   IKFM3W（契约 §10 视频目标扩展）：references 单数组并入、帧互斥、能力位类型阻止、
-   分类超限、混合目标独立处理、重试复用与普通文本回归。 */
+vi.mock("@lib/shared/billing/billing-client.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@lib/shared/billing/billing-client.js")>();
+  return {
+    ...actual,
+    sharedBillingClient: () => ({
+      charge: async () => ({ chargedCredits: 1, catalogVersion: 1, duplicated: false }),
+      quote: async () => ({ credits: BigInt(1), catalogVersion: 1 }),
+      queryBalance: async () => ({ availableCredits: 0, expiring: [] }),
+      listTransactions: async () => ({ items: [], total: 0 }),
+    }),
+  };
+});
+
 describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync contract (IKFM3S)", () => {
   const prisma = new PrismaService();
   const projects = new ProjectService(prisma);
@@ -69,6 +76,7 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
         default_size: "1024x1024",
         default_aspect_ratio: "1:1",
         features: { reference_image: true },
+        channel: "seedream-image",
       },
       update: { supported_sizes: sizes, default_size: "1024x1024", features: { reference_image: true } },
     });
@@ -85,12 +93,10 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
         default_size: "1024x1024",
         default_aspect_ratio: "1:1",
         features: { image_reference_max: 1 },
+        channel: "seedream-image",
       },
       update: { features: { image_reference_max: 1 } },
     });
-    // IKFM3W：视频目标测试模型（契约 §10）——全能参考（video_reference 开 / audio 关）、
-    // 图片参考上限 1（超限联算）、video_reference 关（类型能力位阻止）。
-    // sort_order：默认模型排最前（浏览器段面板默认选中它，避免误选 limit/novid 档）。
     const videoFeatures = { reference_image: true, video_reference: true, audio_reference: false, image_reference_max: 10 };
     for (const [modelId, label, features, sortOrder] of [
       [VIDEO_MODEL_ID, "IKFM3W Video", videoFeatures, 0],
@@ -112,13 +118,12 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
           default_size: "1024x1024",
           default_aspect_ratio: "1:1",
           features,
+          channel: "seedream-video",
           sort_order: sortOrder,
         },
         update: { features, supported_durations: [5, 10, 1], default_duration: 5 },
       });
     }
-    // IKFM41：音频目标测试模型（契约 §11）——缺省分类上限（audio 3 / image 1）、
-    // 超限档（audio_reference_max=1 联算超限）。
     for (const [modelId, label, features] of [
       [AUDIO_MODEL_ID, "IKFM41 Audio", {}],
       [AUDIO_LIMIT_MODEL_ID, "IKFM41 Audio Limit", { audio_reference_max: 1 }],
@@ -136,6 +141,7 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
           default_size: "mp3",
           default_aspect_ratio: "1:1",
           features,
+          channel: "seedream-audio",
         },
         update: { features },
       });
@@ -143,22 +149,29 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
     const canvasService = new CanvasService(prisma, projects);
     const jobsService = new JobsService(prisma, projects);
     Reflect.defineMetadata("design:paramtypes", [CanvasService], CanvasesController);
-    Reflect.defineMetadata("design:paramtypes", [ProjectService, GenerationCommandService, ModelCapabilityReadService, GenerationCostEstimatorService, CanvasService], GenerationJobsController);
+    Reflect.defineMetadata("design:paramtypes", [ProjectService, GenerationCommandService, ModelCapabilityReadService, CanvasService, MaterialService, AssetService, AssetStorageService, AccountDirectoryService], GenerationJobsController);
     Reflect.defineMetadata("design:paramtypes", [ModelCapabilityReadService], GenerationModelsController);
     Reflect.defineMetadata("design:paramtypes", [JobsService], JobsController);
     Reflect.defineMetadata("design:paramtypes", [ProjectService, CanvasService, SnapshotService, PrismaService], ProjectsController);
     class HarnessModule {}
     Module({ controllers: [CanvasesController, GenerationJobsController, GenerationModelsController, JobsController, ProjectsController], providers: [
+      { provide: APP_FILTER, useClass: AllExceptionsFilter },
+      { provide: MaterialService, useValue: new MaterialService(prisma, new SystemSettingsService(prisma)) },
+      { provide: AssetService, useValue: new AssetService(prisma, new AssetStorageService()) },
+      { provide: AssetStorageService, useValue: new AssetStorageService() },
       { provide: CanvasService, useValue: canvasService },
       { provide: ProjectService, useValue: projects },
       { provide: PrismaService, useValue: prisma },
       { provide: JobsService, useValue: jobsService },
       { provide: GenerationCommandService, useValue: new GenerationCommandService(prisma) },
       { provide: ModelCapabilityReadService, useValue: new ModelCapabilityReadService(prisma) },
-      { provide: GenerationCostEstimatorService, useValue: new GenerationCostEstimatorService() },
       { provide: SnapshotService, useValue: new SnapshotService(prisma) },
+      { provide: MaterialService, useValue: new MaterialService(prisma, new SystemSettingsService(prisma)) },
+      { provide: AssetService, useValue: new AssetService(prisma, new AssetStorageService()) },
+      { provide: AccountDirectoryService, useValue: new AccountDirectoryService(prisma) },
     ] })(HarnessModule);
     app = await NestFactory.create(HarnessModule, { logger: false, bodyParser: false });
+    app.useGlobalFilters(new AllExceptionsFilter());
     app.use(json({ limit: "16mb" }));
     app.setGlobalPrefix("api");
     app.use((req: { user: unknown }, _res: unknown, next: () => void) => {
@@ -214,8 +227,6 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
     };
   }
 
-  /** 夹具：图片目标 gen-1 + 文本卡 text-1（正文索引 media-1）+ 直接参考 media-2。
-   *  返回画布保存所需的节点/连线与素材 id。 */
   async function seedIndexedCanvas(projectName: string, options: { dropIndexEdge?: boolean; videoRef?: boolean } = {}) {
     const project = await projects.create("987654", projectName);
     const projectId = project.id;
@@ -250,7 +261,6 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
     const created = await createJob(projectId, imageJobBody("gen-1", "暮色", [directAssetId]));
     expect(created.code).toBe(200);
     const job = await readJob(created.data.generation_job_id);
-    // 直接参考在前、文本带入追加尾部（body 未携带 → 后端权威并入）
     expect(job!.input.input_asset_ids).toEqual([directAssetId, imageAssetId]);
     expect(job!.input.text_attachments).toEqual([
       {
@@ -260,7 +270,6 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
         media: [{ node_id: "media-1", asset_id: imageAssetId, media_type: "image" }],
       },
     ]);
-    // 签名与前端同源（同一契约函数）：正文 + 有效身份 + 边序
     expect(job!.input.text_input_signature).toBe(
       textInputSignatureOf([
         { nodeId: "text-1", text: "用图片1出图", identities: [{ sourceNodeId: "media-1", assetId: imageAssetId, mediaType: "image" }] },
@@ -279,7 +288,6 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
     });
     expect(created.code).toBe(200);
     const job = await readJob(created.data.generation_job_id);
-    // IKG6EK / ADR-0088：正文一律取 parameters.prompt；doc 不读、不冻结
     expect(job!.input.prompt).toBe("重绘");
     expect(job!.input).not.toHaveProperty("prompt_doc");
     expect(job!.input.input_asset_ids).toEqual([directAssetId, imageAssetId]);
@@ -316,7 +324,6 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
     const { projectId, imageAssetId, directAssetId } = await seedIndexedCanvas("IKFR50 plan snapshot");
     const canvas = await prisma.client.canvas.findUnique({ where: { project_id: BigInt(projectId) } });
     const nodes = canvas!.nodes_json as unknown as Array<{ id: string; data: Record<string, unknown> }>;
-    // 预置已应用的历史方案；普通保存 API 不允许伪造 promptSource。
     const planNodes = [...nodes, {
       id: "plan-1", type: "textNode", position: { x: 0, y: 500 }, data: {
         text: "电影质感", promptSource: { sessionId: "test-session", revisionId: "test-revision", shotNo: 1 },
@@ -334,8 +341,6 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
     const job = await readJob(created.data.generation_job_id);
     const snapshot = job!.input.prompt_plan_snapshot as { images: Array<{ assetId: string }> };
     expect(snapshot.images.map((item) => item.assetId)).toEqual([directAssetId, imageAssetId]);
-    // IKG6EK / ADR-0088：providerPrompt 已退役——正文由提交方给全、引用标记转移在接纳管线完成，
-    // 方案快照退为方案绑定校验与审计事实。
     expect(snapshot).not.toHaveProperty("providerPrompt");
   });
 
@@ -344,12 +349,10 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
     const created = await createJob(projectId, imageJobBody("gen-1", "暮色", [directAssetId]));
     expect(created.code).toBe(200);
     const original = await readJob(created.data.generation_job_id);
-    // 提交后编辑画布（正文变化）：重试必须沿用原冻结输入，不读取后续编辑
     const canvasRow = await prisma.client.canvas.findUnique({ where: { project_id: BigInt(projectId) } });
     const retryNodes = canvasRow!.nodes_json as unknown as Array<{ id: string; data: Record<string, unknown> }>;
     retryNodes.find((node) => node.id === "text-1")!.data.text = "提交后改的正文";
     await saveCanvas(projectId, retryNodes, canvasRow!.edges_json as unknown as unknown[], canvasRow!.version);
-    // 翻失败让任务可重试（重试入口仅对终态失败任务开放：job + 输出槽，同 IKDMQV 模式）
     await prisma.client.generation_output_slots.updateMany({
       where: { generation_job_id: BigInt(created.data.generation_job_id) },
       data: { status: "failed" },
@@ -374,7 +377,6 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
 
   it("同源预演：body 已含文本素材时序不变（后端零追加）", async () => {
     const { projectId, imageAssetId, directAssetId } = await seedIndexedCanvas("IKFM3S premerged");
-    // 前端同源预演：直接参考 + 文本素材已按合并序提交 → 后端零追加、序保持
     const created = await createJob(projectId, imageJobBody("gen-1", "暮色", [directAssetId, imageAssetId]));
     expect(created.code).toBe(200);
     const job = await readJob(created.data.generation_job_id);
@@ -385,7 +387,7 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
     const { projectId } = await seedIndexedCanvas("IKFM3S invalid", { dropIndexEdge: true });
     const before = await jobCount(projectId);
     const created = await createJob(projectId, imageJobBody("gen-1", "暮色"));
-    expect(created.code).toBe(400);
+    expect(created.code).toBe(1034);
     expect(created.msg).toBe("文本索引存在失效素材，请修复来源文本后提交");
     expect(await jobCount(projectId)).toBe(before);
   });
@@ -394,7 +396,7 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
     const { projectId } = await seedIndexedCanvas("IKFM3S unsupported", { videoRef: true });
     const before = await jobCount(projectId);
     const created = await createJob(projectId, imageJobBody("gen-1", "暮色"));
-    expect(created.code).toBe(400);
+    expect(created.code).toBe(1035);
     expect(created.msg).toBe("文本索引包含目标不支持的媒体类型，请修改来源文本");
     expect(await jobCount(projectId)).toBe(before);
   });
@@ -403,7 +405,7 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
     const { projectId, directAssetId } = await seedIndexedCanvas("IKFM3S overflow");
     const before = await jobCount(projectId);
     const created = await createJob(projectId, imageJobBody("gen-1", "暮色", [directAssetId], LIMIT_MODEL_ID));
-    expect(created.code).toBe(400);
+    expect(created.code).toBe(1004);
     expect(created.msg).toBe("参考图最多 1 张");
     expect(await jobCount(projectId)).toBe(before);
   });
@@ -421,7 +423,6 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
     const job = await readJob(created.data.generation_job_id);
     expect(job!.input.input_asset_ids).toBeUndefined();
     expect(job!.input.text_attachments).toEqual([{ node_id: "text-1", title: "文本", text: "赛博朋克" }]);
-    // 普通文本正文也是文本输入：签名覆盖（空媒体映射），「输入已更新」随正文变化派生
     expect(job!.input.text_input_signature).toBe(
       textInputSignatureOf([{ nodeId: "text-1", text: "赛博朋克", identities: [] }]),
     );
@@ -432,7 +433,6 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
     const first = await createJob(projectId, imageJobBody("gen-1", "暮色", [directAssetId]));
     expect(first.code).toBe(200);
     const firstJob = await readJob(first.data.generation_job_id);
-    // 修改正文（保留索引）再提交 → 签名变化
     const canvas = await prisma.client.canvas.findUnique({ where: { project_id: BigInt(projectId) } });
     const nodes = canvas!.nodes_json as unknown as Array<{ id: string; data: Record<string, unknown> }>;
     const edges = canvas!.edges_json as unknown as unknown[];
@@ -443,10 +443,9 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
     expect(second.code).toBe(200);
     const secondJob = await readJob(second.data.generation_job_id);
     expect(secondJob!.input.text_input_signature).not.toBe(firstJob!.input.text_input_signature);
-    // 素材被删（软删）后提交：文本带入素材存在性复核拒绝（阻止发送，不静默丢）
     await prisma.client.assets.update({ where: { id: BigInt(imageAssetId) }, data: { is_delete: true } });
     const third = await createJob(projectId, imageJobBody("gen-1", "暮色", [directAssetId]));
-    expect(third.code).toBe(400);
+    expect(third.code).toBe(1034);
     expect(third.msg).toBe("参考素材不存在或无权访问");
   });
 
@@ -456,7 +455,6 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
     const projectId = (await projects.create("987654", "IKFM3S browser")).id;
     const indexedAssetId = await createAsset(projectId, "image", "https://example.com/indexed.png");
     const directAssetId = await createAsset(projectId, "image", "https://example.com/direct.png");
-    // 预置：被索引素材 m1 + 直接参考 m2 + 带媒体索引的文本卡 t1（正文 @ 标签经保存 API 落库）+ 图片草稿 d1
     const nodes = [
       { id: "m1", type: "mediaNode", position: { x: 100, y: 80 }, data: { assetId: indexedAssetId, mediaType: "image", src: "https://example.com/indexed.png", fileName: "索引图" } },
       { id: "m2", type: "mediaNode", position: { x: 100, y: 320 }, data: { assetId: directAssetId, mediaType: "image", src: "https://example.com/direct.png", fileName: "直接图" } },
@@ -503,7 +501,6 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
       await nodeById("t1").waitFor();
       await nodeById("d1").waitFor();
 
-      // 1) 文本卡连到图片目标：真实拖线 t1 → d1 → 右上角显眼「输入已更新」
       const src = page.locator('.react-flow__node[data-id="t1"] .react-flow__handle-right');
       const dst = page.locator('.react-flow__node[data-id="d1"] .react-flow__handle-left');
       const sb = (await src.boundingBox())!;
@@ -515,7 +512,6 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
       await vi.waitFor(async () => expect(await badge.count(), "文本连线后目标右上角显示输入已更新").toBe(1));
       await page.screenshot({ path: "/tmp/ikfm3s-badge.png", fullPage: true });
 
-      // 2) 打开目标面板：文本带入素材以锁定条目进参考栏（无移除入口、有定位入口）+ 文本附件
       await nodeById("d1").locator('[data-testid="media-content"]').click();
       await editor.waitFor();
       await vi.waitFor(async () => expect(await dockRefs.count(), "直接参考 + 文本带入参考").toBe(2));
@@ -523,10 +519,8 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
       const removable = dockRefs.filter({ has: page.locator('button[title="移除"]') });
       await vi.waitFor(async () => expect(await locked.count(), "文本带入条目锁定（定位入口）").toBe(1));
       await vi.waitFor(async () => expect(await removable.count(), "直接参考可移除").toBe(1));
-      // 编号合并：文本素材编号 2（直接参考在前）
       expect(await dockRefs.nth(1).locator('[data-testid="ref-thumb-badge"]').textContent()).toBe("2");
 
-      // 3) 发送：请求体含文本带入素材（前端同源预演，与 Dock 显示一致）
       await editor.click();
       await page.keyboard.type("参考这张图重新绘制");
       const acceptedResponse = page.waitForResponse((response) =>
@@ -536,7 +530,6 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
       expect(generationRequests[0].target_node_id).toBe("d1");
       expect(generationRequests[0].input_asset_ids).toEqual([directAssetId, indexedAssetId]);
 
-      // 4) DB 翻 succeeded 模拟供应商终态：轮询拿签名回写 → 徽标清除
       const response = await acceptedResponse;
       expect(response.ok()).toBe(true);
       const accepted = await response.json();
@@ -549,7 +542,6 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
         data: { status: "succeeded", progress: 100, output_asset_ids: [outputAsset.id] },
       });
       await vi.waitFor(async () => expect(await badge.count(), "成功使用最新输入后清除提示").toBe(0), { timeout: 15_000 });
-      // 回写落盘：目标节点 data.usedInputSignature = 快照签名
       await vi.waitFor(async () => {
         const canvas = await prisma.client.canvas.findUnique({ where: { project_id: BigInt(projectId) } });
         const saved = (canvas!.nodes_json as unknown as Array<{ id: string; data: Record<string, unknown> }>).find((n) => n.id === "d1");
@@ -557,7 +549,6 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
         expect(saved!.data.usedInputJobId).toBe(Number(jobRow!.id));
       }, { timeout: 10_000 });
 
-      // 5) 另一端修改来源正文（真实保存 API）→ 刷新画布：提示重现且刷新后保留
       const canvasRow = await prisma.client.canvas.findUnique({ where: { project_id: BigInt(projectId) } });
       const savedNodes = canvasRow!.nodes_json as unknown as Array<{ id: string; data: Record<string, unknown> }>;
       savedNodes.find((n) => n.id === "t1")!.data.text = "改用图片1重绘这张";
@@ -567,7 +558,6 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
       await vi.waitFor(async () => expect(await badge.count(), "正文变化后提示重现（刷新恢复）").toBe(1));
       await page.screenshot({ path: "/tmp/ikfm3s-badge-reappear.png", fullPage: true });
 
-      // 6) 断开文本 → 目标连线：仅解除文本来源，直接参考保留、提示消失
       const textEdge = page.locator('.react-flow__edge[data-id="e-t1-d1"]');
       await textEdge.waitFor();
       await nodeById("d1").locator('[data-testid="media-content"]').click({ position: { x: 5, y: 5 } }).catch(() => {});
@@ -586,7 +576,6 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
     } finally { await browser.close(); await vite.close(); }
   }, 180_000);
 
-  /* ---- IKFM3W（契约 §10 视频目标扩展）---- */
 
   function videoJobBody(targetNodeId: string, prompt: string, references?: unknown[], modelId = VIDEO_MODEL_ID, aspectRatio = "1:1") {
     return {
@@ -598,7 +587,6 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
     };
   }
 
-  /** 夹具：视频目标 gen-v + 文本卡 text-1（正文索引 media-1）+ 直接参考 media-2（单数组 references）。 */
   async function seedVideoIndexedCanvas(projectName: string, options: { refMediaType?: "image" | "video"; dropIndexEdge?: boolean } = {}) {
     const project = await projects.create("987654", projectName);
     const projectId = project.id;
@@ -634,7 +622,6 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
     const created = await createJob(projectId, videoJobBody("gen-v", "暮色", directVideoRefs(directAssetId)));
     expect(created.code).toBe(200);
     const job = await readJob(created.data.generation_job_id);
-    // 直接参考在前、文本带入追加尾部（role=reference、类型保留），references 缺失项被权威并入
     expect(job!.input.references).toEqual([
       { role: "reference", asset_id: directAssetId, type: "image" },
       { role: "reference", asset_id: indexedAssetId, type: "image" },
@@ -699,7 +686,7 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
     const { projectId } = await seedVideoIndexedCanvas("IKFM3W invalid", { dropIndexEdge: true });
     const before = await jobCount(projectId);
     const created = await createJob(projectId, videoJobBody("gen-v", "暮色"));
-    expect(created.code).toBe(400);
+    expect(created.code).toBe(1034);
     expect(created.msg).toBe("文本索引存在失效素材，请修复来源文本后提交");
     expect(await jobCount(projectId)).toBe(before);
   });
@@ -710,7 +697,7 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
     const created = await createJob(projectId, videoJobBody("gen-v", "暮色", [
       { role: "first_frame", asset_id: directAssetId, type: "image" },
     ], VIDEO_MODEL_ID, "adaptive"));
-    expect(created.code).toBe(400);
+    expect(created.code).toBe(1034);
     expect(created.msg).toBe(VIDEO_TEXT_INDEX_FRAME_CONFLICT_MESSAGE);
     expect(await jobCount(projectId)).toBe(before);
   });
@@ -719,7 +706,7 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
     const { projectId, directAssetId } = await seedVideoIndexedCanvas("IKFM3W novid", { refMediaType: "video" });
     const before = await jobCount(projectId);
     const created = await createJob(projectId, videoJobBody("gen-v", "暮色", directVideoRefs(directAssetId), VIDEO_NOVID_MODEL_ID));
-    expect(created.code).toBe(400);
+    expect(created.code).toBe(1035);
     expect(created.msg).toBe("文本索引包含目标不支持的媒体类型，请修改来源文本");
     expect(await jobCount(projectId)).toBe(before);
   });
@@ -728,15 +715,13 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
     const { projectId, directAssetId } = await seedVideoIndexedCanvas("IKFM3W overflow");
     const before = await jobCount(projectId);
     const created = await createJob(projectId, videoJobBody("gen-v", "暮色", directVideoRefs(directAssetId), VIDEO_LIMIT_MODEL_ID));
-    expect(created.code).toBe(400);
+    expect(created.code).toBe(1034);
     expect(created.msg).toBe("参考图最多 1 张");
     expect(await jobCount(projectId)).toBe(before);
   });
 
   it("混合目标独立处理：视频目标被帧互斥阻止不影响同文本连接的图片目标提交", async () => {
     const { projectId, directAssetId } = await seedVideoIndexedCanvas("IKFM3W mixed");
-    // 追加图片目标 gen-i，同文本 text-1 连接：视频目标带首帧与文本带入冲突被 400，
-    // 图片目标（同一文本索引图片素材）按各自能力正常提交——一个目标失败不阻断另一个
     const canvasRow = await prisma.client.canvas.findUnique({ where: { project_id: BigInt(projectId) } });
     const nodes = canvasRow!.nodes_json as unknown as unknown[];
     const edges = [
@@ -747,7 +732,7 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
     const videoBlocked = await createJob(projectId, videoJobBody("gen-v", "暮色", [
       { role: "first_frame", asset_id: directAssetId, type: "image" },
     ], VIDEO_MODEL_ID, "adaptive"));
-    expect(videoBlocked.code).toBe(400);
+    expect(videoBlocked.code).toBe(1034);
     expect(videoBlocked.msg).toBe(VIDEO_TEXT_INDEX_FRAME_CONFLICT_MESSAGE);
     const imageOk = await createJob(projectId, imageJobBody("gen-i", "暮色"));
     expect(imageOk.code).toBe(200);
@@ -805,11 +790,10 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
       type: "video",
       target_node_id: "gen-v",
       expected_output_count: 1,
-      // 旧字段携带直接参考（无 references 单数组）+ 画布文本带入非空 → 400
       reference_asset_ids: [directAssetId],
       parameters: { prompt: "暮色", model_id: VIDEO_MODEL_ID, aspect_ratio: "1:1" },
     });
-    expect(created.code).toBe(400);
+    expect(created.code).toBe(1034);
     expect(created.msg).toBe("文本带入参考与旧参考字段不能混用，请使用 references 提交");
     expect(await jobCount(projectId)).toBe(before);
   });
@@ -818,12 +802,11 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
     const { projectId, indexedAssetId, directAssetId } = await seedVideoIndexedCanvas("IKFM3W missing");
     await prisma.client.assets.update({ where: { id: BigInt(indexedAssetId) }, data: { is_delete: true } });
     const blocked = await createJob(projectId, videoJobBody("gen-v", "暮色", directVideoRefs(directAssetId)));
-    expect(blocked.code).toBe(400);
+    expect(blocked.code).toBe(1034);
     expect(blocked.msg).toBe("参考素材不存在或无权访问");
-    // 恢复素材但替换为视频类型（文本声明 image）：类型复核拒绝
     await prisma.client.assets.update({ where: { id: BigInt(indexedAssetId) }, data: { is_delete: false, type: "video" } });
     const mismatch = await createJob(projectId, videoJobBody("gen-v", "暮色", directVideoRefs(directAssetId)));
-    expect(mismatch.code).toBe(400);
+    expect(mismatch.code).toBe(1035);
     expect(mismatch.msg).toBe("参考素材类型与声明不符");
   });
 
@@ -833,8 +816,6 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
     const projectId = (await projects.create("987654", "IKFM3W browser")).id;
     const indexedAssetId = await createAsset(projectId, "image", "https://example.com/indexed.png");
     const directAssetId = await createAsset(projectId, "image", "https://example.com/direct.png");
-    // 预置：被索引素材 m1 + 直接参考 m2（预置合规 materialId，跳过角色库入库请求——
-    // harness 不含 material controller，直接参考以 material_id 形态提交）+ 带媒体索引的文本卡 t1 + 视频草稿 d1
     const nodes = [
       { id: "m1", type: "mediaNode", position: { x: 100, y: 80 }, data: { assetId: indexedAssetId, mediaType: "image", src: "https://example.com/indexed.png", fileName: "索引图" } },
       { id: "m2", type: "mediaNode", position: { x: 100, y: 320 }, data: { assetId: directAssetId, mediaType: "image", src: "https://example.com/direct.png", fileName: "直接图", materialId: "asset-ikfm3w-direct" } },
@@ -881,7 +862,6 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
       await nodeById("t1").waitFor();
       await nodeById("d1").waitFor();
 
-      // 1) 文本卡连到视频目标：真实拖线 t1 → d1 → 视频目标右上角「输入已更新」
       const src = page.locator('.react-flow__node[data-id="t1"] .react-flow__handle-right');
       const dst = page.locator('.react-flow__node[data-id="d1"] .react-flow__handle-left');
       const sb = (await src.boundingBox())!;
@@ -893,7 +873,6 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
       await vi.waitFor(async () => expect(await badge.count(), "文本连线后视频目标显示输入已更新").toBe(1));
       await page.screenshot({ path: "/tmp/ikfm3w-badge.png", fullPage: true });
 
-      // 2) 打开视频面板：文本带入素材以锁定条目进普通参考栏（无移除入口、有定位入口）
       await nodeById("d1").locator('[data-testid="media-content"]').click();
       await editor.waitFor();
       await vi.waitFor(async () => expect(await videoRefs.count(), "直接参考 + 文本带入参考").toBe(2));
@@ -902,8 +881,6 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
       await vi.waitFor(async () => expect(await locked.count(), "文本带入条目锁定（定位入口）").toBe(1));
       await vi.waitFor(async () => expect(await removable.count(), "直接参考可移除").toBe(1));
 
-      // 3) 发送：请求体 references 含文本带入素材（前端同源预演；直接参考 m2 预置合规
-      //    materialId 走 material_id，文本带入按 asset_id 追加——两个 ID 空间不互蚀）
       await editor.click();
       await page.keyboard.type("用这两张图出一段视频");
       await vi.waitFor(async () => {
@@ -921,7 +898,6 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
         { role: "reference", asset_id: indexedAssetId, type: "image" },
       ]);
 
-      // 4) DB 翻 succeeded 模拟供应商终态：轮询拿签名回写 → 徽标清除 + 落盘核对
       const response = await acceptedResponse;
       expect(response.ok()).toBe(true);
       const accepted = await response.json();
@@ -950,7 +926,6 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
         expect(saved!.data.usedInputJobId).toBe(Number(jobRow!.id));
       }, { timeout: 10_000 });
 
-      // 5) 修改来源正文（真实保存 API）→ 刷新画布：提示重现且刷新后保留
       const canvasRow = await prisma.client.canvas.findUnique({ where: { project_id: BigInt(projectId) } });
       const savedNodes = canvasRow!.nodes_json as unknown as Array<{ id: string; data: Record<string, unknown> }>;
       savedNodes.find((n) => n.id === "t1")!.data.text = "改用图片1出片吧";
@@ -962,7 +937,6 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
     } finally { await browser.close(); await vite.close(); }
   }, 180_000);
 
-  /* ---- IKFM41（契约 §11 音频目标扩展）---- */
 
   function audioJobBody(targetNodeId: string, prompt: string, references?: unknown[], modelId = AUDIO_MODEL_ID) {
     return {
@@ -974,10 +948,6 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
     };
   }
 
-  /** 夹具：音频目标 gen-a + 文本卡 text-1（正文索引 media-1）+ 直接参考 media-2（音频）。
-   *  refMediaType 控制 text-1 索引的素材类型（audio 默认 / image / video 变体）；
-   *  directMediaType 控制直接参考类型（audio 默认 / image 跨来源混用变体）；
-   *  withImageMention 额外并入 image 索引（文本带入内混用变体）。 */
   async function seedAudioIndexedCanvas(
     projectName: string,
     options: { refMediaType?: "audio" | "image" | "video"; directMediaType?: "audio" | "image"; dropIndexEdge?: boolean; withImageMention?: boolean } = {},
@@ -1028,7 +998,6 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
     const created = await createJob(projectId, audioJobBody("gen-a", "暮色背景音", directAudioRefs(directAssetId)));
     expect(created.code).toBe(200);
     const job = await readJob(created.data.generation_job_id);
-    // 直接参考在前、文本带入追加尾部（role=reference、类型保留），references 缺失项被权威并入
     expect(job!.input.references).toEqual([
       { role: "reference", asset_id: directAssetId, type: "audio" },
       { role: "reference", asset_id: indexedAssetId, type: "audio" },
@@ -1093,7 +1062,7 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
     const { projectId } = await seedAudioIndexedCanvas("IKFM41 invalid", { dropIndexEdge: true });
     const before = await jobCount(projectId);
     const created = await createJob(projectId, audioJobBody("gen-a", "暮色背景音"));
-    expect(created.code).toBe(400);
+    expect(created.code).toBe(1034);
     expect(created.msg).toBe("文本索引存在失效素材，请修复来源文本后提交");
     expect(await jobCount(projectId)).toBe(before);
   });
@@ -1102,7 +1071,7 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
     const { projectId } = await seedAudioIndexedCanvas("IKFM41 unsupported", { refMediaType: "video" });
     const before = await jobCount(projectId);
     const created = await createJob(projectId, audioJobBody("gen-a", "暮色背景音"));
-    expect(created.code).toBe(400);
+    expect(created.code).toBe(1035);
     expect(created.msg).toBe("文本索引包含目标不支持的媒体类型，请修改来源文本");
     expect(await jobCount(projectId)).toBe(before);
   });
@@ -1111,7 +1080,7 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
     const { projectId } = await seedAudioIndexedCanvas("IKFM41 mix refs", { withImageMention: true });
     const before = await jobCount(projectId);
     const created = await createJob(projectId, audioJobBody("gen-a", "暮色背景音"));
-    expect(created.code).toBe(400);
+    expect(created.code).toBe(1034);
     expect(created.msg).toBe("音频与图片参考不可混用");
     expect(await jobCount(projectId)).toBe(before);
   });
@@ -1122,7 +1091,7 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
     const created = await createJob(projectId, audioJobBody("gen-a", "暮色背景音", [
       { role: "reference", asset_id: directAssetId, type: "image" },
     ]));
-    expect(created.code).toBe(400);
+    expect(created.code).toBe(1034);
     expect(created.msg).toBe("音频与图片参考不可混用");
     expect(await jobCount(projectId)).toBe(before);
   });
@@ -1131,15 +1100,13 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
     const { projectId, directAssetId } = await seedAudioIndexedCanvas("IKFM41 overflow");
     const before = await jobCount(projectId);
     const created = await createJob(projectId, audioJobBody("gen-a", "暮色背景音", directAudioRefs(directAssetId), AUDIO_LIMIT_MODEL_ID));
-    expect(created.code).toBe(400);
+    expect(created.code).toBe(1034);
     expect(created.msg).toBe("参考音频最多 1 个");
     expect(await jobCount(projectId)).toBe(before);
   });
 
   it("混合目标独立处理：同文本音频素材音频目标正常、图片目标分别报错（不静默丢素材）", async () => {
     const { projectId } = await seedAudioIndexedCanvas("IKFM41 mixed targets");
-    // 追加图片目标 gen-i，同文本 text-1 连接：音频目标正常同步提交，
-    // 图片目标对同一文本的音频素材分别报错——互不影响
     const canvasRow = await prisma.client.canvas.findUnique({ where: { project_id: BigInt(projectId) } });
     const nodes = canvasRow!.nodes_json as unknown as unknown[];
     const edges = [
@@ -1150,30 +1117,25 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
     const audioOk = await createJob(projectId, audioJobBody("gen-a", "暮色背景音"));
     expect(audioOk.code).toBe(200);
     const imageBlocked = await createJob(projectId, imageJobBody("gen-i", "暮色"));
-    expect(imageBlocked.code).toBe(400);
+    expect(imageBlocked.code).toBe(1035);
     expect(imageBlocked.msg).toBe("文本索引包含目标不支持的媒体类型，请修改来源文本");
   });
 
   it("断开文本→音频目标连线仅解除该来源：文本带入消失、直接参考与素材卡保留", async () => {
     const { projectId, indexedAssetId, directAssetId } = await seedAudioIndexedCanvas("IKFM41 unlink");
-    // 断开 text-1 → gen-a 边（保留 media-1→text-1 关系线与 media-2 直接参考连线）
     const canvasRow = await prisma.client.canvas.findUnique({ where: { project_id: BigInt(projectId) } });
     const keptEdges = (canvasRow!.edges_json as unknown as Array<{ id: string }>).filter((edge) => edge.id !== "e-text");
     await saveCanvas(projectId, canvasRow!.nodes_json as unknown as unknown[], keptEdges, canvasRow!.version);
     const created = await createJob(projectId, audioJobBody("gen-a", "暮色背景音", directAudioRefs(directAssetId)));
     expect(created.code).toBe(200);
     const job = await readJob(created.data.generation_job_id);
-    // 文本带入项随边解除消失，直接参考保留；无文本入边 → 附件为空集合（target_node_id
-    // 仍冻结空数组）、签名不写入
     expect(job!.input.references).toEqual([{ role: "reference", asset_id: directAssetId, type: "audio" }]);
     expect(job!.input.text_attachments).toEqual([]);
     expect(job!.input.text_input_signature).toBeUndefined();
-    // 素材卡（含被索引素材）仍在画布——断边只解除来源，不删素材
     const after = await prisma.client.canvas.findUnique({ where: { project_id: BigInt(projectId) } });
     const nodeIds = (after!.nodes_json as unknown as Array<{ id: string }>).map((node) => node.id);
     expect(nodeIds).toContain("media-1");
     expect(nodeIds).toContain("text-1");
-    // 同 assetId 不重复进入：断边后提交的 references 不含 indexedAssetId
     expect(JSON.stringify(job!.input.references)).not.toContain(indexedAssetId);
   });
 
@@ -1226,12 +1188,11 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
     const { projectId, indexedAssetId, directAssetId } = await seedAudioIndexedCanvas("IKFM41 missing");
     await prisma.client.assets.update({ where: { id: BigInt(indexedAssetId) }, data: { is_delete: true } });
     const blocked = await createJob(projectId, audioJobBody("gen-a", "暮色背景音", directAudioRefs(directAssetId)));
-    expect(blocked.code).toBe(400);
+    expect(blocked.code).toBe(1034);
     expect(blocked.msg).toBe("参考素材不存在或无权访问");
-    // 恢复素材但替换为 video 类型（文本声明 audio）：类型复核拒绝
     await prisma.client.assets.update({ where: { id: BigInt(indexedAssetId) }, data: { is_delete: false, type: "video" } });
     const mismatch = await createJob(projectId, audioJobBody("gen-a", "暮色背景音", directAudioRefs(directAssetId)));
-    expect(mismatch.code).toBe(400);
+    expect(mismatch.code).toBe(1035);
     expect(mismatch.msg).toBe("参考素材类型与声明不符");
   });
 
@@ -1287,7 +1248,6 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
       await nodeById("t1").waitFor();
       await nodeById("d1").waitFor();
 
-      // 1) 文本卡连到音频目标：真实拖线 t1 → d1 → 音频目标右上角「输入已更新」
       const src = page.locator('.react-flow__node[data-id="t1"] .react-flow__handle-right');
       const dst = page.locator('.react-flow__node[data-id="d1"] .react-flow__handle-left');
       const sb = (await src.boundingBox())!;
@@ -1299,7 +1259,6 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
       await vi.waitFor(async () => expect(await badge.count(), "文本连线后音频目标显示输入已更新").toBe(1));
       await page.screenshot({ path: "/tmp/ikfm41-badge.png", fullPage: true });
 
-      // 2) 打开音频面板：文本带入素材以锁定条目进参考栏（无移除入口、有定位入口）
       await nodeById("d1").locator('[data-testid="media-content"]').click();
       await editor.waitFor();
       await vi.waitFor(async () => expect(await audioRefs.count(), "直接参考 + 文本带入参考").toBe(2));
@@ -1308,7 +1267,6 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
       await vi.waitFor(async () => expect(await locked.count(), "文本带入条目锁定（定位入口）").toBe(1));
       await vi.waitFor(async () => expect(await removable.count(), "直接参考可移除").toBe(1));
 
-      // 3) 发送：请求体 references 含文本带入素材（前端同源预演，asset_id 空间追加尾部）
       await editor.click();
       await page.keyboard.type("用这两段音频出一段配乐");
       await vi.waitFor(async () => {
@@ -1326,7 +1284,6 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
         { role: "reference", asset_id: indexedAssetId, type: "audio" },
       ]);
 
-      // 4) DB 翻 succeeded 模拟供应商终态：轮询拿签名回写 → 徽标清除 + 落盘核对
       const response = await acceptedResponse;
       expect(response.ok()).toBe(true);
       const accepted = await response.json();
@@ -1355,7 +1312,6 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
         expect(saved!.data.usedInputJobId).toBe(Number(jobRow!.id));
       }, { timeout: 10_000 });
 
-      // 5) 修改来源正文（真实保存 API）→ 刷新画布：提示重现且刷新后保留
       const canvasRow = await prisma.client.canvas.findUnique({ where: { project_id: BigInt(projectId) } });
       const savedNodes = canvasRow!.nodes_json as unknown as Array<{ id: string; data: Record<string, unknown> }>;
       savedNodes.find((n) => n.id === "t1")!.data.text = "改用音频1配音吧";

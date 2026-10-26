@@ -1,41 +1,32 @@
-const DOCUMENTATION_FILE = /^(?:CLAUDE\.md|AGENTS\.md|agent-rules\/.*\.md|CONTEXT\.md|README(?:\.[^/]+)?\.md|docs\/.*\.(?:md|html?|pdf|png|jpe?g|gif|webp|svg|js|css)|(?:apps|packages)\/.*\/README(?:\.[^/]+)?\.md|\.(?:claude|superpowers|zcode|qoder)\/skills\/[^/]+\/.*\.md|\.(?:claude|superpowers|zcode|qoder)\/skills\/[^/]+\/agents\/openai\.yaml)$/i;
+const DOCUMENTATION_FILE = /^(?:CLAUDE\.md|AGENTS\.md|agent-rules\/.*\.md|CONTEXT\.md|README(?:\.[^/]+)?\.md|docs\/.*\.(?:md|html?|pdf|png|jpe?g|gif|webp|svg|js|css)|(?:apps|packages)\/.*\/README(?:\.[^/]+)?\.md|\.(?:agents|claude|superpowers|zcode|qoder)\/skills\/[^/]+\/.*\.md|\.(?:agents|claude|superpowers|zcode|qoder)\/skills\/[^/]+\/agents\/openai\.yaml|\.(?:agents|claude|superpowers|zcode|qoder)\/commands\/[^/]+\.md)$/i;
 const NODE_SOURCE = /^(?:apps|packages)\/[^/]+\/(?:src|tests?)\/.*\.(?:ts|tsx)$/;
-// `.json` 也算 web 源码：`web/src/api/agent-rest-routes.v1.json` 是 agent 路由清单的副本，
-// `web/src/api/agentRoutes.test.ts` 正在断言它——改了副本却不跑 web 测试，等于没有守卫。
+const FRONTEND_BUILD_FILE = /^(?:web\/|backend\/libs\/(?:contracts|core)\/|(?:backend\/)?(?:package\.json|tsconfig(?:\.[^.]+)?\.json)$|pnpm-lock\.yaml$|pnpm-workspace\.yaml$|\.nvmrc$|\.dockerignore$)/;
 const WEB_SOURCE = /^web\/src\/.*\.(?:ts|tsx|css|json)$/;
-// NestJS BFF。**整棵 backend/ 树此前没有任何归类规则**：NODE_SOURCE 只认 `^(?:apps|packages)/`，
-// 于是改 BFF 的 controller 会落进「未归类」，门禁一条 backend 的 typecheck 或测试都不会跑。
-// 这和 web/scripts 那个洞是同一个形状——有验证手段，只是选择器够不着它。
 const BACKEND_SOURCE = /^backend\/(?:apps|libs)\/.*\.ts$/;
-// Java 生成 worker（worker-java/，独立 Maven 工程，不在 pnpm workspace 内）。**整棵树此前没有归类规则**：
-// 改它会在 PR 阶段落进「未归类」兜底升为 full，看似安全，但构建出的计划里一条 Java 命令都没有——
-// TS 侧的改动有 typecheck/测试兜底，Java 侧的改动静默裸奔。这与 backend / web/scripts 那两个洞同形：
-// 有验证手段，只是选择器够不着。pom.xml 一并归类：改构建配置同样要跑一遍。
-const JAVA_SOURCE = /^worker-java\/(?:src\/|pom\.xml|Dockerfile|docker-settings\.xml)/;
-// web 自己的工具脚本（契约核对、构建辅助等）。归 web 而不是 operations：它们的题材是 web 的契约，
-// 对应的定向验证就是 web 那套（typecheck + lint + vitest）——`check-agent-routes.mjs` 要守的
-// `web/src/api/agent-rest-routes.v1.json`，正是 `web/src/api/agentRoutes.test.ts` 在断言的东西。
-// 归 operations 会去跑 `scripts/tests` 下的 Python 单测，与这里毫无关系。
+const BACKEND_TOOLING_FILE = /^backend\/scripts\/.*\.mjs$/;
+const JAVA_SOURCE = /^server\/(?:blue-whale-worker\/|blue-whale-common\/|pom\.xml)/;
+const BILLING_SOURCE = /^server\/blue-whale-billing\//;
 const WEB_TOOLING_FILE = /^web\/scripts\/.*\.(?:mjs|cjs|js)$/;
-// web 的浏览器端验收规格与 fixture（Playwright）：题材是 web 产品行为，对应的定向验证就是 web 那套。
-// 此前 web/e2e 没有任何归类规则，提交 e2e 规格会在 PR 阶段被兜底升级为 full——与 web/scripts 那个洞同形。
-const WEB_E2E_FILE = /^web\/e2e\/.*\.(?:ts|json)$/;
-const CONTROL_PLANE_FILE = /^(?:\.githooks\/|\.claude\/settings\.json|\.codex\/hooks\.json|\.qoder\/settings\.json|\.kimi-code\/(?:hooks\.toml|hooks\/)|\.(?:claude|codex)\/hooks\/|\.zcode\/config\.json|scripts\/(?:check-error-code-drift|check-hook-closed-loop|check-hook-contracts|cleanup-release-branch|cleanup-task-worktree|commit-spec-on-master|commit-task-for-review|gitee-resolve-ids|install-kimi-hooks|list-task-worktrees|manage-agent-authorization|manage-release-branch|merge-task-to-local-master|pr-update-evidence|probe-codex-write-hook|publish-review-package|publish-task-branch|query-hook-audit|setup-hooks|start-task-worktree|sync-codex-skill|sync-superpowers-skills|sync-task-from-origin|sync-write-rules-skill|sync_recovery|test-hooks|verification-policy|verify-change-scope|verify-pr-update)\.|scripts\/lib\/|scripts\/tests\/)/;
-const OPERATIONS_FILE = /^scripts\/(?:check-schema-charset|check-target-environment-retirement|compress-gallery-images|ensure-graphify-worktree|fix-ik7grv-replace-slot-backfill|reconcile-cost-reservations|run-ik50gb-c-testsite-probe|run-real-canary|tunnel-testsite-db)\./;
-const PRODUCT_IMPACT_FILE = /^(?:(?:web\/|backend\/)?package\.json|web\/package-lock\.json|web\/\.env[^/]*|pnpm-lock\.yaml|pnpm-workspace\.yaml|tsconfig(?:\.[^.]+)?\.json|(?:.*\/)?Dockerfile[^/]*|deploy\/|backend\/libs\/contracts\/|backend\/prisma\/(?:prisma\/migrations|schema)\/|worker-java\/|tests\/typescript-baseline\/|scripts\/(?:dev-blue-whale|dev-stack|init-typescript-baseline-db|run-typescript-baseline-acceptance|verify-typescript-baseline)\.)/;
+const CONTROL_PLANE_FILE = /^(?:\.githooks\/|\.claude\/skills$|\.claude\/settings\.json|\.codex\/hooks\.json|\.qoder\/settings\.json|\.kimi-code\/(?:hooks\.toml|hooks\/)|\.(?:claude|codex)\/hooks\/|\.zcode\/(?:config\.json|ponytail\.json$|plugins\/(?:marketplace\.json$|ponytail\/))|scripts\/(?:check-code-comments|check-contract-breaking|check-error-code-drift|check-hook-closed-loop|check-hook-contracts|check-project-skills|cleanup-implement-spec-child|cleanup-release-branch|cleanup-task-worktree|commit-spec-on-master|commit-task-for-review|gitee-resolve-ids|install-kimi-hooks|list-task-worktrees|manage-agent-authorization|manage-release-branch|merge-implement-spec-child|merge-task-to-local-master|pr-update-evidence|probe-codex-write-hook|probe-zcode-write-hook|publish-review-package|publish-task-branch|query-hook-audit|setup-hooks|start-task-worktree|sync-codex-skill|sync-implement-spec-skill|sync-release-line|sync-superpowers-skills|sync-task-from-origin|sync-write-rules-skill|sync_recovery|test-hooks|verification-policy|verify-change-scope|verify-pr-update)\.|scripts\/lib\/|scripts\/tests\/)/;
+const OPERATIONS_FILE = /^scripts\/(?:check-agent-routes|check-schema-charset|check-target-environment-retirement|compress-gallery-images|ensure-graphify-worktree|fix-ik7grv-replace-slot-backfill|fix-ikij40-canvas-309-mojibake|import-brand-gallery-assets|reconcile-cost-reservations|recompress-gallery-videos|run-ik50gb-c-testsite-probe|run-real-canary|run-testsite-sql|tunnel-testsite-db|update-gallery-final)\./;
+const PRODUCT_IMPACT_FILE = /^(?:(?:web\/|backend\/)?package\.json|web\/package-lock\.json|web\/\.env[^/]*|pnpm-lock\.yaml|pnpm-workspace\.yaml|tsconfig(?:\.[^.]+)?\.json|(?:.*\/)?Dockerfile[^/]*|deploy\/|contracts\/|backend\/libs\/contracts\/|backend\/prisma\/|server\/|tests\/typescript-baseline\/|scripts\/(?:dev-blue-whale|dev-stack|init-typescript-baseline-db|run-typescript-baseline-acceptance|verify-typescript-baseline)\.)/;
+const CONTRACTS_SOURCE = /^contracts\//;
 const EXECUTABLE_FILE = /^(?:scripts\/|.*\.(?:sh|py|mjs|cjs|js))$/;
-const SKILL_SCRIPT_FILE = /^\.(?:claude|superpowers|zcode|qoder)\/skills\/[^/]+\/scripts\/.*\.(?:sh|py|mjs|cjs|js)$/;
-const GOVERNANCE_FILE = /^(?:eslint\.config\.mjs|docs\/agents\/testing-strategy\.md|scripts\/(?:verification-policy|verify-change-scope)\.mjs|scripts\/publish-review-package\.sh|tests\/(?:verification-policy|agent-rules)\.test\.mjs|\.gitee\/PULL_REQUEST_TEMPLATE\.md|\.(?:claude|superpowers|zcode|qoder)\/skills\/implement\/)/;
+const SKILL_SCRIPT_FILE = /^\.(?:agents|claude|superpowers|zcode|qoder)\/skills\/[^/]+\/scripts\/.*\.(?:sh|py|mjs|cjs|js)$/;
+const SKILL_PACKAGE_FILE = /^\.agents\/skills\/[^/]+\/.+/;
+const SKILL_DOCKERFILE = /^\.(?:agents|claude|superpowers|zcode|qoder)\/skills\/[^/]+\/(?:.*\/)?Dockerfile[^/]*$/;
+const GOVERNANCE_FILE = /^(?:eslint\.config\.mjs|docs\/agents\/testing-strategy\.md|scripts\/(?:verification-policy|verify-change-scope)\.mjs|scripts\/publish-review-package\.sh|tests\/(?:verification-policy|agent-rules)\.test\.mjs|\.gitee\/PULL_REQUEST_TEMPLATE\.md|\.(?:agents|claude|superpowers|zcode|qoder)\/skills\/implement\/)/;
 
-// 精确登记已同步的技能资产；未知的同目录脚本仍须单独分类。
 const SKILL_ASSET_FILES = new Set([
+  ".agents/skills/deploy-blue-whale-api/tests/test-tag-propagation.sh",
+  ".agents/skills/setup-ts-deep-modules/dependency-cruiser.config.cjs",
+  ".agents/skills/wizard/template.sh",
   ".zcode/skills/deploy-blue-whale-api/tests/test-tag-propagation.sh",
   ".zcode/skills/setup-ts-deep-modules/dependency-cruiser.config.cjs",
   ".zcode/skills/wizard/template.sh",
   ".claude/skills/setup-ts-deep-modules/dependency-cruiser.config.cjs",
   ".claude/skills/wizard/template.sh",
   "tests/skill-assets.test.mjs",
-  // 已精简删除的 superpowers 技能根目录脚本（删除态仍需可分类）
   ".claude/skills/systematic-debugging/find-polluter.sh",
   ".claude/skills/writing-skills/render-graphs.js",
   ".superpowers/skills/systematic-debugging/find-polluter.sh",
@@ -49,23 +40,39 @@ function isTestFile(file) {
 }
 
 function hasProductImpact(file, documentationOnlyFiles) {
-  return PRODUCT_IMPACT_FILE.test(file) && !isTestFile(file) && !documentationOnlyFiles.has(file);
+  return PRODUCT_IMPACT_FILE.test(file) && !SKILL_PACKAGE_FILE.test(file) && !SKILL_DOCKERFILE.test(file) && !isTestFile(file) && !documentationOnlyFiles.has(file);
+}
+
+export function requiresFrontendBuild(files, documentationOnlyFiles = []) {
+  const documentation = new Set(documentationOnlyFiles);
+  return files.some((file) => FRONTEND_BUILD_FILE.test(file) &&
+    !isDocumentation(file, documentation) && !/\.mdx?$/i.test(file));
 }
 
 function sourceArea(file) {
   if (SKILL_ASSET_FILES.has(file)) return "skill-assets";
+  if (BILLING_SOURCE.test(file)) return "billing-java";
+  if (CONTRACTS_SOURCE.test(file)) return "contracts";
   if (NODE_SOURCE.test(file)) return "node";
-  if (BACKEND_SOURCE.test(file)) return "backend";
+  if (BACKEND_SOURCE.test(file) || BACKEND_TOOLING_FILE.test(file) || /^backend\/prisma\//.test(file)) return "backend";
   if (JAVA_SOURCE.test(file)) return "worker-java";
-  if (WEB_SOURCE.test(file) || WEB_TOOLING_FILE.test(file) || WEB_E2E_FILE.test(file)) return "web";
+  if (WEB_SOURCE.test(file) || WEB_TOOLING_FILE.test(file) ||
+      (file.startsWith("web/") && !EXECUTABLE_FILE.test(file) && requiresFrontendBuild([file]))) return "web";
   if (CONTROL_PLANE_FILE.test(file)) return "control-plane";
   if (OPERATIONS_FILE.test(file)) return "operations";
   if (SKILL_SCRIPT_FILE.test(file)) return "operations";
+  if (SKILL_DOCKERFILE.test(file)) return "operations";
+  if (SKILL_PACKAGE_FILE.test(file) && !EXECUTABLE_FILE.test(file)) return "operations";
   return null;
 }
 
 function inferredAreas(files, documentationOnlyFiles) {
   const areas = new Set(files.map(sourceArea).filter(Boolean));
+  if (requiresFrontendBuild(files, documentationOnlyFiles)) areas.add("web");
+  if (files.some((file) => /^server\/(?:blue-whale-common\/|pom\.xml)/.test(file))) {
+    areas.add("worker-java");
+    areas.add("billing-java");
+  }
   if (files.some((file) => GOVERNANCE_FILE.test(file))) {
     areas.add("governance");
   } else if (files.some((file) => DOCUMENTATION_FILE.test(file))) {
@@ -75,7 +82,8 @@ function inferredAreas(files, documentationOnlyFiles) {
 }
 
 function isDocumentation(file, documentationOnlyFiles) {
-  return DOCUMENTATION_FILE.test(file) || documentationOnlyFiles.has(file);
+  return DOCUMENTATION_FILE.test(file) || file === "GLOSSARY.md" ||
+    /^web\/.*\.mdx?$/i.test(file) || documentationOnlyFiles.has(file);
 }
 
 function classified(file, documentationOnlyFiles) {
@@ -83,7 +91,7 @@ function classified(file, documentationOnlyFiles) {
     isDocumentation(file, documentationOnlyFiles) ||
     GOVERNANCE_FILE.test(file) ||
     PRODUCT_IMPACT_FILE.test(file) ||
-    sourceArea(file) !== null
+    sourceArea(file) !== null || (!EXECUTABLE_FILE.test(file) && requiresFrontendBuild([file], documentationOnlyFiles))
   );
 }
 
@@ -105,7 +113,7 @@ function fullClassification(files, reason, documentationOnlyFiles) {
   };
 }
 
-function classifyAutomatically(files, stage, documentationOnlyFiles) {
+function classifyAutomatically(files, documentationOnlyFiles) {
   const unknownExecutable = files.filter(
     (file) => EXECUTABLE_FILE.test(file) && !classified(file, documentationOnlyFiles),
   );
@@ -131,17 +139,11 @@ function classifyAutomatically(files, stage, documentationOnlyFiles) {
     };
   }
 
-  if (stage === "pr") {
-    if (files.some((file) => hasProductImpact(file, documentationOnlyFiles))) {
-      return fullClassification(
-        files,
-        "publishing product-impact changes requires full verification",
-        documentationOnlyFiles,
-      );
-    }
-    if (files.some((file) => !classified(file, documentationOnlyFiles))) {
-      return fullClassification(files, "unclassified PR scope requires full verification", documentationOnlyFiles);
-    }
+  if (files.some((file) => hasProductImpact(file, documentationOnlyFiles))) {
+    return fullClassification(files, "product-impact changes require full verification", documentationOnlyFiles);
+  }
+  if (files.some((file) => !classified(file, documentationOnlyFiles))) {
+    return fullClassification(files, "unclassified scope requires full verification", documentationOnlyFiles);
   }
 
   const areas = [...new Set(files.map(sourceArea).filter(Boolean))].sort();
@@ -174,13 +176,9 @@ function classifyAutomatically(files, stage, documentationOnlyFiles) {
   ) {
     return {
       tier: "scoped",
-      areas,
+      areas: inferredAreas(files, documentationOnlyFiles),
       reasons: ["known source paths changed"],
     };
-  }
-
-  if (files.some((file) => hasProductImpact(file, documentationOnlyFiles))) {
-    return scopedClassification(files, "product-impact infrastructure changed", documentationOnlyFiles);
   }
 
   return scopedClassification(files, "change scope is not classified", documentationOnlyFiles);
@@ -194,44 +192,45 @@ export function classifyChanges(files, { risk = "auto", stage = "completion", do
     throw new Error("stage must be completion or pr");
   }
   const documentationOnlySet = new Set(documentationOnlyFiles);
-  const automatic = classifyAutomatically(files, stage, documentationOnlySet);
+  const automatic = classifyAutomatically(files, documentationOnlySet);
   if (risk === "auto") return automatic;
 
   return fullClassification(files, "risk explicitly escalated to high", documentationOnlySet);
 }
 
-function appendAreaCommands(commands, areas, base) {
+function appendAreaCommands(commands, areas, base, full) {
   if (areas.includes("docs") && !areas.includes("governance")) {
     commands.push(["node", "--test", "tests/agent-rules.test.mjs"]);
   }
   if (areas.includes("node")) {
     commands.push(
       ["pnpm", "exec", "tsc", "-b", "--pretty", "false"],
-      ["pnpm", "exec", "vitest", "run", "packages", "apps", "--changed", base],
+      ["pnpm", "exec", "vitest", "run", "packages", "apps"],
     );
   }
   if (areas.includes("backend")) {
-    // backend 有自己的 tsconfig（`@lib/*` 路径别名），根 tsc -b 覆盖不到它；
-    // 根 vitest 的 include 里有 `backend/**/*.test.ts`，所以测试用根 runner 加路径过滤。
     commands.push(
       ["pnpm", "exec", "tsc", "-p", "backend/tsconfig.json", "--noEmit", "--pretty", "false"],
-      ["pnpm", "exec", "vitest", "run", "backend", "--changed", base],
     );
+    if (!full) commands.push(["pnpm", "exec", "vitest", "run", "backend"]);
   }
   if (areas.includes("web")) {
     commands.push(
       ["node", "web/node_modules/typescript/bin/tsc", "-b", "web/tsconfig.json", "--pretty", "false"],
       ["npm", "--prefix", "web", "run", "lint"],
-      // docs/agents/testing-strategy.md 的 scoped/web 一行写的是「Web typecheck + Web Vitest --changed」，
-      // 这一条此前缺失，web 下的单测从来没有被门禁执行过。
-      // --passWithNoTests：web 变更常常只动 CSS 或页面壳，模块图上够不到任何测试；
-      // 那种情况该放行，而不是把「没有相关测试」报成失败。
-      ["npm", "--prefix", "web", "run", "test", "--", "--changed", base, "--passWithNoTests"],
+      ["npm", "--prefix", "web", "run", "test"],
+      ["node", "web/node_modules/vite/bin/vite.js", "build", "--mode", "test"],
+      ["node", "web/node_modules/vite/bin/vite.js", "build", "--mode", "release"],
     );
   }
   if (areas.includes("worker-java")) {
-    // worker-java 是独立 Maven 工程（不在 pnpm workspace 内），直接对它自己的 pom 跑测试。
-    commands.push(["mvn", "-f", "worker-java/pom.xml", "-q", "test"]);
+    commands.push(["mvn", "-f", "server/pom.xml", "-pl", "blue-whale-worker", "-am", "-q", "test"]);
+  }
+  if (areas.includes("contracts")) {
+    commands.push(["bash", "scripts/check-contract-breaking.sh", base]);
+  }
+  if (areas.includes("billing-java")) {
+    commands.push(["mvn", "-f", "server/pom.xml", "-pl", "blue-whale-billing", "-am", "-q", "test"]);
   }
   if (areas.includes("governance")) {
     commands.push([
@@ -249,19 +248,25 @@ function appendAreaCommands(commands, areas, base) {
         "-m",
         "unittest",
         "scripts.tests.test_cbm_context",
+        "scripts.tests.test_gitee_channel",
         "scripts.tests.test_publish_review_package",
         "scripts.tests.test_start_task_worktree",
         "scripts.tests.test_sync_task_from_origin",
+        "scripts.tests.test_manage_release_branch",
+        "scripts.tests.test_sync_release_line",
+        "scripts.tests.test_cleanup_task_worktree",
+        "scripts.tests.test_implement_spec_child_merge",
+        "scripts.tests.test_project_skills",
+        "scripts.tests.test_release_task_workflow",
+        "scripts.tests.test_code_comments",
       ],
     );
   }
   if (areas.includes("skill-assets")) {
     commands.push(
-      ["bash", ".zcode/skills/deploy-blue-whale-api/tests/test-tag-propagation.sh"],
-      ["bash", "-n", ".zcode/skills/wizard/template.sh"],
-      ["node", "--check", ".zcode/skills/setup-ts-deep-modules/dependency-cruiser.config.cjs"],
-      ["bash", "-n", ".claude/skills/wizard/template.sh"],
-      ["node", "--check", ".claude/skills/setup-ts-deep-modules/dependency-cruiser.config.cjs"],
+      ["bash", ".agents/skills/deploy-blue-whale-api/tests/test-tag-propagation.sh"],
+      ["bash", "-n", ".agents/skills/wizard/template.sh"],
+      ["node", "--check", ".agents/skills/setup-ts-deep-modules/dependency-cruiser.config.cjs"],
       ["node", "--test", "tests/skill-assets.test.mjs"],
     );
   }
@@ -270,14 +275,16 @@ function appendAreaCommands(commands, areas, base) {
   }
 }
 
-export function buildVerificationPlan(classification, { base }) {
+export function buildVerificationPlan(classification, { base, pythonCommand = ["python3"] }) {
   const commands = [["git", "diff", "--check", `${base}...HEAD`]];
   const areas = classification.tier === "docs" ? ["docs"] : classification.areas ?? [];
-  appendAreaCommands(commands, areas, base);
+  appendAreaCommands(commands, areas, base, classification.tier === "full");
   if (classification.tier === "full") {
     commands.push(["pnpm", "verify"]);
   }
-  return commands;
+  return commands.map((command) => command[0] === "python3"
+    ? [...pythonCommand, ...command.slice(1)]
+    : command);
 }
 
 function classificationCovers(receipt, current) {
@@ -312,6 +319,12 @@ export function validateReceipt(receipt, current) {
   if (receipt.base !== current.base) {
     return { valid: false, reason: "verification base changed" };
   }
+  if (receipt.startSha !== current.startSha) {
+    return { valid: false, reason: "task start changed after verification" };
+  }
+  if (receipt.targetBranch !== current.targetBranch || receipt.targetSha !== current.targetSha) {
+    return { valid: false, reason: "PR target changed after verification" };
+  }
   if (receipt.changedFilesHash !== current.changedFilesHash) {
     return { valid: false, reason: "changed file scope changed" };
   }
@@ -322,7 +335,10 @@ export function validateReceipt(receipt, current) {
     return { valid: false, reason: "verification tier does not cover current risk" };
   }
   if (current.commands) {
-    const expectedPlan = buildVerificationPlan(receipt.classification, { base: current.base });
+    const expectedPlan = buildVerificationPlan(receipt.classification, {
+      base: current.base,
+      pythonCommand: current.pythonCommand,
+    });
     if (!commandsMatch(receipt.commands, expectedPlan)) {
       return { valid: false, reason: "verification plan does not match its classification" };
     }

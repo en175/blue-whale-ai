@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-parent</artifactId>
+    <version>3.3.5</version>
+    <relativePath/>
+  </parent>
+
+  <groupId>com.bluewhale</groupId>
+  <artifactId>blue-whale-billing</artifactId>
+  <version>0.0.1-SNAPSHOT</version>
+  <name>blue-whale-billing</name>
+  <description>
+    Blue-Whale 计费控制面（ADR-0113 / ADR-0114）。
+
+    职责：积分账户（批次 + 有效期）、复式账本、定价目录、预扣 / 结算 / 返还、对账。
+    与 worker 的分工：worker 是**执行面**（长任务、崩溃可重启、发版频繁）；
+    billing 是**控制面**（被同步调用、强一致、不容失败）。**故障域完全不同**，
+    所以不复用进程、只复用基础设施（server/blue-whale-common）。
+
+    技术栈与 worker 逐项对齐（同一 Spring Boot 版本 / 同一 ORM / 同一 MQ 客户端），
+    零新依赖学习成本。
+
+    ⚠️ 当前是**骨架**：只有启动类与健康检查，业务能力按 ADR-0113 的 P2–P6 分期落地。
+  </description>
+
+  <properties>
+    <java.version>21</java.version>
+    <mybatis-plus.version>3.5.7</mybatis-plus.version>
+    <rocketmq-client.version>5.0.7</rocketmq-client.version>
+    <grpc.version>1.68.1</grpc.version>
+  </properties>
+
+  <dependencies>
+    <dependency>
+      <groupId>com.bluewhale</groupId>
+      <artifactId>blue-whale-common</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-web</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-validation</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-jdbc</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>com.baomidou</groupId>
+      <artifactId>mybatis-plus-spring-boot3-starter</artifactId>
+      <version>${mybatis-plus.version}</version>
+    </dependency>
+
+    <dependency>
+      <groupId>com.mysql</groupId>
+      <artifactId>mysql-connector-j</artifactId>
+      <scope>runtime</scope>
+    </dependency>
+
+    <dependency>
+      <groupId>io.grpc</groupId>
+      <artifactId>grpc-netty-shaded</artifactId>
+      <version>${grpc.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>io.grpc</groupId>
+      <artifactId>grpc-services</artifactId>
+      <version>${grpc.version}</version>
+    </dependency>
+
+    <dependency>
+      <groupId>org.apache.rocketmq</groupId>
+      <artifactId>rocketmq-client-java</artifactId>
+      <version>${rocketmq-client.version}</version>
+    </dependency>
+
+    <dependency>
+      <groupId>org.flywaydb</groupId>
+      <artifactId>flyway-core</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.flywaydb</groupId>
+      <artifactId>flyway-mysql</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.testcontainers</groupId>
+      <artifactId>mysql</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.testcontainers</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-maven-plugin</artifactId>
+      </plugin>
+      <plugin>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <configuration>
+          <argLine>-Duser.timezone=Asia/Shanghai</argLine>
+          <systemPropertyVariables>
+            <billing.grpc.enabled>false</billing.grpc.enabled>
+            <billing.mq.enabled>false</billing.mq.enabled>
+          </systemPropertyVariables>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+</project>

@@ -5,15 +5,6 @@ import { describe, expect, it, vi } from "vitest";
 
 import { AllExceptionsFilter } from "./all-exceptions.filter.js";
 
-/**
- * 这里是**整条链上唯一写 HTTP 状态码的地方**（ADR-0083 的「唯一投影出入口」）。
- *
- * 另一条路——控制器里 `return fail(code, msg)`——压根不经过这里，于是没人写状态码，
- * Nest 按方法给默认值：一次 POST 的拒绝回成 `HTTP 201` + 信封 `code: 400`。
- * 2026-09-08 测试站实测：传一份 SVG，`presign` 回 201 而 body 写着 400。
- *
- * 所以这个文件必须有用例：它是那个 bug 唯一的守门人。
- */
 function capture() {
   const json = vi.fn();
   const status = vi.fn().mockReturnValue({ json });
@@ -48,7 +39,6 @@ describe("AllExceptionsFilter", () => {
   });
 
   it("DomainError：领域码原样进信封，不被状态码顶掉", () => {
-    // 信封的 code 是给前端分支用的语义码；状态码是给传输层的。两者都要，不能互相覆盖。
     const { json, status, host } = capture();
     filter.catch(new DomainError(100301, "资源不存在"), host);
     expect(status).toHaveBeenCalledWith(404);
@@ -59,7 +49,12 @@ describe("AllExceptionsFilter", () => {
     const { json, status, host } = capture();
     filter.catch(new NewApiError("会话不存在", 404, "session_not_found"), host);
     expect(status).toHaveBeenCalledWith(404);
-    expect(json).toHaveBeenCalledWith({ code: 404, msg: "会话不存在", data: null });
+    expect(json).toHaveBeenCalledWith({
+      code: 404,
+      msg: "会话不存在",
+      data: null,
+      error_code: "session_not_found",
+    });
   });
 
   it("HttpException 保留自己的状态码", () => {

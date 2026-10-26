@@ -1,9 +1,16 @@
 import {
-  IMAGE_CHANNEL_PARSERS,
-  isImageChannelParserId,
+  CHANNEL_IDS,
+  channelOf,
+  defaultChannelFor,
+  isChannelId,
+  validateChannel,
   validateRequestMapping,
+  type ChannelId,
   type ImageChannelParserId,
 } from "../generation/image-channel-parser.js";
+
+
+import { VIDEO_MODES, parsePixels, parseSpecKey } from "@lib/contracts";
 
 export const MODEL_CAPABILITY_TYPES = ["image", "video", "text", "audio"] as const;
 export type ModelCapabilityType = (typeof MODEL_CAPABILITY_TYPES)[number];
@@ -43,8 +50,12 @@ export type ModelCreatePayload = {
   default_aspect_ratio?: string;
   default_duration?: number | null;
   features?: unknown;
-  channel_parser?: ImageChannelParserId;
+
+
+  channel?: ChannelId;
   request_mapping?: unknown;
+
+  pricing?: unknown | null;
   enabled?: boolean;
 };
 
@@ -60,32 +71,35 @@ export type ModelUpdatePayload = {
   default_aspect_ratio?: string;
   default_duration?: number | null;
   features?: unknown;
-  channel_parser?: ImageChannelParserId;
+
+  channel?: ChannelId;
   request_mapping?: unknown;
+
+  pricing?: unknown | null;
   enabled?: boolean;
   sort_order?: number;
 };
 
-/** 上游模型名长度与 model_id 列宽对齐；prompt 上限取一个足够宽的工程硬顶。 */
+
 const I2I_MODEL_NAME_MAX = 128;
 const MAX_PROMPT_LENGTH_LIMIT = 65_535;
 
-/** ADR-0086：参考素材限制键的上限（防运营误配海量值污染前端/校验）。 */
+
 const MAX_REFERENCE_COUNT = 1_000;
 
-/** 单次输出上限的量级闸门；上游 `expected_output_count` 另有 1–4 的硬校验。 */
+
 const MAX_QUANTITY_MAX = 100;
 
-/** snake_case → camelCase。读侧（toFeatures / worker-java）两种键形都认，写闸门同理。 */
+
 function camelKey(key: string): string {
   return key.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase());
 }
 
-/** features 已知扩展键的写入闸门（IKESD6）：i2i_model_name / max_prompt_length；
- *  ADR-0086 追加参考素材限制键 video_reference / video_reference_max / audio_reference /
- *  audio_reference_max / image_reference_max / max_reference_duration_sec / task_types。
- *  读侧（toFeatures）对脏值宽容降级默认，写侧必须拒绝——否则管理端下次整包提交
- *  会把错误类型固化回库。兼容 snake_case / camelCase 两种键形。 */
+
+
+
+
+
 function featuresFieldErr(features: unknown): string | null {
   if (!isPlainObject(features)) return null;
   const alias = features.i2i_model_name ?? features.i2iModelName;
@@ -105,13 +119,18 @@ function featuresFieldErr(features: unknown): string | null {
     )
       return `提示词上限(max_prompt_length)须为 1–${MAX_PROMPT_LENGTH_LIMIT} 的整数或 null`;
   }
-  // ADR-0086 布尔能力位
-  for (const key of ["video_reference", "audio_reference"] as const) {
-    const v = features[key] ?? features[key === "video_reference" ? "videoReference" : "audioReference"];
+
+  for (const key of ["video_reference", "audio_reference", "sample_mode", "omni_reference_task_type"] as const) {
+    const alias =
+      key === "video_reference" ? "videoReference"
+      : key === "audio_reference" ? "audioReference"
+      : key === "sample_mode" ? "sampleMode"
+      : "omniReferenceTaskType";
+    const v = features[key] ?? features[alias];
     if (v !== undefined && v !== null && typeof v !== "boolean")
       return `${key}须为布尔值`;
   }
-  // ADR-0086 数量上限（非负整数，可显式 0 禁用）
+
   for (const key of ["video_reference_max", "audio_reference_max", "image_reference_max"] as const) {
     const v = features[key] ?? features[key === "video_reference_max" ? "videoReferenceMax" : key === "audio_reference_max" ? "audioReferenceMax" : "imageReferenceMax"];
     if (v !== undefined && v !== null) {
@@ -119,24 +138,60 @@ function featuresFieldErr(features: unknown): string | null {
         return `${key}须为 0–${MAX_REFERENCE_COUNT} 的非负整数或 null`;
     }
   }
-  // ADR-0086 参考素材总时长上限（正数秒或 null）
+
   const dur = features.max_reference_duration_sec ?? features.maxReferenceDurationSec;
   if (dur !== undefined && dur !== null) {
     if (typeof dur !== "number" || !Number.isFinite(dur) || dur <= 0 || dur > 86_400)
       return `参考素材总时长上限(max_reference_duration_sec)须为正数秒（≤86400）或 null`;
   }
-  // ADR-0086 task_types 对象
+
   const taskTypes = features.task_types ?? features.taskTypes;
   if (taskTypes !== undefined && taskTypes !== null) {
     if (!isPlainObject(taskTypes))
       return "任务类型约束(task_types)须为 JSON 对象";
+    for (const [mode, entry] of Object.entries(taskTypes as Record<string, unknown>)) {
+      if (!(VIDEO_MODES as readonly string[]).includes(mode))
+        return `视频模式(task_types)的键须为 ${VIDEO_MODES.join(" / ")}，实为「${mode}」`;
+      if (!isPlainObject(entry))
+        return `视频模式(task_types.${mode})须为 JSON 对象`;
+      const ratios = (entry as Record<string, unknown>).allowed_ratios;
+      if (ratios !== undefined && ratios !== null) {
+        if (
+          !Array.isArray(ratios) ||
+          !ratios.every((r) => typeof r === "string" && r.length > 0)
+        )
+          return `视频模式比例(task_types.${mode}.allowed_ratios)须为非空字符串数组或 null`;
+      }
+      const autoDuration = (entry as Record<string, unknown>).allow_auto_duration;
+      if (autoDuration !== undefined && autoDuration !== null && typeof autoDuration !== "boolean")
+        return `视频模式自动时长(task_types.${mode}.allow_auto_duration)须为布尔值或 null`;
+      const durations = (entry as Record<string, unknown>).allowed_durations;
+      if (durations !== undefined && durations !== null) {
+        if (!Array.isArray(durations) || durations.length !== 1 || durations[0] !== -1)
+          return `视频模式时长(task_types.${mode}.allowed_durations)只允许 [-1]`;
+      }
+    }
   }
-  // IKH BDO：闸门此前只覆盖上面这些键，能力行的主流键（数量上限 / 各布尔位）任意类型都能入库
-  // ——"abc" / 1.5 照收。读侧再宽容降级也救不回来：脏值一旦落库，管理端下次整包提交就把它固化了。
-  // 按同一原则补齐。
-  //
-  // IKHEXG：参考图上限原先在这一段单独校一遍（当时它还叫 max_reference_images，不在上面的
-  // ADR-0086 键表里）；合并进 `image_reference_max` 后已由上面的数量上限循环覆盖，此处删除重复段。
+
+
+
+  const videoDimensions = features.video_dimensions ?? features.videoDimensions;
+  if (videoDimensions !== undefined && videoDimensions !== null) {
+    if (!isPlainObject(videoDimensions)) return "输出像素表(video_dimensions)须为 JSON 对象";
+    for (const [specKey, pixels] of Object.entries(videoDimensions as Record<string, unknown>)) {
+      const parsedKey = parseSpecKey(specKey);
+      if (parsedKey === null)
+        return `输出像素表(video_dimensions)的键须形如 resolution=480p|aspect_ratio=16:9，实为「${specKey}」`;
+      if (typeof pixels !== "string" || parsePixels(pixels) === null)
+        return `输出像素表(video_dimensions)的值须形如 宽x高（正整数），键「${specKey}」实为「${String(pixels)}」`;
+    }
+  }
+
+
+
+
+
+
   const quantityMax = features.quantity_max ?? features.quantityMax;
   if (quantityMax !== undefined && quantityMax !== null) {
     if (
@@ -162,12 +217,6 @@ function featuresFieldErr(features: unknown): string | null {
     if (v !== undefined && v !== null && typeof v !== "boolean")
       return `${key}须为布尔值`;
   }
-  // 出站图片协议名；未知取值 worker-java 回落 inline-image 并告警，故这里只卡类型。
-  const protocol = features.image_protocol ?? features.imageProtocol;
-  if (protocol !== undefined && protocol !== null) {
-    if (typeof protocol !== "string" || protocol.trim().length === 0)
-      return "图片协议(image_protocol)须为非空字符串或 null";
-  }
   return null;
 }
 
@@ -188,17 +237,17 @@ function isNumberArray(v: unknown): v is number[] {
   );
 }
 
-/** IKG4UR：`supported_durations` 的合法形态——数字数组、时长范围对象 `{min,max,step?}` 或 null。
- *  库中两种形态长期并存：数组在读侧按 `[min,max,step]` 解析（见 toDurationRange），对象是区间的显式写法。
- *  写侧此前只收数组，后台把对象行读成空后写回 null，直接把该行清空。
- *  放行对象才能做到「读什么写什么」——一次保存不改变该行原本的语义。 */
+
+
+
+
 function isDurationRange(v: unknown): boolean {
   if (v === null) return true;
   if (Array.isArray(v)) {
-    // 数组是历史形态，读侧仍在生效（toDurationRange 按 [min,max,step] 解析）。
-    // 但只有「能构成合法区间」的才放行——`[]` / `[5]` / `[30,4]` / 负值 / step<=0
-    // 都会造出「滑杆消失 + 该模型任何时长都被 400」的坏行，且后台因 min>max 也修不回。
-    // 形态唯一性由写入闸门兜底，不能只靠前端。
+
+
+
+
     return (
       v.length >= 2 &&
       v.length <= 3 &&
@@ -225,6 +274,17 @@ function isSizeArray(v: unknown): boolean {
   );
 }
 
+function isRatioOptions(v: unknown): boolean {
+  if (isStringArray(v)) return true;
+  if (!isSizeArray(v)) return false;
+  return (v as Array<{ label?: unknown }>).every(
+    (item) =>
+      item.label === undefined ||
+      item.label === null ||
+      typeof item.label === "string",
+  );
+}
+
 function reqString(v: unknown, limit: number, label: string): string | null {
   if (typeof v !== "string") return `${label}须为字符串`;
   if (v.length === 0) return `${label}不能为空`;
@@ -237,6 +297,7 @@ function jsonField(
   label: string,
   allowed:
     | "sizes"
+    | "ratioOptions"
     | "stringArray"
     | "numberArray"
     | "nullNumberArray"
@@ -245,6 +306,8 @@ function jsonField(
   if (v === undefined) return null;
   if (allowed === "sizes" && !isSizeArray(v))
     return `${label}须为 [{ id, label? }] 数组`;
+  if (allowed === "ratioOptions" && !isRatioOptions(v))
+    return `${label}须为 [{ id, label? }] 数组（存量裸字符串亦可）`;
   if (allowed === "stringArray" && !isStringArray(v))
     return `${label}须为字符串数组`;
   if (allowed === "numberArray" && !isNumberArray(v))
@@ -264,57 +327,269 @@ function pickNullableString(v: unknown): string | null | undefined {
   return v == null ? null : typeof v === "string" ? v : undefined;
 }
 
-/** NOT NULL 字符串列（`default_size` / `default_aspect_ratio`）的取值归一。
- *
- *  IKHEXG：这两列在库里是 `VarChar NOT NULL`，「未配」的形态是**空串**；而表单把清空的状态
- *  发成 `null`（`form.defaultSize.trim() || null`），旧闸门又只收字符串 → 保存必然 400
- *  （本单实测：音频行 `PUT /api/admin/models/23` 报「默认尺寸(default_size)须为字符串」）。
- *  收 null 并归一为空串：与列形态一致，且保留「清空」的语义。
- *
- *  ⚠️ **创建与更新的语义不对称**（既有行为，非本次引入）：更新时空串就是空串；但创建时
- *  `default_size` 为空串会被 repo 的 `deriveDefaultSize` 顶成 `supported_sizes[0].id`
- *  （`model-capability-admin-repo.ts`）。别假设两个解析器对空串的处理一致。 */
+
+
+
+
+
+
+
+
+
+
 function pickNotNullString(v: unknown): string | undefined {
   if (v === null) return "";
   return pickString(v);
 }
 
-function parseParserAndMapping(
+
+
+
+
+
+const PRICING_BASE_UNITS = new Set([
+  "constant:1",
+  "usage.succeededSlots",
+  "usage.seconds",
+  "usage.characters",
+  "usage.referenceCount",
+  "usage.referenceSeconds",
+  "usage.videoEdit",
+  "usage.p",
+  "usage.c",
+  "usage.cr",
+  "usage.cc5m",
+  "usage.cc1h",
+  "usage.reasoning",
+  "usage.imgIn",
+  "usage.audioIn",
+  "usage.len",
+]);
+
+
+const PRICING_ROUNDINGS = new Set(["halfUp", "ceil", "floor"]);
+
+
+const PRICING_KINDS = new Set(["const", "table", "unset"]);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+export function pricingFieldErr(pricing: unknown, channel?: ChannelId): string | null {
+  if (pricing === undefined || pricing === null) return null;
+  if (!isPlainObject(pricing)) return "计价规则(pricing)须为 JSON 对象或 null";
+
+  const baseUnit = pricing.baseUnit;
+  if (typeof baseUnit !== "string" || baseUnit.length === 0) {
+    return "计价规则(pricing).baseUnit 必填（基准维度，如 usage.c / constant:1）";
+  }
+  if (!PRICING_BASE_UNITS.has(baseUnit)) {
+    return `计价规则(pricing).baseUnit 未知：「${baseUnit}」（见 billing 的 UsageDim 枚举）`;
+  }
+
+  const price = pricing.basePrice;
+  if (!isPlainObject(price)) {
+    return "计价规则(pricing).basePrice 必填（{kind: const|table|unset, ...}）";
+  }
+  const kind = price.kind;
+  if (typeof kind !== "string" || !PRICING_KINDS.has(kind)) {
+    return `计价规则(pricing).basePrice.kind 须为 const / table / unset，实为「${String(kind)}」`;
+  }
+  if (kind === "const") {
+    if (typeof price.value !== "number") {
+      return "计价规则(pricing).basePrice.kind=const 时必须给数值 value";
+    }
+
+
+
+
+
+
+    if (price.value < 0) {
+      return (
+        `计价规则(pricing).basePrice.value 不能为负（实为 ${String(price.value)}）：` +
+        `负单价经下限兜底后变成 0，整单免费且账面无信号；要表达「免费」请直接写 0，并用 minCredits 定下限`
+      );
+    }
+  }
+  if (kind === "table") {
+    if (!isPlainObject(price.table) || Object.keys(price.table).length === 0) {
+      return "计价规则(pricing).basePrice.kind=table 时必须给非空 table";
+    }
+
+    for (const [axis, v] of Object.entries(price.table)) {
+      if (typeof v !== "number" || v < 0) {
+        return (
+          `计价规则(pricing).basePrice.table.${axis} 不能为负（实为 ${String(v)}）：` +
+          `负单价经下限兜底后变成 0`
+        );
+      }
+    }
+  }
+
+  const denom = pricing.unitDenominator;
+  if (denom !== undefined && denom !== null) {
+    if (typeof denom !== "number" || !Number.isInteger(denom) || denom <= 0) {
+      return "计价规则(pricing).unitDenominator 须为正整数（1 = 每秒/每张；60 = 每分钟）";
+    }
+  }
+  for (const key of ["quantityOffset", "quantityStep"] as const) {
+    const v = pricing[key];
+    if (v === undefined || v === null) continue;
+    if (typeof v !== "number" || !Number.isInteger(v) || v < 0) {
+      return `计价规则(pricing).${key} 须为非负整数`;
+    }
+  }
+  for (const key of ["minCredits", "maxCredits"] as const) {
+    const v = pricing[key];
+    if (v !== undefined && v !== null) {
+      if (typeof v !== "number" || !Number.isInteger(v) || v < 0) {
+        return `计价规则(pricing).${key} 须为非负整数`;
+      }
+    }
+  }
+  const rounding = pricing.rounding;
+  if (rounding !== undefined && rounding !== null) {
+    if (typeof rounding !== "string" || !PRICING_ROUNDINGS.has(rounding)) {
+      return `计价规则(pricing).rounding 须为 halfUp / ceil / floor，实为「${String(rounding)}」`;
+    }
+  }
+  for (const key of ["dims", "multipliers"] as const) {
+    const v = pricing[key];
+    if (v === undefined || v === null) continue;
+    if (!isPlainObject(v)) return `计价规则(pricing).${key} 须为 JSON 对象`;
+    for (const [axis, raw] of Object.entries(v)) {
+      if (!PRICING_BASE_UNITS.has(axis)) {
+        return `计价规则(pricing).${key} 的键须为基准维度，实为「${axis}」`;
+      }
+
+
+
+
+      if (typeof raw !== "number" || !Number.isInteger(raw)) {
+        return `计价规则(pricing).${key}.${axis} 须为整数（万分比），实为 ${String(raw)}`;
+      }
+      if (key === "multipliers" && raw <= 0) {
+        return (
+          `计价规则(pricing).multipliers.${axis} 须为正整数（实为 ${raw}）：` +
+          `0 会让整单免费，「这一维不参与」应当是不写它`
+        );
+      }
+      if (key === "dims" && raw < 0) {
+        return `计价规则(pricing).dims.${axis} 不能为负（实为 ${raw}）：负倍率把等效数量拉低，等于少收`;
+      }
+    }
+  }
+
+
+
+
+
+  const dimPrices = pricing.dimPrices;
+  if (dimPrices !== undefined && dimPrices !== null) {
+    if (!isPlainObject(dimPrices)) return "计价规则(pricing).dimPrices 须为 JSON 对象";
+    for (const [axis, spec] of Object.entries(dimPrices)) {
+      if (!PRICING_BASE_UNITS.has(axis)) {
+        return `计价规则(pricing).dimPrices 的键须为基准维度，实为「${axis}」`;
+      }
+      if (!isPlainObject(spec)) {
+        return `计价规则(pricing).dimPrices.${axis} 须为对象 { unitMc: number, firstFree?: boolean }`;
+      }
+      const unitMc = spec.unitMc;
+
+
+      if (typeof unitMc !== "number" || !Number.isInteger(unitMc) || unitMc <= 0) {
+        return `计价规则(pricing).dimPrices.${axis}.unitMc 须为正整数（单位是 mc，与 basePrice.value 相同：`
+          + "1 积分 = 1000 mc。要让这个维度不计费，请整块删掉它，别写 0）";
+      }
+      if (spec.firstFree !== undefined && spec.firstFree !== null
+          && typeof spec.firstFree !== "boolean") {
+        return `计价规则(pricing).dimPrices.${axis}.firstFree 须为布尔（缺省 = 不免费）`;
+      }
+    }
+
+
+
+    if (typeof pricing.maxCredits === "number") {
+      return "计价规则(pricing).dimPrices 与 maxCredits 不能同时配："
+        + "上限计价跳过用量计算、算不到维度绝对加价，预扣会冻结一份不含加价的额度，"
+        + "结算超出后只记应收（少收且静默）。二选一";
+    }
+  }
+
+  if (channel !== undefined) {
+
+    if (channelOf(channel).media === "audio" && baseUnit === "usage.seconds"
+        && (pricing.maxCredits === undefined || pricing.maxCredits === null)) {
+      return "音频按 usage.seconds 计价必须同时配 maxCredits："
+        + "音频时长在提交时刻取不到（TTS 由文案决定，请求里没有 duration），"
+        + "billing 只能「按上限冻结、结算按实际重算」；不配上限则该模型的每一次提交都会被拒。"
+        + "上限按官方单次输出上限（2 分钟）折算，并留一点余量";
+    }
+  }
+  return null;
+}
+
+function parseChannelAndMapping(
   body: Record<string, unknown>,
   mode: "create" | "update",
-  currentParser?: unknown,
+  capabilityType: unknown,
+  current?: { channel?: unknown; supported_sizes?: unknown },
 ): ParseResult<{
-  channel_parser?: ImageChannelParserId;
+  channel?: ChannelId;
+
+  effectiveChannel?: ChannelId;
   request_mapping?: unknown;
 }> {
-  if (body.channel_parser !== undefined && !isImageChannelParserId(body.channel_parser)) {
-    return {
-      ok: false,
-      error: `生成渠道解析器只支持 ${IMAGE_CHANNEL_PARSERS.join(" / ")}`,
-    };
+  if (body.channel !== undefined && !isChannelId(body.channel)) {
+    return { ok: false, error: `渠道(channel)只支持 ${CHANNEL_IDS.join(" / ")}` };
   }
-  // update 是 diff 提交——没改过的 channel_parser 不在请求体里。解析器必须回落到
-  // **库中该行**的值，否则下面整段映射校验会被跳过：GPT 行删空矩阵、Seedream 行
-  // 映射表被清空都是从这条缝漏过去的（解析器未知 ⇒ 不校验 ⇒ 脏值直接落库）。
-  const rawParser = body.channel_parser;
-  const parserExplicit = isImageChannelParserId(rawParser);
-  const parser: ImageChannelParserId = parserExplicit
-    ? rawParser
-    : mode === "create"
-      ? "seedream"
-      : isImageChannelParserId(currentParser)
-        ? currentParser
-        : "seedream";
-  // Seedream 行的映射表是 IK629 之后尺寸换算的唯一来源（worker-java hasSizeMatrix
-  // 判假即回退成「直传 provider size」，而那正是 024 迁移要修的 400 Invalid size）。
-  // 后台没有「清空矩阵」入口，所以对一个**本来就是 seedream** 的行，客户端传的 null
-  // 不是运营意图、是 diff 提交的产物——按「不改」处理。
-  //
-  // 但「本来不是 seedream」的行不能这么办：把 gpt 行切到 seedream 时，前端同样只发
-  // null，而那个 null 就是「gpt 的矩阵不再适用」的唯一表达。当成「不改」会把上一族的
-  // 矩阵留在行里，worker 拿它去算 seedream 的尺寸，而界面上没有任何入口能再清掉它。
-  const currentParserIsSeedream =
-    isImageChannelParserId(currentParser) && currentParser === "seedream";
+  const explicit = isChannelId(body.channel) ? body.channel : null;
+
+
+  if (explicit !== null) {
+    const channelErr = validateChannel(explicit, capabilityType);
+    if (channelErr) return { ok: false, error: channelErr };
+  }
+
+
+
+  const stored = mode === "update" && isChannelId(current?.channel) ? current.channel : null;
+
+
+  const channel: ChannelId | null = explicit ?? (mode === "create" ? defaultChannelFor(capabilityType) : null);
+
+
+
+
+
+  const effectiveChannel = channel ?? stored;
+  const parser: ImageChannelParserId =
+    channel !== null ? channelOf(channel).parser ?? "seedream"
+    : stored !== null ? channelOf(stored).parser ?? "seedream"
+    : "seedream";
+
+
+
+
+
+
+
+
+
+
+  const currentParserIsSeedream = stored !== null && channelOf(stored).parser === "seedream";
   const clearSeedreamMapping =
     parser === "seedream" &&
     body.request_mapping === null &&
@@ -332,21 +607,26 @@ function parseParserAndMapping(
     );
     if (mappingTypeErr) return { ok: false, error: mappingTypeErr };
   }
-  // 显式声明切到 gpt / banana 时必须同时给出映射表——否则切完是一张空表，
-  // 该模型每次请求都 empty_mapping。缺省不传 channel_parser 时表示「不改」，
-  // 那一行的映射表原样留在库里，由上面的 currentParser 兜底校验。
-  if (parserExplicit && parser !== "seedream" && !mappingProvided) {
+
+
+
+  if (explicit !== null && parser !== "seedream" && !mappingProvided) {
     return { ok: false, error: "request_mapping 不能为空" };
   }
   if (mappingProvided) {
-    const mappingErr = validateRequestMapping(parser, body.request_mapping);
+
+
+
+    const sizesForGate = body.supported_sizes ?? current?.supported_sizes;
+    const mappingErr = validateRequestMapping(parser, body.request_mapping, sizesForGate);
     if (mappingErr) return { ok: false, error: mappingErr };
   }
   return {
     ok: true,
     value: {
-      // 新建恒带解析器（缺省 seedream）；更新只在显式声明时才提交，否则会覆盖库里那一行。
-      ...(parserExplicit || mode === "create" ? { channel_parser: parser } : {}),
+
+      ...(channel !== null ? { channel } : {}),
+      ...(effectiveChannel !== null ? { effectiveChannel } : {}),
       ...(mappingProvided ? { request_mapping: body.request_mapping } : {}),
     },
   };
@@ -394,7 +674,7 @@ export function parseModelCreateBody(
     jsonField(
       body.supported_aspect_ratios,
       "比例(supported_aspect_ratios)",
-      "stringArray",
+      "ratioOptions",
     ) ??
     jsonField(
       body.supported_durations,
@@ -410,7 +690,6 @@ export function parseModelCreateBody(
   if (jsonErr) return { ok: false, error: jsonErr };
   const featuresErr = featuresFieldErr(body.features);
   if (featuresErr) return { ok: false, error: featuresErr };
-
   if (body.enabled !== undefined && typeof body.enabled !== "boolean") {
     return { ok: false, error: "启用(enabled)须为布尔值" };
   }
@@ -463,8 +742,11 @@ export function parseModelCreateBody(
       error: "默认时长(default_duration)须为非负整数秒（≤2147483647）或 null",
     };
 
-  const parsedMapping = parseParserAndMapping(body, "create");
+  const parsedMapping = parseChannelAndMapping(body, "create", body.capability_type);
   if (!parsedMapping.ok) return parsedMapping;
+
+  const pricingErr = pricingFieldErr(body.pricing, parsedMapping.value.effectiveChannel);
+  if (pricingErr) return { ok: false, error: pricingErr };
 
   return {
     ok: true,
@@ -485,20 +767,21 @@ export function parseModelCreateBody(
         : {}),
       default_duration: defaultDuration,
       features: body.features,
+      ...(body.pricing !== undefined ? { pricing: body.pricing } : {}),
       ...parsedMapping.value,
       ...(body.enabled !== undefined ? { enabled: body.enabled as boolean } : {}),
     },
   };
 }
 
-/** 校验管理端「更新模型」请求体。
- *
- *  `current` 是**库中当前那一行**（至少 `channel_parser`）。更新是 diff 提交，未变更的
- *  字段不在请求体里，光看 body 推不出该用哪个解析器做映射校验——必须由调用方把行读出来
- *  传进来。调用方须读库，**不得读缓存**：校验读到旧值等于没校验。 */
+
+
+
+
+
 export function parseModelUpdateBody(
   body: unknown,
-  current?: { channel_parser?: unknown },
+  current?: { channel?: unknown; capability_type?: unknown; supported_sizes?: unknown },
 ): ParseResult<ModelUpdatePayload> {
   if (!isPlainObject(body)) return { ok: false, error: "请求体须为 JSON 对象" };
 
@@ -520,8 +803,8 @@ export function parseModelUpdateBody(
         error: `图标(icon)超长（≤${MODEL_FIELD_LIMITS.icon}字符）`,
       };
   }
-  // IKHEXG：两列是 NOT NULL，「清空」的合法表达是空串（不是 null）。收 null 归一为空串——
-  // 只收字符串会让表单（对非图片/视频行恒发 null）保存必然 400，实测症状即此。
+
+
   const defaultSize = pickNotNullString(body.default_size);
   if (body.default_size !== undefined) {
     if (
@@ -571,7 +854,7 @@ export function parseModelUpdateBody(
     jsonField(
       body.supported_aspect_ratios,
       "比例(supported_aspect_ratios)",
-      "stringArray",
+      "ratioOptions",
     ) ??
     jsonField(
       body.supported_durations,
@@ -587,9 +870,11 @@ export function parseModelUpdateBody(
   if (jsonErr) return { ok: false, error: jsonErr };
   const featuresErr = featuresFieldErr(body.features);
   if (featuresErr) return { ok: false, error: featuresErr };
-
-  const parsedMapping = parseParserAndMapping(body, "update", current?.channel_parser);
+  const parsedMapping = parseChannelAndMapping(body, "update", current?.capability_type, current);
   if (!parsedMapping.ok) return parsedMapping;
+
+  const pricingErr = pricingFieldErr(body.pricing, parsedMapping.value.effectiveChannel);
+  if (pricingErr) return { ok: false, error: pricingErr };
 
   return {
     ok: true,
@@ -627,6 +912,7 @@ export function parseModelUpdateBody(
           | null,
       }),
       ...(body.features !== undefined && { features: body.features }),
+      ...(body.pricing !== undefined && { pricing: body.pricing }),
       ...parsedMapping.value,
       ...(body.enabled !== undefined && { enabled: body.enabled as boolean }),
       ...(body.sort_order !== undefined && {

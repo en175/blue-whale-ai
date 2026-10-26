@@ -2,7 +2,6 @@ import { Injectable } from "@nestjs/common";
 import { createTemplateRepo } from "@lib/shared/persistence/index.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 
-/** 首页模板读取侧依赖：wire Prisma template repo。 */
 @Injectable()
 export class TemplateService {
   private repoInstance?: ReturnType<typeof createTemplateRepo>;
@@ -20,7 +19,6 @@ export class TemplateService {
     return this.repo.listTags();
   }
 
-  /** IKA64P：管理端全量标签（含隐藏） */
   listAllTags() {
     return this.repo.listAllTags();
   }

@@ -10,11 +10,13 @@
 
 | 场景 | 文档 |
 |---|---|
+| **需求、开发、测试、缺陷或交付** | [bluewhale-product-sop.md](bluewhale-product-sop.md)，先核对 PRD 评审、业务父需求、版本及角色授权 |
 | **开 PR / 提交代码** | [commit-and-review.md](commit-and-review.md) |
 | **开新分支** | [branch-naming.md](branch-naming.md) |
 | **Agent 任务区 / 本地集成 / task worktree 生命周期** | [worktree-workflow.md](worktree-workflow.md) |
 | **创建 / 跟进 Issue** | [issue-tracker.md](issue-tracker.md) |
 | **打 / 改标签** | [triage-labels.md](triage-labels.md) |
+| **改工单状态（需求 / 任务 / 缺陷）** | 人看 [gitee-workflow.md](gitee-workflow.md)；Agent 看 [gitee-workflow-agent.md](gitee-workflow-agent.md) |
 | **维护 / 新增 Claude Code 拦截器** | [hooks/README.md](hooks/README.md) |
 
 ---
@@ -23,7 +25,7 @@
 
 - [branch-naming.md](branch-naming.md) ↔ [commit-and-review.md](commit-and-review.md):分支前缀 vs Conventional Commits type 区分(刻意不统一,见 branch-naming.md)
 - [worktree-workflow.md](worktree-workflow.md) → [ADR-0009](../../adr/0009-parallel-agent-worktrees.md):并行 Agent Session 的 task worktree 隔离
-- [worktree-workflow.md](worktree-workflow.md) → [ADR-0010](../../adr/0010-local-master-is-user-integration-zone.md):用户本地集成区与 Agent 任务区边界
+- [worktree-workflow.md](worktree-workflow.md) → [ADR-0115](../adr/0115-local-release-code-baseline.md):当前发布线基线与 Agent 任务区边界；替代 [ADR-0010](../adr/0010-local-master-is-user-integration-zone.md)
 - [hooks/README.md](hooks/README.md) → [commit-and-review.md](commit-and-review.md):「合并方法」一节
 - [hooks/README.md](hooks/README.md) → [ADR-0003](../../adr/0003-no-direct-push-to-master.md):「禁止直推 master」决策
 - [branch-naming.md](branch-naming.md) → [ADR-0004](../../adr/0004-branch-naming.md):分支命名决策

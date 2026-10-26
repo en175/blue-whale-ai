@@ -1,15 +1,15 @@
-/* ============================================
- * OperationLog 操作日志：管理操作审计记录，按类别/时间/关键词查询
- * 数据源 GET /api/admin/operation-logs（时间倒序）
- * ============================================ */
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Search } from 'lucide-react';
-import { fetchOperationLogs, type OperationLog } from '@/api/admin';
-import { isApiError } from '@/api/http';
-import { formatLogIp } from '@/admin/formatLogIp';
-import styles from './index.module.css';
+import {
+  operationLogsOptions,
+  type OperationLog as OperationLogRow,
+} from '@/admin/api/adminOperationLogs';
+import { isApiError } from '@/shared/api/http';
+import { Badge, Button, Empty, Input, Page, PageHeader, Select, Table, Toolbar } from '../../ui';
 
-/** 类别 code → 展示名（筛选下拉与表格徽章共用） */
+const BREAK_ANY = { overflowWrap: 'anywhere' } as const;
+
 const CATEGORY_OPTIONS: { code: string; label: string }[] = [
   { code: 'model.capability', label: '模型列表' },
   { code: 'tier', label: '充值档位' },
@@ -18,10 +18,14 @@ const CATEGORY_OPTIONS: { code: string; label: string }[] = [
   { code: 'template', label: '模板管理' },
 ];
 
+const CATEGORY_SELECT_OPTIONS = [
+  { value: 'all', label: '全部类别' },
+  ...CATEGORY_OPTIONS.map((c) => ({ value: c.code, label: c.label })),
+];
+
 const categoryLabel = (code: string) =>
   CATEGORY_OPTIONS.find((c) => c.code === code)?.label ?? code;
 
-/** 已知 action → 中文展示名，未匹配原样展示 */
 const ACTION_LABEL: Record<string, string> = {
   'model.capability.create': '新建模型',
   'model.capability.update': '编辑模型',
@@ -46,13 +50,10 @@ const ACTION_LABEL: Record<string, string> = {
 
 const actionLabel = (action: string) => ACTION_LABEL[action] ?? action;
 
-/** ISO 时间 → 本地展示 */
 const fmtTime = (iso: string) => new Date(iso).toLocaleString('zh-CN', { hour12: false });
 
-/** 日期（yyyy-mm-dd）→ 当天零点 ISO */
 const dayToIso = (day: string) => new Date(`${day}T00:00:00`).toISOString();
 
-/** detail JSON 字符串 → 可读摘要，解析失败原样展示 */
 function formatDetail(detail: string): string {
   if (!detail) return '—';
   try {
@@ -64,7 +65,6 @@ function formatDetail(detail: string): string {
       if (parts.length) return parts.join('；');
     }
   } catch {
-    /* 非 JSON 原样展示 */
   }
   return detail;
 }
@@ -75,138 +75,116 @@ export default function OperationLog() {
   const [to, setTo] = useState('');
   const [search, setSearch] = useState('');
   const [searchDebounced, setSearchDebounced] = useState('');
-  const [logs, setLogs] = useState<OperationLog[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState('');
 
-  /** 搜索输入 300ms 防抖，避免每次按键都请求 */
   useEffect(() => {
     const t = setTimeout(() => setSearchDebounced(search.trim()), 300);
     return () => clearTimeout(t);
   }, [search]);
 
-  /** 拉取日志（筛选变化时重新请求，服务端时间倒序） */
-  const loadLogs = useCallback(async () => {
-    setLoading(true);
-    setLoadError('');
-    try {
-      const list = await fetchOperationLogs({
-        category: category === 'all' ? undefined : category,
-        dateFrom: from ? dayToIso(from) : undefined,
-        dateTo: to ? dayToIso(to) : undefined,
-        searchText: searchDebounced || undefined,
-      });
-      setLogs(list);
-    } catch (e) {
-      setLoadError(isApiError(e) ? e.message : '日志加载失败，请稍后重试');
-    } finally {
-      setLoading(false);
-    }
-  }, [category, from, to, searchDebounced]);
-
-  useEffect(() => {
-    void loadLogs();
-  }, [loadLogs]);
+  const list = useQuery(
+    operationLogsOptions({
+      category: category === 'all' ? undefined : category,
+      dateFrom: from ? dayToIso(from) : undefined,
+      dateTo: to ? dayToIso(to) : undefined,
+      searchText: searchDebounced || undefined,
+    })
+  );
+  const logs: OperationLogRow[] = list.data ?? [];
+  const loadError = list.isError
+    ? isApiError(list.error)
+      ? list.error.message
+      : '日志加载失败，请稍后重试'
+    : '';
 
   return (
-    <div className={styles.page}>
-      {/* 页头 */}
-      <div className={styles.header}>
-        <div>
-          <h1 className={styles.title}>操作日志</h1>
-          <p className={styles.subtitle}>管理操作审计记录，按类别和时间筛选</p>
-        </div>
-      </div>
+    <Page>
+      <PageHeader title="操作日志" subtitle="管理操作审计记录，按类别和时间筛选" />
 
-      {/* 筛选行 */}
-      <div className={styles.filterRow}>
-        <select className={styles.select} value={category} onChange={(e) => setCategory(e.target.value)}>
-          <option value="all">全部类别</option>
-          {CATEGORY_OPTIONS.map((c) => (
-            <option key={c.code} value={c.code}>
-              {c.label}
-            </option>
-          ))}
-        </select>
-        <input type="date" className={styles.dateInput} value={from} onChange={(e) => setFrom(e.target.value)} />
-        <span className={styles.rangeDash}>—</span>
-        <input type="date" className={styles.dateInput} value={to} onChange={(e) => setTo(e.target.value)} />
-        <div className={styles.searchWrap}>
-          <Search size={16} strokeWidth={2} className={styles.searchIcon} />
-          <input
-            className={styles.searchInput}
+      {}
+      <Toolbar>
+        <Select options={CATEGORY_SELECT_OPTIONS} value={category} onChange={setCategory} />
+        <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+        <span>—</span>
+        <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+        {}
+        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          <Search size={16} strokeWidth={2} aria-hidden />
+          <Input
+            style={{ width: 260 }}
             placeholder="搜索目标/详情/操作人..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
-      </div>
+      </Toolbar>
 
-      {/* 日志表格 */}
-      <div className={styles.tableWrap}>
-        <table className={styles.table}>
-          <thead>
+      {}
+      <Table fixed>
+        {}
+        <thead>
+          <tr>
+            <th style={{ width: 104 }}>操作人</th>
+            <th style={{ width: 152 }}>时间</th>
+            <th style={{ width: 92 }}>类别</th>
+            <th style={{ width: 132 }}>操作</th>
+            <th style={{ width: 220 }}>目标</th>
+            <th>详情</th>
+          </tr>
+        </thead>
+        <tbody>
+          {}
+          {list.isPending && (
             <tr>
-              <th>时间</th>
-              <th>类别</th>
-              <th>操作</th>
-              <th>目标</th>
-              <th>详情</th>
-              <th>IP</th>
-              <th className={styles.thRight}>操作人</th>
+              <td colSpan={6}>
+                <Empty message="加载中…" />
+              </td>
             </tr>
-          </thead>
-          <tbody>
-            {loading ? (
-              <tr>
-                <td colSpan={7} className={styles.tableState}>
-                  加载中…
-                </td>
-              </tr>
-            ) : loadError ? (
-              <tr>
-                <td colSpan={7} className={styles.tableState}>
-                  {loadError}{' '}
-                  <button className={styles.retryLink} onClick={() => void loadLogs()}>
-                    重试
-                  </button>
-                </td>
-              </tr>
-            ) : logs.length === 0 ? (
-              <tr>
-                <td colSpan={7} className={styles.tableState}>
-                  暂无日志
-                </td>
-              </tr>
-            ) : (
-              logs.map((l) => {
-                const detailText = formatDetail(l.detail);
-                return (
-                  <tr key={l.id}>
-                    <td className={styles.cellTime}>{fmtTime(l.createdAt)}</td>
-                    <td>
-                      <span className={styles.catBadge}>{categoryLabel(l.category)}</span>
-                    </td>
-                    <td className={styles.cellAction} title={l.action}>
-                      {actionLabel(l.action)}
-                    </td>
-                    <td className={styles.cellTarget} title={l.target}>
-                      {l.target || '—'}
-                    </td>
-                    <td className={styles.cellDetail} title={l.detail}>
-                      {detailText}
-                    </td>
-                    <td className={styles.cellIp} title={l.ipAddress ?? undefined}>
-                      {formatLogIp(l.ipAddress)}
-                    </td>
-                    <td className={styles.cellOperator}>{l.operator}</td>
-                  </tr>
-                );
-              })
-            )}
-          </tbody>
-        </table>
-      </div>
-    </div>
+          )}
+          {!list.isPending && list.isError && (
+            <tr>
+              <td colSpan={6}>
+                <Empty
+                  message={loadError}
+                  extra={
+                    <Button size="sm" onClick={() => void list.refetch()}>
+                      重试
+                    </Button>
+                  }
+                />
+              </td>
+            </tr>
+          )}
+          {!list.isPending && !list.isError && logs.length === 0 && (
+            <tr>
+              <td colSpan={6}>
+                <Empty message="暂无日志" />
+              </td>
+            </tr>
+          )}
+          {!list.isPending &&
+            !list.isError &&
+            logs.map((l) => {
+              const detailText = formatDetail(l.detail);
+              return (
+                <tr key={l.id}>
+                  <td>{l.operator}</td>
+                  {}
+                  <td style={{ whiteSpace: 'nowrap' }}>{fmtTime(l.createdAt)}</td>
+                  <td>
+                    <Badge tone="neutral">{categoryLabel(l.category)}</Badge>
+                  </td>
+                  <td title={l.action}>{actionLabel(l.action)}</td>
+                  <td title={l.target} style={BREAK_ANY}>
+                    {l.target || '—'}
+                  </td>
+                  <td title={l.detail} style={BREAK_ANY}>
+                    {detailText}
+                  </td>
+                </tr>
+              );
+            })}
+        </tbody>
+      </Table>
+    </Page>
   );
 }

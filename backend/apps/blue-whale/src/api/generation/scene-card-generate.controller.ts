@@ -8,12 +8,17 @@ import {
   Res,
 } from "@nestjs/common";
 import type { Response } from "express";
-import { fail, ok, RESOURCE_NOT_FOUND_CODE } from "@lib/contracts";
+import {
+  DomainError,
+  fail,
+  ok,
+  RESOURCE_NOT_FOUND_CODE,
+  type ResultEnvelope,
+} from "@lib/contracts";
 import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
 import { wireInteger } from "@lib/shared/wire-integer.js";
-import { AccountService } from "@lib/shared/account/account.service.js";
+import { sharedBillingClient } from "@lib/shared/billing/billing-client.js";
 import { SceneCardGenerationService } from "@lib/shared/generation/scene-card-generation.service.js";
-import { GenerationCostEstimatorService } from "@lib/shared/generation/cost-estimator.service.js";
 import { createRequestMaterialGate } from "@lib/shared/generation/material-gate-wiring.js";
 import { MaterialService } from "@lib/shared/material/material.service.js";
 import { AssetService } from "@lib/shared/assets/assets.service.js";
@@ -24,9 +29,10 @@ import {
   enqueueVideoGenerationJob,
   enqueueImageGenerationJob,
 } from "@lib/shared/generation/generation-queue.js";
-import { sealProviderCredential } from "@lib/shared/generation/credential.js";
 import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js";
+import { enqueueFailureLog } from "@lib/infra/mq/rocketmq-producer.js";
 import { logger } from "@lib/infra/logging/blue-whale-logger.js";
+import { isRecoveryControlledEnvelope } from "../recovery-envelope.js";
 
 function bodyString(body: unknown): string {
   return typeof body === "string" ? body : JSON.stringify(body ?? "");
@@ -37,9 +43,6 @@ export class SceneCardGenerateController {
   constructor(
     private readonly sceneCard: SceneCardGenerationService,
     private readonly storyboard: StoryboardPreviewService,
-    private readonly cost: GenerationCostEstimatorService,
-    private readonly account: AccountService,
-    // IKF YHJ：素材校验门（场景卡再生成是第三条视频创建路径）。
     private readonly material: MaterialService,
     private readonly assets: AssetService,
   ) {}
@@ -51,10 +54,8 @@ export class SceneCardGenerateController {
     @Param("sceneCardId") sceneCardId: string,
     @Body() body: unknown,
     @Headers("idempotency-key") idempotencyKey: string | undefined,
-    @Headers("authorization") authorization: string | undefined,
     @Res() res: Response,
   ) {
-    const internal = sealProviderCredential(authorization);
     const result = await handleSceneCardGenerate(
       user.userId,
       projectId,
@@ -63,19 +64,10 @@ export class SceneCardGenerateController {
       bodyString(body),
       this.sceneCard.repo,
       {
-        ...(internal.providerCredential
-          ? { providerCredential: internal.providerCredential }
-          : {}),
-        ...(this.cost.estimator
-          ? { costEstimator: this.cost.estimator }
-          : {}),
-        // IKF YHJ（ADR-0087）：场景卡再生成是第三条视频创建路径，与创建期/重试期共用同一个门
-        // （同一工厂、同一判定、同一失败处置）。原先漏接，导致预设保存后才变成 Failed 的素材
-        // 仍能从这里进生成。
         materialGate: createRequestMaterialGate({
           repo: this.material.materialStatusRepo,
           callAction: (action, body) =>
-            this.material.callAction(authorization, action, body),
+            this.material.callAction(action, body),
           resolveLocalAssetMaterialIds: (uid, assetIds) =>
             this.assets.findBoundMaterialIds(uid, assetIds),
           onMaterialFailure: (input) =>
@@ -83,14 +75,11 @@ export class SceneCardGenerateController {
               .handleUpstreamMaterialFailure({
                 userId: user.userId,
                 materialId: input.materialId,
-                authorization,
                 errorCode: input.errorCode,
                 errorMessage: input.errorMessage,
                 ...(input.deleteUpstream === false ? { deleteUpstream: false } : {}),
               })
               .catch((error: unknown) => {
-                // 处置是清理副作用，绝不外抛——抛了会被门的 try 咽成「本轮未知」，
-                // 把本该终局拒绝的结果降级成「请稍后重试」。
                 logger.warn(
                   `[scene-card-generate] 素材失败处置异常 materialId=${input.materialId}: ${
                     error instanceof Error ? error.message : "unknown"
@@ -101,22 +90,27 @@ export class SceneCardGenerateController {
       },
     );
     if (result.code === 200 && result.data?.generation_job_id != null) {
+      const jobId = String(result.data.generation_job_id);
       try {
-        await enqueueVideoGenerationJob(
-          String(result.data.generation_job_id),
-        );
+        await enqueueVideoGenerationJob(jobId);
       } catch (error) {
-        logger.error(
-          `[scene-card-generate] enqueue video job failed: ${error instanceof Error ? error.message : "unknown"}`,
-        );
+        const log = enqueueFailureLog(error, { scope: "scene-card-generate", kind: "video", jobId });
+        logger[log.level](log.message);
       }
     }
-    // 对齐原 web 路由：成功受理（含 job）返 202 Accepted，业务错误返 200 + 信封。
-    res.status(result.code === 200 ? 202 : 200).json(result);
+    this.writeAcceptedOrThrow(result, res);
   }
 
-  /** GET /api/projects/:projectId/scene-cards/:sceneCardId/generation-preset
-   *  编辑器只读端点：返回当前 Preset 完整参数 + SceneCard 版本与权威正文（完整参数不进 Snapshot）。 */
+  private writeAcceptedOrThrow(
+    result: ResultEnvelope<unknown>,
+    res: Response,
+  ): void {
+    if (result.code !== 200) {
+      throw new DomainError(result.code, result.msg ?? undefined);
+    }
+    res.status(202).json(result);
+  }
+
   @Get("generation-preset")
   async generationPreset(
     @CurrentUser() user: AuthenticatedUser,
@@ -145,13 +139,9 @@ export class SceneCardGenerateController {
         reference_assets: result.preset.reference_assets,
         capability_snapshot_version: result.preset.capability_snapshot_version,
       },
-      projection: result.projection,
     });
   }
 
-  /** POST /api/projects/:projectId/scene-cards/:sceneCardId/storyboard-preview
-   *  User 从 SceneCard 显式触发分镜预览（CONTEXT L43-47，可选旁路）：建 type=image 的 GenerationJob，
-   *  其 N 个 output_slot 即有序画格。与 Dock 图片链路一致：Bearer <sk-token> 做额度预检，凭证明文透传（修正四：去密）。 */
   @Post("storyboard-preview")
   async storyboardPreview(
     @CurrentUser() user: AuthenticatedUser,
@@ -159,19 +149,12 @@ export class SceneCardGenerateController {
     @Param("sceneCardId") sceneCardId: string,
     @Body() body: unknown,
     @Headers("idempotency-key") idempotencyKey: string | undefined,
-    @Headers("authorization") authorization: string | undefined,
     @Res() res: Response,
   ) {
-    const token = authorization?.startsWith("Bearer ")
-      ? authorization.slice(7).trim()
-      : undefined;
-    const internal = sealProviderCredential(authorization);
-    const quotaCheck = token?.startsWith("sk-")
-      ? async () => {
-          const usage = await this.account.getTokenUsage(token);
-          return { sufficient: usage.userQuota > 0 };
-        }
-      : undefined;
+    const quotaCheck = async () => {
+      const balance = await sharedBillingClient().queryBalance(Number(user.userId));
+      return { sufficient: balance.availableCredits > 0 };
+    };
 
     const result = await handleStoryboardPreviewCreate(
       user.userId,
@@ -181,34 +164,25 @@ export class SceneCardGenerateController {
       bodyString(body),
       this.storyboard.repo,
       {
-        ...(internal.providerCredential
-          ? { providerCredential: internal.providerCredential }
-          : {}),
-        ...(quotaCheck ? { quotaCheck } : {}),
-        ...(this.cost.estimator
-          ? { costEstimator: this.cost.estimator }
-          : {}),
+        quotaCheck,
       },
     );
 
-    // 成功后即时调度首图 job（IKBGKA：走 RocketMQ 图片 consumer，消费端 Semaphore 控并发；
-    // 孤儿由 worker-java RecoveryService 重投 MQ 兜底）。
     if (result.code === 200 && result.data?.generation_job_id != null) {
-      void enqueueImageGenerationJob(
-        String(result.data.generation_job_id),
-      ).catch((e) =>
-        logger.error(
-          `[storyboard-preview] enqueue image job failed: ${e instanceof Error ? e.message : String(e)}`,
-        ),
-      );
+      const jobId = String(result.data.generation_job_id);
+      void enqueueImageGenerationJob(jobId).catch((e) => {
+        const log = enqueueFailureLog(e, { scope: "storyboard-preview", kind: "image", jobId });
+        logger[log.level](log.message);
+      });
     }
 
-    // 对齐原 web 路由：成功受理（含 job）返 202 Accepted，业务错误返 200 + 信封。
-    res.status(result.code === 200 ? 202 : 200).json(result);
+    if (isRecoveryControlledEnvelope(result)) {
+      res.status(result.code).json(result);
+      return;
+    }
+    this.writeAcceptedOrThrow(result, res);
   }
 
-  /** GET /api/projects/:projectId/scene-cards/:sceneCardId/storyboard-preview
-   *  只读端点：返回该 SceneCard 下所有未删除分镜预览（按 id 升序）及其画格候选。 */
   @Get("storyboard-preview")
   async listStoryboardPreview(
     @CurrentUser() user: AuthenticatedUser,

@@ -1,61 +1,90 @@
-import { randomInt } from "node:crypto";
 import type { PrismaClient } from "@prisma/client";
-
-/** Auth 用例的 db port 实现（Prisma-backed），满足 core 里 requestSmsCode/loginWithCode 的 db 依赖形状。
- *  字段映射 Java 真实表：verification_codes(gmt_expire,is_used) / users(phone unique, username, status)。 */
 
 export interface AuthRepo {
   createVerificationCode(record: {
     phone: string;
+    purpose: string;
     code: string;
     ip: string;
     expiresAt: Date;
-  }): Promise<unknown>;
-  findValidCode(phone: string, code: string): Promise<{ id: string } | null>;
-  upsertUser(phone: string): Promise<{ id: string; username: string; phone: string }>;
-  markCodeUsed(codeId: string): Promise<unknown>;
-}
-
-function randomUsername(): string {
-  // 对齐 Java：自动注册随机 "用户XXXX"
-  return "用户" + String(randomInt(0, 10000)).padStart(4, "0");
+  }): Promise<{ id: string }>;
+  invalidateOtherCodes(phone: string, purpose: string, keepId: string): Promise<number>;
+  findActiveCode(phone: string, purposes: readonly string[]): Promise<{
+    id: string;
+    code: string;
+    attempts: number;
+    purpose: string;
+  } | null>;
+  incrementAttempts(codeId: string): Promise<number>;
+  consumeCode(codeId: string): Promise<boolean>;
 }
 
 export function createAuthRepo(prisma: PrismaClient): AuthRepo {
   return {
     async createVerificationCode(record) {
-      await prisma.verification_codes.create({
+      const created = await prisma.bw_verification_codes.create({
         data: {
           phone: record.phone,
+          purpose: record.purpose,
           code: record.code,
           ip: record.ip,
           gmt_expire: record.expiresAt,
           is_used: false,
+          attempts: 0,
         },
       });
+      return { id: created.id.toString() };
     },
-    async findValidCode(phone, code) {
-      const row = await prisma.verification_codes.findFirst({
-        where: { phone, code, is_used: false, gmt_expire: { gt: new Date() } },
-        orderBy: { id: "desc" },
-      });
-      return row ? { id: row.id.toString() } : null;
-    },
-    async upsertUser(phone) {
-      const existing = await prisma.users.findFirst({ where: { phone } });
-      if (existing) {
-        return { id: existing.id.toString(), username: existing.username, phone };
-      }
-      const created = await prisma.users.create({
-        data: { phone, username: randomUsername(), status: "NORMAL" },
-      });
-      return { id: created.id.toString(), username: created.username, phone };
-    },
-    async markCodeUsed(codeId) {
-      await prisma.verification_codes.update({
-        where: { id: BigInt(codeId) },
+
+    async invalidateOtherCodes(phone, purpose, keepId) {
+      const result = await prisma.bw_verification_codes.updateMany({
+        where: {
+          phone,
+          purpose,
+          is_used: false,
+          id: { not: BigInt(keepId) },
+        },
         data: { is_used: true },
       });
+      return result.count;
+    },
+
+    async findActiveCode(phone, purposes) {
+      const row = await prisma.bw_verification_codes.findFirst({
+        where: {
+          phone,
+          purpose: { in: [...purposes] },
+          is_used: false,
+          gmt_expire: { gt: new Date() },
+        },
+        orderBy: { id: "desc" },
+        select: { id: true, code: true, attempts: true, purpose: true },
+      });
+      return row
+        ? {
+            id: row.id.toString(),
+            code: row.code,
+            attempts: row.attempts,
+            purpose: row.purpose,
+          }
+        : null;
+    },
+
+    async incrementAttempts(codeId) {
+      const row = await prisma.bw_verification_codes.update({
+        where: { id: BigInt(codeId) },
+        data: { attempts: { increment: 1 } },
+        select: { attempts: true },
+      });
+      return row.attempts;
+    },
+
+    async consumeCode(codeId) {
+      const result = await prisma.bw_verification_codes.updateMany({
+        where: { id: BigInt(codeId), is_used: false },
+        data: { is_used: true },
+      });
+      return result.count === 1;
     },
   };
 }

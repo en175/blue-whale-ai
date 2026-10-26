@@ -30,7 +30,7 @@ const EDITABLE_FIELDS: {
     fmt: (v) => (v != null ? `${v}s` : "无"),
   },
   { key: "features", label: "特性", fmt: fmtJson },
-  { key: "channel_parser", label: "解析器", fmt: (v) => String(v ?? "seedream") },
+  { key: "channel", label: "渠道", fmt: (v) => (v ? String(v) : "未设") },
   { key: "request_mapping", label: "请求映射", fmt: fmtJson },
 ];
 

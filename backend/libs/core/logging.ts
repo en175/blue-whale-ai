@@ -1,10 +1,3 @@
-/**
- * 日志/链路子入口（IK6KQQ）。
- *
- * 从 `@lib/core/logging` 导入，避免主 barrel 把所有消费者
- * 静态绑定到火山 SDK（tls-writer 依赖 @volcengine/openapi）。
- * 仅 worker 等需要结构化日志/TLS 上报的进程入口使用。
- */
 export {
   PEER_ADDRESS_HEADER,
   TRACE_ID_HEADER,

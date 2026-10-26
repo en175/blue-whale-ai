@@ -4,13 +4,6 @@ import { pathToFileURL } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
-// `@lib/*` 是 backend/tsconfig.json 的编译期 paths 别名，Node ESM 解析器不认识它；
-// tsc-alias 在构建期把 dist 里所有 `@lib/*` 改写为相对路径。因此这里直接验证
-// 编译产物 `backend/dist/libs/shared/persistence/index.js` 可作为入口被 import，
-// 并暴露消费者依赖的 AssetRepo API —— 等价于旧 `@blue-whale/persistence` 包的
-// "development resolution" 断言目标（dist 可执行 + API 形状）。
-// 自包含：先 `pnpm --dir backend build`（tsc -b + tsc-alias）再读 dist，
-// 避免外部 dist 被 root `tsc -b`（无 tsc-alias）覆盖成未重写状态。
 describe("@lib/shared/persistence dist resolution", () => {
   it("resolves an executable dist build with the current AssetRepo API", () => {
     const build = spawnSync("pnpm", ["--dir", "backend", "build"], {

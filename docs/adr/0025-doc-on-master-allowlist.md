@@ -1,6 +1,6 @@
 # ADR-0025：文档白名单——AI 可在本地 master 直改散文规格文档
 
-- **状态**：Accepted
+- **状态**：已被 [ADR-0115](0115-local-release-code-baseline.md) 替代。散文文档不再直写本地 master；以下保留历史决策记录。
 - **日期**：2026-07-25
 - **决策者**：JJNNReno（经 `/grilling` 会话共同得出）
 - **修订**：[ADR-0010](0010-local-master-is-user-integration-zone.md)（窄例外）
@@ -52,3 +52,36 @@ ADR-0010 规定本地 `master` 是用户集成区，Agent 写入必须进 task w
 ## 验收
 
 合并后：① AI Edit `CONTEXT.md` → 放行；② `commit-spec-on-master.sh` 落本地 master；③ AI Edit 代码 / `.claude/` → 仍硬拦；④ `check-hook-contracts.py` 绿；⑤ `test-hooks.sh` 含 doc 白名单黑盒夹具通过。
+
+## 修正一（2026-09-25）：落盘入口废止——散文文档改与代码同路
+
+> 依 [ADR-0084](0084-generation-worker-java-runtime.md) 文末「修正」体例记录。本文上方标题、「决策」「威胁模型边界」「验收」等历史正文**保持原样不改写**——其中出现的 `scripts/commit-spec-on-master.sh` 提及（白名单一致性、落盘入口、`--no-renames` 兜底、验收步骤②）**均已随该入口废止而失效**，现状以本节为准。标题中「AI 可在本地 master 直改」与其「状态」字段的处置见本节末「待决」。
+
+**触发**：`scripts/commit-spec-on-master.sh` 已于 **2026-09-10 废止为指路桩**（打印说明后 `exit 1`），而本 ADR 与多份规则源（`CLAUDE.md`、`docs/README.md`、`docs/agents/*.md`、`docs/skills/README.md`）仍在指向该命令——规则指一条必然失败的路，违背最高红线 8「文档驱动、Hook 兜底」。本次把落盘入口统一为现行路径。
+
+**已钉实的事实**（如实记录，供后来者判断代价）：
+
+- **废止动因**（桩头注释原文口径）：本地 master 直提与红线冲突——「PR 审合前不合入 master，本地集成区同理不提前吃未审内容」；且未推送的 master 直提会被开工入口的「本地领先保留」卷进后续任务分支，污染每个 PR（2026-09-09 实测两次）。
+- **落盘通道断，但 Edit 白名单仍在**：`block-master-edit.sh` 对 master 上的 `CONTEXT.md` / `docs/*.md` 仍判 `allowed-doc-allowlist` 并放行。二者叠加**形成死结**：AI 可在本地 master 改文档（hook 放行）→ 无入口落盘 → 本地 master 不干净 → 开工入口直接拒绝（`start-task-worktree.py` 的 `git status --porcelain` 门：「本地 master 工作区不干净，不能同步或创建 Work Tree」）。这是本次把规则源口径改为「散文文档不得在 master 直改」的直接依据。
+- 三个替代入口均已核实可用：`start-task-worktree.sh`（`ALLOWED_TYPES` 含 `docs`，支持 `--no-issue`）、`commit-task-for-review.sh -m`、`publish-review-package.sh --user-authorized --create-pr`（默认目标 master，允许 `--target-branch release/*`）。
+
+**决策**
+
+1. **散文文档落盘改为与代码同路**（三步）：`scripts/start-task-worktree.sh --type docs --no-issue --summary <6–15字中文简述>` → 工单分支内编辑后 `bash scripts/commit-task-for-review.sh -m "docs: <描述>"` → 用户授权后 `scripts/publish-review-package.sh --user-authorized --create-pr`。工程面 docs PR 直进 master，不经 release 批次。
+2. **规则源同步收口**：`CLAUDE.md`（路由表、红线 4、写入前自检）与 `docs/README.md`、`docs/agents/{git-workflow,worktree-workflow,domain,commit-and-review}.md`、`docs/skills/README.md` 中「AI 可在本地 master 直改散文文档」的授权语句一并移除，改为上述三步。
+3. **本文决策正文的存废不动**：白名单本身是否从 `block-master-edit.sh` 撤除，属 hook 层行为变更，**另行决策**——废止桩头注释亦明示「pre-commit 层硬拦另行决策，不在本通道范围」。在另行决策前，hook 白名单与规则源口径的这段残留窗口仍然存在（规则源更严，hook 更宽，符合「文档驱动、Hook 兜底」的分层）。
+
+**后果**
+
+- 原决策「doc 不困在未合并分支」的收益，改由「docs 同路 + PR 目标 master」承接；代价是散文文档也需一次 worktree + PR 往返。
+- `docs/**/*.json` 契约、fixtures、`.claude/` 规则源、代码本就不在例外内，本次无变化。
+- 人类若确需本地 master 直提（ADR-0010 的用户集成区语义），仍可自行标准 git commit，自担未推送提交被卷进任务分支的代价——这是**人**的通道，不是 Agent 的授权。
+
+**待决（归决策者，本修正不代为拍板）**
+
+本 ADR 的「状态」字段目前仍是 `Accepted`，而其唯一落盘入口已不存在；标题亦仍写「AI 可在本地 master 直改散文规格文档」。两个候选处置：
+
+1. **标 `Superseded by ADR-0010`（或 `Superseded`）**：读者一眼看到本决策整体退场，不会误按标题行事。代价是 ADR-0025 的 hook 白名单事实上仍在生效（`allowed-doc-allowlist` 未撤），标 Superseded 会让「白名单还在」失去文档依据；且标题与状态不一致（标题说直改，状态说被取代）。
+2. **保持 `Accepted` + 修正一段落说明入口废止（现状）**：与 ADR-0084「状态 Accepted 含修正 N」的既有体例一致，历史正文不动；代价是状态行需读者下翻到修正段才理解「入口已死」，标题仍有误导性。
+
+若同时撤除 `block-master-edit.sh` 的 doc 白名单（另行决策），选项 1 的代价即消失——两项宜合并拍板。

@@ -5,7 +5,7 @@ import { createSnapshotRepo } from "./snapshot-repo.js";
 import { capabilityDigest } from "./capability-digest.js";
 
 describe("SnapshotRepo.loadJobsAndAssets", () => {
-  it("does not expose the encrypted provider credential in snapshot input", async () => {
+  it("快照投影剥掉 input 里的 provider_credential", async () => {
     const prisma = {
       generation_jobs: {
         findMany: vi.fn().mockResolvedValue([
@@ -41,7 +41,6 @@ describe("SnapshotRepo.loadJobsAndAssets", () => {
 
   it("returns normal uploaded project assets even when no generation job produced them", async () => {
     const findJobs = vi.fn().mockResolvedValue([]);
-    // 200 有 md5、201 无（老资产未落 md5）→ 字段原样带出，缺失归 null。
     const MD5_200 = "d41d8cd98f00b204e9800998ecf8427e";
     const findAssets = vi.fn().mockResolvedValue([
       {
@@ -87,10 +86,7 @@ describe("SnapshotRepo.loadJobsAndAssets", () => {
         project_id: "55",
         type: "image",
         url: "tos://project/55/200.png",
-        // IKEXX8：素材库关联两列成对携带（mock 行未含列值 → null）。
         material_id: null,
-        material_group_id: null,
-        // IKFYHJ：未关联素材库 → 不带校验状态。
         material_status: null,
         material_status_checked_at: null,
         md5: MD5_200,
@@ -101,7 +97,6 @@ describe("SnapshotRepo.loadJobsAndAssets", () => {
         type: "image",
         url: "tos://project/55/201.png",
         material_id: null,
-        material_group_id: null,
         material_status: null,
         material_status_checked_at: null,
         md5: null,
@@ -109,10 +104,8 @@ describe("SnapshotRepo.loadJobsAndAssets", () => {
     ]);
   });
 
-  // IKFYHJ（ADR-0087）：snapshot 是打开画布的读路径，按素材扇出上游 GetAsset 会把一次开页
-  // 变成 N 次往返。所以状态只从本地镜像表批量取一次，且必须带 user_id 谓词。
   it("已关联素材库的 asset 带上本地镜像的校验状态（单次批量查，不打上游）", async () => {
-    const checkedAt = new Date("2026-09-15T10:00:00.000Z");
+    const checkedAt = new Date("2026-09-15T18:00:00+08:00");
     const findMaterialAssets = vi.fn().mockResolvedValue([
       { material_id: "asset-a", status: "Active", status_checked_at: checkedAt },
       { material_id: "asset-b", status: "Failed", status_checked_at: null },
@@ -123,9 +116,7 @@ describe("SnapshotRepo.loadJobsAndAssets", () => {
         findMany: vi.fn().mockResolvedValue([
           { id: 200n, project_id: 55n, type: "image", url: "u-200", material_id: "asset-a" },
           { id: 201n, project_id: 55n, type: "image", url: "u-201", material_id: "asset-b" },
-          // 关联了素材库但本地无镜像行（早于本功能入库的存量素材）→ 保持 null，不瞎猜。
           { id: 202n, project_id: 55n, type: "image", url: "u-202", material_id: "asset-c" },
-          // 未关联素材库 → 不进查询、也不带状态。
           { id: 203n, project_id: 55n, type: "image", url: "u-203", material_id: null },
         ]),
       },
@@ -136,7 +127,6 @@ describe("SnapshotRepo.loadJobsAndAssets", () => {
 
     const result = await createSnapshotRepo(prisma).loadJobsAndAssets("55", "100");
 
-    // 只查一次，且只查真正有 material_id 的那三个；带 user_id 谓词。
     expect(findMaterialAssets).toHaveBeenCalledTimes(1);
     expect(findMaterialAssets).toHaveBeenCalledWith({
       where: {
@@ -149,7 +139,7 @@ describe("SnapshotRepo.loadJobsAndAssets", () => {
     const byId = new Map(result.assets.map((a) => [a.id, a]));
     expect(byId.get("200")).toMatchObject({
       material_status: "Active",
-      material_status_checked_at: "2026-09-15T10:00:00.000Z",
+      material_status_checked_at: "2026-09-15T18:00:00+08:00",
     });
     expect(byId.get("201")).toMatchObject({
       material_status: "Failed",
@@ -187,9 +177,7 @@ describe("SnapshotRepo.loadJobsAndAssets", () => {
   it("保留被本项目关联的跨项目素材，丢弃未关联的跨项目素材（IKCNLP bug 回归）", async () => {
     const findJobs = vi.fn().mockResolvedValue([]);
     const findAssets = vi.fn().mockResolvedValue([
-      // 跨项目关联命中的素材（project_id=777 是别项目，但已被本项目 project_asset 关联）→ 应保留
       { id: 999n, project_id: 777n, type: "image", url: "tos://project/777/999.png" },
-      // 未关联的跨项目素材（project_id=777，不在 linkedSet）→ 应丢弃
       { id: 888n, project_id: 777n, type: "image", url: "tos://project/777/888.png" },
     ]);
     const prisma = {
@@ -203,7 +191,6 @@ describe("SnapshotRepo.loadJobsAndAssets", () => {
       "55",
       "100",
     );
-    // 999 关联命中 → 保留；888 未关联且 project_id=777 !== 55 且 !== 0 → 丢弃
     const ids = result.assets.map((a) => a.id);
     expect(ids).toContain("999");
     expect(ids).not.toContain("888");
@@ -212,7 +199,6 @@ describe("SnapshotRepo.loadJobsAndAssets", () => {
   it("同一素材同时命中关联+project_id 分支时只在 assets 出现一次（IKCNLP 去重）", async () => {
     const findJobs = vi.fn().mockResolvedValue([]);
     const findAssets = vi.fn().mockResolvedValue([
-      // 既是本项目 project_id=55，又被 project_asset 关联 → 两条 OR 分支都命中
       { id: 300n, project_id: 55n, type: "image", url: "tos://project/55/300.png" },
     ]);
     const prisma = {
@@ -233,9 +219,7 @@ describe("SnapshotRepo.loadJobsAndAssets", () => {
   it("不再返回全局素材 project_id=0（全局素材移除回归）", async () => {
     const findJobs = vi.fn().mockResolvedValue([]);
     const findAssets = vi.fn().mockResolvedValue([
-      // 全局素材（project_id=0）：未关联任何项目 → 不应出现在项目 snapshot.assets 中
       { id: 600n, project_id: 0n, type: "image", url: "tos://global/600.png" },
-      // 直接归属本项目的素材 → 仍应出现
       { id: 601n, project_id: 55n, type: "image", url: "tos://project/55/601.png" },
     ]);
     const prisma = {
@@ -249,7 +233,6 @@ describe("SnapshotRepo.loadJobsAndAssets", () => {
       "55",
       "100",
     );
-    // 全局素材 id=600 不再出现；project_id=55 直接归属素材 id=601 保留
     expect(findAssets).toHaveBeenCalledTimes(1);
     expect(findAssets).toHaveBeenCalledWith({
       where: {
@@ -285,16 +268,7 @@ describe("SnapshotRepo.loadConversationState", () => {
         findMany: vi.fn().mockResolvedValue([]),
         aggregate: vi.fn().mockResolvedValue({ _max: { cursor: 12n } }),
       },
-      plan_messages: {
-        findMany: vi.fn().mockResolvedValue([]),
-      },
       scene_cards: {
-        findMany: vi.fn().mockResolvedValue([]),
-      },
-      generation_model_capability: {
-        findMany: vi.fn().mockResolvedValue([]),
-      },
-      plan_application_receipts: {
         findMany: vi.fn().mockResolvedValue([]),
       },
       scene_card_generation_records: {
@@ -315,17 +289,13 @@ describe("SnapshotRepo.loadConversationState", () => {
       conversation_messages: [
         expect.objectContaining({ message_id: "8", sequence_no: 1 }),
       ],
-      plan_messages: [],
       scene_cards: [],
-      plan_applications: [],
       scene_card_generation_records: [],
       storyboard_previews: [],
       high_watermark_cursor: "12",
     });
   });
 
-  // IKEEFV：conversation_message_mentions 表已删，读链不再触该表——message.mentions
-  // 恒为空（引用事实不复存在），asset/scene_card 批量查询被空 id 集 guard 挡住。
   it("mention 表已删 → message.mentions 恒为空且素材批量查询不触发", async () => {
     const assetsFindMany = vi.fn().mockResolvedValue([]);
     const prisma = {
@@ -347,11 +317,6 @@ describe("SnapshotRepo.loadConversationState", () => {
       project_events: {
         aggregate: vi.fn().mockResolvedValue({ _max: { cursor: 12n } }),
       },
-      plan_messages: { findMany: vi.fn().mockResolvedValue([]) },
-      generation_model_capability: {
-        findMany: vi.fn().mockResolvedValue([]),
-      },
-      plan_application_receipts: { findMany: vi.fn().mockResolvedValue([]) },
       scene_card_generation_records: { findMany: vi.fn().mockResolvedValue([]) },
       storyboard_previews: { findMany: vi.fn().mockResolvedValue([]) },
       generation_output_slots: { findMany: vi.fn().mockResolvedValue([]) },
@@ -365,127 +330,6 @@ describe("SnapshotRepo.loadConversationState", () => {
     expect(state.conversation_messages[0]?.mentions).toEqual([]);
     expect(assetsFindMany).not.toHaveBeenCalled();
   });
-
-  // —— plan_messages.application_availability 投影（IK6MZU）：复用 loadPlanApplicationFacts，
-  //    读路径 missingMention="unavailable"，不查余额（恒 available/requires_new_plan）。——
-  describe("plan_messages.application_availability 投影（IK6MZU）", () => {
-    const CAP_FIELDS = {
-      supported_sizes: ["1024x1024"],
-      supported_aspect_ratios: ["1:1"],
-      supported_durations: null,
-      supported_formats: ["png"],
-      default_size: "1024x1024",
-      default_format: "png",
-      default_aspect_ratio: "1:1",
-      default_duration: null,
-    };
-    const SNAPSHOT = {
-      schema_version: 1,
-      capability_type: "image",
-      model_id: "doubao-seedream-5.0-lite",
-      provider_id: "doubao",
-      row_version: 3,
-      digest: capabilityDigest(CAP_FIELDS),
-    };
-
-    function buildPlanMessage(derivedReferences: unknown[]) {
-      return {
-        message_id: 500n,
-        conversation_id: 50n,
-        agent_run_id: 9n,
-        project_id: 42n,
-        ordinal: 1,
-        total_in_batch: 1,
-        sequence_label: null,
-        application_kind: "image_generate",
-        target_scene_card_mention_id: null,
-        base_scene_card_version: null,
-        content_markdown: "一只蓝鲸",
-        derived_references: derivedReferences,
-        frozen_generation_parameters: {},
-        capability_snapshot_version: SNAPSHOT,
-        provider_prompt_projection: {},
-        base_plan_message_id: null,
-        source_plan_message_id: null,
-        applied_at: null,
-        first_generation_job_id: null,
-        gmt_create: new Date("2026-08-05T00:00:00.000Z"),
-      };
-    }
-
-    function matchingCapability(overrides: Record<string, unknown> = {}) {
-      return {
-        model_id: "doubao-seedream-5.0-lite",
-        capability_type: "image",
-        version: 3,
-        enabled: true,
-        is_delete: false,
-        ...CAP_FIELDS,
-        ...overrides,
-      };
-    }
-
-    // IKEEFV：mention 表已删——原 mentionRow/assetRow 夹具与 assets 查询随下线。
-    function buildPrisma(opts: {
-      planMessages: unknown[];
-      capabilityRows?: unknown[];
-    }) {
-      return {
-        conversation_messages: { findMany: vi.fn().mockResolvedValue([]) },
-        plan_messages: {
-          findMany: vi.fn().mockResolvedValue(opts.planMessages),
-        },
-        generation_model_capability: {
-          findMany: vi.fn().mockResolvedValue(
-            opts.capabilityRows ?? [matchingCapability()],
-          ),
-        },
-        project_events: {
-          aggregate: vi.fn().mockResolvedValue({ _max: { cursor: 0n } }),
-        },
-        scene_cards: { findMany: vi.fn().mockResolvedValue([]) },
-        plan_application_receipts: { findMany: vi.fn().mockResolvedValue([]) },
-        scene_card_generation_records: { findMany: vi.fn().mockResolvedValue([]) },
-        storyboard_previews: { findMany: vi.fn().mockResolvedValue([]) },
-        generation_output_slots: { findMany: vi.fn().mockResolvedValue([]) },
-      } as unknown as PrismaClient;
-    }
-
-    async function firstAvailability(prisma: PrismaClient) {
-      const state = await createSnapshotRepo(prisma).loadConversationState(
-        "42",
-        "100",
-      );
-      return state.plan_messages[0]?.application_availability ?? "MISSING";
-    }
-
-    // IKEEFV：mention 表已删 → mentionById 恒空，asset 冻结引用一律缺 mention
-    // fail-closed（前端「需重新计划」）。能力漂移分支被缺 mention 短路、在快照
-    // 读路径不再可达，原「能力行缺失 / row_version 变 / enabled=false」三例随下线
-    //（判定逻辑本体由 regen 侧与 plan-application-internals 覆盖）。
-    it("asset 冻结引用 mention 不可解析 → requires_new_plan（IKEEFV fail-closed）", async () => {
-      const prisma = buildPrisma({
-        planMessages: [buildPlanMessage([{ mention_id: "101", type: "asset" }])],
-      });
-      expect(await firstAvailability(prisma)).toBe("requires_new_plan");
-    });
-
-    it("scene_card 引用跳过（不参与判定）→ available", async () => {
-      const prisma = buildPrisma({
-        planMessages: [buildPlanMessage([{ mention_id: "555", type: "scene_card" }])],
-        // 555 mention 不存在也无所谓——scene_card 引用被 helper 跳过
-      });
-      expect(await firstAvailability(prisma)).toBe("available");
-    });
-
-    it("读路径不查余额：投影恒为 available | requires_new_plan", async () => {
-      const prisma = buildPrisma({
-        planMessages: [buildPlanMessage([])],
-      });
-      const availability = await firstAvailability(prisma);
-      expect(["available", "requires_new_plan"]).toContain(availability);
-    });
-  });
 });
 
 describe("SnapshotRepo.loadConversationState output slots", () => {
@@ -493,13 +337,10 @@ describe("SnapshotRepo.loadConversationState output slots", () => {
     const empty = () => ({ findMany: vi.fn().mockResolvedValue([]) });
     const prisma = {
       conversation_messages: empty(),
-      plan_messages: empty(),
-      generation_model_capability: empty(),
       project_events: {
         aggregate: vi.fn().mockResolvedValue({ _max: { cursor: null } }),
       },
       scene_cards: empty(),
-      plan_application_receipts: empty(),
       scene_card_generation_records: {
         findMany: vi.fn().mockResolvedValue([
           {
@@ -507,7 +348,6 @@ describe("SnapshotRepo.loadConversationState output slots", () => {
             scene_card_id: 66n,
             summary_status: "partial",
             first_generation_job_id: 300n,
-            plan_message_id: 44n,
           },
         ]),
       },

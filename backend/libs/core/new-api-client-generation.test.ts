@@ -1,4 +1,3 @@
-// IK74V8：从 new-api-client.test.ts 拆出（≤800 行硬线）。用例逐块搬运，断言不变。
 import { describe, expect, it, vi } from "vitest";
 
 import { NewApiError, createNewApiClient } from "./new-api-client.js";
@@ -375,7 +374,6 @@ describe("new-api client —— 图片与视频生成", () => {
       fetchImpl,
     });
 
-    // 旧分字段路径：firstFrameImage + references 仍被拒（互斥守卫保留）。
     await expect(client.submitVideo("sk-test", {
       model: "doubao-seedance-2-0-260128",
       prompt: "含糊输入",
@@ -394,7 +392,6 @@ describe("new-api client —— 图片与视频生成", () => {
     );
     expect(fetchImpl).not.toHaveBeenCalled();
 
-    // IKDJNZ 单数组语义：references 带 role 的帧条目与普通参考可并存，不再互斥。
     await client.submitVideo("sk-test", {
       model: "doubao-seedance-2-0-260128",
       prompt: "单数组并存",
@@ -478,7 +475,6 @@ describe("new-api client —— 图片与视频生成", () => {
     expect(receipt.requestId).toBe("req-receipt-1");
     expect(receipt.images).toEqual([{ url: "https://cdn.test/img.png" }]);
 
-    // 兼容：原 generateImages 仍只回图片列表。
     const images = await client.generateImages("sk-test", {
       model: "m",
       prompt: "p",
@@ -510,8 +506,6 @@ describe("new-api client —— 图片与视频生成", () => {
     expect(task.quota).toBe(880000);
   });
 
-  // IKH8AU（IKH9NU）：ADR-0088 起服务端不再组合正文——执行侧原样发送 `input.prompt`。本条只验证
-  // 「出站 prompt 与传入值逐字一致」，传入值怎么来的不再由本测试负责（组合助手已退役删除）。
   it("delivers the frozen provider prompt verbatim to the image endpoint", async () => {
     const requests: Array<{ url: string; init: RequestInit }> = [];
     const client = createNewApiClient({
@@ -521,7 +515,6 @@ describe("new-api client —— 图片与视频生成", () => {
         return jsonResponse({ data: [{ url: "https://cdn.test/out.png" }] });
       },
     });
-    // 冻结快照里的正文由提交方给全；取值任意（本条只验透传，不代表任何组合格式）。
     const frozenProviderPrompt = "frozen-prompt-body";
 
     await client.generateImages("sk-test", {
@@ -534,5 +527,4 @@ describe("new-api client —— 图片与视频生成", () => {
     expect(JSON.parse(String(requests[0]?.init.body)).prompt).toBe("frozen-prompt-body");
   });
 
-  // ---- native topup（Model B：结算复用 Go 原生 new-api 充值）----
 });

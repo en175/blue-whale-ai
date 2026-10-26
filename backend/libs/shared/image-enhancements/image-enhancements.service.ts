@@ -1,7 +1,3 @@
-// IKGM99：图片高清放大建任务服务（仿 media-extractions 的免费轻量入口，契约 §14）。
-// 校验源图片资产归属与参数合法性 → 复核版本档能力矩阵与源图尺寸门槛 → 插 generation_jobs(type=image_enhance)。
-// 免费口径（§14.1）：不写成本预留、不接成本估算、不走余额拦截门、不走素材库合规门。
-// 不写画布——高清卡由前端建任务前本地插入，产物经 GET /api/jobs/:id 的 asset 按 target_node_id 回填。
 import { Injectable } from "@nestjs/common";
 import {
   FAILURE_CODE,
@@ -11,19 +7,29 @@ import {
   IMAGE_ENHANCE_SOURCE,
   IMAGE_ENHANCE_TIER_CAPABILITY,
   PARAM_MISSING_CODE,
-  RESOURCE_NOT_FOUND_CODE,
   fail,
   imageEnhanceInputSchema,
   imageEnhanceTierSizeGate,
-  ok,
   type ImageEnhanceInput,
 } from "@lib/contracts";
-import { createGenerationCommandRepo } from "@lib/shared/persistence/index.js";
+import {
+  replayAcceptedMediaTool,
+  stripCanvasBinding,
+} from "@lib/shared/generation/media-tool-recovery.js";
+import { enqueueImageEnhanceJob } from "@lib/shared/generation/generation-queue.js";
+import { submitMediaToolJob } from "@lib/shared/media-tools/media-tool-submission.js";
+import { MediaToolBillingService } from "@lib/shared/media-tool-pricing/media-tool-billing.service.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";
 import { AssetService } from "@lib/shared/assets/assets.service.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
+import {
+  requireOwnedProject,
+  resolveOwnedMediaSource,
+} from "@lib/shared/media-tools/owned-media-source.js";
 
-/** zod 校验失败 → 人能读懂的原因（按首个出错键名映射；前端预检只是体验层，这里返回可读文案）。 */
+const IDEMPOTENCY_OPERATION = "image_enhance.create";
+const REQUEST_PATH = "/image-enhancements";
+
 const PARSE_ERROR_MESSAGES: Record<string, string> = {
   [IMAGE_ENHANCE_INPUT_KEYS.sourceAssetId]: "缺少或非法的源素材 ID（source_asset_id）",
   [IMAGE_ENHANCE_INPUT_KEYS.targetNodeId]: "缺少目标节点 ID（target_node_id）",
@@ -49,37 +55,54 @@ export class ImageEnhancementsService {
     private readonly prisma: PrismaService,
     private readonly project: ProjectService,
     private readonly assets: AssetService,
+    private readonly billing: MediaToolBillingService,
   ) {}
 
   async create(
     userId: string,
     projectId: string,
     body: Record<string, unknown>,
-    // 与图片生成同构（handle-create-generation-job.ts 的 internal 形参）：请求方 sk- 凭证冻结进 job。
-    internal: { providerCredential?: string } = {},
+    idempotencyKey?: string,
   ) {
-    // 契约 schema 复核（六键 strict）：版本档枚举、倍数 ∈ 2/4/6 等结构合法性在此拦截。
-    const parsed = imageEnhanceInputSchema.safeParse(body ?? {});
+    const gate = stripCanvasBinding(body ?? {}, "Idempotency-Key", (idempotencyKey ?? "").trim());
+    if (gate.error) return gate.error;
+    const { binding, rest } = gate;
+
+    const parsed = imageEnhanceInputSchema.safeParse(rest);
     if (!parsed.success) {
       return fail(PARAM_MISSING_CODE, readableParseError(parsed.error.issues));
     }
     const input: ImageEnhanceInput = parsed.data;
 
-    const project = await this.project.findOwnedById(projectId, userId);
-    if (!project) return fail(RESOURCE_NOT_FOUND_CODE, "资源不存在");
-    // findOwnedSource 按 user_id 归属过滤（status=normal 且未删除）：非本人素材一律 404，不泄露存在性。
-    const asset = await this.assets.findOwnedSource(
-      input[IMAGE_ENHANCE_INPUT_KEYS.sourceAssetId],
+    const projectError = await requireOwnedProject({
+      projects: this.project,
+      projectId,
       userId,
-    );
-    if (!asset) return fail(RESOURCE_NOT_FOUND_CODE, "资源不存在");
-    if (asset.type !== "image") {
-      return fail(FAILURE_CODE, "仅支持对图片资产发起高清放大");
-    }
+    });
+    if (projectError) return projectError;
 
-    // 版本档能力矩阵复核（§14.3，与前端置灰 / worker 出站裁剪三处同源）。
-    // 「带」的口径：色彩校正是开关，true=开启即「带」；增强策略无关闭值，非默认值=显式选择即「带」，
-    // 契约 §14.2 钦定置灰档仍冻结默认值（占位），默认值组合放行、显式激活组合拒绝。
+    const { recovery, replayed } = await replayAcceptedMediaTool(this.prisma.client, {
+      projectId,
+      userId,
+      binding,
+      taskType: IMAGE_ENHANCE_JOB_TYPE,
+      operation: IDEMPOTENCY_OPERATION,
+      requestPath: REQUEST_PATH,
+      body: body ?? {},
+    });
+    if (replayed) return replayed;
+
+    const source = await resolveOwnedMediaSource({
+      prisma: this.prisma.client,
+      assets: this.assets,
+      userId,
+      assetId: input[IMAGE_ENHANCE_INPUT_KEYS.sourceAssetId],
+      expectedTypes: ["image"],
+      wrongTypeMessage: "仅支持对图片资产发起高清放大",
+    });
+    if (!source.ok) return source.envelope;
+    const asset = source.asset;
+
     const capability = IMAGE_ENHANCE_TIER_CAPABILITY[input.version_tier];
     if (input.enable_correct_color && !capability.correctColor) {
       return fail(FAILURE_CODE, "当前版本档不支持色彩校正，请切换到 Max 版本或关闭色彩校正");
@@ -91,9 +114,6 @@ export class ImageEnhancementsService {
       return fail(FAILURE_CODE, "Lite 版本不支持选择增强策略，请切换到 Pro 或 Max 版本");
     }
 
-    // 源图尺寸门槛复核。assets.width/height 由前端上报、后端原样存，存量图大量为 null（IKE53U 实测）；
-    // 缺权威尺寸时不臆造、不拦存量图——放行交供应商按官方门槛拒（用户故事 30 预期的兜底路径）。
-    // 门槛数值与判定在契约 imageEnhanceTierSizeGate 单处定义（web 面板预检同源引用）。
     if (asset.width != null && asset.height != null) {
       const sizeError = imageEnhanceTierSizeGate(
         input.version_tier,
@@ -103,51 +123,31 @@ export class ImageEnhancementsService {
       if (sizeError) return fail(FAILURE_CODE, sizeError);
     }
 
-    // 契约 schema parse 后原样冻结（六键恒在、重试原样沿用，§14.2）。
-    // provider_credential 是六键之上的基础设施键（不进契约 zod——它校验的是客户端 payload，
-    // 凭证由服务端注入）：与图片生成同构（handle-create-generation-job.ts 修正四，凭证去密），
-    // 请求方 sk- 明文冻结进 job input，worker（ImageEnhanceJobProcessor）处理时直接取用；
-    // 未携带/非 sk- 时不写键。契约 strict 六键口径不变。
-    const frozenInput: ImageEnhanceInput & { provider_credential?: string } = {
-      ...input,
-      ...(internal.providerCredential
-        ? { provider_credential: internal.providerCredential }
-        : {}),
-    };
+    const frozenInput: ImageEnhanceInput = { ...input };
 
-    const job = await this.prisma.client.generation_jobs.create({
-      data: {
-        user_id: BigInt(userId),
-        project_id: BigInt(projectId),
-        type: IMAGE_ENHANCE_JOB_TYPE,
-        source: IMAGE_ENHANCE_SOURCE,
-        status: "queued",
-        progress: 0,
-        expected_output_count: 1,
-        input: frozenInput,
-        // 过去 60s：回拨口径同 media_extract——DATETIME(0) 秒精度进位会让同秒 claim 的 lte now 判 false。
-        next_action_at: new Date(Date.now() - 60_000),
+    return submitMediaToolJob({
+      prisma: this.prisma.client,
+      billing: this.billing,
+      toolType: IMAGE_ENHANCE_JOB_TYPE,
+      userId,
+      input: frozenInput,
+      recovery,
+      createJob: async (db) => {
+        const job = await db.generation_jobs.create({
+          data: {
+            user_id: BigInt(userId),
+            project_id: BigInt(projectId),
+            type: IMAGE_ENHANCE_JOB_TYPE,
+            source: IMAGE_ENHANCE_SOURCE,
+            status: "queued",
+            progress: 0,
+            input: frozenInput,
+            next_action_at: new Date(Date.now() - 60_000),
+          },
+        });
+        return { jobId: job.id.toString(), status: "queued" };
       },
+      enqueue: enqueueImageEnhanceJob,
     });
-    return ok({
-      job_id: job.id.toString(),
-      status: "queued",
-    });
-  }
-
-  /** 入队失败兜底：queued 任务直接置 failed，避免高清放大任务在 worker 恢复扫描接管前静默悬挂。
-   *  IKBQEE / ADR-0078：details 落调试原文，禁展示用户。逻辑在 repo.markFailedQueued（IKDZGH 收敛）。 */
-  async markFailed(
-    jobId: string,
-    code: string,
-    message: string,
-    details?: Record<string, unknown>,
-  ): Promise<void> {
-    await createGenerationCommandRepo(this.prisma.client).markFailedQueued(
-      jobId,
-      code,
-      message,
-      details,
-    );
   }
 }

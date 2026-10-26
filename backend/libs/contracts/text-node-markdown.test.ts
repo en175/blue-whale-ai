@@ -7,8 +7,6 @@ import {
   TEXT_NODE_MARKDOWN_FORMATS,
 } from "./text-node-markdown.js";
 
-/* IKFM3L 统一文本卡正文契约 v1：受限 Markdown 子集（八类）与 html 升级互转。
-   契约：docs/specs/2026-09-14-ikfm3l-unified-text-node-content-contract.md */
 
 describe("markdownToSanitizedHtml（渲染方向）", () => {
   it("八类格式各自渲染白名单标签", () => {
@@ -31,7 +29,6 @@ describe("markdownToSanitizedHtml（渲染方向）", () => {
   it("段落 空行 段落 分为两个块（空行终结段落）", () => {
     expect(markdownToSanitizedHtml("第一段\n\n第二段")).toContain("<p>第一段</p><p>第二段</p>");
     expect(markdownToSanitizedHtml("第一段\n\n第二段")).not.toContain("第一段<br>");
-    // 段落 空行 标题 空行 段落
     expect(markdownToSanitizedHtml("甲\n\n# 题\n\n乙")).toContain("<p>甲</p><h1>题</h1><p>乙</p>");
   });
 

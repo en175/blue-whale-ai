@@ -1,4 +1,3 @@
-// IKGOQ0 验收修订：图片尺寸探测器的字节布局单测（各格式构造真实头字节）与 storage 探测行为。
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -9,8 +8,8 @@ import {
 function pngHead(width: number, height: number): Uint8Array {
   const head = new Uint8Array(32);
   head.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], 0);
-  head.set([0x00, 0x00, 0x00, 0x0d], 8); // IHDR 段长 13
-  head.set([0x49, 0x48, 0x44, 0x52], 12); // "IHDR"
+  head.set([0x00, 0x00, 0x00, 0x0d], 8);
+  head.set([0x49, 0x48, 0x44, 0x52], 12);
   const view = new DataView(head.buffer);
   view.setUint32(16, width);
   view.setUint32(20, height);
@@ -19,7 +18,7 @@ function pngHead(width: number, height: number): Uint8Array {
 
 function gifHead(width: number, height: number): Uint8Array {
   const head = new Uint8Array(32);
-  head.set([0x47, 0x49, 0x46, 0x38, 0x39, 0x61], 0); // "GIF89a"
+  head.set([0x47, 0x49, 0x46, 0x38, 0x39, 0x61], 0);
   const view = new DataView(head.buffer);
   view.setUint16(6, width, true);
   view.setUint16(8, height, true);
@@ -28,7 +27,7 @@ function gifHead(width: number, height: number): Uint8Array {
 
 function bmpHead(width: number, height: number): Uint8Array {
   const head = new Uint8Array(32);
-  head.set([0x42, 0x4d], 0); // "BM"
+  head.set([0x42, 0x4d], 0);
   const view = new DataView(head.buffer);
   view.setInt32(18, width, true);
   view.setInt32(22, height, true);
@@ -37,10 +36,10 @@ function bmpHead(width: number, height: number): Uint8Array {
 
 function webpVp8Head(width: number, height: number): Uint8Array {
   const head = new Uint8Array(32);
-  head.set([0x52, 0x49, 0x46, 0x46], 0); // "RIFF"
-  head.set([0x57, 0x45, 0x42, 0x50], 8); // "WEBP"
-  head.set([0x56, 0x50, 0x38, 0x20], 12); // "VP8 "
-  head.set([0x9d, 0x01, 0x2a], 23); // 帧签名
+  head.set([0x52, 0x49, 0x46, 0x46], 0);
+  head.set([0x57, 0x45, 0x42, 0x50], 8);
+  head.set([0x56, 0x50, 0x38, 0x20], 12);
+  head.set([0x9d, 0x01, 0x2a], 23);
   const view = new DataView(head.buffer);
   view.setUint16(26, width, true);
   view.setUint16(28, height, true);
@@ -51,8 +50,8 @@ function webpVp8lHead(width: number, height: number): Uint8Array {
   const head = new Uint8Array(32);
   head.set([0x52, 0x49, 0x46, 0x46], 0);
   head.set([0x57, 0x45, 0x42, 0x50], 8);
-  head.set([0x56, 0x50, 0x38, 0x4c], 12); // "VP8L"
-  head[20] = 0x2f; // 签名
+  head.set([0x56, 0x50, 0x38, 0x4c], 12);
+  head[20] = 0x2f;
   const w = width - 1;
   const h = height - 1;
   head[21] = w & 0xff;
@@ -66,7 +65,7 @@ function webpVp8xHead(width: number, height: number): Uint8Array {
   const head = new Uint8Array(32);
   head.set([0x52, 0x49, 0x46, 0x46], 0);
   head.set([0x57, 0x45, 0x42, 0x50], 8);
-  head.set([0x56, 0x50, 0x38, 0x58], 12); // "VP8X"
+  head.set([0x56, 0x50, 0x38, 0x58], 12);
   const w = width - 1;
   const h = height - 1;
   head[24] = w & 0xff;
@@ -78,24 +77,23 @@ function webpVp8xHead(width: number, height: number): Uint8Array {
   return head;
 }
 
-/** JPEG：SOI + 若干 APPn 段 + SOF0。appPadding 控制 APP1 段体量，模拟 EXIF 把 SOF 顶到后面。 */
 function jpegHead(width: number, height: number, appPadding = 0): Uint8Array {
-  const app1Len = 2 + 6 + appPadding; // 段长含自身 2 字节；6 = "Exif\0\0"
+  const app1Len = 2 + 6 + appPadding;
   const total = 2 + 2 + app1Len + 2 + 7 + 16;
   const head = new Uint8Array(Math.max(total, 64));
   const view = new DataView(head.buffer);
   head[0] = 0xff;
-  head[1] = 0xd8; // SOI
+  head[1] = 0xd8;
   let o = 2;
   head[o] = 0xff;
-  head[o + 1] = 0xe1; // APP1
+  head[o + 1] = 0xe1;
   view.setUint16(o + 2, app1Len);
-  head.set([0x45, 0x78, 0x69, 0x66, 0x00, 0x00], o + 4); // "Exif\0\0"
+  head.set([0x45, 0x78, 0x69, 0x66, 0x00, 0x00], o + 4);
   o += 2 + app1Len;
   head[o] = 0xff;
-  head[o + 1] = 0xc0; // SOF0
-  view.setUint16(o + 2, 17); // 段长
-  head[o + 4] = 8; // precision
+  head[o + 1] = 0xc0;
+  view.setUint16(o + 2, 17);
+  head[o + 4] = 8;
   view.setUint16(o + 5, height);
   view.setUint16(o + 7, width);
   return head;
@@ -144,21 +142,21 @@ describe("parseImageDimensions：各格式字节布局", () => {
     head[1] = 0xd8;
     head[2] = 0xff;
     head[3] = 0xe1;
-    new DataView(head.buffer).setUint16(4, 60); // APP1 段长越界 → 扫不到 SOF
+    new DataView(head.buffer).setUint16(4, 60);
     expect(parseImageDimensions(head)).toBeNull();
   });
 
   it("returns null for a non-image file (mp3)", () => {
     const head = new Uint8Array(32);
-    head.set([0x49, 0x44, 0x33], 0); // "ID3"
+    head.set([0x49, 0x44, 0x33], 0);
     expect(parseImageDimensions(head)).toBeNull();
   });
 
   it("returns null for recognized-but-unsupported layouts (heic)", () => {
     const head = new Uint8Array(32);
     head.set([0x00, 0x00, 0x00, 0x18], 0);
-    head.set([0x66, 0x74, 0x79, 0x70], 4); // "ftyp"
-    head.set([0x68, 0x65, 0x69, 0x63], 8); // "heic"
+    head.set([0x66, 0x74, 0x79, 0x70], 4);
+    head.set([0x68, 0x65, 0x69, 0x63], 8);
     expect(parseImageDimensions(head)).toBeNull();
   });
 });

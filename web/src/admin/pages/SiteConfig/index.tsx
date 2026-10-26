@@ -1,7 +1,3 @@
-/* ============================================
- * SiteConfig 通用配置：首页背景图 / 视频增删改查、排序、启停与 TOS 上传
- * 数据源 /api/admin/site-config/homepage-heroes
- * ============================================ */
 import { useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -23,14 +19,22 @@ import {
   uploadHomepageHeroFile,
   type HomepageHeroAdmin,
   type HomepageHeroPayload,
-} from '@/api/homepageHeroes';
-import { isApiError } from '@/api/http';
+  type HomepageHeroScene,
+} from '@/shared/api/homepageHeroes';
+import { isApiError } from '@/shared/api/http';
 import ConfirmModal from '../../components/ConfirmModal';
-import Modal from '@/components/Modal';
-import auroraPoster from '@/assets/home-hero/aurora-poster.jpg';
-import styles from './index.module.css';
+import { remoteImageCrossOrigin, resolveMediaSrc } from '@/shared/utils/remoteImageCors';
+import auroraPoster from '@/shared/assets/home-hero/aurora-poster.jpg';
+import { Alert, Badge, Button, Checkbox, Empty, Modal, Page, PageHeader, Table, Tabs } from '../../ui';
 
 const fmtTime = (iso: string) => new Date(iso).toLocaleString('zh-CN', { hour12: false });
+
+const SCENE_TABS = [
+  { key: 'homepage', label: '首页背景' },
+  { key: 'auth', label: '登录弹窗' },
+] as const;
+
+const sceneLabel = (scene: HomepageHeroScene) => (scene === 'auth' ? '登录弹窗背景' : '首页背景');
 
 const errMsg = (e: unknown, fallback: string) => (isApiError(e) ? e.message : fallback);
 
@@ -44,9 +48,18 @@ function thumbOf(row: HomepageHeroAdmin): string | null {
   return null;
 }
 
+const urlCellStyle = {
+  display: 'inline-block',
+  maxWidth: 240,
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  verticalAlign: 'bottom',
+} as const;
+
 export default function SiteConfig() {
   const queryClient = useQueryClient();
-  const list = useQuery(adminHomepageHeroesOptions());
+  const [scene, setScene] = useState<HomepageHeroScene>('homepage');
+  const list = useQuery(adminHomepageHeroesOptions(scene));
   const [form, setForm] = useState<{ id?: string } | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [draggedId, setDraggedId] = useState<string | null>(null);
@@ -54,6 +67,16 @@ export default function SiteConfig() {
 
   const items = list.data ?? [];
   const enabledCount = items.filter((row) => row.enabled === 1).length;
+  const label = sceneLabel(scene);
+
+  const changeScene = (next: string) => {
+    if (next !== 'homepage' && next !== 'auth') return;
+    setScene(next);
+    setForm(null);
+    setDeleteId(null);
+    setDraggedId(null);
+    setActionError('');
+  };
 
   const invalidate = () => {
     void queryClient.invalidateQueries({ queryKey: homepageHeroKeys.all });
@@ -85,7 +108,7 @@ export default function SiteConfig() {
   const saveMut = useMutation({
     mutationFn: async ({ id, payload }: { id?: string; payload: HomepageHeroPayload }) => {
       if (id) return updateHomepageHero(id, payload, { silent: true });
-      return createHomepageHero(payload, { silent: true });
+      return createHomepageHero({ ...payload, scene }, { silent: true });
     },
     onSuccess: () => {
       setForm(null);
@@ -116,159 +139,198 @@ export default function SiteConfig() {
   };
 
   return (
-    <div className={styles.page}>
-      <div className={styles.header}>
-        <div>
-          <h1 className={styles.title}>通用配置</h1>
-          <p className={styles.subtitle}>
-            首页封面图 / 视频（已启用 {enabledCount}/{HOMEPAGE_HERO_MAX_ENABLED}）
-          </p>
-        </div>
-        <button className={styles.primaryBtn} onClick={() => setForm({})}>
-          <Plus size={16} strokeWidth={2} />
-          <span>新建条目</span>
-        </button>
-      </div>
+    <Page>
+      <PageHeader
+        title="站点设置"
+        subtitle={`${label}图 / 视频（已启用 ${enabledCount}/${HOMEPAGE_HERO_MAX_ENABLED}）`}
+        extra={
+          <Button
+            variant="primary"
+            icon={<Plus size={16} strokeWidth={2} />}
+            onClick={() => setForm({})}
+          >
+            新建条目
+          </Button>
+        }
+      />
 
-      <section className={styles.fallbackInfo} aria-label="首页默认背景说明">
-        <img className={styles.fallbackThumb} src={auroraPoster} alt="首页默认兜底背景" />
-        <div>
-          <h2 className={styles.fallbackTitle}>首页默认兜底背景</h2>
-          <p className={styles.fallbackText}>
-            GET /api/site/homepage-heroes 仅返回已启用的后台条目，不包含此默认图。没有可播放条目时首页使用这张内置静态图；视频没有封面时也以它作为加载封面。
-          </p>
-          <code className={styles.fallbackPath}>web/src/assets/home-hero/aurora-poster.jpg</code>
-        </div>
-      </section>
+      <Tabs items={SCENE_TABS} value={scene} onChange={changeScene} />
 
-      {actionError && <div className={styles.actionError}>{actionError}</div>}
+      {scene === 'homepage' ? (
+        <Alert tone="info" title="首页默认兜底背景">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+            <img
+              src={auroraPoster}
+              alt="首页默认兜底背景"
+              style={{ width: 128, height: 72, flex: '0 0 auto', objectFit: 'cover', borderRadius: 'var(--admin-radius-surface)' }}
+            />
+            <div>
+              <p style={{ margin: 0 }}>
+                GET /api/site/homepage-heroes?scene=homepage 仅返回已启用的后台条目，不包含此默认图。没有可播放条目时首页使用这张内置静态图；视频没有封面时也以它作为加载封面。
+              </p>
+              <code>web/src/shared/assets/home-hero/aurora-poster.jpg</code>
+            </div>
+          </div>
+        </Alert>
+      ) : (
+        <Alert tone="info" title="登录弹窗背景">
+          登录弹窗读取 GET /api/site/homepage-heroes?scene=auth，与首页素材互不影响。未配置或停用时由前端展示静态占位背景。
+        </Alert>
+      )}
 
-      <div className={styles.tableWrap}>
-        <table className={styles.table}>
-          <thead>
+      {actionError && <Alert tone="danger">{actionError}</Alert>}
+
+      <Table>
+        <thead>
+          <tr>
+            <th>拖拽排序</th>
+            <th>预览</th>
+            <th>类型</th>
+            <th>媒体</th>
+            <th>封面</th>
+            <th>启用</th>
+            <th>当前顺序</th>
+            <th>更新时间</th>
+            <th style={{ textAlign: 'right' }}>操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          {list.isPending && (
             <tr>
-              <th>拖拽排序</th>
-              <th>预览</th>
-              <th>类型</th>
-              <th>媒体</th>
-              <th>封面</th>
-              <th>启用</th>
-              <th>当前顺序</th>
-              <th>更新时间</th>
-              <th className={styles.thRight}>操作</th>
+              <td colSpan={9}>
+                <Empty message="加载中…" />
+              </td>
             </tr>
-          </thead>
-          <tbody>
-            {list.isPending && (
-              <tr>
-                <td colSpan={9} className={styles.tableState}>加载中…</td>
-              </tr>
-            )}
-            {list.isError && (
-              <tr>
-                <td colSpan={9} className={styles.tableState}>
-                  {isApiError(list.error) ? list.error.message : '获取首页背景配置失败'}
+          )}
+          {list.isError && (
+            <tr>
+              <td colSpan={9}>
+                <Empty
+                  message={isApiError(list.error) ? list.error.message : `获取${label}配置失败`}
+                  extra={<Button onClick={() => void list.refetch()}>重试</Button>}
+                />
+              </td>
+            </tr>
+          )}
+          {!list.isPending && !list.isError && items.length === 0 && (
+            <tr>
+              <td colSpan={9}>
+                <Empty message={`暂无${label}条目`} />
+              </td>
+            </tr>
+          )}
+          {items.map((row) => {
+            const thumb = thumbOf(row);
+            return (
+              <tr
+                key={row.id}
+                data-testid={`hero-row-${row.id}`}
+                style={draggedId === row.id ? { opacity: 0.45 } : undefined}
+                onDragOver={(event) => event.preventDefault()}
+                onDrop={() => moveByDrag(row.id)}
+              >
+                <td>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    title="拖动排序"
+                    aria-label="拖动排序"
+                    data-testid={`hero-drag-handle-${row.id}`}
+                    icon={<GripVertical size={16} strokeWidth={2} />}
+                    style={{ cursor: 'grab' }}
+                    draggable={!busy}
+                    disabled={busy}
+                    onDragStart={() => setDraggedId(row.id)}
+                    onDragEnd={() => setDraggedId(null)}
+                  />
+                </td>
+                <td>
+                  {thumb ? (
+                    <img
+                      src={resolveMediaSrc(thumb)}
+                      crossOrigin={remoteImageCrossOrigin(thumb)}
+                      alt=""
+                      style={{ width: 72, height: 40, objectFit: 'cover', borderRadius: 'var(--admin-radius-control)', display: 'block' }}
+                    />
+                  ) : (
+                    <span>—</span>
+                  )}
+                </td>
+                <td>
+                  <Badge tone="accent">{row.media_type === 'image' ? '图片' : '视频'}</Badge>
+                </td>
+                <td>
+                  {row.media_url ? (
+                    <span style={urlCellStyle} title={row.media_url}>{row.media_url}</span>
+                  ) : (
+                    <Badge tone="warning">待填地址</Badge>
+                  )}
+                </td>
+                <td>
+                  {row.poster_url ? (
+                    <span style={urlCellStyle} title={row.poster_url}>{row.poster_url}</span>
+                  ) : (
+                    <span>—</span>
+                  )}
+                </td>
+                <td>
+                  <Badge tone={row.enabled === 1 ? 'success' : 'neutral'}>
+                    {row.enabled === 1 ? '启用' : '停用'}
+                  </Badge>
+                </td>
+                <td>{row.sort_order}</td>
+                <td>{fmtTime(row.updated_at)}</td>
+                <td>
+                  <div
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 4,
+                      justifyContent: 'flex-end',
+                      width: '100%',
+                    }}
+                  >
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      title={row.enabled === 1 ? '停用' : '启用'}
+                      data-testid={`hero-toggle-${row.id}`}
+                      disabled={busy}
+                      icon={<Power size={15} strokeWidth={2} />}
+                      onClick={() => {
+                        setActionError('');
+                        toggleMut.mutate(
+                          { id: row.id, enabled: row.enabled === 1 ? 0 : 1 },
+                          { onError: (e) => setActionError(errMsg(e, '启停失败，请稍后重试')) },
+                        );
+                      }}
+                    />
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      title="编辑"
+                      icon={<Pencil size={15} strokeWidth={2} />}
+                      onClick={() => setForm({ id: row.id })}
+                    />
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      title="删除"
+                      data-testid={`hero-delete-${row.id}`}
+                      icon={<Trash2 size={15} strokeWidth={2} />}
+                      onClick={() => setDeleteId(row.id)}
+                    />
+                  </div>
                 </td>
               </tr>
-            )}
-            {!list.isPending && !list.isError && items.length === 0 && (
-              <tr>
-                <td colSpan={9} className={styles.tableState}>暂无首页背景条目</td>
-              </tr>
-            )}
-            {items.map((row) => {
-              const thumb = thumbOf(row);
-              return (
-                <tr
-                  key={row.id}
-                  data-testid={`hero-row-${row.id}`}
-                  className={draggedId === row.id ? styles.dragging : undefined}
-                  onDragOver={(event) => event.preventDefault()}
-                  onDrop={() => moveByDrag(row.id)}
-                >
-                  <td className={styles.dragCell}>
-                    <button
-                      type="button"
-                      className={`${styles.iconBtn} ${styles.dragHandle}`}
-                      title="拖动排序"
-                      aria-label="拖动排序"
-                      data-testid={`hero-drag-handle-${row.id}`}
-                      draggable={!busy}
-                      disabled={busy}
-                      onDragStart={() => setDraggedId(row.id)}
-                      onDragEnd={() => setDraggedId(null)}
-                    >
-                      <GripVertical size={16} strokeWidth={2} />
-                    </button>
-                  </td>
-                  <td>
-                    {thumb ? (
-                      <img className={styles.thumb} src={thumb} alt="" />
-                    ) : (
-                      <span className={styles.dash}>—</span>
-                    )}
-                  </td>
-                  <td className={styles.cellType}>{row.media_type === 'image' ? '图片' : '视频'}</td>
-                  <td>
-                    {row.media_url ? (
-                      <span className={styles.cellUrl} title={row.media_url}>{row.media_url}</span>
-                    ) : (
-                      <span className={styles.pendingMark}>待填地址</span>
-                    )}
-                  </td>
-                  <td>
-                    {row.poster_url ? (
-                      <span className={styles.cellUrl} title={row.poster_url}>{row.poster_url}</span>
-                    ) : (
-                      <span className={styles.dash}>—</span>
-                    )}
-                  </td>
-                  <td>
-                    <span className={row.enabled === 1 ? styles.badgeOn : styles.badgeOff}>
-                      {row.enabled === 1 ? '启用' : '停用'}
-                    </span>
-                  </td>
-                  <td className={styles.cellSort}>{row.sort_order}</td>
-                  <td className={styles.cellTime}>{fmtTime(row.updated_at)}</td>
-                  <td>
-                    <div className={styles.actionGroup}>
-                      <button
-                        className={styles.iconBtn}
-                        title={row.enabled === 1 ? '停用' : '启用'}
-                        data-testid={`hero-toggle-${row.id}`}
-                        disabled={busy}
-                        onClick={() => {
-                          setActionError('');
-                          toggleMut.mutate(
-                            { id: row.id, enabled: row.enabled === 1 ? 0 : 1 },
-                            { onError: (e) => setActionError(errMsg(e, '启停失败，请稍后重试')) },
-                          );
-                        }}
-                      >
-                        <Power size={15} strokeWidth={2} />
-                      </button>
-                      <button className={styles.iconBtn} title="编辑" onClick={() => setForm({ id: row.id })}>
-                        <Pencil size={15} strokeWidth={2} />
-                      </button>
-                      <button
-                        className={`${styles.iconBtn} ${styles.iconDanger}`}
-                        title="删除"
-                        data-testid={`hero-delete-${row.id}`}
-                        onClick={() => setDeleteId(row.id)}
-                      >
-                        <Trash2 size={15} strokeWidth={2} />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+            );
+          })}
+        </tbody>
+      </Table>
 
       {form !== null && (
         <HeroFormModal
+          label={label}
           initial={form.id !== undefined ? items.find((row) => row.id === form.id) : undefined}
           enabledCount={enabledCount}
           saving={saveMut.isPending}
@@ -282,7 +344,7 @@ export default function SiteConfig() {
 
       {deleteId !== null && (
         <ConfirmModal
-          title="删除首页背景"
+          title={`删除${label}`}
           content={`确定删除该${items.find((row) => row.id === deleteId)?.media_type === 'image' ? '图片' : '视频'}条目吗？删除后无法恢复，需重新上传。`}
           confirmText={deleteMut.isPending ? '删除中…' : '确认删除'}
           onConfirm={() => {
@@ -295,11 +357,12 @@ export default function SiteConfig() {
           onClose={() => setDeleteId(null)}
         />
       )}
-    </div>
+    </Page>
   );
 }
 
 interface HeroFormModalProps {
+  label: string;
   initial?: HomepageHeroAdmin;
   enabledCount: number;
   saving: boolean;
@@ -307,7 +370,7 @@ interface HeroFormModalProps {
   onSubmit: (payload: HomepageHeroPayload, id?: string) => Promise<unknown>;
 }
 
-function HeroFormModal({ initial, enabledCount, saving, onClose, onSubmit }: HeroFormModalProps) {
+function HeroFormModal({ label, initial, enabledCount, saving, onClose, onSubmit }: HeroFormModalProps) {
   const atCap = enabledCount >= HOMEPAGE_HERO_MAX_ENABLED && initial?.enabled !== 1;
   const [coverUrl, setCoverUrl] = useState(
     initial?.media_type === 'video' ? initial.poster_url ?? '' : initial?.media_url ?? '',
@@ -366,119 +429,115 @@ function HeroFormModal({ initial, enabledCount, saving, onClose, onSubmit }: Her
   return (
     <Modal
       open
-      title={initial ? '编辑首页背景' : '新建首页背景'}
-      ariaLabel={initial ? '编辑首页背景' : '新建首页背景'}
+      title={`${initial ? '编辑' : '新建'}${label}`}
       width={640}
-      okText={saving ? '保存中…' : '保存'}
-      confirmLoading={saving}
-      okButtonProps={{ disabled: uploadBusy }}
-      onOk={() => void handleSave()}
-      onCancel={onClose}
-      classNames={{
-        container: styles.modal,
-        body: styles.modalBody,
-        footer: styles.modalFoot,
-      }}
+      onClose={onClose}
+      footer={
+        <>
+          <Button onClick={onClose}>取消</Button>
+          <Button variant="primary" disabled={saving || uploadBusy} onClick={() => void handleSave()}>
+            {saving ? '保存中…' : '保存'}
+          </Button>
+        </>
+      }
     >
-          <div className={styles.label}>
-            封面图 <span className={styles.required}>*</span>
-          </div>
-          <div className={styles.imgAddRow}>
-            <button
-              type="button"
-              className={styles.ghostBtn}
-              disabled={uploadBusy}
-              onClick={() => posterFileRef.current?.click()}
-            >
-              <Upload size={15} strokeWidth={2} />
-              上传封面图
-            </button>
-            <input
-              data-testid="hero-cover-upload"
-              ref={posterFileRef}
-              type="file"
-              hidden
-              accept="image/jpeg,image/png,image/webp,image/gif"
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                e.target.value = '';
-                if (file) void upload(file, 'cover');
-              }}
-            />
-            {coverUrl && <span className={styles.uploadedMark}>已上传</span>}
-          </div>
-          {hasCoverPreview && (
-            <div className={styles.previewPanel}>
-              <span className={styles.previewTitle}>封面图预览</span>
-              <img
-                data-testid="hero-cover-preview"
-                className={styles.preview}
-                src={coverUrl}
-                alt="封面图预览"
-              />
-            </div>
-          )}
+      <div style={{ margin: '0 0 10px' }}>
+        封面图 <span aria-hidden="true">*</span>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <Button
+          icon={<Upload size={15} strokeWidth={2} />}
+          disabled={uploadBusy}
+          onClick={() => posterFileRef.current?.click()}
+        >
+          上传封面图
+        </Button>
+        <input
+          data-testid="hero-cover-upload"
+          ref={posterFileRef}
+          type="file"
+          hidden
+          accept="image/jpeg,image/png,image/webp,image/gif"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            e.target.value = '';
+            if (file) void upload(file, 'cover');
+          }}
+        />
+        {coverUrl && <Badge tone="success">已上传</Badge>}
+      </div>
+      {hasCoverPreview && (
+        <div style={{ marginTop: 14 }}>
+          <div style={{ marginBottom: 8 }}>封面图预览</div>
+          <img
+            data-testid="hero-cover-preview"
+            src={resolveMediaSrc(coverUrl)}
+            crossOrigin={remoteImageCrossOrigin(coverUrl)}
+            alt="封面图预览"
+            style={{ display: 'block', width: '100%', maxHeight: 220, objectFit: 'cover', borderRadius: 'var(--admin-radius-surface)' }}
+          />
+        </div>
+      )}
 
-          <div className={styles.label}>
-            背景视频 <span className={styles.labelSub}>（可选）</span>
-          </div>
-          <div className={styles.imgAddRow}>
-            <button
-              type="button"
-              className={styles.ghostBtn}
-              disabled={uploadBusy}
-              onClick={() => mediaFileRef.current?.click()}
-            >
-              <Upload size={15} strokeWidth={2} />
-              上传视频
-            </button>
-            <input
-              data-testid="hero-video-upload"
-              ref={mediaFileRef}
-              type="file"
-              hidden
-              accept="video/mp4"
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                e.target.value = '';
-                if (file) void upload(file, 'video');
-              }}
-            />
-            {videoUrl && <span className={styles.uploadedMark}>已上传</span>}
-          </div>
-          {hasVideoPreview && (
-            <div className={styles.previewPanel}>
-              <span className={styles.previewTitle}>背景视频预览</span>
-              <video
-                data-testid="hero-video-preview"
-                className={styles.preview}
-                src={videoUrl}
-                poster={hasCoverPreview ? coverUrl : undefined}
-                controls
-                muted
-                playsInline
-                preload="metadata"
-              >
-                当前浏览器不支持视频预览。
-              </video>
-            </div>
-          )}
+      <div style={{ margin: '22px 0 10px' }}>
+        背景视频 <span>（可选）</span>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <Button
+          icon={<Upload size={15} strokeWidth={2} />}
+          disabled={uploadBusy}
+          onClick={() => mediaFileRef.current?.click()}
+        >
+          上传视频
+        </Button>
+        <input
+          data-testid="hero-video-upload"
+          ref={mediaFileRef}
+          type="file"
+          hidden
+          accept="video/mp4"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            e.target.value = '';
+            if (file) void upload(file, 'video');
+          }}
+        />
+        {videoUrl && <Badge tone="success">已上传</Badge>}
+      </div>
+      {hasVideoPreview && (
+        <div style={{ marginTop: 14 }}>
+          <div style={{ marginBottom: 8 }}>背景视频预览</div>
+          <video
+            data-testid="hero-video-preview"
+            src={videoUrl}
+            poster={hasCoverPreview ? coverUrl : undefined}
+            controls
+            muted
+            playsInline
+            preload="metadata"
+            style={{ display: 'block', width: '100%', maxHeight: 220, objectFit: 'cover', borderRadius: 'var(--admin-radius-surface)' }}
+          >
+            当前浏览器不支持视频预览。
+          </video>
+        </div>
+      )}
 
-          <div className={styles.switchRow}>
-            <span className={styles.switchLabel}>启用（进首页轮播）</span>
-            <button
-              type="button"
-              className={`${styles.switch} ${enabled ? styles.switchOn : ''}`}
-              aria-label="启用"
-              onClick={() => setEnabled((v) => !v)}
-            >
-              <span className={styles.knob} />
-            </button>
-          </div>
-          {atCap && (
-            <p className={styles.hint}>已启用 {HOMEPAGE_HERO_MAX_ENABLED} 条，新建默认停用；再启用会返回 409。</p>
-          )}
-          {formError && <div className={styles.formError}>{formError}</div>}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginTop: 24 }}>
+        <span>启用（进首页轮播）</span>
+        <Checkbox checked={enabled} onChange={setEnabled} aria-label="启用" />
+      </div>
+      {atCap && (
+        <div style={{ marginTop: 12 }}>
+          <Alert tone="info">
+            已启用 {HOMEPAGE_HERO_MAX_ENABLED} 条，新建默认停用；再启用会返回 409。
+          </Alert>
+        </div>
+      )}
+      {formError && (
+        <div style={{ marginTop: 12 }}>
+          <Alert tone="danger">{formError}</Alert>
+        </div>
+      )}
     </Modal>
   );
 }

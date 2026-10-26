@@ -1,9 +1,4 @@
 #!/usr/bin/env bash
-# Codex lifecycle wrapper for the shared Claude hook scripts.
-#
-# .claude/hooks remains the policy authority. Shared hooks use the common
-# no-output allow / exit-2 block contract. Only block-master-edit.sh needs a
-# Codex apply_patch adapter; every other lifecycle hook remains transparent.
 
 set -u
 

@@ -1,8 +1,9 @@
-// IKGM99：高清放大创建入口复核矩阵与免费口径单测（先例：media-extractions.service.test.ts）。
-// 只测外部可见行为：拒绝原因可读、落库参数冻结、免费口径无成本预留。
 import { describe, expect, it, vi } from "vitest";
 
 import { ImageEnhancementsService } from "./image-enhancements.service.js";
+
+const { enqueueImageEnhanceJob } = vi.hoisted(() => ({ enqueueImageEnhanceJob: vi.fn() }));
+vi.mock("@lib/shared/generation/generation-queue.js", () => ({ enqueueImageEnhanceJob }));
 
 const VALID_BODY = {
   source_asset_id: "88",
@@ -17,6 +18,7 @@ function makeService(overrides: {
   project?: unknown;
   assets?: unknown;
   createJob?: unknown;
+  billing?: unknown;
 } = {}) {
   const project = overrides.project ?? { findOwnedById: vi.fn().mockResolvedValue({ id: 55n }) };
   const assets =
@@ -27,16 +29,32 @@ function makeService(overrides: {
   const prisma = {
     client: {
       generation_jobs: { create },
-      // 免费口径哨兵：任何成本预留写入都会在这里暴露。
       cost_reservations: { create: costCreate },
     },
   };
   return {
-    service: new ImageEnhancementsService(prisma as never, project as never, assets as never),
+    service: new ImageEnhancementsService(prisma as never, project as never, assets as never, (overrides.billing ?? { jobBilling: async () => undefined, release: async () => {} }) as never),
     create,
     costCreate,
   };
 }
+
+describe("ImageEnhancementsService.create：计费输入", () => {
+  it("把 multiple 原样交给工具计价（2/4/6 档位由价目表决定）", async () => {
+    const jobBilling = vi.fn().mockResolvedValue(undefined);
+    const { service } = makeService({
+      billing: { jobBilling, release: vi.fn() },
+    });
+    const result = await service.create("9", "55", { ...VALID_BODY, multiple: 4 });
+    expect(result.code).toBe(200);
+    expect(jobBilling).toHaveBeenCalledWith(
+      "image_enhance",
+      "9",
+      expect.objectContaining({ multiple: 4 }),
+    );
+    expect(enqueueImageEnhanceJob).toHaveBeenCalledWith("400");
+  });
+});
 
 describe("ImageEnhancementsService.create：契约 schema 复核", () => {
   it("rejects a missing source_asset_id", async () => {
@@ -230,8 +248,6 @@ describe("ImageEnhancementsService.create：源图尺寸门槛复核", () => {
   });
 
   it("lets an asset without recorded dimensions pass to the supplier gate", async () => {
-    // assets.width/height 由前端上报、存量图大量为 null（IKE53U）：缺权威尺寸不臆造、不拦，
-    // 交供应商按官方门槛拒（用户故事 30 的兜底路径）。
     const { service } = makeService({
       assets: { findOwnedSource: vi.fn().mockResolvedValue({ type: "image", width: null, height: null }) },
     });
@@ -266,29 +282,5 @@ describe("ImageEnhancementsService.create：落任务与免费口径", () => {
     expect(costCreate).not.toHaveBeenCalled();
     const data = create.mock.calls[0][0].data;
     expect(Object.keys(data)).not.toContain("provider");
-  });
-});
-
-describe("ImageEnhancementsService.create：请求方凭证冻结（断链防护）", () => {
-  // 断链背景：worker（ImageEnhanceJobProcessor）只从 input.provider_credential 取请求方 sk-，
-  // 创建链路不冻结则必落 provider_credential_missing（先例：图片生成 handle-create-generation-job.ts）。
-  it("freezes the requester sk- token into job input (provider_credential)", async () => {
-    const { service, create } = makeService();
-    const result = await service.create("9", "55", VALID_BODY, {
-      providerCredential: "sk-live-token",
-    });
-    expect(result.code).toBe(200);
-    expect(create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        input: { ...VALID_BODY, provider_credential: "sk-live-token" },
-      }),
-    });
-  });
-
-  it("omits provider_credential when the requester carries no sk- token", async () => {
-    const { service, create } = makeService();
-    const result = await service.create("9", "55", VALID_BODY);
-    expect(result.code).toBe(200);
-    expect(create.mock.calls[0][0].data.input).toEqual(VALID_BODY);
   });
 });

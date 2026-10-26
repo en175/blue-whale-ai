@@ -24,6 +24,9 @@
 
     /* Path aliases */
     "paths": {
+      "@/custom/*": ["./src/custom/*"],
+      "@/admin/*": ["./src/admin/*"],
+      "@/shared/*": ["./src/shared/*"],
       "@/*": ["./src/*"],
       "@lib/*": ["../backend/libs/*"]
     }

@@ -1,9 +1,15 @@
 import { CanActivate, ExecutionContext, Injectable } from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
-import { NewApiError } from "@lib/core";
+import { ApiError } from "@lib/core";
+import {
+  ACCOUNT_ERROR_ACCOUNT_DISABLED,
+  ACCOUNT_ERROR_SESSION_EVICTED,
+  ACCOUNT_ERROR_SESSION_EXPIRED,
+} from "@lib/contracts";
 import type { Request, Response } from "express";
-import { AccountService } from "@lib/shared/account/account.service.js";
+import { AccountDirectoryService } from "@lib/shared/identity/index.js";
 import { SessionService } from "@lib/shared/session/session.service.js";
+import { extractLoginToken } from "@lib/shared/session/login-token.js";
 import {
   SESSION_COOKIE_NAME,
   sessionCookieOptions,
@@ -15,21 +21,17 @@ import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js"
 const ADMIN_ROLE_THRESHOLD = 10;
 const ENABLED_STATUS = 1;
 
-type RequestWithUser = Request & { user: AuthenticatedUser };
+type RequestWithUser = Request & {
+  user: AuthenticatedUser;
+  loginToken?: string;
+};
 
-/**
- * 全局守卫（ADR-0062 #19 凭证分层）：浏览器登录态走 HttpOnly 会话 cookie
- * （`bw_session`），BFF 本地校验会话后把真实 `sk-...` 回注请求头，下游业务接口
- * 继续以 `Bearer sk-...` 自解析、代打 new-api，无需逐处改动。
- * - 每次鉴权刷新 cookie maxAge，与 Redis 7 天滑动 TTL 对齐（活跃用户不踢）
- * - role/status 超 ROLE_STATUS_RECHECK_MS 回源 new-api 复核，账户禁用/降权近实时生效
- */
 @Injectable()
 export class AuthGuard implements CanActivate {
   constructor(
     private readonly reflector: Reflector,
     private readonly sessions: SessionService,
-    private readonly account: AccountService,
+    private readonly directory: AccountDirectoryService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -41,49 +43,72 @@ export class AuthGuard implements CanActivate {
 
     const request = context.switchToHttp().getRequest<Request>();
     const response = context.switchToHttp().getResponse<Response>();
-    const token = request.cookies?.[SESSION_COOKIE_NAME];
+    const token = extractLoginToken(request);
     if (!token) {
-      throw new NewApiError("缺少登录凭证", 401, "unauthorized");
+      throw new ApiError("缺少登录凭证", 401, "unauthorized");
+    }
+    (request as RequestWithUser).loginToken = token;
+
+    let claims;
+    try {
+      claims = await this.sessions.verifyToken(token);
+    } catch {
+      throw new ApiError(
+        "登录已过期，请重新验证",
+        401,
+        ACCOUNT_ERROR_SESSION_EXPIRED,
+      );
     }
 
     let session;
     try {
       session = await this.sessions.resolveSession(token);
     } catch (error) {
-      if (error instanceof NewApiError) throw toAuthError(error);
-      throw new NewApiError("会话服务暂不可用", 503, "session_service_error");
+      if (error instanceof ApiError) throw toAuthError(error);
+      throw new ApiError("会话服务暂不可用", 503, "session_service_error");
     }
     if (!session) {
-      throw new NewApiError("登录已过期，请重新登录", 401, "unauthorized");
+      if (await this.sessions.wasEvicted(token)) {
+        throw new ApiError(
+          "登录已失效，账号已在其他浏览器登录，请重新验证",
+          401,
+          ACCOUNT_ERROR_SESSION_EVICTED,
+        );
+      }
+      throw new ApiError(
+        "登录已过期，请重新验证",
+        401,
+        ACCOUNT_ERROR_SESSION_EXPIRED,
+      );
     }
 
-    // role/status 定期复核（账户禁用/降权近实时生效；new-api 不可达时沿用缓存身份，不阻断请求）
     if (session.needsRecheck) {
       try {
-        const identity = await this.account.resolveTokenIdentity(session.sk);
+        const { role, status } = await this.directory.resolveAccessState(
+          session.userId,
+        );
         session = {
           ...session,
-          role: identity.role,
-          status: identity.status,
+          role,
+          status,
           needsRecheck: false,
         };
-        await this.sessions.updateSessionIdentity(token, {
-          role: identity.role,
-          status: identity.status,
-        });
+        await this.sessions.updateSessionIdentity(token, { role, status });
       } catch {
-        // 上游不可达：沿用缓存 role/status
       }
     }
     if (session.status !== ENABLED_STATUS) {
-      throw new NewApiError("账户已停用", 403, "account_disabled");
+      throw new ApiError("账户已停用", 403, ACCOUNT_ERROR_ACCOUNT_DISABLED);
     }
 
-    // 滑动续期：刷新 HttpOnly cookie maxAge，与 Redis TTL 对齐（活跃用户不被 7 天硬踢）
-    response.cookie(SESSION_COOKIE_NAME, token, sessionCookieOptions());
+    const remainingMs = claims.expiresAt - Date.now();
+    if (remainingMs > 0) {
+      response.cookie(SESSION_COOKIE_NAME, token, {
+        ...sessionCookieOptions(),
+        maxAge: remainingMs,
+      });
+    }
 
-    // 回注真实 sk-，下游 `parseBearerToken` 拿到上游执行凭证代打 new-api（浏览器永不接触）。
-    request.headers.authorization = `Bearer ${session.sk}`;
     (request as RequestWithUser).user = {
       userId: String(session.userId),
       status: "enabled",

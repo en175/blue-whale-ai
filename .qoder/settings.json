@@ -31,6 +31,15 @@
             "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/cbm-discovery-gate.sh\""
           }
         ]
+      },
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/block-gitee-alternative-channel.sh\""
+          }
+        ]
       }
     ]
   }

@@ -1,0 +1,99 @@
+
+.frameLayer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 6;
+  overflow: visible;
+}
+
+.frameBox {
+  position: absolute;
+  border: 1.5px solid rgba(208, 208, 208, 0.9);
+  border-radius: 4px;
+  background-color: rgba(208, 208, 208, 0.08);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+}
+
+.edgeHit {
+  position: absolute;
+  pointer-events: auto;
+  background: transparent;
+}
+
+.edgeHitTop,
+.edgeHitBottom {
+  height: 12px;
+  transform: translateY(-50%);
+  cursor: ns-resize;
+}
+
+.edgeHitLeft,
+.edgeHitRight {
+  width: 12px;
+  transform: translateX(-50%);
+  cursor: ew-resize;
+}
+
+.edgeVisual {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  background-color: rgba(208, 208, 208, 0.85);
+  border-radius: 2px;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+}
+
+.edgeVisualH {
+  width: 40px;
+  height: 6px;
+}
+
+.edgeVisualV {
+  width: 6px;
+  height: 40px;
+}
+
+.edgeHit:hover .edgeVisual {
+  background-color: #d0d0d0;
+}
+
+.cornerHit {
+  position: absolute;
+  width: 20px;
+  height: 20px;
+  transform: translate(-50%, -50%);
+  pointer-events: auto;
+  background: transparent;
+  z-index: 1;
+}
+
+.cornerVisual {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  background-color: #fff;
+  border: 1.5px solid rgba(208, 208, 208, 0.95);
+  pointer-events: none;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
+}
+
+.cornerHit:hover .cornerVisual {
+  border-color: #d0d0d0;
+  background-color: #d0d0d0;
+}
+
+.cornerNwse {
+  cursor: nwse-resize;
+}
+
+.cornerNesw {
+  cursor: nesw-resize;
+}

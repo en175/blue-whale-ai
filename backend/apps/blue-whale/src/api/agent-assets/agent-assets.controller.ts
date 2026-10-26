@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Headers, Param, Post } from "@nestjs/common";
+import { Body, Controller, Get, Param, Post } from "@nestjs/common";
 import { NewApiError } from "@lib/core";
 import { DomainError, RESOURCE_NOT_FOUND_CODE, ok } from "@lib/contracts";
 import { assetDurationSeconds } from "@lib/shared/persistence/index.js";
@@ -21,8 +21,6 @@ import {
 } from "@lib/shared/rate-limit/decorators/rate-limit.decorator.js";
 import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js";
 
-/** IKDR4P：presign 与 uploads/presign 同为 TOS 预签名入口，共享同一计数 scope，
- *  防止换端点把 30/min、120/hr 配额翻倍。 */
 const ASSET_PRESIGN_BUCKETS: RateLimitBucket[] = [
   { scope: "asset-presign", key: "user", limit: 30, windowMs: 60_000 },
   { scope: "asset-presign", key: "user", limit: 120, windowMs: 3_600_000 },
@@ -55,21 +53,19 @@ export class AgentAssetsController {
     return handlePresignAsset(user.userId, body, this.storage.uploads);
   }
 
-  /** IKCNLS：上传 md5 去重（presign 前判断）。命中返回已有资产并建关联，未命中标记需上传。
-   *  IKGQWR：带 `materialId` 时先过素材闸，命中后写 `material_id` / `material_group_id`。 */
   @Post("uploads/dedup")
   @RateLimit({
     buckets: [{ scope: "asset-dedup", key: "user", limit: 30, windowMs: 60_000 }],
   })
   async uploadsDedup(
     @CurrentUser() user: AuthenticatedUser,
-    @Headers("authorization") authorization: string | undefined,
     @Body() body: DedupAssetInput,
   ) {
     return handleDedupAsset(user.userId, body, {
       projects: this.projects,
       uploads: this.assets,
-      materialGate: this.material.uploadMaterialGate(authorization),
+      materialGate: this.material.uploadMaterialGate(),
+      materialStatus: this.material.materialStatusReader(),
     });
   }
 
@@ -79,14 +75,15 @@ export class AgentAssetsController {
   })
   async uploadsComplete(
     @CurrentUser() user: AuthenticatedUser,
-    @Headers("authorization") authorization: string | undefined,
     @Body() body: CompleteAssetInput,
   ) {
     return handleCompleteAsset(user.userId, body, {
       projects: this.projects,
       uploads: this.assets,
       storage: this.storage.uploads,
-      materialGate: this.material.uploadMaterialGate(authorization),
+      probe: this.storage.probe,
+      materialGate: this.material.uploadMaterialGate(),
+      materialStatus: this.material.materialStatusReader(),
     });
   }
 

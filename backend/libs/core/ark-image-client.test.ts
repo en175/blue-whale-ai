@@ -46,7 +46,7 @@ describe("generateImages", () => {
     ).rejects.toMatchObject({ code: "content_rejected" });
   });
 
-  it("HTTP error + 敏感内容 → ArkImageError(content_rejected)；HTTP 402 → quota_exhausted（IKDAJN）", async () => {
+  it("HTTP error + 敏感内容 → ArkImageError(content_rejected)；HTTP 402 → platform_quota_exhausted（IKDAJN/ADR-0128）", async () => {
     const fetchImpl = vi
       .fn()
       .mockResolvedValueOnce(
@@ -70,6 +70,6 @@ describe("generateImages", () => {
         { model: "image-model", prompt: "x" },
         fetchImpl,
       ),
-    ).rejects.toMatchObject({ code: "quota_exhausted" });
+    ).rejects.toMatchObject({ code: "platform_quota_exhausted" });
   });
 });

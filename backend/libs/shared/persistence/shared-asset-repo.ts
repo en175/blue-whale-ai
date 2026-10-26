@@ -5,8 +5,6 @@ import type {
   SharedAssetType,
 } from "@lib/contracts";
 
-/** 共享资产内部行：snapshot 为类型数据的自包含快照（不依赖来源表）。
- *  asset_type 为第一层（节点大类），kind 为第二层（节点判别字段，goods/scene/text 为 null）。 */
 export interface SharedAssetRow {
   id: bigint;
   user_id: bigint;
@@ -34,9 +32,7 @@ export interface SharedAssetCreateInput {
 }
 
 export interface SharedAssetListFilter {
-  /** 第一层类型过滤（缺省 = 全部）。 */
   assetType?: SharedAssetType;
-  /** 第二层类型过滤（缺省 = 全部）。 */
   kind?: SharedAssetKind;
   page: number;
   size: number;
@@ -50,12 +46,8 @@ export interface SharedAssetPage {
 }
 
 export interface SharedAssetRepo {
-  /** 新建共享资产；dedup_key 撞唯一键（uk_shared_user_dedup）由调用方捕获处理（并发兜底）。 */
   create(input: SharedAssetCreateInput): Promise<SharedAssetRow>;
-  /** 幂等/近似去重查询（R2/R3）：按 (user_id, dedup_key) 取既有存活行。 */
   findByDedupKey(userId: string, dedupKey: string): Promise<SharedAssetRow | null>;
-  /** 删除后重存兜底：按 dedup_key 取软删行并复活（is_delete 1→0，刷新快照/名称/缩略图）。
-   *  不存在可复活行 → null。 */
   reviveByDedupKey(
     userId: string,
     dedupKey: string,
@@ -65,11 +57,8 @@ export interface SharedAssetRepo {
       snapshot: SharedAssetSnapshot;
     },
   ): Promise<SharedAssetRow | null>;
-  /** 列表：asset_type/kind 双维过滤（缺省 = 全部）+ 分页。 */
   listByUser(userId: string, filter: SharedAssetListFilter): Promise<SharedAssetPage>;
-  /** 详情（添加回画布取全量快照）；不存在/不归属 → null。 */
   findById(userId: string, id: string): Promise<SharedAssetRow | null>;
-  /** 逻辑删除当前用户自己的共享资产；不存在/不归属 → false。 */
   softDeleteOwned(id: string, userId: string): Promise<boolean>;
 }
 

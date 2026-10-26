@@ -28,6 +28,7 @@
 3. **message 两档制**：DB `error.message` 保留**原始失败信息**（provider 原文/请求详情，调试价值）；对外 `error.message` **一律**经 `messageFor()` 生成**用户可读中文**，杜绝 provider 原文/英文 request id 到前端。`messageFor()` 补齐枚举**全部码**（含现在缺的 `model_unavailable`/`quota_exhausted`/`unsupported_input`/`provider_config`/`provider_timeout`/`unsupported_type` 等）。provider 原文与结构化详情进 `details`。
 4. **`retryable` 真实计算**：后端按码判定（瞬时可重试 = `provider_failed` / `provider_timeout` 等上游瞬时类；不可重试 = `invalid_input` / `unsupported_input` / `model_unavailable` / `quota_exhausted` / `provider_credential_missing` / `content_rejected` 等），替代恒 false。**前端本期不消费**（前端零改动，`retryable` 由前端同事后续使用）。
 5. **quota 语义还原**：new-api 402 → `quota_exhausted`（现在是 `provider_failed` 吞掉语义，见 1494）；与 `retryable:false` 组合。该码供前端后续做充值引导（非本期）。
+   - ⚠️ **2026-10-13 修正（[ADR-0128](0128-personal-vs-platform-quota-exhausted.md)）**：本条后半句「该码供前端后续做充值引导」**已作废**。上游 402/欠费反映的是**平台统一调用账户**没钱，不是用户个人积分；现在上游一律归新码 `platform_quota_exhausted`(1061)，`quota_exhausted`(1001) 收窄为个人侧提交预扣专属。原文保留以存因由。
 6. **创建期校验统一码**：`handle-create-generation-job` / `handle-retry-generation-job` 的 HTTP 400 裸中文，升级为**统一枚举码 + 中文 message**（响应体结构不变，前端 `e.message` 消费不变）。
 7. **前端零改动**：本期只改后端（error 枚举、public-error 投影、fail 调用点、创建期校验、DB 写入）。契约字段对前端是纯增量（JSON 多字段，前端类型未声明即忽略）。前端 `mediaExtract.ts` 双份映射**维持现状**，后端 message 完善后成为无害冗余，**由前端同事后续清理**（不属本期）。
 8. **不在本期**：`partially_succeeded` 的失败槽位统一展示、执行期 `quota_exhausted` 充值弹框、不可重试 UI（重试按钮置灰）、i18n/多端文案抽象。均为前端消费侧，留待前端同事或后续工单。

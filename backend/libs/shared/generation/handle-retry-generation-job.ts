@@ -1,22 +1,29 @@
 import { createHash } from "node:crypto";
 
-import { ERROR_INVALID_REFERENCE, RESOURCE_NOT_FOUND_CODE, fail, ok } from "@lib/contracts";
+import {
+  ERROR_FINALIZE_ALREADY_ATTEMPTED,
+  ERROR_INVALID_REFERENCE,
+  ERROR_JOB_ALREADY_RETRIED,
+  ERROR_JOB_NOT_RETRYABLE_STATUS,
+  IDEMPOTENCY_CONFLICT_CODE,
+  PARAM_MISSING_CODE,
+  RECOVERY_REASONS,
+  RESOURCE_NOT_FOUND_CODE,
+  canvasBindingSchema,
+  errorCodeToNumeric,
+  fail,
+  messageOf,
+  ok,
+  type CanvasBinding,
+} from "@lib/contracts";
 import type {
+  CanvasRecoveryAcceptance,
   GenerationCommandRepo,
+  JobBillingSource,
   ProjectRepo,
 } from "@lib/shared/persistence/index.js";
 import type { MaterialGate } from "./handle-create-generation-job.js";
 
-const IDEMPOTENCY_CONFLICT_CODE = 100409;
-
-/** POST /api/projects/{projectId}/generation-jobs/{jobId}/retry（IK67HE/T14）：
- *  仅终态 failed/partially_succeeded 的 job 可重试；只补 failed/missing 槽，不覆盖成功输出。
- *  接入 command_idempotency：同 Key 同摘要重放首次结果，同 Key 异摘要判冲突（409）。
- *  重试沿用原 job 已验证的 model_id，不重复白名单校验；模型后续停用时由 provider 阶段失败。
- *  路由拿到 type 后按 image（RocketMQ）/ video（RocketMQ）/ audio（RocketMQ）重新入队。
- *
- *  IKF YHJ（ADR-0087 决策 7）：原 job 的参数快照照搬，但快照里那批素材的校验状态可能
- *  在首次生成之后变了。重过同一道素材状态门（`materialGate`），不通过则不建重试行。 */
 export async function handleRetryGenerationJob(
   userId: string,
   projectId: string,
@@ -25,18 +32,43 @@ export async function handleRetryGenerationJob(
   body: string,
   deps: {
     projects: Pick<ProjectRepo, "findOwnedById">;
-    command: Pick<GenerationCommandRepo, "retryJob">;
-    /** 缺省则不做素材校验（接线方未提供——调用方必须显式知道这个取舍）。 */
+    command: Pick<GenerationCommandRepo, "retryJob" | "canvasBindingView">;
     materialGate?: MaterialGate;
+    billing?: JobBillingSource;
   },
+  canvasBindingBody?: unknown,
 ) {
   const owned = await deps.projects.findOwnedById(projectId, userId);
   if (!owned) return fail(RESOURCE_NOT_FOUND_CODE, "资源不存在");
   if (idempotencyKey.trim() === "") {
-    return fail(400, "Idempotency-Key 不能为空");
+    return fail(PARAM_MISSING_CODE, "Idempotency-Key 不能为空");
+  }
+  let canvasBinding: CanvasBinding | null = null;
+  if (canvasBindingBody !== undefined && canvasBindingBody !== null) {
+    const parsed = canvasBindingSchema.safeParse(canvasBindingBody);
+    if (!parsed.success) {
+      return fail(400, "canvas_binding 载荷无效", { reason: RECOVERY_REASONS.invalidPayload });
+    }
+    canvasBinding = parsed.data;
+    if (idempotencyKey.trim() !== canvasBinding.submission_id) {
+      return fail(400, "Idempotency-Key 必须等于 canvas_binding.submission_id", {
+        reason: RECOVERY_REASONS.invalidPayload,
+      });
+    }
   }
   const requestHash = generationRetryRequestHash(projectId, jobId, body);
   const gate = deps.materialGate;
+  const canvasRecovery: CanvasRecoveryAcceptance | undefined = canvasBinding
+    ? {
+        projectId,
+        userId,
+        binding: canvasBinding,
+        operation: "generation.retry",
+        requestHash,
+        idempotencyKey: canvasBinding.submission_id,
+        taskType: "",
+      }
+    : undefined;
   const retry = await deps.command.retryJob(
     jobId,
     projectId,
@@ -47,20 +79,41 @@ export async function handleRetryGenerationJob(
       ? (input, jobType) =>
           gate.assertInputUsable({ userId, jobInput: input, jobType })
       : undefined,
+    canvasRecovery,
+    deps.billing,
   );
   if (!retry) return fail(RESOURCE_NOT_FOUND_CODE, "资源不存在");
   if ("generation_job_id" in retry) {
-    return ok(retry);
+    if (!canvasBinding) return ok(retry);
+    const bindingView = await deps.command.canvasBindingView(projectId, canvasBinding.submission_id);
+    return ok(bindingView ? { ...retry, canvas_binding: bindingView } : retry);
+  }
+  if (retry.kind === "recovery_contract_error") {
+    return retry.envelope;
+  }
+  if (retry.kind === "finalize_retry_closed") {
+    return fail(
+      errorCodeToNumeric(ERROR_FINALIZE_ALREADY_ATTEMPTED),
+      "成片失败后暂不支持同任务重试，请重新生成样片",
+      { code: ERROR_FINALIZE_ALREADY_ATTEMPTED },
+    );
   }
   if (retry.kind === "material_blocked") {
-    return fail(400, retry.reason, { code: ERROR_INVALID_REFERENCE });
+    return fail(errorCodeToNumeric(ERROR_INVALID_REFERENCE), retry.reason, {
+      code: ERROR_INVALID_REFERENCE,
+    });
   }
-  // 剩余分支：{ kind: "idempotency_conflict" }
+  if (retry.kind === "not_retryable_status" || retry.kind === "already_retried") {
+    const stringCode =
+      retry.kind === "not_retryable_status"
+        ? ERROR_JOB_NOT_RETRYABLE_STATUS
+        : ERROR_JOB_ALREADY_RETRIED;
+    const code = errorCodeToNumeric(stringCode);
+    return fail(code, messageOf(code));
+  }
   return fail(IDEMPOTENCY_CONFLICT_CODE, "幂等键冲突：同键异载荷");
 }
 
-/** 重试请求摘要（method + operation + 资源路径 + body）。
- *  重试无请求 body 时仍参与摘要（空串稳定），同 Key 重放即命中。 */
 export function generationRetryRequestHash(
   projectId: string,
   jobId: string,

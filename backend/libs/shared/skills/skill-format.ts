@@ -1,6 +1,8 @@
 import { createControlledChatClient } from "./controlled-chat-client.js";
 import { ok, skillError } from "@lib/contracts";
 import { parseSkillMd } from "@lib/core";
+import { newApiBaseUrl } from "@lib/shared/upstream/new-api-egress.js";
+import type { SystemSettingsService } from "@lib/shared/system-settings/index.js";
 
 export type SkillFormatChatClient = {
   complete(input: { rules: string; draft: string }): Promise<string>;
@@ -37,13 +39,19 @@ export function loadSkillFormatRules(
   return override || DEFAULT_SKILL_FORMAT_RULES;
 }
 
-export function createSkillFormatDeps():
-  | { ai: SkillFormatChatClient; rules: string }
-  | null {
-  const baseUrl = process.env.NEW_API_BASE_URL;
-  const token = process.env.NEW_API_ROOT_ACCESS_TOKEN;
+export async function createSkillFormatDeps(
+  settings: Pick<SystemSettingsService, "requireUpstreamKey">,
+): Promise<{ ai: SkillFormatChatClient; rules: string } | null> {
   const model = process.env.SKILL_FORMAT_MODEL;
-  if (!baseUrl || !token || !model) return null;
+  if (!model) return null;
+  let baseUrl: string;
+  let token: string;
+  try {
+    baseUrl = newApiBaseUrl();
+    token = await settings.requireUpstreamKey();
+  } catch {
+    return null;
+  }
   return {
     ai: createSkillFormatChatClient({ baseUrl, token, model }),
     rules: loadSkillFormatRules(),

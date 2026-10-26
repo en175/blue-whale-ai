@@ -1,12 +1,10 @@
 import { BadRequestException } from "@nestjs/common";
 import { describe, expect, it, vi } from "vitest";
 
-import { CANVAS_EDGE_LIMITS, DATA_NOT_EXIST_CODE, DomainError } from "@lib/contracts";
+import { CANVAS_EDGE_LIMITS, DATA_NOT_EXIST_CODE, DomainError, RECOVERY_REASONS } from "@lib/contracts";
 
 import { CanvasService } from "./canvas.service.js";
 
-// IKDLQF：Canvas save() 的 edges 校验分支（契约「连线持久化」：不满足即明确失败、零写入）。
-// 校验失败在读库与事务之前发生，断言 prisma 完全未被触碰（零读零写）。
 
 type CanvasRow = {
   id: bigint;
@@ -36,6 +34,8 @@ function buildService(current: CanvasRow | null = null) {
   };
   const client = {
     canvas: { findFirst: vi.fn().mockResolvedValue(current) },
+    generation_canvas_submissions: { findFirst: vi.fn().mockResolvedValue(null), findMany: vi.fn().mockResolvedValue([]) },
+    generation_canvas_node_owners: { findMany: vi.fn().mockResolvedValue([]) },
     $transaction: vi.fn(
       async (callback: (client: typeof tx) => Promise<unknown>) =>
         callback(tx),
@@ -46,6 +46,12 @@ function buildService(current: CanvasRow | null = null) {
     { findOwnedById: vi.fn().mockResolvedValue({ id: "1" }) } as never,
   );
   return { service, client, tx };
+}
+
+function buildProtectedService(current: CanvasRow | null = null) {
+  const built = buildService(current);
+  built.client.generation_canvas_submissions.findFirst.mockResolvedValue({ id: 1n });
+  return built;
 }
 
 const NODES = JSON.stringify([
@@ -189,7 +195,6 @@ describe("CanvasService.save edges 校验（IKDLQF）", () => {
 
   it(`超过 ${CANVAS_EDGE_LIMITS.maxEdges} 条 → 400，零读零写`, async () => {
     const { service, client } = buildService();
-    // 24 个节点的全部有序点对共 576 个（自环亦合法，见契约修订），取前 501 条保证除总数外全部合法。
     const nodeIds = Array.from({ length: 24 }, (_, i) => `n${i}`);
     const nodes = JSON.stringify(nodeIds.map((id) => ({ id, type: "textNode", data: {} })));
     const edges: Array<{ id: string; source: string; target: string }> = [];
@@ -258,7 +263,6 @@ describe("CanvasService.save edges 校验（IKDLQF）", () => {
   });
 });
 
-// 版本冲突（412）信封须带服务端当前 version，前端据此直接刷新 If-Match，无需再 GET 一次。
 describe("CanvasService.save 版本冲突返回当前 version", () => {
   function row(version: number) {
     return {
@@ -296,7 +300,6 @@ describe("CanvasService.save 版本冲突返回当前 version", () => {
   it("条件写失败（读后被并发改动）→ 412 且 data.version 是重读的最新值，不是本次请求的陈旧快照", async () => {
     const { service, client, tx } = buildService(row(3));
     tx.canvas.updateMany.mockResolvedValue({ count: 0 });
-    // 第一次读（校验用）看到 3，第二次读（冲突后重读）看到并发推进后的 5。
     client.canvas.findFirst
       .mockResolvedValueOnce(row(3))
       .mockResolvedValueOnce(row(5));
@@ -310,7 +313,6 @@ describe("CanvasService.save 版本冲突返回当前 version", () => {
 
   it("保存成功仍返回 200 与 data.version，冲突分支不影响成功路径", async () => {
     const { service, tx } = buildService(row(3));
-    // 条件写命中后 repo 重读的是自增后的行。
     tx.canvas.findFirst.mockResolvedValue(row(4));
 
     const result = await service.save("u1", "1", { nodes: NODES, expectedVersion: 3 });
@@ -320,11 +322,8 @@ describe("CanvasService.save 版本冲突返回当前 version", () => {
   });
 });
 
-// 项目不存在/不属于调用方：抛而不是 return 信封。返回的信封走不到 AllExceptionsFilter，
-// 没人写 HTTP 状态码，会回 HTTP 200 + body code 100100（ADR-0083 禁的那类不一致）。
 describe("CanvasService.save 项目不属于调用方", () => {
   it("抛 DomainError：code 100100、HTTP 404（此前回 200）", async () => {
-    // 归属校验在读库之前，画布存不存在无所谓
     const { client } = buildService(null);
     const notOwned = new CanvasService(
       { client } as never,
@@ -340,7 +339,187 @@ describe("CanvasService.save 项目不属于调用方", () => {
       code: DATA_NOT_EXIST_CODE,
       status: 404,
     });
-    // 校验在读库之前，拒绝时不该发生任何读写
     expect(client.$transaction).not.toHaveBeenCalled();
+  });
+});
+
+describe("CanvasService.save 空覆盖防护（IKIIWN）", () => {
+  const nonEmpty = {
+    id: 1n,
+    project_id: 1n,
+    version: 3,
+    viewport_json: {},
+    nodes_json: JSON.parse(NODES),
+    edges_json: [],
+  };
+
+  it("非空画布被空 nodes 覆盖且未确认 → 422 信封，零写入", async () => {
+    const { service, tx } = buildService(nonEmpty);
+
+    const result = await service.save("u1", "1", { nodes: "[]" });
+
+    expect(result).toEqual({
+      code: 422,
+      msg: "画布非空，本次保存会清空全部节点；确认清空请携带 confirmEmpty",
+      data: null,
+    });
+    expect(tx.canvas.updateMany).not.toHaveBeenCalled();
+    expect(tx.canvas.create).not.toHaveBeenCalled();
+  });
+
+  it("confirmEmpty 非 true（如字符串 \"true\"）→ 同样拒绝", async () => {
+    const { service, tx } = buildService(nonEmpty);
+
+    const result = await service.save("u1", "1", { nodes: "[]", confirmEmpty: "true" });
+
+    expect(result.code).toBe(422);
+    expect(tx.canvas.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("确认清空缺 If-Match → 428 信封，零写入、不消耗版本", async () => {
+    const { service, client, tx } = buildService(nonEmpty);
+
+    const result = await service.save("u1", "1", { nodes: "[]", confirmEmpty: true });
+
+    expect(result).toEqual({
+      code: 428,
+      msg: "确认清空必须携带 If-Match 数值版本",
+      data: null,
+    });
+    expect(client.$transaction).not.toHaveBeenCalled();
+    expect(tx.canvas.updateMany).not.toHaveBeenCalled();
+    expect(tx.canvas.create).not.toHaveBeenCalled();
+  });
+
+  it(`确认清空携带 "missing" 哨兵 → 已有非空画布上 create 撞唯一键 → 412 带当前版本，零写入`, async () => {
+    const { service, tx } = buildService(nonEmpty);
+    tx.canvas.create.mockRejectedValue(
+      Object.assign(new Error("Unique constraint failed"), { code: "P2002" }),
+    );
+
+    const result = await service.save("u1", "1", { nodes: "[]", confirmEmpty: true, expectedVersion: null });
+
+    expect(result.code).toBe(412);
+    expect(result.data).toEqual({ version: 3 });
+    expect(tx.canvas.create).toHaveBeenCalled();
+    expect(tx.canvas.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("确认清空携带过期数值版本 → 条件写不命中 → 412 带当前版本，零写入", async () => {
+    const { service, tx } = buildService(nonEmpty);
+    tx.canvas.updateMany.mockResolvedValue({ count: 0 });
+
+    const result = await service.save("u1", "1", { nodes: "[]", confirmEmpty: true, expectedVersion: 2 });
+
+    expect(result.code).toBe(412);
+    expect(result.data).toEqual({ version: 3 });
+    expect(tx.canvas.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { project_id: 1n, version: 2 } }),
+    );
+    expect(tx.canvas.create).not.toHaveBeenCalled();
+  });
+
+  it("携带当前数值版本的确认清空 → 放行（用户显式删光场景），空文档条件写入", async () => {
+    const { service, tx } = buildService(nonEmpty);
+
+    const result = await service.save("u1", "1", { nodes: "[]", confirmEmpty: true, expectedVersion: 3 });
+
+    expect(result.code).toBe(200);
+    expect(tx.canvas.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { project_id: 1n, version: 3 },
+        data: expect.objectContaining({ nodes_json: [] }),
+      }),
+    );
+  });
+
+  it("既有画布本就为空 → 空保存不触发防护", async () => {
+    const { service, tx } = buildService({ ...nonEmpty, nodes_json: [] });
+
+    const result = await service.save("u1", "1", { nodes: "[]" });
+
+    expect(result.code).toBe(200);
+    expect(tx.canvas.updateMany).toHaveBeenCalled();
+  });
+
+  it("画布行不存在 → 空保存直接新建（首次创建空画布）", async () => {
+    const { service, tx } = buildService(null);
+
+    const result = await service.save("u1", "1", { nodes: "[]" });
+
+    expect(result.code).toBe(200);
+    expect(tx.canvas.create).toHaveBeenCalled();
+  });
+});
+
+describe("CanvasService.save 受保护项目版本要求（IKJJQU B.7）", () => {
+  const nonEmptyRow = {
+    id: 1n,
+    project_id: 1n,
+    version: 3,
+    viewport_json: {},
+    nodes_json: JSON.parse(NODES),
+    edges_json: [],
+  };
+  it("项目存在新协议关联且缺 If-Match → 428 canvas_version_required，零写入", async () => {
+    const { service, tx } = buildProtectedService(null);
+
+    const result = await service.save("u1", "1", saveBody([]));
+
+    expect(result).toMatchObject({
+      code: 428,
+      data: { reason: "canvas_version_required" },
+    });
+    expect(tx.canvas.create).not.toHaveBeenCalled();
+    expect(tx.canvas.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("带版本旧请求普通编辑仍可用（无受保护标记节点时不拦）", async () => {
+    const { service, tx } = buildProtectedService({ ...nonEmptyRow });
+
+    const result = await service.save("u1", "1", saveBody([{ id: "text-1", source: "text-1", target: "media-1" }], 3));
+
+    expect(result.code).toBe(200);
+    expect(tx.canvas.updateMany).toHaveBeenCalled();
+  });
+});
+
+describe("CanvasService.save 旧协议受保护标记严格比较", () => {
+  const marker = { protocolVersion: 1, submissionId: "0a1b2c3d-0000-4000-8000-000000000000", outputKey: "$target" };
+  const previous = [{ id: "media-1", type: "mediaNode", position: { x: 1, y: 2 }, data: { assetId: "7", generationRecovery: marker } }];
+  const current: CanvasRow = {
+    id: 1n,
+    project_id: 1n,
+    version: 3,
+    viewport_json: {},
+    nodes_json: previous,
+    edges_json: [],
+  };
+
+  it.each([
+    { label: "布尔值", protocolVersion: true },
+    { label: "数组", protocolVersion: [1] },
+  ])("协议版本从 1 改为$label → 428，零写入", async ({ protocolVersion }) => {
+    const { service, client, tx } = buildProtectedService(current);
+    const incoming = [{ ...previous[0]!, data: { assetId: "7", generationRecovery: { ...marker, protocolVersion } } }];
+
+    const result = await service.save("u1", "1", { expectedVersion: 3, nodes: JSON.stringify(incoming), edges: "[]" });
+
+    expect(result).toMatchObject({ code: 428, data: { reason: RECOVERY_REASONS.protocolRequired } });
+    expect(client.$transaction).not.toHaveBeenCalled();
+    expect(tx.canvas.updateMany).not.toHaveBeenCalled();
+    expect(tx.canvas.create).not.toHaveBeenCalled();
+  });
+
+  it("合法标记不变时，受保护卡普通编辑仍可保存", async () => {
+    const { service, tx } = buildProtectedService(current);
+    const incoming = [{ ...previous[0]!, position: { x: 99, y: 2 }, data: { ...previous[0]!.data, fileName: "改名" } }];
+
+    const result = await service.save("u1", "1", { expectedVersion: 3, nodes: JSON.stringify(incoming), edges: "[]" });
+
+    expect(result.code).toBe(200);
+    expect(tx.canvas.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ nodes_json: incoming }) }),
+    );
   });
 });

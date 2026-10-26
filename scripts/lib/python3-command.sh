@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Select a real Python 3 launcher on macOS/Linux or Windows Git Bash.
 
 select_python3_command() {
   PYTHON3_COMMAND=()

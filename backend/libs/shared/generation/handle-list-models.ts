@@ -3,16 +3,16 @@ import type { ModelCapabilityView } from "@lib/shared/persistence/index.js";
 
 import {
   availableAspectRatiosForSize,
+  channelOf,
+  parseStoredChannel,
   parseStoredImageRequestMapping,
 } from "./image-channel-parser.js";
 
 type CatalogRow = ModelCapabilityView & {
-  channel_parser?: string | null;
+  channel?: string | null;
   request_mapping?: unknown;
 };
 
-/** GET /api/generation/models：查启用模型能力列表（公开目录，无鉴权）。
- *  消费端只返尺寸/比例展示 id、label 与已填组合；不返调用值。 */
 export async function handleListModels(
   capability: string,
   deps: {
@@ -23,32 +23,22 @@ export async function handleListModels(
 ) {
   const models = await deps.models.listEnabledByType(capability);
   const lengthType = asPromptLengthType(capability);
-  return ok(models.map((model) => toConsumerModel(model, lengthType)));
+  return ok(models.map((model) => toConsumerModel(model, lengthType, capability)));
 }
 
-/** text 档不建 GenerationJob、没有提示词长度闸：不解析缺省，`max_prompt_length` 原样透出
- *  （行里真配了值也照传）。 */
 function asPromptLengthType(capability: string): PromptLengthType | null {
   return capability === "image" || capability === "video" || capability === "audio"
     ? capability
     : null;
 }
 
-function toConsumerModel(view: CatalogRow, lengthType: PromptLengthType | null) {
+function toConsumerModel(view: CatalogRow, lengthType: PromptLengthType | null, capabilityType: string) {
   const mapping = parseStoredImageRequestMapping(
-    view.channel_parser,
+    channelOf(parseStoredChannel(view.channel, capabilityType)).parser,
     view.request_mapping,
     { sizeId: view.default_size, ratioId: view.default_aspect_ratio },
   );
-  const {
-    channel_parser: _parser,
-    request_mapping: _mapping,
-    features,
-    ...rest
-  } = view;
-  // IKESD6 / ADR-0085：i2i_model_name 是出站调用值，与像素/api_value 同哲学对消费端剥除。
-  // IKH4B8：max_prompt_length 下发的是**已算好的生效值**（模型配置优先、未配置回落缺省），
-  // 消费端拿到即可直接用，不必自己知道缺省口径——目录仍是上限的唯一事实源。
+  const { channel: _channel, request_mapping: _mapping, features, ...rest } = view;
   const { i2i_model_name: _alias, ...publicFeatures } = features;
   return {
     ...rest,

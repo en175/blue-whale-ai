@@ -3,10 +3,13 @@ import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import {
   chmodSync,
+  copyFileSync,
+  cpSync,
   existsSync,
   mkdtempSync,
   mkdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -26,9 +29,6 @@ function childEnvironment() {
   return environment;
 }
 
-// Windows 上 node spawnSync(shell:false) 无法执行 .cmd/.bash shim（pnpm 是 pnpm.cmd）。
-// 给假 pnpm 所在的 bin 补一个 pnpm.cmd，委托 Git Bash 的 bash 跑同目录的 bash 假脚本，并透传退出码。
-// 注意必须多行写 if errorlevel（单行 `& if errorlevel 1` 链不会在 bash 后取到 errorlevel）。
 function installPnpmCmdShim(bin) {
   if (process.platform !== "win32") return;
   writeFileSync(
@@ -37,7 +37,6 @@ function installPnpmCmdShim(bin) {
   );
 }
 
-// PATH 拼接：Windows 用 `;`（cmd.exe/CreateProcess），POSIX 用 `:`。走 CLI（node→cmd）的 fixture 必须用本函数。
 function withFakePnpmOnPath(fakeBin) {
   return `${fakeBin}${process.platform === "win32" ? ";" : ":"}${process.env.PATH}`;
 }
@@ -50,13 +49,16 @@ function git(cwd, ...args) {
   }).trim();
 }
 
-function createRepository({ flakyRuleTest = false } = {}) {
+function createRepository({ flakyRuleTest = false, localAhead = false } = {}) {
   const directory = mkdtempSync(join(tmpdir(), "blue-whale-verification-"));
   git(directory, "init", "-b", "master");
   git(directory, "config", "user.email", "agent@example.com");
   git(directory, "config", "user.name", "Agent Test");
   mkdirSync(join(directory, "tests"));
   writeFileSync(join(directory, "README.md"), "baseline\n");
+  mkdirSync(join(directory, ".githooks"));
+  writeFileSync(join(directory, ".githooks", "pre-push"), "#!/bin/sh\nexit 0\n");
+  chmodSync(join(directory, ".githooks", "pre-push"), 0o755);
   writeFileSync(
     join(directory, "tests", "agent-rules.test.mjs"),
     flakyRuleTest
@@ -74,17 +76,78 @@ function createRepository({ flakyRuleTest = false } = {}) {
   );
   git(directory, "add", ".");
   git(directory, "commit", "-m", "docs: baseline");
+  const origin = join(directory, ".git", "test-origin.git");
+  git(directory, "init", "--bare", origin);
+  git(directory, "remote", "add", "origin", origin);
+  git(directory, "branch", "release/prod");
+  git(directory, "push", "origin", "release/prod");
+  if (localAhead) {
+    git(directory, "switch", "release/prod");
+    mkdirSync(join(directory, "docs"));
+    writeFileSync(join(directory, "docs", "shared-baseline.md"), "local baseline\n");
+    git(directory, "add", "docs/shared-baseline.md");
+    git(directory, "commit", "-m", "docs: local release baseline");
+  }
   git(directory, "switch", "-c", "chore/test-verification");
-  mkdirSync(join(directory, "docs"));
+  const startSha = git(directory, "rev-parse", "HEAD");
+  mkdirSync(join(directory, ".git", "blue-whale"), { recursive: true });
+  writeFileSync(join(directory, ".git", "blue-whale", "task-base.json"), JSON.stringify({
+    version: 1,
+    task_branch: "chore/test-verification",
+    target_branch: "release/prod",
+    start_sha: startSha,
+  }));
+  mkdirSync(join(directory, "docs"), { recursive: true });
   writeFileSync(join(directory, "docs", "change.md"), "change\n");
   git(directory, "add", "docs/change.md");
   git(directory, "commit", "-m", "docs: change");
   return directory;
 }
 
+test("completion plans run complete application suites without changed or empty-suite exemptions", async () => {
+  const { buildVerificationPlan } = await import("../scripts/verification-policy.mjs");
+  const plan = buildVerificationPlan(classifyChanges([
+    "backend/libs/shared/result.ts", "web/src/pages/Home/index.tsx",
+  ]), { base: "base" });
+  assert.ok(plan.some((command) => JSON.stringify(command) === JSON.stringify(["pnpm", "exec", "vitest", "run", "backend"])));
+  assert.ok(plan.some((command) => JSON.stringify(command) === JSON.stringify(["npm", "--prefix", "web", "run", "test"])));
+  assert.ok(plan.every((command) => !command.includes("--changed") && !command.includes("--passWithNoTests")));
+});
+
+test("database-only completion verifies backend before a task can be reported complete", async () => {
+  const { buildVerificationPlan } = await import("../scripts/verification-policy.mjs");
+  for (const file of ["backend/prisma/schema.prisma", "backend/prisma/schema/001_baseline.sql", "backend/prisma/migrations/example/migration.sql"]) {
+    const classification = classifyChanges([file]);
+    assert.equal(classification.tier, "full", file);
+    assert.ok(classification.areas.includes("backend"), file);
+    assert.ok(buildVerificationPlan(classification, { base: "base" }).some((command) => command.join(" ") === "pnpm verify"), file);
+  }
+});
+
+test("full backend verification executes its complete test suite only once", async () => {
+  const { buildVerificationPlan } = await import("../scripts/verification-policy.mjs");
+  const plan = buildVerificationPlan(classifyChanges(["backend/libs/shared/result.ts"], { risk: "high" }), { base: "base" });
+  const backendRuns = plan.filter((command) => command.join(" ") === "pnpm verify" ||
+    command.includes("vitest") && command.includes("backend"));
+  assert.equal(backendRuns.length, 1);
+});
+
+test("previous changed-only receipts cannot satisfy complete application verification", async () => {
+  const { buildVerificationPlan, validateReceipt } = await import("../scripts/verification-policy.mjs");
+  const classification = classifyChanges(["backend/libs/shared/result.ts"]);
+  const binding = { head: "head", base: "base", changedFilesHash: "scope" };
+  const commands = buildVerificationPlan(classification, { base: "base" });
+  const previousCommands = [
+    ["git", "diff", "--check", "base...HEAD"],
+    ["pnpm", "exec", "tsc", "-p", "backend/tsconfig.json", "--noEmit", "--pretty", "false"],
+    ["pnpm", "exec", "vitest", "run", "backend", "--changed", "base"],
+  ];
+  const receipt = { version: 1, status: "passed", ...binding, classification, commands: previousCommands,
+    results: previousCommands.map((command) => ({ command, exitCode: 0, attempts: [{ exitCode: 0 }] })) };
+  assert.equal(validateReceipt(receipt, { ...binding, classification, commands }).valid, false);
+});
+
 test("classifies backend BFF sources as scoped/backend", async () => {
-  // 整棵 backend/ 树此前没有任何归类规则：NODE_SOURCE 只认 `^(?:apps|packages)/`，
-  // 于是改 BFF 的 controller 落进「未归类」，门禁一条 backend 的 typecheck 或测试都不跑。
   const { classifyChanges, buildVerificationPlan } = await import("../scripts/verification-policy.mjs");
 
   const classification = classifyChanges([
@@ -107,16 +170,13 @@ test("classifies backend BFF sources as scoped/backend", async () => {
 });
 
 test("classifies the Java worker as its own area and actually runs Maven", async () => {
-  // 整棵 worker-java/ 树此前没有任何归类规则：改它会落进「未归类」兜底升为 full，
-  // 看似安全，但计划里一条 Java 命令都没有——TS 侧有门禁、Java 侧静默裸奔。
-  // 与 backend / web/scripts 那两个洞同形：有验证手段，只是选择器够不着。
   const { classifyChanges, buildVerificationPlan } = await import("../scripts/verification-policy.mjs");
 
   const classification = classifyChanges([
-    "worker-java/src/main/java/com/bluewhale/worker/application/processor/VideoJobProcessor.java",
-    "worker-java/pom.xml",
+    "server/blue-whale-worker/src/main/java/com/bluewhale/worker/application/processor/VideoJobProcessor.java",
+    "server/blue-whale-worker/pom.xml",
   ]);
-  assert.equal(classification.tier, "scoped");
+  assert.equal(classification.tier, "full");
   assert.deepEqual(classification.areas, ["worker-java"]);
 
   const flattened = buildVerificationPlan(classification, { base: "BASE" }).map((command) =>
@@ -124,23 +184,23 @@ test("classifies the Java worker as its own area and actually runs Maven", async
   );
   assert.ok(
     flattened.some(
-      (command) => command.startsWith("mvn ") && command.includes("worker-java/pom.xml"),
+      (command) =>
+        command.startsWith("mvn ") &&
+        command.includes("server/pom.xml") &&
+        command.includes("-pl blue-whale-worker") &&
+        command.includes("-am"),
     ),
-    "worker-java 是独立 Maven 工程，必须真的跑它的测试",
+    "worker-java 必须从聚合根用 -pl worker -am 跑（它依赖 server/blue-whale-common）",
   );
 
-  // worker-java 是产品生成运行时：PR 阶段按产品影响路径升 full。
-  // 补归类前它靠「未归类」兜底才升 full——归类后必须仍升 full，不能被这次修复顺带降级。
   const prClassification = classifyChanges(
-    ["worker-java/src/main/java/com/bluewhale/worker/application/processor/VideoJobProcessor.java"],
+    ["server/blue-whale-worker/src/main/java/com/bluewhale/worker/application/processor/VideoJobProcessor.java"],
     { stage: "pr" },
   );
   assert.equal(prClassification.tier, "full");
 });
 
 test("classifies the agent route manifest copy as web, not unclassified", async () => {
-  // web/src/api/agent-rest-routes.v1.json 是 agent 路由清单的副本，agentRoutes.test.ts 正在断言它。
-  // WEB_SOURCE 原来只认 ts|tsx|css，改了副本却不跑 web 测试，等于没有守卫。
   const { classifyChanges } = await import("../scripts/verification-policy.mjs");
 
   const classification = classifyChanges(["web/src/api/agent-rest-routes.v1.json"]);
@@ -149,8 +209,6 @@ test("classifies the agent route manifest copy as web, not unclassified", async 
 });
 
 test("no path in a mixed real-world change set falls through unclassified", async () => {
-  // 兜底那条分支不会失败，只会把 reason 写成「change scope is not classified」并照常放行——
-  // 所以「有没有漏网」必须由这条测试盯着，而不是靠人读 reason。
   const { classifyChanges } = await import("../scripts/verification-policy.mjs");
 
   const files = [
@@ -159,7 +217,7 @@ test("no path in a mixed real-world change set falls through unclassified", asyn
     "web/package-lock.json",
     "web/.env.test",
     "web/src/api/agent-rest-routes.v1.json",
-    "web/scripts/check-agent-routes.mjs",
+    "scripts/check-agent-routes.mjs",
     "backend/libs/core/new-api-billing-ops.ts",
   ];
   for (const file of files) {
@@ -201,7 +259,7 @@ test("classifies documentation assets without treating contracts as prose", asyn
   );
   assert.deepEqual(classifyChanges(["docs/specs/runtime.schema.json"], { stage: "pr" }), {
     tier: "full",
-    reasons: ["unclassified PR scope requires full verification"],
+    reasons: ["unclassified scope requires full verification"],
   });
 });
 
@@ -242,12 +300,40 @@ test("classifies skill Markdown as documentation (docs) at completion and PR sta
     tier: "docs",
     reasons: ["only documentation files changed"],
   });
+  assert.deepEqual(classifyChanges([".agents/skills/tdd/SKILL.md"], { stage: "pr" }), {
+    tier: "docs",
+    reasons: ["only documentation files changed"],
+  });
+});
+
+test("classifies slash command Markdown as documentation like skill Markdown", async () => {
+  const { classifyChanges } = await import("../scripts/verification-policy.mjs");
+
+  for (const file of [
+    ".agents/commands/ponytail.md",
+    ".claude/commands/ponytail-audit.md",
+    ".zcode/commands/ponytail-review.md",
+  ]) {
+    assert.deepEqual(classifyChanges([file]), {
+      tier: "docs",
+      reasons: ["only documentation files changed"],
+    });
+    const classification = classifyChanges([file], { stage: "pr" });
+    assert.deepEqual(classification, {
+      tier: "docs",
+      reasons: ["only documentation files changed"],
+    });
+    assert.deepEqual(
+      classification,
+      classifyChanges([".agents/skills/ponytail/SKILL.md"], { stage: "pr" }),
+    );
+  }
 });
 
 test("classifies known Node source changes as scoped verification", async () => {
   const { classifyChanges } = await import("../scripts/verification-policy.mjs");
   const files = [
-    "backend/libs/core/result.ts",
+    "backend/libs/shared/result.ts",
     "backend/apps/blue-whale/src/main.ts",
   ];
   const expected =
@@ -265,7 +351,7 @@ test("keeps node coverage tests scoped at PR stage", async () => {
   const { classifyChanges } = await import("../scripts/verification-policy.mjs");
 
   assert.deepEqual(
-    classifyChanges(["backend/libs/core/result.test.ts"], { stage: "pr" }),
+    classifyChanges(["backend/libs/shared/result.test.ts"], { stage: "pr" }),
     {
       tier: "scoped",
       areas: ["backend"],
@@ -278,7 +364,7 @@ test("allows an explicit high-risk escalation to full verification", async () =>
   const { classifyChanges } = await import("../scripts/verification-policy.mjs");
 
   assert.deepEqual(
-    classifyChanges(["backend/libs/core/result.ts"], { risk: "high" }),
+    classifyChanges(["backend/libs/shared/result.ts"], { risk: "high" }),
     {
       tier: "full",
       areas: ["backend"],
@@ -287,7 +373,7 @@ test("allows an explicit high-risk escalation to full verification", async () =>
   );
 });
 
-test("keeps high-impact infrastructure scoped at completion but full at PR stage", async () => {
+test("verifies high-impact infrastructure fully at completion and PR stages", async () => {
   const { classifyChanges } = await import("../scripts/verification-policy.mjs");
   const files = [
     "pnpm-lock.yaml",
@@ -295,14 +381,13 @@ test("keeps high-impact infrastructure scoped at completion but full at PR stage
     "backend/prisma/schema/001_baseline.sql",
   ];
 
-  assert.deepEqual(classifyChanges(files), {
-    tier: "scoped",
-    reasons: ["product-impact infrastructure changed"],
-  });
-  assert.deepEqual(classifyChanges(files, { stage: "pr" }), {
-    tier: "full",
-    reasons: ["publishing product-impact changes requires full verification"],
-  });
+  for (const stage of ["completion", "pr"]) {
+    assert.deepEqual(classifyChanges(files, { stage }), {
+      tier: "full",
+      areas: ["backend", "web"],
+      reasons: ["product-impact changes require full verification"],
+    });
+  }
 });
 
 test("treats skill agents metadata as documentation at both stages", async () => {
@@ -310,6 +395,7 @@ test("treats skill agents metadata as documentation at both stages", async () =>
   for (const file of [
     ".claude/skills/ask-matt/agents/openai.yaml",
     ".zcode/skills/pr/agents/openai.yaml",
+    ".agents/skills/pr/agents/openai.yaml",
   ]) {
     assert.deepEqual(classifyChanges([file]), { tier: "docs", reasons: ["only documentation files changed"] });
     assert.deepEqual(classifyChanges([file], { stage: "pr" }), { tier: "docs", reasons: ["only documentation files changed"] });
@@ -326,7 +412,7 @@ test("treats comment-only Dockerfile edits as documentation without weakening re
   );
   assert.deepEqual(classifyChanges([file], { stage: "pr" }), {
     tier: "full",
-    reasons: ["publishing product-impact changes requires full verification"],
+    reasons: ["product-impact changes require full verification"],
   });
 });
 
@@ -346,6 +432,18 @@ test("keeps hook and git control-plane changes scoped at PR stage", async () => 
   );
 });
 
+test("classifies the release sync entrypoints as control-plane at both stages", () => {
+  for (const stage of ["completion", "pr"]) {
+    assert.deepEqual(
+      classifyChanges(["scripts/sync-release-line.py", "scripts/sync-release-line.sh",
+        "scripts/merge-implement-spec-child.py", "scripts/cleanup-implement-spec-child.py",
+        "scripts/sync-implement-spec-skill.py"], { stage }),
+      { tier: "scoped", areas: ["control-plane"], reasons: ["control-plane changed"] },
+    );
+  }
+  assert.throws(() => classifyChanges(["scripts/sync-release-line-new.sh"]), /UNCLASSIFIED_PATH/);
+});
+
 test("classifies operational scripts without product acceptance", async () => {
   const { classifyChanges } = await import("../scripts/verification-policy.mjs");
 
@@ -358,7 +456,6 @@ test("classifies operational scripts without product acceptance", async () => {
     },
   );
 
-  // IK9VZ0：对账脚本归 operations 分类（只读运维工具）。
   assert.deepEqual(
     classifyChanges(["scripts/reconcile-cost-reservations.mjs"], { stage: "pr" }),
     {
@@ -368,7 +465,6 @@ test("classifies operational scripts without product acceptance", async () => {
     },
   );
 
-  // IKAXDT：画廊图片压缩换链脚本归 operations 分类（一次性维护工具，管理员会话鉴权）。
   assert.deepEqual(
     classifyChanges(["scripts/compress-gallery-images.mjs"], { stage: "pr" }),
     {
@@ -388,43 +484,11 @@ test("rejects unknown executable paths instead of escalating to full", async () 
   );
 });
 
-// IKACK2：`web/scripts/` 是本轮新开的目录，此前没有任何规则覆盖，于是它命中 EXECUTABLE_FILE
-// 却分不了类，`--stage pr` 必抛 UNCLASSIFIED_PATH。补分类而不是放宽那条规矩——「归不了类就停下」
-// 本身是对的，缺的是这一条归属。
-// IKDIDO：web/e2e 的 Playwright 规格与 fixture 此前没有归类规则，提交后 PR 阶段必被兜底升级为
-// full（`unclassified PR scope requires full verification`）。补分类而不是接受升级——它们的题材是
-// web 产品行为，定向验证就是 web 那套（typecheck + lint + vitest）。
-test("classifies web e2e specs and fixtures as web", async () => {
-  const { classifyChanges } = await import("../scripts/verification-policy.mjs");
-
-  const expected = {
-    tier: "scoped",
-    areas: ["web"],
-    reasons: ["known source paths changed"],
-  };
-  assert.deepEqual(
-    classifyChanges(["web/e2e/media-node-layout.e2e.ts", "web/e2e/fixtures/media-node-layout.json"]),
-    expected,
-  );
-  assert.deepEqual(
-    classifyChanges(["web/e2e/media-node-layout.e2e.ts"], { stage: "pr" }),
-    expected,
-  );
-
-  // 与 web 源码同区：一起改时不该分裂出第二个 area。
-  assert.deepEqual(
-    classifyChanges(["web/e2e/media-node-layout.e2e.ts", "web/src/pages/CanvasPage/index.tsx"], {
-      stage: "pr",
-    }),
-    expected,
-  );
-});
-
 test("classifies web tooling scripts as web", async () => {
   const { classifyChanges } = await import("../scripts/verification-policy.mjs");
 
   assert.deepEqual(
-    classifyChanges(["web/scripts/check-agent-routes.mjs"], { stage: "pr" }),
+    classifyChanges(["web/scripts/some-tool.mjs"], { stage: "pr" }),
     {
       tier: "scoped",
       areas: ["web"],
@@ -432,9 +496,8 @@ test("classifies web tooling scripts as web", async () => {
     },
   );
 
-  // 与 web 源码同区：一起改时不该分裂出第二个 area。
   assert.deepEqual(
-    classifyChanges(["web/scripts/check-agent-routes.mjs", "web/src/api/agentRoutes.ts"], {
+    classifyChanges(["web/scripts/some-tool.mjs", "web/src/api/agentRoutes.ts"], {
       stage: "pr",
     }),
     {
@@ -444,7 +507,6 @@ test("classifies web tooling scripts as web", async () => {
     },
   );
 
-  // 归类只覆盖 web 自己的脚本目录，不是「凡叫 scripts 就放行」。
   assert.throws(
     () => classifyChanges(["web/tools/some-new-tool.mjs"], { stage: "pr" }),
     /UNCLASSIFIED_PATH: web\/tools\/some-new-tool\.mjs/,
@@ -461,9 +523,9 @@ test("keeps governance checks when a governance change also hits high-impact pat
   ];
 
   assert.deepEqual(classifyChanges(files), {
-    tier: "scoped",
+    tier: "full",
     areas: ["control-plane", "governance"],
-    reasons: ["product-impact infrastructure changed"],
+    reasons: ["product-impact changes require full verification"],
   });
   assert.deepEqual(buildVerificationPlan(classifyChanges(files), { base: "base" }), [
     ["git", "diff", "--check", "base...HEAD"],
@@ -474,17 +536,26 @@ test("keeps governance checks when a governance change also hits high-impact pat
       "-m",
       "unittest",
       "scripts.tests.test_cbm_context",
+      "scripts.tests.test_gitee_channel",
       "scripts.tests.test_publish_review_package",
       "scripts.tests.test_start_task_worktree",
       "scripts.tests.test_sync_task_from_origin",
+      "scripts.tests.test_manage_release_branch",
+      "scripts.tests.test_sync_release_line",
+      "scripts.tests.test_cleanup_task_worktree",
+      "scripts.tests.test_implement_spec_child_merge",
+      "scripts.tests.test_project_skills",
+      "scripts.tests.test_release_task_workflow",
+      "scripts.tests.test_code_comments",
     ],
+    ["pnpm", "verify"],
   ]);
 
   const prClassification = classifyChanges(files, { stage: "pr" });
   assert.deepEqual(prClassification, {
     tier: "full",
     areas: ["control-plane", "governance"],
-    reasons: ["publishing product-impact changes requires full verification"],
+    reasons: ["product-impact changes require full verification"],
   });
   assert.deepEqual(buildVerificationPlan(prClassification, { base: "base" }), [
     ["git", "diff", "--check", "base...HEAD"],
@@ -495,9 +566,17 @@ test("keeps governance checks when a governance change also hits high-impact pat
       "-m",
       "unittest",
       "scripts.tests.test_cbm_context",
+      "scripts.tests.test_gitee_channel",
       "scripts.tests.test_publish_review_package",
       "scripts.tests.test_start_task_worktree",
       "scripts.tests.test_sync_task_from_origin",
+      "scripts.tests.test_manage_release_branch",
+      "scripts.tests.test_sync_release_line",
+      "scripts.tests.test_cleanup_task_worktree",
+      "scripts.tests.test_implement_spec_child_merge",
+      "scripts.tests.test_project_skills",
+      "scripts.tests.test_release_task_workflow",
+      "scripts.tests.test_code_comments",
     ],
     ["pnpm", "verify"],
   ]);
@@ -577,7 +656,9 @@ test("builds web typecheck, lint and vitest checks for web verification", async 
       ["git", "diff", "--check", "origin/master...HEAD"],
       ["node", "web/node_modules/typescript/bin/tsc", "-b", "web/tsconfig.json", "--pretty", "false"],
       ["npm", "--prefix", "web", "run", "lint"],
-      ["npm", "--prefix", "web", "run", "test", "--", "--changed", "origin/master", "--passWithNoTests"],
+      ["npm", "--prefix", "web", "run", "test"],
+      ["node", "web/node_modules/vite/bin/vite.js", "build", "--mode", "test"],
+      ["node", "web/node_modules/vite/bin/vite.js", "build", "--mode", "release"],
     ],
   );
 });
@@ -597,7 +678,7 @@ test("builds affected Node checks for scoped verification", async () => {
     [
       ["git", "diff", "--check", "origin/master...HEAD"],
       ["pnpm", "exec", "tsc", "-b", "--pretty", "false"],
-      ["pnpm", "exec", "vitest", "run", "packages", "apps", "--changed", "origin/master"],
+      ["pnpm", "exec", "vitest", "run", "packages", "apps"],
     ],
   );
 });
@@ -642,9 +723,17 @@ test("builds targeted hook and workflow tests for control-plane changes", async 
         "-m",
         "unittest",
         "scripts.tests.test_cbm_context",
-      "scripts.tests.test_publish_review_package",
+        "scripts.tests.test_gitee_channel",
+        "scripts.tests.test_publish_review_package",
         "scripts.tests.test_start_task_worktree",
         "scripts.tests.test_sync_task_from_origin",
+        "scripts.tests.test_manage_release_branch",
+        "scripts.tests.test_sync_release_line",
+        "scripts.tests.test_cleanup_task_worktree",
+        "scripts.tests.test_implement_spec_child_merge",
+        "scripts.tests.test_project_skills",
+        "scripts.tests.test_release_task_workflow",
+        "scripts.tests.test_code_comments",
       ],
     ],
   );
@@ -680,7 +769,7 @@ test("builds the repository full verification command for full scope", async () 
     [
       ["git", "diff", "--check", "origin/master...HEAD"],
       ["pnpm", "exec", "tsc", "-b", "--pretty", "false"],
-      ["pnpm", "exec", "vitest", "run", "packages", "apps", "--changed", "origin/master"],
+      ["pnpm", "exec", "vitest", "run", "packages", "apps"],
       ["pnpm", "verify"],
     ],
   );
@@ -690,7 +779,7 @@ test("keeps ordinary source changes scoped at PR stage", async () => {
   const { buildVerificationPlan, classifyChanges } = await import(
     "../scripts/verification-policy.mjs"
   );
-  const files = ["backend/libs/core/result.ts"];
+  const files = ["backend/libs/shared/result.ts"];
 
   const classification = classifyChanges(files, { stage: "pr" });
   assert.deepEqual(classification, {
@@ -701,7 +790,7 @@ test("keeps ordinary source changes scoped at PR stage", async () => {
   assert.deepEqual(buildVerificationPlan(classification, { base: "origin/master" }), [
     ["git", "diff", "--check", "origin/master...HEAD"],
     ["pnpm", "exec", "tsc", "-p", "backend/tsconfig.json", "--noEmit", "--pretty", "false"],
-    ["pnpm", "exec", "vitest", "run", "backend", "--changed", "origin/master"],
+    ["pnpm", "exec", "vitest", "run", "backend"],
   ]);
 });
 
@@ -757,7 +846,7 @@ test("rejects unknown verification stages", async () => {
   const { classifyChanges } = await import("../scripts/verification-policy.mjs");
 
   assert.throws(
-    () => classifyChanges(["backend/libs/core/result.ts"], { stage: "merge" }),
+    () => classifyChanges(["backend/libs/shared/result.ts"], { stage: "merge" }),
     /stage must be completion or pr/,
   );
 });
@@ -767,7 +856,11 @@ test("full verification reports each existing stage without changing the command
   try {
     const fakeBin = join(directory, "bin");
     const stageLog = join(directory, "stages.jsonl");
+    const worktree = join(directory, "worktree");
     mkdirSync(fakeBin);
+    mkdirSync(join(worktree, "backend", "libs", "contracts", "gen", "billing"), {
+      recursive: true,
+    });
     const fakePnpm = join(fakeBin, "pnpm");
     writeFileSync(
       fakePnpm,
@@ -783,7 +876,7 @@ test("full verification reports each existing stage without changing the command
     chmodSync(fakePnpm, 0o755);
 
     const result = spawnSync("bash", [FULL_VERIFY], {
-      cwd: ROOT,
+      cwd: worktree,
       encoding: "utf8",
       env: {
         ...childEnvironment(),
@@ -921,6 +1014,35 @@ test("rejects a receipt whose plan or passing results are inconsistent", async (
   );
 });
 
+test("checks the selected Python interpreter against the verification receipt", async () => {
+  const { buildVerificationPlan, validateReceipt } = await import(
+    "../scripts/verification-policy.mjs"
+  );
+  const classification = { tier: "scoped", areas: ["control-plane"] };
+  const pythonCommand = ["python3.12"];
+  const commands = buildVerificationPlan(classification, {
+    base: "def456", pythonCommand,
+  });
+  const binding = {
+    head: "abc123", base: "def456", changedFilesHash: "scope-hash",
+  };
+  const current = { ...binding, classification, commands, pythonCommand };
+  const receipt = {
+    version: 1, status: "passed", ...binding, classification, commands,
+    results: commands.map((command) => ({
+      command, exitCode: 0, attempts: [{ exitCode: 0 }],
+    })),
+  };
+
+  assert.deepEqual(validateReceipt(receipt, current), { valid: true });
+  assert.deepEqual(
+    validateReceipt({ ...receipt, commands: buildVerificationPlan(classification, {
+      base: "def456",
+    }) }, current),
+    { valid: false, reason: "verification plan does not match its classification" },
+  );
+});
+
 test("rejects a receipt when verification input conditions change", async () => {
   const { validateReceipt } = await import("../scripts/verification-policy.mjs");
   const binding = {
@@ -964,7 +1086,7 @@ test("rejects attempts to downgrade the computed risk", async () => {
   const { classifyChanges } = await import("../scripts/verification-policy.mjs");
 
   assert.throws(
-    () => classifyChanges(["backend/libs/core/result.ts"], { risk: "low" }),
+    () => classifyChanges(["backend/libs/shared/result.ts"], { risk: "low" }),
     /risk must be auto or high/,
   );
 });
@@ -974,7 +1096,7 @@ test("plans verification from the committed Git diff", () => {
   try {
     const result = spawnSync(
       process.execPath,
-      [CLI, "plan", "--base", "master", "--json"],
+      [CLI, "plan", "--json"],
       { cwd: repository, encoding: "utf8", env: childEnvironment() },
     );
 
@@ -988,6 +1110,78 @@ test("plans verification from the committed Git diff", () => {
   }
 });
 
+test("local release commits stay outside task verification and block publication until shared", () => {
+  const repository = createRepository({ localAhead: true });
+  try {
+    const plan = spawnSync(process.execPath, [CLI, "plan", "--json"], {
+      cwd: repository, encoding: "utf8", env: childEnvironment(),
+    });
+    assert.equal(plan.status, 0, plan.stderr);
+    assert.deepEqual(JSON.parse(plan.stdout).changedFiles, ["docs/change.md"]);
+
+    const conflict = spawnSync(process.execPath,
+      [CLI, "plan", "--base", "origin/release/prod", "--json"], {
+        cwd: repository, encoding: "utf8", env: childEnvironment(),
+      });
+    assert.equal(conflict.status, 2);
+    assert.match(conflict.stderr, /显式基线.*任务起点/);
+
+    const publish = spawnSync("bash", [PUBLISH, "--user-authorized", "--create-pr", "--json"], {
+      cwd: repository, encoding: "utf8", env: childEnvironment(),
+    });
+    assert.equal(publish.status, 12, publish.stderr);
+    const payload = JSON.parse(publish.stdout);
+    assert.equal(payload.status, "TASK_BASE_NOT_SHARED");
+    assert.match(payload.pending_commits, /local release baseline/);
+    assert.equal(git(repository, "ls-remote", "--heads", "origin",
+      "refs/heads/chore/test-verification"), "");
+  } finally {
+    rmSync(repository, { recursive: true, force: true });
+  }
+});
+
+test("target advance invalidates a receipt and synced target files leave the task scope", () => {
+  const repository = createRepository();
+  try {
+    const initial = spawnSync(process.execPath, [CLI, "run", "--json"], {
+      cwd: repository, encoding: "utf8", env: childEnvironment(),
+    });
+    assert.equal(initial.status, 0, initial.stderr);
+
+    git(repository, "switch", "release/prod");
+    mkdirSync(join(repository, "docs"), { recursive: true });
+    writeFileSync(join(repository, "docs", "remote-only.md"), "target change\n");
+    git(repository, "add", "docs/remote-only.md");
+    git(repository, "commit", "-m", "docs: advance release");
+    const targetSha = git(repository, "rev-parse", "HEAD");
+    git(repository, "push", "origin", "release/prod");
+    git(repository, "switch", "chore/test-verification");
+
+    const stale = spawnSync(process.execPath, [CLI, "check", "--stage", "pr", "--json"], {
+      cwd: repository, encoding: "utf8", env: childEnvironment(),
+    });
+    assert.equal(stale.status, 4, stale.stderr);
+    assert.equal(JSON.parse(stale.stdout).reason, "PR target changed after verification");
+
+    const unsynced = spawnSync(process.execPath, [CLI, "plan", "--stage", "pr", "--json"], {
+      cwd: repository, encoding: "utf8", env: childEnvironment(),
+    });
+    assert.equal(unsynced.status, 2);
+    assert.match(unsynced.stderr, /PR_TARGET_NOT_SYNCED/);
+
+    git(repository, "rebase", "release/prod");
+    const synced = spawnSync(process.execPath, [CLI, "plan", "--stage", "pr", "--json"], {
+      cwd: repository, encoding: "utf8", env: childEnvironment(),
+    });
+    assert.equal(synced.status, 0, synced.stderr);
+    const scope = JSON.parse(synced.stdout);
+    assert.equal(scope.base, targetSha);
+    assert.deepEqual(scope.changedFiles, ["docs/change.md"]);
+  } finally {
+    rmSync(repository, { recursive: true, force: true });
+  }
+});
+
 test("plans Chinese documentation paths from raw Git names without escalating", () => {
   const repository = createRepository();
   try {
@@ -995,19 +1189,15 @@ test("plans Chinese documentation paths from raw Git names without escalating", 
     writeFileSync(join(repository, "docs", "API", "视觉模型.md"), "说明\n");
     git(repository, "add", ".");
     git(repository, "commit", "-m", "docs: add Chinese path");
-    git(repository, "branch", "-f", "master", "HEAD");
-    rmSync(join(repository, "docs", "API", "视觉模型.md"));
-    git(repository, "add", "-A");
-    git(repository, "commit", "-m", "docs: remove Chinese path");
 
-    const result = spawnSync(process.execPath, [CLI, "plan", "--base", "master", "--stage", "pr", "--json"], {
+    const result = spawnSync(process.execPath, [CLI, "plan", "--stage", "pr", "--json"], {
       cwd: repository,
       encoding: "utf8",
       env: childEnvironment(),
     });
     assert.equal(result.status, 0, result.stderr);
     const scope = JSON.parse(result.stdout);
-    assert.deepEqual(scope.changedFiles, ["docs/API/视觉模型.md"]);
+    assert.deepEqual(scope.changedFiles, ["docs/API/视觉模型.md", "docs/change.md"]);
     assert.equal(scope.classification.tier, "docs");
   } finally {
     rmSync(repository, { recursive: true, force: true });
@@ -1019,7 +1209,7 @@ test("reports a machine-readable error when verification evidence is missing", (
   try {
     const result = spawnSync(
       process.execPath,
-      [CLI, "check", "--base", "master", "--json"],
+      [CLI, "check", "--json"],
       { cwd: repository, encoding: "utf8", env: childEnvironment() },
     );
 
@@ -1033,13 +1223,41 @@ test("reports a machine-readable error when verification evidence is missing", (
   }
 });
 
+test("verification refuses missing task metadata", () => {
+  const repository = createRepository();
+  try {
+    rmSync(join(repository, ".git", "blue-whale", "task-base.json"));
+    const result = spawnSync(process.execPath, [CLI, "plan", "--json"], {
+      cwd: repository, encoding: "utf8", env: childEnvironment(),
+    });
+    assert.equal(result.status, 2);
+    assert.match(result.stderr, /缺少任务基线元数据/);
+  } finally {
+    rmSync(repository, { recursive: true, force: true });
+  }
+});
+
+test("verification refuses a task HEAD that no longer descends from its start", () => {
+  const repository = createRepository({ localAhead: true });
+  try {
+    git(repository, "reset", "--hard", "origin/release/prod");
+    const result = spawnSync(process.execPath, [CLI, "plan", "--json"], {
+      cwd: repository, encoding: "utf8", env: childEnvironment(),
+    });
+    assert.equal(result.status, 2);
+    assert.match(result.stderr, /HEAD 已脱离记录的起点 SHA/);
+  } finally {
+    rmSync(repository, { recursive: true, force: true });
+  }
+});
+
 test("refuses to verify an uncommitted worktree", () => {
   const repository = createRepository();
   try {
     writeFileSync(join(repository, "uncommitted.txt"), "not in HEAD\n");
     const result = spawnSync(
       process.execPath,
-      [CLI, "run", "--base", "master", "--json"],
+      [CLI, "run", "--json"],
       { cwd: repository, encoding: "utf8", env: childEnvironment() },
     );
 
@@ -1058,7 +1276,7 @@ test("runs the selected plan and reuses its receipt for the same HEAD", () => {
   try {
     const run = spawnSync(
       process.execPath,
-      [CLI, "run", "--base", "master", "--json"],
+      [CLI, "run", "--json"],
       { cwd: repository, encoding: "utf8", env: childEnvironment() },
     );
 
@@ -1078,7 +1296,7 @@ test("runs the selected plan and reuses its receipt for the same HEAD", () => {
 
     const check = spawnSync(
       process.execPath,
-      [CLI, "check", "--base", "master", "--json"],
+      [CLI, "check", "--json"],
       { cwd: repository, encoding: "utf8", env: childEnvironment() },
     );
     assert.equal(check.status, 0, check.stderr);
@@ -1086,7 +1304,7 @@ test("runs the selected plan and reuses its receipt for the same HEAD", () => {
 
     const summary = spawnSync(
       process.execPath,
-      [CLI, "summary", "--base", "master"],
+      [CLI, "summary"],
       { cwd: repository, encoding: "utf8", env: childEnvironment() },
     );
     assert.equal(summary.status, 0, summary.stderr);
@@ -1132,7 +1350,7 @@ test("captures full verification stage timings in the receipt", () => {
 
     const run = spawnSync(
       process.execPath,
-      [CLI, "run", "--base", "master", "--stage", "pr", "--json"],
+      [CLI, "run", "--stage", "pr", "--json"],
       { cwd: repository, encoding: "utf8", env: environment },
     );
 
@@ -1148,7 +1366,7 @@ test("captures full verification stage timings in the receipt", () => {
 
     const summary = spawnSync(
       process.execPath,
-      [CLI, "summary", "--base", "master", "--stage", "pr"],
+      [CLI, "summary", "--stage", "pr"],
       { cwd: repository, encoding: "utf8", env: environment },
     );
     assert.equal(summary.status, 0, summary.stderr);
@@ -1160,13 +1378,63 @@ test("captures full verification stage timings in the receipt", () => {
   }
 });
 
+test("automatic publication preserves failed high-risk evidence despite classification changes", () => {
+  for (const productImpact of [false, true]) {
+    const repository = createRepository();
+    const fakeBin = mkdtempSync(join(tmpdir(), "blue-whale-failed-high-risk-"));
+    try {
+      if (productImpact) {
+        mkdirSync(join(repository, "deploy"));
+        writeFileSync(join(repository, "deploy", "example.txt"), "deployment input\n");
+        git(repository, "add", "deploy/example.txt");
+        git(repository, "commit", "-m", "chore: deployment input");
+      }
+      const callsPath = join(repository, ".git", "high-risk-calls.log");
+      writeFileSync(join(fakeBin, "pnpm"), '#!/usr/bin/env bash\nprintf "verify\\n" >> "$FIXTURE_VERIFY_CALLS"\nexit 1\n');
+      chmodSync(join(fakeBin, "pnpm"), 0o755);
+      installPnpmCmdShim(fakeBin);
+      const environment = { ...childEnvironment(), PATH: withFakePnpmOnPath(fakeBin), FIXTURE_VERIFY_CALLS: callsPath };
+      const high = spawnSync(process.execPath, [CLI, "run", "--stage", "pr", "--risk", "high", "--json"], {
+        cwd: repository, encoding: "utf8", env: environment,
+      });
+      assert.equal(high.status, 5, high.stderr);
+      const receiptPath = join(repository, ".git", "blue-whale", "verification", `${git(repository, "rev-parse", "HEAD")}.json`);
+      const failed = readFileSync(receiptPath, "utf8");
+      const previous = JSON.parse(failed);
+      assert.equal(previous.classification.tier, "full");
+      const plan = spawnSync(process.execPath, [CLI, "plan", "--stage", "pr", "--json"], {
+        cwd: repository, encoding: "utf8", env: environment,
+      });
+      assert.equal(plan.status, 0, plan.stderr);
+      const current = JSON.parse(plan.stdout);
+      assert.equal(previous.inputHash, current.inputHash);
+      assert.notDeepEqual(previous.classification, current.classification);
+      if (productImpact) assert.deepEqual(previous.commands, current.commands);
+      const blocked = spawnSync(process.execPath, [CLI, "ensure", "--stage", "pr", "--json"], {
+        cwd: repository, encoding: "utf8", env: environment,
+      });
+      assert.equal(blocked.status, 5, blocked.stderr);
+      const publish = spawnSync("bash", [PUBLISH, "--user-authorized", "--create-pr", "--json"], {
+        cwd: repository, encoding: "utf8", env: environment,
+      });
+      assert.equal(publish.status, 11, publish.stderr);
+      assert.equal(readFileSync(receiptPath, "utf8"), failed);
+      assert.equal(readFileSync(callsPath, "utf8"), "verify\n");
+      assert.equal(git(repository, "ls-remote", "--heads", "origin", "refs/heads/chore/test-verification"), "");
+    } finally {
+      rmSync(repository, { recursive: true, force: true });
+      rmSync(fakeBin, { recursive: true, force: true });
+    }
+  }
+});
+
 test("retries a declared infrastructure failure once and records both attempts", () => {
   const repository = createRepository({ flakyRuleTest: true });
   try {
     assert.equal(existsSync(join(repository, ".git", "fixture-retry")), false);
     const failedRun = spawnSync(
       process.execPath,
-      [CLI, "run", "--base", "master", "--json"],
+      [CLI, "run", "--json"],
       { cwd: repository, encoding: "utf8", env: childEnvironment() },
     );
     assert.equal(failedRun.status, 5, failedRun.stdout + failedRun.stderr);
@@ -1176,8 +1444,6 @@ test("retries a declared infrastructure failure once and records both attempts",
       [
         CLI,
         "run",
-        "--base",
-        "master",
         "--retry-kind",
         "known-flaky",
         "--retry-reason",
@@ -1204,7 +1470,7 @@ test("retries a declared infrastructure failure once and records both attempts",
     rmSync(join(repository, ".git", "fixture-retry"));
     const summary = spawnSync(
       process.execPath,
-      [CLI, "summary", "--base", "master"],
+      [CLI, "summary"],
       { cwd: repository, encoding: "utf8", env: childEnvironment() },
     );
     assert.equal(summary.status, 0, summary.stderr);
@@ -1222,8 +1488,6 @@ test("requires a failed receipt before accepting retry metadata", () => {
       [
         CLI,
         "run",
-        "--base",
-        "master",
         "--retry-kind",
         "infrastructure",
         "--retry-reason",
@@ -1251,7 +1515,7 @@ test("does not apply an earlier retry reason to a later failing command", () => 
 
     const failedRun = spawnSync(
       process.execPath,
-      [CLI, "run", "--base", "master", "--stage", "pr", "--json"],
+      [CLI, "run", "--stage", "pr", "--json"],
       { cwd: repository, encoding: "utf8", env: childEnvironment() },
     );
     assert.equal(failedRun.status, 5, failedRun.stdout + failedRun.stderr);
@@ -1269,8 +1533,6 @@ test("does not apply an earlier retry reason to a later failing command", () => 
       [
         CLI,
         "run",
-        "--base",
-        "master",
         "--stage",
         "pr",
         "--retry-kind",
@@ -1302,8 +1564,6 @@ test("rejects an unknown retry category", () => {
       [
         CLI,
         "run",
-        "--base",
-        "master",
         "--retry-kind",
         "test-failed",
         "--retry-reason",
@@ -1320,13 +1580,10 @@ test("rejects an unknown retry category", () => {
   }
 });
 
-test("blocks publishing when the current HEAD has no valid verification receipt", () => {
+test("publishing automatically verifies when the current HEAD has no receipt", () => {
   const repository = createRepository();
   const remote = mkdtempSync(join(tmpdir(), "blue-whale-verification-remote-"));
   try {
-    git(remote, "init", "--bare");
-    git(repository, "remote", "add", "origin", remote);
-    git(repository, "push", "origin", "master:master");
 
     const result = spawnSync(
       "bash",
@@ -1334,8 +1591,9 @@ test("blocks publishing when the current HEAD has no valid verification receipt"
       { cwd: repository, encoding: "utf8", env: childEnvironment() },
     );
 
-    assert.equal(result.status, 11, result.stderr);
-    assert.equal(JSON.parse(result.stdout).status, "VERIFICATION_REQUIRED");
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(JSON.parse(result.stdout.trim().split("\n").at(-1)).status, "PUSHED_CREATE_PR");
+    assert.equal(git(repository, "config", "--get", "core.hooksPath"), ".githooks");
   } finally {
     rmSync(repository, { recursive: true, force: true });
     rmSync(remote, { recursive: true, force: true });
@@ -1346,13 +1604,10 @@ test("allows publishing when the current HEAD has a valid verification receipt",
   const repository = createRepository();
   const remote = mkdtempSync(join(tmpdir(), "blue-whale-verification-remote-"));
   try {
-    git(remote, "init", "--bare");
-    git(repository, "remote", "add", "origin", remote);
-    git(repository, "push", "origin", "master:master");
 
     const verification = spawnSync(
       process.execPath,
-      [CLI, "run", "--base", "origin/master", "--json"],
+      [CLI, "run", "--json"],
       { cwd: repository, encoding: "utf8", env: childEnvironment() },
     );
     assert.equal(verification.status, 0, verification.stderr);
@@ -1377,13 +1632,10 @@ test("publishing reuses a scoped completion receipt for ordinary code changes", 
   const remote = mkdtempSync(join(tmpdir(), "blue-whale-verification-remote-"));
   const fakeBin = mkdtempSync(join(tmpdir(), "blue-whale-publish-stage-"));
   try {
-    mkdirSync(join(repository, "backend", "libs", "core"), { recursive: true });
-    writeFileSync(join(repository, "backend", "libs", "core", "result.ts"), "export {};\n");
-    git(repository, "add", "backend/libs/core/result.ts");
+    mkdirSync(join(repository, "backend", "libs", "shared"), { recursive: true });
+    writeFileSync(join(repository, "backend", "libs", "shared", "result.ts"), "export {};\n");
+    git(repository, "add", "backend/libs/shared/result.ts");
     git(repository, "commit", "-m", "feat: add source change");
-    git(remote, "init", "--bare");
-    git(repository, "remote", "add", "origin", remote);
-    git(repository, "push", "origin", "master:master");
 
     const fakePnpm = join(fakeBin, "pnpm");
     writeFileSync(fakePnpm, ["#!/usr/bin/env bash", "exit 0", ""].join("\n"));
@@ -1396,7 +1648,7 @@ test("publishing reuses a scoped completion receipt for ordinary code changes", 
 
     const completion = spawnSync(
       process.execPath,
-      [CLI, "run", "--base", "origin/master", "--json"],
+      [CLI, "run", "--json"],
       { cwd: repository, encoding: "utf8", env: environment },
     );
     assert.equal(completion.status, 0, completion.stderr);
@@ -1427,7 +1679,7 @@ test("CLI rejects an unclassified script without planning full verification", ()
 
     const result = spawnSync(
       process.execPath,
-      [CLI, "plan", "--base", "master", "--stage", "pr", "--json"],
+      [CLI, "plan", "--stage", "pr", "--json"],
       { cwd: repository, encoding: "utf8", env: childEnvironment() },
     );
 
@@ -1444,7 +1696,7 @@ test("rejects an unknown verification stage on the command line", () => {
   try {
     const result = spawnSync(
       process.execPath,
-      [CLI, "plan", "--base", "master", "--stage", "merge", "--json"],
+      [CLI, "plan", "--stage", "merge", "--json"],
       { cwd: repository, encoding: "utf8", env: childEnvironment() },
     );
 
@@ -1459,11 +1711,9 @@ test("rejects an unknown verification stage on the command line", () => {
 test("skill assets select their real checks at both stages", async () => {
   const { classifyChanges, buildVerificationPlan } = await import("../scripts/verification-policy.mjs");
   const files = [
-    ".zcode/skills/deploy-blue-whale-api/tests/test-tag-propagation.sh",
-    ".zcode/skills/setup-ts-deep-modules/dependency-cruiser.config.cjs",
-    ".zcode/skills/wizard/template.sh",
-    ".claude/skills/setup-ts-deep-modules/dependency-cruiser.config.cjs",
-    ".claude/skills/wizard/template.sh",
+    ".agents/skills/deploy-blue-whale-api/tests/test-tag-propagation.sh",
+    ".agents/skills/setup-ts-deep-modules/dependency-cruiser.config.cjs",
+    ".agents/skills/wizard/template.sh",
     "tests/skill-assets.test.mjs",
   ];
   for (const stage of ["completion", "pr"]) {
@@ -1476,9 +1726,7 @@ test("skill assets select their real checks at both stages", async () => {
         ["bash", files[0]],
         ["node", "--check", files[1]],
         ["bash", "-n", files[2]],
-        ["node", "--check", files[3]],
-        ["bash", "-n", files[4]],
-        ["node", "--test", files[5]],
+        ["node", "--test", files[3]],
       ]) assert.ok(commands.some(command => JSON.stringify(command) === JSON.stringify(expected)));
     }
   }
@@ -1488,22 +1736,329 @@ test("skill assets do not allow unknown siblings or downgrade product impact", a
   const { classifyChanges } = await import("../scripts/verification-policy.mjs");
   for (const stage of ["completion", "pr"]) {
     for (const file of [
-      ".zcode/skills/wizard/unknown.sh",
-      ".zcode/skills/deploy-blue-whale-api/tests/unknown.sh",
-      ".zcode/skills/setup-ts-deep-modules/unknown.cjs",
-      ".claude/skills/wizard/unknown.sh",
-      ".claude/skills/setup-ts-deep-modules/unknown.cjs",
+      ".agents/skills/wizard/unknown.sh",
+      ".agents/skills/deploy-blue-whale-api/tests/unknown.sh",
+      ".agents/skills/setup-ts-deep-modules/unknown.cjs",
     ]) assert.throws(() => classifyChanges([file], { stage }), /UNCLASSIFIED_PATH/);
   }
   const classification = classifyChanges([
-    ".zcode/skills/wizard/template.sh", "backend/Dockerfile",
+    ".agents/skills/wizard/template.sh", "backend/Dockerfile",
   ], { stage: "pr" });
   assert.equal(classification.tier, "full");
   assert.ok(classification.areas.includes("skill-assets"));
+});
+
+test("legacy skill Dockerfile migration stays scoped at PR stage", () => {
+  const files = [
+    ".zcode/skills/deploy-blue-whale-api/docker/Dockerfile",
+    ".agents/skills/deploy-blue-whale-api/docker/Dockerfile",
+  ];
+  for (const stage of ["completion", "pr"]) {
+    const classification = classifyChanges(files, { stage });
+    assert.equal(classification.tier, "scoped");
+    assert.deepEqual(classification.areas, ["operations"]);
+  }
+  assert.equal(classifyChanges([...files, "backend/Dockerfile"], { stage: "pr" }).tier, "full");
 });
 
 test('CBM client adapters select control-plane verification', () => {
   const result = classifyChanges(['.qoder/settings.json', '.kimi-code/hooks.toml', '.claude/settings.json', '.codex/hooks.json']);
   assert.equal(result.tier, 'scoped');
   assert.deepEqual(result.areas, ['control-plane']);
+});
+
+test('Ponytail runtime dependencies select control-plane verification', () => {
+  const files = ['.claude/hooks/ponytail-map.js', '.claude/hooks/ponytail-statusline.js',
+    '.claude/hooks/ponytail-statusline.sh', '.claude/hooks/ponytail-statusline.ps1',
+    'scripts/tests/test_codex_ponytail_hooks.py'];
+  for (const stage of ['completion', 'pr']) {
+    assert.deepEqual(classifyChanges(files, { stage }), {
+      tier: 'scoped', areas: ['control-plane'], reasons: ['control-plane changed'],
+    });
+  }
+});
+
+test('ZCode Ponytail plugin assets select control-plane verification', () => {
+  const files = ['.zcode/ponytail.json', '.zcode/plugins/marketplace.json',
+    '.zcode/plugins/ponytail/.zcode-plugin/plugin.json',
+    '.zcode/plugins/ponytail/hooks/hooks.json', '.zcode/plugins/ponytail/hooks/route.js'];
+  for (const stage of ['completion', 'pr']) {
+    for (const file of files) {
+      assert.deepEqual(classifyChanges([file], { stage }), {
+        tier: 'scoped', areas: ['control-plane'], reasons: ['control-plane changed'],
+      });
+    }
+    assert.throws(() => classifyChanges(['.zcode/plugins/unmanaged/hooks/route.js'], { stage }), /UNCLASSIFIED_PATH/);
+    assert.equal(classifyChanges([...files, 'backend/Dockerfile'], { stage }).tier, 'full');
+  }
+});
+
+function createFrontendRepository({ localPublish = false } = {}) {
+  const repository = createRepository();
+  writeFileSync(join(repository, ".git", "info", "exclude"), "node_modules/\nscripts/\n.env.local\n.env.*.local\n");
+  if (localPublish) {
+    mkdirSync(join(repository, "scripts"));
+    for (const name of ["start-task-worktree.py", "verify-change-scope.mjs", "verification-policy.mjs"]) {
+      copyFileSync(join(ROOT, "scripts", name), join(repository, "scripts", name));
+    }
+    cpSync(join(ROOT, "scripts", "lib"), join(repository, "scripts", "lib"), { recursive: true });
+    copyFileSync(join(ROOT, ".githooks", "pre-push"), join(repository, ".githooks", "pre-push"));
+  }
+  mkdirSync(join(repository, "web", "src"), { recursive: true });
+  const calls = join(repository, ".git", "frontend-calls.jsonl");
+  for (const [tool, file] of [
+    ["tsc", "typescript/bin/tsc"], ["vite", "vite/bin/vite.js"], ["checks", "fixture-checks.mjs"],
+  ]) {
+    const path = join(repository, "web", "node_modules", file);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, [
+      'import { appendFileSync, readFileSync } from "node:fs";',
+      `const tool = ${JSON.stringify(tool)};`,
+      'const mode = process.argv[process.argv.indexOf("--mode") + 1];',
+      `appendFileSync(${JSON.stringify(calls)}, JSON.stringify({ tool, mode, cwd: process.cwd() }) + "\\n");`,
+      'if (tool === "vite") readFileSync(`.env.${mode}`);',
+      'if (process.env.FIXTURE_BUILD_FAILURE === tool || (tool === "vite" && process.env.FIXTURE_BUILD_FAILURE === mode)) process.exit(1);',
+      '',
+    ].join("\n"));
+  }
+  writeFileSync(join(repository, "web", "package.json"), JSON.stringify({
+    type: "module", scripts: { lint: "node node_modules/fixture-checks.mjs", test: "node node_modules/fixture-checks.mjs" },
+  }));
+  writeFileSync(join(repository, "web", ".env.test"), "VITE_APP_ENV=test\n");
+  writeFileSync(join(repository, "web", ".env.release"), "VITE_APP_ENV=release\n");
+  git(repository, "add", "web", ".githooks");
+  git(repository, "commit", "-m", "test: frontend baseline");
+  git(repository, "push", "origin", "HEAD:release/prod");
+  if (localPublish) git(repository, "branch", "-m", "chore/验证本地自动构建");
+  writeFileSync(join(repository, ".git", "blue-whale", "task-base.json"), JSON.stringify({
+    version: 1, task_branch: git(repository, "branch", "--show-current"), target_branch: "release/prod", start_sha: git(repository, "rev-parse", "HEAD"),
+  }));
+  writeFileSync(join(repository, "web", "src", "index.ts"), "export const value = 1;\n");
+  git(repository, "add", "web/src/index.ts");
+  git(repository, "commit", "-m", "feat: frontend change");
+  return repository;
+}
+
+function frontendCli(repository, args, environment = {}) {
+  return spawnSync(process.execPath, [CLI, ...args, "--json"], {
+    cwd: repository, encoding: "utf8", env: { ...childEnvironment(), ...environment },
+  });
+}
+
+test("local publication enables hooks, builds before push, and reuses the same result", () => {
+  const repository = createFrontendRepository({ localPublish: true });
+  try {
+    const publish = (environment = {}) => spawnSync("bash",
+      [PUBLISH, "--user-authorized", "--create-pr", "--json"], {
+        cwd: repository, encoding: "utf8", env: { ...childEnvironment(), ...environment },
+      });
+    const head = git(repository, "rev-parse", "HEAD");
+    const ref = "refs/heads/chore/验证本地自动构建";
+    assert.equal(git(repository, "ls-remote", "--heads", "origin", ref), "");
+    const first = publish();
+    assert.equal(first.status, 0, first.stderr + first.stdout);
+    assert.equal(git(repository, "config", "--get", "core.hooksPath"), ".githooks");
+    assert.equal(git(repository, "ls-remote", "--heads", "origin", ref).split(/\s/)[0], head);
+    const callsPath = join(repository, ".git", "frontend-calls.jsonl");
+    const calls = readFileSync(callsPath, "utf8");
+    const records = calls.trim().split("\n").map(JSON.parse);
+    assert.equal(records.filter(call => call.tool === "tsc").length, 1);
+    assert.deepEqual(records.filter(call => call.tool === "vite").map(call => call.mode), ["test", "release"]);
+    const receiptPath = join(repository, ".git", "blue-whale", "verification", `${head}.json`);
+    const receipt = readFileSync(receiptPath, "utf8");
+    const again = publish();
+    assert.equal(again.status, 0, again.stderr);
+    assert.equal(readFileSync(callsPath, "utf8"), calls);
+    assert.equal(readFileSync(receiptPath, "utf8"), receipt);
+    const changedInputs = frontendCli(repository, ["ensure", "--stage", "pr"], { VITE_APP_ENV: "changed" });
+    assert.equal(changedInputs.status, 0, changedInputs.stderr);
+    assert.notEqual(readFileSync(callsPath, "utf8"), calls);
+  } finally { rmSync(repository, { recursive: true, force: true }); }
+});
+
+test("typecheck and either build mode failure leave create and update remotes unchanged", () => {
+  for (const mode of ["create", "update"]) {
+    for (const failure of ["tsc", "test", "release"]) {
+      const repository = createFrontendRepository({ localPublish: true });
+      try {
+        const ref = "refs/heads/chore/验证本地自动构建";
+        let args = ["--create-pr"];
+        let before = "";
+        if (mode === "update") {
+          git(repository, "push", "origin", `HEAD:${ref}`);
+          before = git(repository, "rev-parse", "HEAD");
+          const snapshot = join(repository, ".git", "pr-snapshot.json");
+          writeFileSync(snapshot, JSON.stringify({
+            pull_request_id: 65, state: "opened", source_branch: "chore/验证本地自动构建",
+            target_branch: "release/prod", head_sha: before, conflict: false,
+            changed_files: ["web/src/index.ts"], fetched_at: Math.floor(Date.now() / 1000),
+          }));
+          writeFileSync(join(repository, "web", "src", "index.ts"), "export const value = 2;\n");
+          git(repository, "add", "web/src/index.ts");
+          git(repository, "commit", "-m", "fix: review change");
+          args = ["--update-pr", "65", "--pr-snapshot", snapshot];
+        }
+        const publish = () => spawnSync("bash", [PUBLISH, "--user-authorized", ...args, "--json"], {
+          cwd: repository, encoding: "utf8",
+          env: { ...childEnvironment(), FIXTURE_BUILD_FAILURE: failure },
+        });
+        const failed = publish();
+        assert.equal(failed.status, 11, `${mode}/${failure}: ${failed.stderr}${failed.stdout}`);
+        assert.equal(JSON.parse(failed.stdout.trim().split("\n").at(-1)).status, "VERIFICATION_FAILED");
+        assert.equal(git(repository, "ls-remote", "--heads", "origin", ref).split(/\s/)[0] || "", before);
+        const callsPath = join(repository, ".git", "frontend-calls.jsonl");
+        const calls = readFileSync(callsPath, "utf8");
+        assert.equal(publish().status, 11);
+        assert.equal(readFileSync(callsPath, "utf8"), calls);
+        assert.equal(git(repository, "ls-remote", "--heads", "origin", ref).split(/\s/)[0] || "", before);
+      } finally { rmSync(repository, { recursive: true, force: true }); }
+    }
+  }
+});
+
+test("frontend plans cover shared inputs and skip unrelated changes", async () => {
+  const { requiresFrontendBuild, buildVerificationPlan } = await import("../scripts/verification-policy.mjs");
+  for (const file of [
+    "web/vite.config.ts", "web/tsconfig.app.json", "web/public/icon.svg", "web/index.html",
+    "web/package.json", "web/package-lock.json", "web/.env.test", "web/Dockerfile",
+    "backend/libs/contracts/quote.ts", "backend/libs/core/result.ts", "backend/tsconfig.json",
+    "package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml", "tsconfig.base.json", ".nvmrc", ".dockerignore",
+  ]) {
+    assert.equal(requiresFrontendBuild([file]), true, file);
+    for (const stage of ["completion", "pr"]) {
+      const commands = buildVerificationPlan(classifyChanges([file], { stage }), { base: "BASE" });
+      assert.equal(commands.filter(command => command[1] === "web/node_modules/typescript/bin/tsc").length, 1, file);
+      assert.deepEqual(commands.filter(command => command[1] === "web/node_modules/vite/bin/vite.js").map(command => command.at(-1)), ["test", "release"], file);
+    }
+  }
+  for (const file of ["GLOSSARY.md", "docs/example.md", "web/README.md", "scripts/test-hooks.sh", "backend/libs/shared/account.ts"]) {
+    assert.equal(requiresFrontendBuild([file]), false, file);
+  }
+  assert.equal(requiresFrontendBuild(["web/Dockerfile"], ["web/Dockerfile"]), false);
+  assert.equal(classifyChanges(["GLOSSARY.md"], { stage: "pr" }).tier, "docs");
+});
+
+test("frontend verification checks types once and builds both modes from web", () => {
+  const repository = createFrontendRepository();
+  try {
+    const result = frontendCli(repository, ["run", "--stage", "pr"]);
+    assert.equal(result.status, 0, result.stderr);
+    const calls = readFileSync(join(repository, ".git", "frontend-calls.jsonl"), "utf8").trim().split("\n").map(JSON.parse);
+    assert.equal(calls.filter(call => call.tool === "tsc").length, 1);
+    assert.deepEqual(calls.filter(call => call.tool === "vite").map(call => call.mode), ["test", "release"]);
+    assert.ok(calls.filter(call => call.tool === "vite").every(call => call.cwd === realpathSync(join(repository, "web"))));
+    const head = git(repository, "rev-parse", "HEAD");
+    const before = readFileSync(join(repository, ".git", "frontend-calls.jsonl"), "utf8");
+    assert.equal(frontendCli(repository, ["check-push", "--head", head]).status, 0);
+    assert.equal(readFileSync(join(repository, ".git", "frontend-calls.jsonl"), "utf8"), before);
+    const wrongHead = frontendCli(repository, ["check-push", "--head", git(repository, "rev-parse", "HEAD~1")]);
+    assert.equal(wrongHead.status, 4);
+    assert.equal(JSON.parse(wrongHead.stdout).status, "PUSH_HEAD_MISMATCH");
+  } finally { rmSync(repository, { recursive: true, force: true }); }
+});
+
+test("each frontend typecheck or mode failure blocks push", () => {
+  for (const failure of ["tsc", "test", "release"]) {
+    const repository = createFrontendRepository();
+    try {
+      const failed = frontendCli(repository, ["run", "--stage", "pr"], { FIXTURE_BUILD_FAILURE: failure });
+      assert.equal(failed.status, 5, failed.stderr);
+      const head = git(repository, "rev-parse", "HEAD");
+      const check = frontendCli(repository, ["check-push", "--head", head]);
+      assert.equal(check.status, 4, check.stderr);
+      assert.equal(JSON.parse(check.stdout).reason, "verification did not pass");
+    } finally { rmSync(repository, { recursive: true, force: true }); }
+  }
+});
+
+test("frontend push refuses a completion receipt built without the latest release", () => {
+  const repository = createFrontendRepository();
+  try {
+    git(repository, "switch", "-c", "release-update", "origin/release/prod");
+    writeFileSync(join(repository, "README.md"), "new release input\n");
+    git(repository, "add", "README.md");
+    git(repository, "commit", "-m", "docs: advance release");
+    git(repository, "push", "origin", "HEAD:release/prod");
+    git(repository, "switch", "chore/test-verification");
+    assert.equal(frontendCli(repository, ["run"]).status, 0);
+    const result = frontendCli(repository, ["check-push", "--head", git(repository, "rev-parse", "HEAD")]);
+    assert.equal(result.status, 2, result.stdout);
+    assert.match(result.stderr, /PR_TARGET_NOT_SYNCED/);
+  } finally { rmSync(repository, { recursive: true, force: true }); }
+});
+
+test("frontend input changes invalidate a successful receipt without exposing values", () => {
+  for (const changedInput of ["environment", "env-file", "dependency-install"]) {
+    const repository = createFrontendRepository();
+    try {
+      assert.equal(frontendCli(repository, ["run", "--stage", "pr"]).status, 0);
+      let environment = {};
+      if (changedInput === "environment") environment = { VITE_API_BASE_URL: "private-fixture-value" };
+      if (changedInput === "env-file") writeFileSync(join(repository, "web", ".env.test.local"), "VITE_API_BASE_URL=private-fixture-value\n");
+      if (changedInput === "dependency-install") writeFileSync(join(repository, "web", "node_modules", ".package-lock.json"), '{"packages":{"vite":{"version":"changed"}}}');
+      const result = frontendCli(repository, ["check-push", "--head", git(repository, "rev-parse", "HEAD")], environment);
+      assert.equal(result.status, 4, result.stderr);
+      assert.equal(JSON.parse(result.stdout).reason, "verification inputs changed");
+      assert.doesNotMatch(result.stdout + result.stderr, /private-fixture-value/);
+    } finally { rmSync(repository, { recursive: true, force: true }); }
+  }
+});
+
+test("a direct git push is blocked before the remote changes and reuses a passed receipt", () => {
+  const repository = createFrontendRepository();
+  try {
+    mkdirSync(join(repository, "scripts"));
+    writeFileSync(join(repository, "scripts", "start-task-worktree.py"), "import sys\nsys.exit(0)\n");
+    copyFileSync(CLI, join(repository, "scripts", "verify-change-scope.mjs"));
+    copyFileSync(join(ROOT, "scripts", "verification-policy.mjs"), join(repository, "scripts", "verification-policy.mjs"));
+    cpSync(join(ROOT, "scripts", "lib"), join(repository, "scripts", "lib"), { recursive: true });
+    git(repository, "config", "core.hooksPath", join(ROOT, ".githooks"));
+    const push = () => spawnSync("git", ["push", "origin", "HEAD:refs/heads/chore/frontend-gate"], { cwd: repository, encoding: "utf8", env: childEnvironment() });
+    assert.notEqual(push().status, 0);
+    assert.equal(git(repository, "ls-remote", "--heads", "origin", "chore/frontend-gate"), "");
+    assert.equal(frontendCli(repository, ["run", "--stage", "pr"]).status, 0);
+    assert.equal(push().status, 0);
+    assert.equal(git(repository, "ls-remote", "--heads", "origin", "chore/frontend-gate").split(/\s/)[0], git(repository, "rev-parse", "HEAD"));
+  } finally { rmSync(repository, { recursive: true, force: true }); }
+});
+
+test("unrelated pushes need no frontend receipt", () => {
+  const repository = createRepository();
+  try {
+    const result = frontendCli(repository, ["check-push", "--head", git(repository, "rev-parse", "HEAD")]);
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(JSON.parse(result.stdout).status, "BUILD_NOT_REQUIRED");
+    mkdirSync(join(repository, "scripts"));
+    writeFileSync(join(repository, "scripts", "unclassified-maintenance.sh"), "#!/bin/sh\n");
+    git(repository, "add", "scripts/unclassified-maintenance.sh");
+    git(repository, "commit", "-m", "chore: unrelated maintenance");
+    const maintenance = frontendCli(repository, ["check-push", "--head", git(repository, "rev-parse", "HEAD")]);
+    assert.equal(maintenance.status, 0, maintenance.stderr);
+    assert.equal(JSON.parse(maintenance.stdout).status, "BUILD_NOT_REQUIRED");
+  } finally { rmSync(repository, { recursive: true, force: true }); }
+});
+
+test("new releases can reuse production but cannot skip verification for new code or updates", () => {
+  const repository = createFrontendRepository();
+  try {
+    git(repository, "push", "origin", "HEAD~1:refs/heads/master");
+    mkdirSync(join(repository, "scripts"));
+    copyFileSync(join(ROOT, "scripts", "start-task-worktree.py"), join(repository, "scripts", "start-task-worktree.py"));
+    copyFileSync(CLI, join(repository, "scripts", "verify-change-scope.mjs"));
+    copyFileSync(join(ROOT, "scripts", "verification-policy.mjs"), join(repository, "scripts", "verification-policy.mjs"));
+    cpSync(join(ROOT, "scripts", "lib"), join(repository, "scripts", "lib"), { recursive: true });
+    git(repository, "config", "core.hooksPath", join(ROOT, ".githooks"));
+    const branch = "release/2026.10.01_下一发布验证";
+    const push = refspec => spawnSync("git", ["push", "origin", refspec], { cwd: repository, encoding: "utf8", env: childEnvironment() });
+    const create = push(`HEAD~1:refs/heads/${branch}`);
+    assert.equal(create.status, 0, create.stderr);
+    const production = git(repository, "rev-parse", "HEAD~1");
+    assert.equal(git(repository, "ls-remote", "--heads", "origin", branch).split(/\s/)[0], production);
+    const changedRelease = push("HEAD:refs/heads/release/2026.10.02_新增代码验证");
+    assert.notEqual(changedRelease.status, 0);
+    assert.match(changedRelease.stdout + changedRelease.stderr, /VERIFICATION_REQUIRED/);
+    const update = push(`HEAD:refs/heads/${branch}`);
+    assert.notEqual(update.status, 0);
+    assert.equal(git(repository, "ls-remote", "--heads", "origin", branch).split(/\s/)[0], production);
+  } finally { rmSync(repository, { recursive: true, force: true }); }
 });

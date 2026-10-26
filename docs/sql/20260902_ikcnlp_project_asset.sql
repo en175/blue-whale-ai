@@ -1,6 +1,3 @@
--- IKCNLP（方案C）：素材-项目关联表（1 素材可跨多项目）。
--- 历史快照（docs/sql）：面向可读性的库变更记录，权威 DDL 见 packages/persistence/schema/ + prisma/migrations/。
--- 日期：2026-09-02
 CREATE TABLE `project_asset` (
   `id`           BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键',
   `user_id`      BIGINT NOT NULL COMMENT '用户 id',

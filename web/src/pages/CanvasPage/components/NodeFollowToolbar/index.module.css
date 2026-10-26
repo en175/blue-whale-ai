@@ -1,8 +1,0 @@
-/* IKGYYD 钉屏幕工具栏容器定位层：绝对定位于 .react-flow 根（transform 层外），
- * left 是工具栏中心点（translateX(-50%) 真居中，估半宽只用于锚函数的水平钳制）、
- * top 是工具栏顶边；尺寸不随画布缩放（容器在 viewport transform 之外）。 */
-.toolbarLayer {
-  position: absolute;
-  transform: translateX(-50%);
-  z-index: 30;
-}

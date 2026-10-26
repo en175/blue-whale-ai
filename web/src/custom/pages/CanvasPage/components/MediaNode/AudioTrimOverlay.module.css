@@ -1,0 +1,71 @@
+
+.overlay {
+  --trim-handle-w: 4px;
+  --trim-handle-h: 30px;
+  --trim-handle-hit-ext: 6px;
+  --trim-sel-radius: 10px;
+
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  cursor: default;
+  user-select: none;
+  touch-action: none;
+}
+
+.dim {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.55);
+  cursor: default;
+}
+
+.selection {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border: 2px solid #ffffff;
+  border-radius: var(--trim-sel-radius);
+  cursor: pointer;
+}
+
+.pill {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  background-color: #000000;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+  line-height: 1;
+  padding: 5px 10px;
+  border-radius: var(--radius-full);
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 2;
+  font-variant-numeric: tabular-nums;
+}
+
+.handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: calc(var(--trim-handle-w) + var(--trim-handle-hit-ext) * 2);
+  transform: translateX(-50%);
+  cursor: ew-resize;
+  z-index: 3;
+}
+
+.handle::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: var(--trim-handle-w);
+  height: var(--trim-handle-h);
+  transform: translate(-50%, -50%);
+  background-color: #ffffff;
+  border-radius: 2px;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.6);
+}

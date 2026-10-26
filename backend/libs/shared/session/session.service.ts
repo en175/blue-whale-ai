@@ -1,12 +1,19 @@
 import { Injectable, OnModuleDestroy } from "@nestjs/common";
-import { createHash, randomBytes } from "node:crypto";
+import { createHash } from "node:crypto";
 import { Redis } from "ioredis";
+import { issueAccessToken, verifyAccessToken, type AccessTokenClaims } from "@lib/core";
 import { redisConnectionOptions } from "@lib/shared/rate-limit/redis-connection.js";
+import { sessionJwtSecret } from "./jwt-secret.js";
 
-/** 会话 7 天滑动过期（Redis TTL）。 */
-const SESSION_TTL_SECONDS = 7 * 24 * 60 * 60;
-/** role/status 距上次复核超过该时长则回源 new-api 复核（账户禁用/降权近实时生效）。 */
+const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const ROLE_STATUS_RECHECK_MS = 5 * 60 * 1000;
+export const MAX_SESSIONS_PER_USER = 3;
+
+export function normalizeClientId(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed.length >= 8 && trimmed.length <= 64 ? trimmed : undefined;
+}
 
 export interface ResolvedSession {
   userId: number;
@@ -14,9 +21,6 @@ export interface ResolvedSession {
   role: number;
   status: number;
   email: string | null;
-  /** 上游执行凭证（sk-，修正四：明文），AuthGuard 回注请求头代打 new-api。 */
-  sk: string;
-  /** role/status 是否已过期、需要回源 new-api 复核。 */
   needsRecheck: boolean;
 }
 
@@ -26,22 +30,58 @@ type SessionPayload = {
   role: number;
   status: number;
   email: string | null;
-  /** 上游 sk-（修正四：明文存 Redis，不再 AES 密封）。 */
-  sk: string;
-  /** role/status 最近一次回源 new-api 复核的时间戳（ms）。 */
   verifiedAt: number;
+  createdAt: number;
+  clientId?: string | undefined;
 };
 
-/**
- * 登录态会话（ADR-0062 #19 凭证分层）。浏览器只持 HttpOnly 会话 cookie 里的 `sess_` 令牌，
- * 会话映射存 Redis（7 天滑动 TTL），上游 sk- 明文随会话存放（修正四：去密），供 BFF 回注请求头代打 new-api。
- */
+type Member = {
+  hash: string;
+  clientId?: string | undefined;
+};
+
+type IndexEntry = {
+  hash: string;
+  createdAt: number;
+  clientId?: string | undefined;
+};
+
+function encodeMember(member: Member): string {
+  return JSON.stringify({
+    hash: member.hash,
+    ...(member.clientId ? { clientId: member.clientId } : {}),
+  });
+}
+
+function decodeMember(raw: string): Member | null {
+  try {
+    const parsed = JSON.parse(raw) as Partial<Member>;
+    if (typeof parsed.hash !== "string") return null;
+    return {
+      hash: parsed.hash,
+      clientId: typeof parsed.clientId === "string" ? parsed.clientId : undefined,
+    };
+  } catch {
+    return null;
+  }
+}
+
 @Injectable()
 export class SessionService implements OnModuleDestroy {
   private readonly redis: Redis;
+  private readonly jwtSecret: string;
 
   constructor() {
     this.redis = new Redis(redisConnectionOptions());
+    this.jwtSecret = sessionJwtSecret();
+  }
+
+  async issueToken(userId: string): Promise<string> {
+    return issueAccessToken(userId, this.jwtSecret);
+  }
+
+  async verifyToken(token: string): Promise<AccessTokenClaims> {
+    return verifyAccessToken(token, this.jwtSecret);
   }
 
   async onModuleDestroy(): Promise<void> {
@@ -56,46 +96,157 @@ export class SessionService implements OnModuleDestroy {
     return createHash("sha256").update(token).digest("hex");
   }
 
-  /** 按用户索引键：冻结时据此枚举该用户全部会话并批量吊销（TTL 与会话键同写同续）。 */
   private indexKey(userId: number, hash: string): string {
     return `user_session:${userId}:${hash}`;
   }
 
-  /** 写会话（sk- 明文存 Redis，修正四），返回下发给浏览器的会话令牌。 */
-  async createSession(input: {
-    userId: number;
-    username: string;
-    role: number;
-    status: number;
-    email: string | null;
-    sk: string;
-  }): Promise<string> {
-    const token = `sess_${randomBytes(32).toString("base64url")}`;
+  private indexPrefix(userId: number): string {
+    return `user_session:${userId}:`;
+  }
+
+  private orderedKey(userId: number): string {
+    return `user_sessions:${userId}`;
+  }
+
+  private evictedKey(hash: string): string {
+    return `session_evicted:${hash}`;
+  }
+
+  private async listIndexed(userId: number): Promise<IndexEntry[]> {
+    const raw = await this.redis.zrange(this.orderedKey(userId), 0, -1, "WITHSCORES");
+    const entries: IndexEntry[] = [];
+    for (let index = 0; index + 1 < raw.length; index += 2) {
+      const member = decodeMember(raw[index] ?? "");
+      if (!member) continue;
+      entries.push({
+        hash: member.hash,
+        clientId: member.clientId,
+        createdAt: Number(raw[index + 1]),
+      });
+    }
+    return entries;
+  }
+
+  private async addIndexed(
+    userId: number,
+    hash: string,
+    createdAt: number,
+    clientId?: string | undefined,
+    ttlMs: number = SESSION_TTL_MS,
+  ): Promise<void> {
+    const key = this.orderedKey(userId);
+    await this.redis.zadd(key, String(createdAt), encodeMember({ hash, clientId }));
+    await this.redis.pexpire(key, Math.max(1, ttlMs));
+  }
+
+  private async removeIndexed(userId: number, hashes: readonly string[]): Promise<void> {
+    if (hashes.length === 0) return;
+    const targets = new Set(hashes);
+    const members = await this.redis.zrange(this.orderedKey(userId), 0, -1);
+    const toRemove = members.filter((raw) => {
+      const member = decodeMember(raw);
+      return member != null && targets.has(member.hash);
+    });
+    if (toRemove.length > 0) {
+      await this.redis.zrem(this.orderedKey(userId), ...toRemove);
+    }
+  }
+
+  private async dropSessions(
+    userId: number,
+    hashes: readonly string[],
+  ): Promise<void> {
+    if (hashes.length === 0) return;
+    const pipeline = this.redis.pipeline();
+    for (const hash of hashes) {
+      pipeline.del(`session:${hash}`);
+      pipeline.del(this.indexKey(userId, hash));
+    }
+    await pipeline.exec();
+    await this.removeIndexed(userId, hashes);
+  }
+
+  private async evictSessions(
+    userId: number,
+    hashes: readonly string[],
+  ): Promise<void> {
+    if (hashes.length === 0) return;
+    const pipeline = this.redis.pipeline();
+    for (const hash of hashes) {
+      pipeline.set(this.evictedKey(hash), "1", "PX", SESSION_TTL_MS);
+      pipeline.del(`session:${hash}`);
+      pipeline.del(this.indexKey(userId, hash));
+    }
+    await pipeline.exec();
+    await this.removeIndexed(userId, hashes);
+  }
+
+  async wasEvicted(token: string): Promise<boolean> {
+    try {
+      return (await this.redis.exists(this.evictedKey(this.hashOf(token)))) === 1;
+    } catch {
+      return false;
+    }
+  }
+
+  async createSession(
+    token: string,
+    input: {
+      userId: number;
+      username: string;
+      role: number;
+      status: number;
+      email: string | null;
+      clientId?: unknown | undefined;
+    },
+  ): Promise<void> {
     const hash = this.hashOf(token);
+    const createdAt = Date.now();
+    const clientId = normalizeClientId(input.clientId);
+
+    if (clientId) {
+      const sameBrowser = (await this.listIndexed(input.userId)).filter(
+        (item) => item.clientId === clientId,
+      );
+      await this.evictSessions(
+        input.userId,
+        sameBrowser.map((item) => item.hash),
+      );
+    }
+
     const payload: SessionPayload = {
       userId: input.userId,
       username: input.username,
       role: input.role,
       status: input.status,
       email: input.email,
-      sk: input.sk,
-      verifiedAt: Date.now(),
+      verifiedAt: createdAt,
+      createdAt,
+      clientId,
     };
-    // 会话键 + 按用户索引键同写同 TTL（EX），冻结时可枚举该用户全部会话。
+
     await this.redis
       .multi()
-      .set(this.key(token), JSON.stringify(payload), "EX", SESSION_TTL_SECONDS)
+      .set(this.key(token), JSON.stringify(payload), "PX", SESSION_TTL_MS)
       .set(
         this.indexKey(input.userId, hash),
-        "1",
-        "EX",
-        SESSION_TTL_SECONDS,
+        JSON.stringify({ createdAt, clientId }),
+        "PX",
+        SESSION_TTL_MS,
       )
       .exec();
-    return token;
+    await this.addIndexed(input.userId, hash, createdAt, clientId);
+
+    const entries = await this.listIndexed(input.userId);
+    if (entries.length > MAX_SESSIONS_PER_USER) {
+      const oldest = entries
+        .sort((left, right) => left.createdAt - right.createdAt)
+        .slice(0, entries.length - MAX_SESSIONS_PER_USER)
+        .map((item) => item.hash);
+      await this.evictSessions(input.userId, oldest);
+    }
   }
 
-  /** 校验并解析会话；不存在或已过期返回 null。每次访问滑动续期 7 天。 */
   async resolveSession(token: string): Promise<ResolvedSession | null> {
     const key = this.key(token);
     const raw = await this.redis.get(key);
@@ -107,38 +258,41 @@ export class SessionService implements OnModuleDestroy {
       await this.redis.del(key);
       return null;
     }
-    await this.redis.expire(key, SESSION_TTL_SECONDS);
-    // 滑动续期同时以 SET 覆盖索引（值恒定）：既给已建索引续 TTL，
-    // 也给部署前旧会话（无索引键）惰性补建，使其纳入冻结枚举范围。
-    await this.redis.set(
-      this.indexKey(data.userId, this.hashOf(token)),
-      "1",
-      "EX",
-      SESSION_TTL_SECONDS,
-    );
-    let sk: string;
-    try {
-      if (typeof data.sk !== "string" || data.sk.length === 0) {
-        throw new Error("会话凭证缺失");
-      }
-      sk = data.sk;
-    } catch {
-      // 凭证缺失/损坏：会话不可用，删除并要求重新登录（而非 503）。
-      await this.redis.del(key);
-      return null;
-    }
+    await this.repairIndexes(token, data);
     return {
       userId: data.userId,
       username: data.username,
       role: data.role,
       status: data.status,
       email: data.email,
-      sk,
       needsRecheck: Date.now() - data.verifiedAt > ROLE_STATUS_RECHECK_MS,
     };
   }
 
-  /** 复核后回写 role/status 与 verifiedAt（AuthGuard 每 ROLE_STATUS_RECHECK_MS 触发）。 */
+  private async repairIndexes(token: string, data: SessionPayload): Promise<void> {
+    const hash = this.hashOf(token);
+    const member = encodeMember({ hash, clientId: data.clientId });
+    const memberScore = await this.redis.zscore(this.orderedKey(data.userId), member);
+    if (memberScore == null) {
+      const ttlMs = await this.redis.pttl(this.key(token));
+      if (ttlMs > 0) {
+        await this.addIndexed(data.userId, hash, data.createdAt ?? 0, data.clientId, ttlMs);
+      }
+    }
+    const indexKey = this.indexKey(data.userId, hash);
+    if ((await this.redis.exists(indexKey)) === 0) {
+      const ttlMs = await this.redis.pttl(this.key(token));
+      if (ttlMs > 0) {
+        await this.redis.set(
+          indexKey,
+          JSON.stringify({ createdAt: data.createdAt ?? 0, clientId: data.clientId }),
+          "PX",
+          ttlMs,
+        );
+      }
+    }
+  }
+
   async updateSessionIdentity(
     token: string,
     input: { role: number; status: number },
@@ -151,20 +305,11 @@ export class SessionService implements OnModuleDestroy {
       data.role = input.role;
       data.status = input.status;
       data.verifiedAt = Date.now();
-      await this.redis.set(key, JSON.stringify(data), "EX", SESSION_TTL_SECONDS);
-      // 复核回写同样以 SET 覆盖索引（值恒定）：续 TTL + 兜底补建，保持与会话键同寿命。
-      await this.redis.set(
-        this.indexKey(data.userId, this.hashOf(token)),
-        "1",
-        "EX",
-        SESSION_TTL_SECONDS,
-      );
+      await this.redis.set(key, JSON.stringify(data), "KEEPTTL");
     } catch {
-      // 解析失败静默忽略：下次 resolve 仍会触发复核
     }
   }
 
-  /** 登出吊销：删除会话（上游 sk- 不动，普通登出与凭证轮换分离，ADR-0062 #10/#19）。 */
   async revoke(token: string): Promise<void> {
     const key = this.key(token);
     const hash = this.hashOf(token);
@@ -172,19 +317,24 @@ export class SessionService implements OnModuleDestroy {
       const { userId } = JSON.parse(
         (await this.redis.get(key)) ?? "{}",
       ) as SessionPayload;
-      // 索引键一并删（键不存在时 DEL 为无害 no-op），避免 GET 后并发吊销留下孤儿索引。
       await this.redis.multi().del(key).del(this.indexKey(userId, hash)).exec();
+      if (typeof userId === "number") {
+        await this.removeIndexed(userId, [hash]);
+      }
     } catch {
-      // 载荷缺失/损坏时兜底只删会话键（索引键交由 TTL 自然过期）
       await this.redis.del(key);
     }
   }
 
-  /** 踢单用户全部会话：按索引枚举并删除会话+索引键，返回枚举到的会话数（供冻结审计）。 */
-  async revokeAllForUser(userId: number): Promise<number> {
-    const prefix = `user_session:${userId}:`;
+  async revokeAllForUser(userId: number, exceptToken?: string | undefined): Promise<number> {
+    const keepHash = exceptToken ? this.hashOf(exceptToken) : null;
+    const targets = new Set(
+      (await this.listIndexed(userId))
+        .map((item) => item.hash)
+        .filter((hash) => hash !== keepHash),
+    );
+    const prefix = this.indexPrefix(userId);
     let cursor = "0";
-    const hashes = new Set<string>();
     do {
       const [next, keys] = await this.redis.scan(
         cursor,
@@ -194,17 +344,14 @@ export class SessionService implements OnModuleDestroy {
         100,
       );
       cursor = next;
-      for (const k of keys) {
-        if (k.startsWith(prefix)) hashes.add(k.slice(prefix.length));
+      for (const key of keys) {
+        if (!key.startsWith(prefix)) continue;
+        const hash = key.slice(prefix.length);
+        if (hash !== keepHash) targets.add(hash);
       }
     } while (cursor !== "0");
-    if (hashes.size === 0) return 0;
-    const pipeline = this.redis.pipeline();
-    for (const hash of hashes) {
-      pipeline.del(`session:${hash}`);
-      pipeline.del(this.indexKey(userId, hash));
-    }
-    await pipeline.exec();
-    return hashes.size;
+    if (targets.size === 0) return 0;
+    await this.dropSessions(userId, [...targets]);
+    return targets.size;
   }
 }

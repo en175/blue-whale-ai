@@ -5,7 +5,6 @@
 !pnpm-workspace.yaml
 !tsconfig.json
 !tsconfig.base.json
-# IK77HE：builder 阶段 pnpm lint 需仓库根 eslint flat config 进 build context
 !eslint.config.mjs
 !apps/
 !apps/**
@@ -13,15 +12,12 @@
 !packages/**
 !backend/
 !backend/**
-# IKHJ0Q：pnpm-workspace.yaml 的 patchedDependencies 指向 patches/，而 pnpm install 在
-# backend/Dockerfile:25 就要跑——补丁文件不进 context 会直接 ENOENT、镜像构建失败。
-!patches/
-!patches/**
-# 前端镜像改为仓库根 context 后，必须放行 web/（否则 COPY web/... 是空的）。
 !web/
 !web/**
-# IK7ERQ：builder 阶段 pnpm test:ci 需跨端契约的 JSON Schema 与夹具进 build context。
-# 只放行 docs/specs 下的 .json（schema）与 fixtures 子树（约 104K），散文 .md 仍排除。
+!contracts/
+!contracts/**
+!server/
+!server/**
 !docs/
 !docs/specs/
 !docs/specs/*.json
@@ -31,3 +27,4 @@
 **/.next
 **/dist
 **/*.tsbuildinfo
+**/target

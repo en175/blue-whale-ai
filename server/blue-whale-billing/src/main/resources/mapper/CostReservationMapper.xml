@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.bluewhale.billing.infrastructure.persistence.mapper.CostReservationMapper">
+
+
+
+  <select id="lockByJobId" resultType="com.bluewhale.billing.infrastructure.persistence.po.CostReservationEntity">
+    SELECT id, generation_job_id, user_id, reserved_credits, actual_credits, receivable_credits,
+           status, allocations, catalog_version, discount_bp, rule_snapshot, title, release_note,
+           gmt_create, gmt_modified, version
+    FROM billing_cost_reservations
+    WHERE generation_job_id = #{jobId}
+    FOR UPDATE
+  </select>
+
+
+
+  <update id="markRefunded">
+    UPDATE billing_cost_reservations
+    SET status = 'refunded',
+        release_note = LEFT(#{releaseNote}, 255),
+        version = version + 1
+    WHERE generation_job_id = #{jobId}
+  </update>
+
+
+
+
+  <select id="sumChargedCredits" resultType="long">
+    SELECT COALESCE(SUM(reserved_credits), 0)
+    FROM billing_cost_reservations
+    WHERE status = 'charged'
+      AND gmt_modified &gt;= #{from}
+      AND gmt_modified &lt; #{to}
+  </select>
+
+
+
+
+  <select id="sumChargedByUser" resultType="com.bluewhale.billing.infrastructure.persistence.row.UserAmountRow">
+    SELECT user_id, COALESCE(SUM(reserved_credits), 0) AS amount
+    FROM billing_cost_reservations
+    WHERE user_id IN
+      <foreach collection="userIds" item="uid" open="(" separator="," close=")">#{uid}</foreach>
+      AND status = 'charged'
+    GROUP BY user_id
+  </select>
+
+</mapper>

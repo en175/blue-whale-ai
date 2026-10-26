@@ -1,33 +1,20 @@
-import { Controller, Get, Headers, UseGuards } from "@nestjs/common";
-import { NewApiError } from "@lib/core";
-import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
+import { Controller, Get, Query, UseGuards } from "@nestjs/common";
 import { AdminGuard } from "@lib/infra/guard/admin.guard.js";
-import { AccountService } from "@lib/shared/account/account.service.js";
-import { collectDashboardStats } from "@lib/shared/account/admin-dashboard.js";
-import { parseBearerToken } from "@lib/shared/errors/bearer-token.js";
-import { toAdminError } from "@lib/shared/errors/admin-error.js";
-import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js";
+import { DashboardService, resolveDashboardRange } from "@lib/shared/dashboard/index.js";
+import { AdminException, toAdminError } from "@lib/shared/errors/admin-error.js";
 
 @Controller("admin/dashboard")
 @UseGuards(AdminGuard)
 export class AdminDashboardController {
-  constructor(private readonly account: AccountService) {}
+  constructor(private readonly dashboard: DashboardService) {}
 
   @Get()
-  async stats(
-    @CurrentUser() user: AuthenticatedUser,
-    @Headers("authorization") authorization?: string,
-  ) {
-    const token = parseBearerToken(authorization);
-    if (!token) throw new NewApiError("缺少登录凭证", 401, "unauthorized");
+  async stats(@Query() query: Record<string, string> = {}) {
     try {
-      const data = await collectDashboardStats(
-        this.account,
-        token,
-        Number(user.userId),
-      );
-      return { success: true, data };
+      const range = resolveDashboardRange({ from: query.from, to: query.to });
+      return { success: true, data: await this.dashboard.stats(range) };
     } catch (error) {
+      if (error instanceof AdminException) throw error;
       throw toAdminError(error);
     }
   }

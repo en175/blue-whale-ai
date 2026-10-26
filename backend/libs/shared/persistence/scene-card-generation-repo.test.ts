@@ -86,10 +86,6 @@ function sceneCardAsset(
   };
 }
 
-/** IKHBDO：画格参考桩——画格是 scene_card 路径上**唯一真正会送到 worker** 的参考形态
- *  （mention 组走 validateDerivedReferences fail-closed；scene_card 组无 asset 映射）。
- *  一次性造出 validateStoryboardFrames / resolveReferenceAssetsToFlat / checkReferenceCountLimits
- *  三处都要读的行（slot → asset_id → assets.type）。 */
 function frameOverrides(
   types: Array<"image" | "video" | "audio">,
   durationsMs: Array<number | null> = [],
@@ -125,7 +121,6 @@ function frameOverrides(
   };
 }
 
-/** 能力行桩（digest 固定 8 字段，不含 features——与 capabilityDigestFromModelCapability 一致）。 */
 function capabilityWith(features: Record<string, unknown>, base = CAP_FIELDS) {
   return {
     generation_model_capability: {
@@ -188,17 +183,10 @@ function buildTx(
       create: vi.fn().mockResolvedValue({ id: 8001n }),
       ...overrides.scene_card_generation_records,
     },
-    plan_application_receipts: {
-      findFirst: vi.fn().mockResolvedValue({ id: 7001n, message_id: 4001n }),
-      ...overrides.plan_application_receipts,
-    },
     generation_model_capability: {
       findUnique: vi.fn().mockResolvedValue(buildCapabilityRow()),
       ...overrides.generation_model_capability,
     },
-    // IKEEFV：conversation_message_mentions 表已删，regen 预检不再触库该表
-    //（validateDerivedReferences fail-closed、resolveReferenceAssetsToFlat 不查 assets），
-    // 相应 mock 随下线。
     canvas: {
       findFirst: vi.fn().mockResolvedValue({
         viewport_json: { x: 0, y: 0, zoom: 1 },
@@ -227,6 +215,12 @@ function buildTx(
         }),
       ...overrides.generation_jobs,
     },
+    generation_job_extras: {
+      upsert: vi.fn().mockResolvedValue({}),
+      findMany: vi.fn().mockResolvedValue([]),
+      deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+      ...overrides.generation_job_extras,
+    },
     cost_reservations: {
       create: vi.fn().mockResolvedValue({}),
       ...overrides.cost_reservations,
@@ -237,8 +231,6 @@ function buildTx(
       findMany: vi.fn().mockResolvedValue([]),
       ...overrides.generation_output_slots,
     },
-    // IKHBDO：画格路径的素材归属校验（findAccessibleAssetIds）与参考数量判定
-    //（checkReferenceCountLimits）都读这张表——前者要 id、后者要 type/duration_ms。
     assets: {
       findMany: vi.fn().mockResolvedValue([]),
       ...overrides.assets,
@@ -307,17 +299,39 @@ describe("SceneCardGenerationRepo.regenerateSceneCard", () => {
     expect(tx.generation_jobs.create).toHaveBeenCalledOnce();
     expect(tx.generation_jobs.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
-        expected_output_count: 1,
         input: expect.objectContaining({
           placement_anchor: { x: 100, y: 200, width: 240, height: 135 },
         }),
       }),
     });
+    expect(tx.generation_job_extras.upsert).toHaveBeenCalledWith({
+      where: {
+        generation_job_id_extra_key: { generation_job_id: 9001n, extra_key: "strategy_version" },
+      },
+      create: {
+        generation_job_id: 9001n,
+        extra_key: "strategy_version",
+        value_type: "string",
+        value_text: "seedance-2.0-v1",
+      },
+      update: {
+        value_type: "string",
+        value_text: "seedance-2.0-v1",
+        gmt_modified: expect.any(Date),
+      },
+    });
     expect(tx.generation_output_slots.create).toHaveBeenCalledOnce();
+    expect(tx.generation_output_slots.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        generation_job_id: 9001n,
+        slot_index: 0,
+        status: "pending",
+      }),
+    });
     expect(tx.command_idempotency.create).toHaveBeenCalledOnce();
   });
 
-  it("新 record 来源指向首次 PlanMessage 与首次 Receipt（CONTEXT L99-101）", async () => {
+  it("新 record 不再写 plan 溯源列（计划通道已退役）", async () => {
     const tx = buildTx({});
     const { repo } = repoWith(tx);
 
@@ -325,8 +339,8 @@ describe("SceneCardGenerationRepo.regenerateSceneCard", () => {
 
     const recordArg =
       tx.scene_card_generation_records.create.mock.calls[0][0].data;
-    expect(recordArg.plan_message_id).toBe(4001n);
-    expect(recordArg.application_receipt_id).toBe(7001n);
+    expect(recordArg.plan_message_id).toBeUndefined();
+    expect(recordArg.application_receipt_id).toBeUndefined();
     expect(recordArg.summary_status).toBe("generating");
   });
 
@@ -339,7 +353,7 @@ describe("SceneCardGenerationRepo.regenerateSceneCard", () => {
     const jobArg = tx.generation_jobs.create.mock.calls[0][0].data;
     expect(jobArg.source).toBe("scene_card");
     expect(jobArg.retry_of_job_id).toBeUndefined();
-    expect(jobArg.input.plan_message_id).toBe("4001");
+    expect(jobArg.input.plan_message_id).toBeUndefined();
     expect(jobArg.input.parameters.duration).toBe(5);
   });
 
@@ -465,6 +479,34 @@ describe("SceneCardGenerationRepo.regenerateSceneCard", () => {
     expect(tx.scene_card_generation_records.create).not.toHaveBeenCalled();
   });
 
+  it("★ ADR-0123：比例档是 { id, label } 形态时同样能过白名单（不会因元素变对象而误拒）", async () => {
+    const labelledCapFields = {
+      ...CAP_FIELDS,
+      supported_aspect_ratios: [{ id: "16:9", label: "横屏 16:9" }],
+    };
+    const tx = buildTx({
+      generation_model_capability: {
+        findUnique: vi.fn().mockResolvedValue({
+          version: 3,
+          enabled: true,
+          is_delete: false,
+          ...labelledCapFields,
+        }),
+      },
+    });
+    const { repo } = repoWith(tx);
+
+    const result = await repo.regenerateSceneCard({
+      ...baseInput,
+      capability_snapshot_version: {
+        ...CAPABILITY_SNAPSHOT,
+        digest: capabilityDigest(labelledCapFields),
+      },
+    });
+
+    expect(result.kind).not.toBe("capability_limit");
+  });
+
   it("IKFPYX：首尾帧模式按 task_types 约束校验——基础比例含 16:9，但 first_last_frame 仅允许 adaptive", async () => {
     const frames = [referenceAsset("first_frame", "101"), referenceAsset("last_frame", "102")];
     const capFields = {
@@ -475,7 +517,6 @@ describe("SceneCardGenerationRepo.regenerateSceneCard", () => {
         task_types: { first_last_frame: { allowed_ratios: ["adaptive"] } },
       },
     };
-    // digest 有意不含 features（capabilityDigestFromModelCapability 固定 8 字段）
     const { features: _features, ...digestFields } = capFields;
     const tx = buildTx({
       scene_card_generation_presets: {
@@ -502,7 +543,6 @@ describe("SceneCardGenerationRepo.regenerateSceneCard", () => {
       },
     });
 
-    // 16:9 在基础比例列表内，但首尾帧任务的 task_types 只允许 adaptive → 拒
     expect(result.kind).toBe("capability_limit");
     expect(tx.scene_card_generation_records.create).not.toHaveBeenCalled();
   });
@@ -517,7 +557,6 @@ describe("SceneCardGenerationRepo.regenerateSceneCard", () => {
         task_types: { first_last_frame: { allowed_ratios: ["adaptive"] } },
       },
     };
-    // digest 有意不含 features（capabilityDigestFromModelCapability 固定 8 字段）
     const { features: _features, ...digestFields } = capFields;
     const tx = buildTx({
       scene_card_generation_presets: {
@@ -749,10 +788,6 @@ describe("SceneCardGenerationRepo.regenerateSceneCard", () => {
     expect(tx.scene_card_generation_presets.updateMany).not.toHaveBeenCalled();
   });
 
-  // IKEEFV：conversation_message_mentions 表已删，validateDerivedReferences 对任何
-  // mention 引用一律 fail-closed（不再触库）。本用例保留的价值：camelCase features 的
-  // 能力校验（5b）仍在 mention 引用校验（6）之前放行——若 camelCase 判定回归，
-  // 结果会是 capability_limit 而非 validation_failed("mention … not found")。
   it("模型声明 camelCase 首尾帧能力时通过能力校验，但 mention 引用 fail-closed 零写入（IKEEFV）", async () => {
     const capFields = { ...CAP_FIELDS, features: { firstLastFrame: true } };
     const tx = buildTx({
@@ -798,19 +833,14 @@ describe("SceneCardGenerationRepo.regenerateSceneCard", () => {
     expect(tx.generation_jobs.create).not.toHaveBeenCalled();
   });
 
-  it("无首次 Receipt 返回 validation_failed", async () => {
-    const tx = buildTx({
-      plan_application_receipts: {
-        findFirst: vi.fn().mockResolvedValue(null),
-      },
-    });
+  it("★ 无首次 Receipt 也能生成（复制来的场景卡不再被挡）", async () => {
+    const tx = buildTx({});
     const { repo } = repoWith(tx);
     const result = await repo.regenerateSceneCard(baseInput);
-    expect(result.kind).toBe("validation_failed");
+    expect(result.kind).toBe("applied");
+    expect(tx.generation_jobs.create).toHaveBeenCalledOnce();
   });
 
-  // IKEEFV：mention 表已删，引用素材不再可解析——fail-closed 拒绝语义与旧
-  // 「mention 行查不到」逐字一致，零写入不变。
   it("引用素材失效返回 validation_failed 零写入（AC#4）", async () => {
     const tx = buildTx({
       scene_card_generation_presets: {
@@ -905,8 +935,6 @@ describe("SceneCardGenerationRepo.regenerateSceneCard", () => {
 
 });
 
-// IKF YHJ（ADR-0087）：场景卡再生成是第三条视频创建路径，与创建期/重试期共用同一个素材门。
-// 门必须在事务内、建 job 之前——那几个扁平引用字段是事务内从 slot 解析出来的。
 describe("SceneCardGenerationRepo.regenerateSceneCard 素材门（IKFYHJ）", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -937,7 +965,6 @@ describe("SceneCardGenerationRepo.regenerateSceneCard 素材门（IKFYHJ）", ()
 
     expect(result.kind).toBe("applied");
     expect(guardInput).toHaveBeenCalledOnce();
-    // 建 job 用的 input 与喂给门的对象必须同源，否则门可能在查一批、执行时用另一批。
     const jobInput = tx.generation_jobs.create.mock.calls[0][0].data.input;
     const guarded = guardInput.mock.calls[0][0] as Record<string, unknown>;
     for (const key of ["first_frame_asset_id", "last_frame_asset_id", "reference_asset_ids"]) {
@@ -955,9 +982,6 @@ describe("SceneCardGenerationRepo.regenerateSceneCard 素材门（IKFYHJ）", ()
     expect(tx.generation_jobs.create).toHaveBeenCalledOnce();
   });
 
-  // ===== IKHBDO：参考上限由能力行驱动（scene_card 再生成路径）=====
-  // 背景：这条路径原先手搓 job.input，不写 reference_limits → worker 回落 LEGACY 常量
-  //（9 图 / 3 视频 / 15 秒）；契约层还自带「参考素材最多 12 个」。两处都让配置输给写死的值。
 
   it("参考上限按能力行冻结进新 job（与接纳侧同一份 freezeReferenceLimits）", async () => {
     const { frames, overrides } = frameOverrides(["image"]);
@@ -997,7 +1021,6 @@ describe("SceneCardGenerationRepo.regenerateSceneCard 素材门（IKFYHJ）", ()
       "video",
     ]);
 
-    // 配 5：必须过（旧 job 快照口径下会被 worker 的 LEGACY 3 拦掉）
     const looseTx = buildTx({
       ...overrides,
       ...capabilityWith({ video_reference: true, video_reference_max: 5 }),
@@ -1011,7 +1034,6 @@ describe("SceneCardGenerationRepo.regenerateSceneCard 素材门（IKFYHJ）", ()
       looseTx.generation_jobs.create.mock.calls[0][0].data.input.reference_limits,
     ).toMatchObject({ video_reference_max: 5 });
 
-    // 配 3：同一份请求必须在**接纳侧**就被拒，判词带配置值
     const strictTx = buildTx({
       ...overrides,
       ...capabilityWith({ video_reference: true, video_reference_max: 3 }),

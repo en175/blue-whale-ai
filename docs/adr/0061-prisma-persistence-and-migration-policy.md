@@ -34,3 +34,9 @@
 
 - **从第一次就用 `prisma migrate dev --name init`，永不 `db push`**（技术更干净、无 history 空档）。拒绝理由：用户明确希望首次保留 `db push` 的灵活度以便敲定表结构；本 ADR 用 `migrate resolve --applied` 弥补 `db push` 留下的 history 空档，既尊重用户工作流又保留可审查迁移史。
 - **保留 `mysql2` 裸 SQL**。拒绝理由：用户要求换 Prisma；裸 SQL 在多表/多 slice 演进时缺乏类型安全与迁移治理。
+
+## 修正（2026-10-10，IKKNMZ）：同上，见 ADR-0058 的修正节
+
+本文件与 [ADR-0058](0058-prisma-persistence-and-migration-policy.md) 是同一次决策的两份记录（同题、同日期、同工单 IK4AJJ）。2026-10-10 的修正（IKKNMZ）写在 **ADR-0058 末尾**，两文件以那里为准。
+
+照本文件的「决策 2 第 4 条」与「决策 3」办事会**去跑 `prisma migrate deploy`** —— 那正是本次要断掉的路：`_prisma_migrations` 与手工执行的真实进度不一致，一跑就把存量迁移当没跑过、从第一条**重放**。现已加闸（`backend/prisma/README.md` 记着实测表现与口径）。

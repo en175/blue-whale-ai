@@ -1,55 +1,71 @@
-/* ============================================
- * SystemConfig 系统设置：支付凭证安全配置·充值政策文案·限流参数
- * 数据源 GET/PUT /api/admin/settings（规划接口，后端暂未实现，按规范预接入）
- * ============================================ */
-import { useCallback, useEffect, useState } from 'react';
+import type { ReactNode } from 'react';
+import { useEffect, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Eye, EyeOff } from 'lucide-react';
 import {
-  fetchAdminSettings,
+  adminSettingsOptions,
   updateAdminSettings,
   type SystemCredentials,
   type SystemPolicy,
   type SystemRateLimit,
   type SystemSettings,
-} from '@/api/admin';
-import { isApiError } from '@/api/http';
-import styles from './index.module.css';
+  type SystemUpstream,
+  type SystemWatermark,
+} from '@/admin/api/adminSettings';
+import { isApiError } from '@/shared/api/http';
+import {
+  Hint,
+  Alert,
+  Badge,
+  Button,
+  Card,
+  Checkbox,
+  Empty,
+  Input,
+  Page,
+  PageHeader,
+  Tabs,
+  Textarea,
+  formGrid,
+} from '../../ui';
 
 const TABS = [
+  { key: 'upstream', label: '上游凭证' },
   { key: 'cred', label: '支付凭证' },
   { key: 'policy', label: '充值政策文案' },
   { key: 'rate', label: '限流配置' },
+  { key: 'watermark', label: '生成水印' },
 ] as const;
 
 type TabKey = (typeof TABS)[number]['key'];
 
 const errMsg = (e: unknown, fallback: string) => (isApiError(e) ? e.message : fallback);
 
+const tabBodyStyle = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 20,
+  maxWidth: 980,
+} as const;
+
 export default function SystemConfig() {
-  const [tab, setTab] = useState<TabKey>('cred');
-  const [settings, setSettings] = useState<SystemSettings | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [tab, setTab] = useState<TabKey>('upstream');
 
-  /** 加载 / 保存成功后重拉（凭证回显服务端脱敏值）；规划接口阶段失败不提示 */
-  const loadSettings = useCallback(async () => {
-    setLoading(true);
-    try {
-      const data = await fetchAdminSettings();
-      setSettings(data);
-    } catch {
-      /* 后端未实现，静默降级 */
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const list = useQuery(adminSettingsOptions());
+  const settings: SystemSettings | null = list.data ?? null;
+  const loading = list.isPending;
 
-  useEffect(() => {
-    void loadSettings();
-  }, [loadSettings]);
+  const loadSettings = async () => {
+    await list.refetch();
+  };
 
-  /** 凭证按 key 增量更新 */
   const saveCredential = async (key: keyof SystemCredentials, value: string) => {
     await updateAdminSettings({ credentials: { [key]: value } });
+    await loadSettings();
+  };
+
+  const saveUpstream = async (key: keyof SystemUpstream, value: string) => {
+    await updateAdminSettings({ upstream: { [key]: value } });
     await loadSettings();
   };
 
@@ -63,48 +79,102 @@ export default function SystemConfig() {
     await loadSettings();
   };
 
-  return (
-    <div className={styles.page}>
-      {/* 页头 */}
-      <div className={styles.header}>
-        <div>
-          <h1 className={styles.title}>系统设置</h1>
-          <p className={styles.subtitle}>支付凭证安全配置 · 充值政策文案 · 限流参数</p>
-        </div>
-      </div>
+  const saveWatermark = async (watermark: SystemWatermark) => {
+    await updateAdminSettings({ watermark });
+    await loadSettings();
+  };
 
-      {/* tabs */}
-      <div className={styles.tabs}>
-        {TABS.map((t) => (
-          <button
-            key={t.key}
-            className={`${styles.tab} ${tab === t.key ? styles.tabActive : ''}`}
-            onClick={() => setTab(t.key)}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
+  return (
+    <Page>
+      <PageHeader
+        title="通用设置"
+        subtitle="上游凭证 · 支付凭证安全配置 · 充值政策文案 · 限流参数 · 生成水印"
+      />
+
+      <Tabs items={TABS} value={tab} onChange={(key) => setTab(key as TabKey)} />
 
       {loading && !settings ? (
-        <div className={styles.loadingBox}>加载中…</div>
+        <Empty message="加载中…" />
       ) : (
         <>
+          {tab === 'upstream' && (
+            <UpstreamTab upstream={settings?.upstream ?? null} onSave={saveUpstream} />
+          )}
           {tab === 'cred' && <CredTab credentials={settings?.credentials ?? null} onSave={saveCredential} />}
           {tab === 'policy' && <PolicyTab policy={settings?.policy ?? null} onSave={savePolicy} />}
           {tab === 'rate' && <RateTab rateLimit={settings?.rateLimit ?? null} onSave={saveRateLimit} />}
+          {tab === 'watermark' && (
+            <WatermarkTab watermark={settings?.watermark ?? null} onSave={saveWatermark} />
+          )}
         </>
       )}
+    </Page>
+  );
+}
+
+
+const UPSTREAM_FIELDS: {
+  key: keyof SystemUpstream;
+  label: string;
+  hint: string;
+  info: ReactNode;
+  secret: boolean;
+}[] = [
+  {
+    key: 'new_api_key',
+    label: '项目统一 key',
+    hint: '保存后立即生效，无需重启。',
+    info: (
+      <Hint>
+        <div>全项目共用这一把：backend 与 worker-java 都从这里取，改一处即全项目生效。</div>
+        <div>用途包括登录后回注请求头、技能格式化、worker 素材跟进。</div>
+      </Hint>
+    ),
+    secret: true,
+  },
+];
+
+function UpstreamTab({
+  upstream,
+  onSave,
+}: {
+  upstream: SystemUpstream | null;
+  onSave: (key: keyof SystemUpstream, value: string) => Promise<void>;
+}) {
+  return (
+    <div style={tabBodyStyle}>
+      {UPSTREAM_FIELDS.map((f) => (
+        <CredCard
+          key={f.key}
+          label={f.label}
+          hint={f.hint}
+          info={f.info}
+          secret={f.secret}
+          value={upstream?.[f.key] ?? ''}
+          onSave={(v) => onSave(f.key, v)}
+        />
+      ))}
     </div>
   );
 }
 
-/* ============ 支付凭证 ============ */
-const CRED_FIELDS: { key: keyof SystemCredentials; section: string; label: string }[] = [
-  { key: 'wechat_mch_id', section: '微信支付', label: '商户号 (Merchant ID)' },
-  { key: 'wechat_api_key', section: '微信支付', label: 'API Key' },
-  { key: 'alipay_app_id', section: '支付宝', label: '应用 ID (App ID)' },
-  { key: 'alipay_private_key', section: '支付宝', label: '应用私钥 (Private Key)' },
+
+const CRED_SECTION = '杭州银行聚合主扫 · 支付网关商户信息';
+const CRED_FIELDS: {
+  key: keyof SystemCredentials;
+  section: string;
+  label: string;
+  secret: boolean;
+}[] = [
+  { key: 'hccb_mch_no', section: CRED_SECTION, label: '商户号 (mchNo)', secret: false },
+  { key: 'hccb_app_id', section: CRED_SECTION, label: '应用 ID (appId)', secret: false },
+  { key: 'hccb_app_secret', section: CRED_SECTION, label: '商户密钥 (appSecret)', secret: true },
+  {
+    key: 'hccb_notify_url',
+    section: CRED_SECTION,
+    label: '异步通知地址 (notifyUrl · 须公网可达)',
+    secret: false,
+  },
 ];
 
 function CredTab({
@@ -116,15 +186,16 @@ function CredTab({
 }) {
   const sections = [...new Set(CRED_FIELDS.map((f) => f.section))];
   return (
-    <div className={styles.tabBody}>
+    <div style={tabBodyStyle}>
       {sections.map((sec) => (
-        <div key={sec}>
-          <h3 className={styles.sectionTitle}>{sec}</h3>
+        <div key={sec} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <h3 style={{ margin: 0 }}>{sec}</h3>
           {CRED_FIELDS.filter((f) => f.section === sec).map((f) => (
             <CredCard
               key={f.key}
               label={f.label}
-              maskedValue={credentials?.[f.key] ?? ''}
+              secret={f.secret}
+              value={credentials?.[f.key] ?? ''}
               onSave={(v) => onSave(f.key, v)}
             />
           ))}
@@ -134,14 +205,19 @@ function CredTab({
   );
 }
 
-/** 单个凭证卡片：回显服务端脱敏值，编辑态密码输入 + 眼睛切换，保存走增量更新 */
 function CredCard({
   label,
-  maskedValue,
+  hint,
+  info,
+  secret,
+  value,
   onSave,
 }: {
   label: string;
-  maskedValue: string;
+  hint?: string;
+  info?: ReactNode;
+  secret: boolean;
+  value: string;
   onSave: (v: string) => Promise<void>;
 }) {
   const [editing, setEditing] = useState(false);
@@ -172,47 +248,64 @@ function CredCard({
   };
 
   return (
-    <div className={styles.card}>
-      <div className={styles.cardHead}>
-        <div>
-          <div className={styles.cardLabel}>{label}</div>
-          <div className={styles.cardValue}>{maskedValue || '未配置'}</div>
-        </div>
-        <button className={styles.editBtn} onClick={() => (editing ? setEditing(false) : startEdit())} disabled={saving}>
+    <Card
+      title={
+        <>
+          {label} {info}
+        </>
+      }
+      extra={
+        <Button
+          size="sm"
+          disabled={saving}
+          onClick={() => (editing ? setEditing(false) : startEdit())}
+        >
           {editing ? '取消' : '编辑'}
-        </button>
-      </div>
+        </Button>
+      }
+    >
+      {}
+      <div style={value ? undefined : { color: 'var(--admin-text-faint)' }}>{value || '未配置'}</div>
+      {hint && (
+        <div style={{ marginTop: 'var(--admin-space-1)', fontSize: 'var(--admin-font-xs)', color: 'var(--admin-text-muted)' }}>
+          {hint}
+        </div>
+      )}
 
       {editing && (
-        <>
-          <div className={styles.secretWrap}>
-            <input
-              className={styles.secretInput}
-              type={visible ? 'text' : 'password'}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 14 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Input
+              type={secret && !visible ? 'password' : 'text'}
               placeholder="请输入新值"
               value={draft}
+              style={{ flex: 1 }}
               onChange={(e) => setDraft(e.target.value)}
             />
-            <button
-              className={styles.eyeBtn}
-              title={visible ? '隐藏' : '显示'}
-              onClick={() => setVisible((v) => !v)}
-            >
-              {visible ? <EyeOff size={16} strokeWidth={2} /> : <Eye size={16} strokeWidth={2} />}
-            </button>
+            {secret && (
+              <Button
+                size="sm"
+                variant="ghost"
+                title={visible ? '隐藏' : '显示'}
+                aria-label={visible ? '隐藏' : '显示'}
+                icon={visible ? <EyeOff size={16} strokeWidth={2} /> : <Eye size={16} strokeWidth={2} />}
+                onClick={() => setVisible((v) => !v)}
+              />
+            )}
           </div>
-          {error && <div className={styles.formError}>{error}</div>}
-          <button className={styles.saveBtn} onClick={() => void save()} disabled={saving || !draft.trim()}>
-            {saving ? '保存中…' : '保存'}
-          </button>
-          <p className={styles.hint}>保存后凭证以 AES-256-GCM 加密存储，仅回显脱敏信息。</p>
-        </>
+          {error && <Alert tone="danger">{error}</Alert>}
+          <div>
+            <Button variant="primary" disabled={saving || !draft.trim()} onClick={() => void save()}>
+              {saving ? '保存中…' : '保存'}
+            </Button>
+          </div>
+          {secret && <Hint>保存后凭证以 AES-256-GCM 加密存储，仅回显脱敏信息。</Hint>}
+        </div>
       )}
-    </div>
+    </Card>
   );
 }
 
-/* ============ 充值政策文案 ============ */
 function PolicyTab({
   policy,
   onSave,
@@ -226,7 +319,6 @@ function PolicyTab({
   const [error, setError] = useState('');
   const [saved, setSaved] = useState(false);
 
-  /** 服务端数据晚于挂载到达时同步表单 */
   useEffect(() => {
     if (policy) {
       setRefund(policy.refund_text);
@@ -251,27 +343,30 @@ function PolicyTab({
   };
 
   return (
-    <div className={styles.tabBody}>
-      <div className={styles.label}>退款政策文案</div>
-      <p className={styles.labelSub}>展示在用户端充值页底部。变更即时生效，无需发版。</p>
-      <textarea className={styles.textarea} value={refund} onChange={(e) => setRefund(e.target.value)} />
+    <div style={tabBodyStyle}>
+      <div>
+        <div>退款政策文案</div>
+        <p style={{ margin: '6px 0 10px' }}>展示在用户端充值页底部。变更即时生效，无需发版。</p>
+        <Textarea value={refund} onChange={(e) => setRefund(e.target.value)} />
+      </div>
 
-      <div className={styles.label}>发票政策文案</div>
-      <p className={styles.labelSub}>展示在用户端充值页底部。</p>
-      <textarea className={styles.textarea} value={invoice} onChange={(e) => setInvoice(e.target.value)} />
+      <div>
+        <div>发票政策文案</div>
+        <p style={{ margin: '6px 0 10px' }}>展示在用户端充值页底部。</p>
+        <Textarea value={invoice} onChange={(e) => setInvoice(e.target.value)} />
+      </div>
 
-      {error && <div className={styles.formError}>{error}</div>}
-      <div className={styles.saveRow}>
-        <button className={styles.saveBtn} onClick={() => void save()} disabled={saving}>
+      {error && <Alert tone="danger">{error}</Alert>}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+        <Button variant="primary" disabled={saving} onClick={() => void save()}>
           {saving ? '保存中…' : '保存文案'}
-        </button>
-        {saved && <span className={styles.savedTip}>已保存 ✓</span>}
+        </Button>
+        {saved && <Badge tone="success">已保存 ✓</Badge>}
       </div>
     </div>
   );
 }
 
-/* ============ 限流配置 ============ */
 function RateTab({
   rateLimit,
   onSave,
@@ -323,36 +418,98 @@ function RateTab({
   };
 
   return (
-    <div className={styles.tabBody}>
-      <div className={styles.grid2}>
+    <div style={tabBodyStyle}>
+      <div style={formGrid(2)}>
         <div>
-          <div className={styles.label}>每分钟请求上限</div>
-          <input className={styles.input} type="number" value={perMin} onChange={(e) => setPerMin(e.target.value)} />
+          <div style={{ marginBottom: 10 }}>每分钟请求上限</div>
+          <Input type="number" value={perMin} style={{ width: '100%' }} onChange={(e) => setPerMin(e.target.value)} />
         </div>
         <div>
-          <div className={styles.label}>每小时请求上限</div>
-          <input className={styles.input} type="number" value={perHour} onChange={(e) => setPerHour(e.target.value)} />
+          <div style={{ marginBottom: 10 }}>每小时请求上限</div>
+          <Input type="number" value={perHour} style={{ width: '100%' }} onChange={(e) => setPerHour(e.target.value)} />
         </div>
         <div>
-          <div className={styles.label}>并发上限</div>
-          <input
-            className={styles.input}
+          <div style={{ marginBottom: 10 }}>并发上限</div>
+          <Input
             type="number"
             value={concurrency}
+            style={{ width: '100%' }}
             onChange={(e) => setConcurrency(e.target.value)}
           />
         </div>
         <div>
-          <div className={styles.label}>突发倍数</div>
-          <input className={styles.input} type="number" value={burst} onChange={(e) => setBurst(e.target.value)} />
+          <div style={{ marginBottom: 10 }}>突发倍数</div>
+          <Input type="number" value={burst} style={{ width: '100%' }} onChange={(e) => setBurst(e.target.value)} />
         </div>
       </div>
-      {error && <div className={styles.formError}>{error}</div>}
-      <div className={styles.saveRow}>
-        <button className={styles.saveBtn} onClick={() => void save()} disabled={saving}>
+      {error && <Alert tone="danger">{error}</Alert>}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+        <Button variant="primary" disabled={saving} onClick={() => void save()}>
           {saving ? '保存中…' : '保存'}
-        </button>
-        {saved && <span className={styles.savedTip}>已保存 ✓</span>}
+        </Button>
+        {saved && <Badge tone="success">已保存 ✓</Badge>}
+      </div>
+    </div>
+  );
+}
+
+function WatermarkTab({
+  watermark,
+  onSave,
+}: {
+  watermark: SystemWatermark | null;
+  onSave: (w: SystemWatermark) => Promise<void>;
+}) {
+  const [enabled, setEnabled] = useState(watermark?.enabled ?? false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    if (watermark) setEnabled(watermark.enabled);
+  }, [watermark]);
+
+  const save = async () => {
+    if (saving) return;
+    setSaving(true);
+    setError('');
+    setSaved(false);
+    try {
+      await onSave({ enabled });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 3000);
+    } catch (e) {
+      setError(errMsg(e, '保存失败，请稍后重试'));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div style={tabBodyStyle}>
+      <Card title="AI 生成水印">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <Checkbox
+            checked={enabled}
+            onChange={setEnabled}
+            label="为生成的图片和视频添加「AI生成」水印"
+          />
+          <p style={{ margin: 0 }}>
+            开启后，之后执行的图片/视频生成请求会要求上游添加水印；已生成内容不受影响。
+          </p>
+          <Hint>
+            <div>全项目只读这一份配置：backend 管理端与 worker-java 生成链路共用。</div>
+            <div>图片仅对 Seedream 渠道生效；官方 OpenAI Images 协议不支持该参数，不会下发。</div>
+          </Hint>
+        </div>
+      </Card>
+
+      {error && <Alert tone="danger">{error}</Alert>}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+        <Button variant="primary" disabled={saving} onClick={() => void save()}>
+          {saving ? '保存中…' : '保存设置'}
+        </Button>
+        {saved && <Badge tone="success">已保存 ✓</Badge>}
       </div>
     </div>
   );

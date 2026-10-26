@@ -3,18 +3,11 @@ import {
   ERROR_INVALID_REFERENCE_TYPE,
 } from "@lib/contracts";
 
-/**
- * 素材库引用（MaterialReference）：视频生成输入里对上游素材库素材的引用。
- * 零本地落表：类型由调用方在创建任务时声明，Worker 只做格式校验并转成
- * `asset://<素材ID>` 载体交给网关；存在性/状态/物理约束由上游强校验。
- */
 export type MaterialReference = {
   id: string;
-  /** IKDJNZ：支持参考音频（type:"audio"，素材库音频引用；不占图/视频额度）。 */
   type: "image" | "video" | "audio";
 };
 
-/** 输入校验错误：携带对外错误码（ERROR_INVALID_REFERENCE 等），供 runner catch 取码落库。 */
 export class VideoInputError extends Error {
   constructor(
     public readonly code: string,

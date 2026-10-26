@@ -1,19 +1,8 @@
 import type { PrismaClient } from "@prisma/client";
 
-/**
- * 模板管理 admin repo（IK764F，Prisma-backed）。
- *
- * 复用 template_card / template_card_image / template_tag 表：
- * - 卡片删除一律软删（is_delete=1），可恢复；查询端（首页 + admin 列表）都按 is_delete=0 过滤。
- * - tag 仅可改 label（tag_code/sort_order 固定）；卡片 move = 同 tag 内交换排序位。
- * - 图片随卡片整体同步（保留/软删/新增），moveImage 同卡片内交换排序位。
- * 调序实现：把同组（tag 内卡片 / 卡片内图片）按 (sort_order, id) 排序后整体重排为
- * 0..n-1 连续值——顺带归一化历史数据里可能存在的重复 sort_order。
- */
 
 export type MoveDirection = "up" | "down";
 
-/** 入参业务错误（如图片 id 不属于目标卡片）：路由层映射 400，与系统错误（500）区分。 */
 export class TemplateAdminInputError extends Error {
   constructor(message: string) {
     super(message);
@@ -23,7 +12,6 @@ export class TemplateAdminInputError extends Error {
 
 export interface MoveResult {
   ok: boolean;
-  /** 失败原因：not_found（目标不存在/已删）| boundary（已在边缘） */
   reason?: "not_found" | "boundary";
 }
 
@@ -44,7 +32,6 @@ export interface AdminTemplateCardView {
   images: AdminTemplateImageView[];
 }
 
-/** 新建/编辑卡片的输入；images 数组顺序即目标展示顺序。 */
 export interface TemplateCardInput {
   tag_code: string;
   title: string;
@@ -57,7 +44,6 @@ export interface TemplateCardInput {
 
 export interface TemplateAdminRepo {
   renameTag(tagCode: string, label: string): Promise<boolean>;
-  /** IKA64P：标签隐藏开关（visible 0/1），返回是否命中标签 */
   setTagVisibility(tagCode: string, visible: number): Promise<boolean>;
   listCards(tagCode?: string): Promise<AdminTemplateCardView[]>;
   getCard(id: bigint): Promise<AdminTemplateCardView | null>;
@@ -68,7 +54,6 @@ export interface TemplateAdminRepo {
   moveImage(imageId: bigint, direction: MoveDirection): Promise<MoveResult>;
 }
 
-/** 把序列中 index 处元素与上/下邻居交换；越界或 index 无效 → null（纯函数，便于单测）。 */
 export function swapSequence<T>(
   items: readonly T[],
   index: number,
@@ -208,15 +193,12 @@ export function createTemplateAdminRepo(prisma: PrismaClient): TemplateAdminRepo
           },
         });
 
-        // 图片同步：入参带 id 的保留（按入参顺序重排 sort_order），缺失的软删，无 id 的新增。
         const keepIds = input.images
           .filter((img) => img.id !== undefined)
           .map((img) => BigInt(img.id as string));
         const current = await tx.template_card_image.findMany({
           where: { card_id: id, is_delete: 0 },
         });
-        // 越权防护：保留的 image id 必须全部属于本卡片当前存活图片，且不得重复；
-        // 否则伪造 id 可跨卡片改写他人图片（image id 自增易枚举）。
         const currentIds = new Set(current.map((img) => img.id.toString()));
         const seen = new Set<string>();
         for (const kid of keepIds) {
@@ -280,7 +262,6 @@ export function createTemplateAdminRepo(prisma: PrismaClient): TemplateAdminRepo
         const idx = siblings.findIndex((c) => c.id === id);
         const swapped = swapSequence(siblings, idx, direction);
         if (!swapped) return { ok: false, reason: "boundary" as const };
-        // 整体重排为连续值，归一化历史重复 sort_order
         await Promise.all(
           swapped.map((c, i) =>
             c.sort_order === i

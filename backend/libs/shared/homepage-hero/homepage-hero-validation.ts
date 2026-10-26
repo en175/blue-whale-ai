@@ -1,14 +1,9 @@
-import type { CreateHomepageHeroInput } from "@lib/shared/persistence/index.js";
+import {
+  isHomepageHeroScene,
+  type CreateHomepageHeroInput,
+  type HomepageHeroScene,
+} from "@lib/shared/persistence/index.js";
 
-/**
- * 首页背景配置入参校验纯函数（IKCH05），对齐母工单 IKCH01 接口草稿：
- * - media_type ∈ {image, video}；media_url 可暂空（TOS 资源迁移中，先建条目后填地址）
- * - media_type=video 时 poster_url 必填（视频没封面不能保存）
- * - media_type=image 时 poster_url 可空（纯图背景）
- * - enabled ∈ {0,1}；sort_order 非负整数；URL 一律 http(s)://
- * - create 与 update 共用本函数：update 由控制器把现存条目与补丁字段合并成完整表单再校验，
- *   保证"视频必须有封面"跨字段规则在改动后仍成立。
- */
 
 export const HOMEPAGE_HERO_MEDIA_TYPES = ["image", "video"] as const;
 export type HomepageHeroMediaTypeValue = (typeof HOMEPAGE_HERO_MEDIA_TYPES)[number];
@@ -21,7 +16,6 @@ function isHttpUrl(value: string): boolean {
   return /^https?:\/\//i.test(value.trim());
 }
 
-/** 可空 URL：undefined/null/"" → null；否则须为 http(s):// 且不超长。 */
 function parseOptionalUrl(
   value: unknown,
   field: string,
@@ -42,6 +36,7 @@ function parseOptionalUrl(
 }
 
 export type HomepageHeroForm = {
+  scene?: unknown;
   media_type?: unknown;
   media_url?: unknown;
   poster_url?: unknown;
@@ -53,9 +48,23 @@ export type HomepageHeroParseResult =
   | { ok: true; input: CreateHomepageHeroInput }
   | { ok: false; error: string };
 
+export const DEFAULT_HOMEPAGE_HERO_SCENE: HomepageHeroScene = "homepage";
+
+export function parseHomepageHeroScene(value: unknown): HomepageHeroScene | null {
+  if (value === undefined || value === null || value === "") {
+    return DEFAULT_HOMEPAGE_HERO_SCENE;
+  }
+  return isHomepageHeroScene(value) ? value : null;
+}
+
 export function parseHomepageHeroForm(
   form: HomepageHeroForm,
 ): HomepageHeroParseResult {
+  const scene = parseHomepageHeroScene(form.scene);
+  if (!scene) {
+    return { ok: false, error: "scene 仅支持 homepage/auth" };
+  }
+
   const mediaType = form.media_type;
   if (
     typeof mediaType !== "string" ||
@@ -70,12 +79,10 @@ export function parseHomepageHeroForm(
   const posterUrl = parseOptionalUrl(form.poster_url, "poster_url");
   if (!posterUrl.ok) return posterUrl;
 
-  // 视频必须要有封面（media_type=video 时 poster_url 必填）
   if (mediaType === "video" && posterUrl.value === null) {
     return { ok: false, error: "视频背景必须配置 poster_url 封面" };
   }
 
-  // sort_order 缺省省略：create 时由 repo 取 max+1，update 合并表单后必已携带
   let sortOrder: number | undefined;
   if (form.sort_order !== undefined) {
     const raw = form.sort_order;
@@ -89,7 +96,6 @@ export function parseHomepageHeroForm(
   const enabledRaw = form.enabled;
   let enabled: number | undefined;
   if (enabledRaw !== undefined) {
-    // enabled 严格只认 0/1 数字：布尔 true 经 Number 会变成 1，属歧义输入，拒绝
     if (typeof enabledRaw !== "number" || (enabledRaw !== 0 && enabledRaw !== 1)) {
       return { ok: false, error: "enabled 仅支持 0/1" };
     }
@@ -99,11 +105,10 @@ export function parseHomepageHeroForm(
   return {
     ok: true,
     input: {
+      scene,
       media_type: mediaType,
-      // media_url 可暂空（TOS 迁移期）：空值落库为 ""，占位待填
       media_url: mediaUrl.value ?? "",
       poster_url: posterUrl.value,
-      // 可选字段条件展开，避免 exactOptionalPropertyTypes 下显式 undefined
       ...(sortOrder !== undefined ? { sort_order: sortOrder } : {}),
       ...(enabled !== undefined ? { enabled } : {}),
     },

@@ -8,11 +8,11 @@ import { CanvasService } from "@lib/shared/canvas/canvas.service.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";
 
-/* IKFM3L 统一文本卡正文契约 v1 集成（隔离 MySQL，IKFM3L_DATABASE_URL 门控）：
-   四类来源（普通新增、历史纯文本、历史 HTML、Agent 绑定）经真实保存 API 与数据库核对——
-   契约见 docs/specs/2026-09-14-ikfm3l-unified-text-node-content-contract.md。
-   - 前端读时升级 html → Markdown 后的落盘形态经保存 API 验证（后端不改写存量数据）；
-   - 带 promptSource 的种子沿用直写 DB 模式（保存 API 拒绝伪造绑定字段）。 */
+
+
+
+
+
 describe.skipIf(!process.env.IKFM3L_DATABASE_URL)("Unified text node content contract (IKFM3L)", () => {
   const prisma = new PrismaService();
   const projects = new ProjectService(prisma);
@@ -94,13 +94,13 @@ describe.skipIf(!process.env.IKFM3L_DATABASE_URL)("Unified text node content con
 
   it("历史 HTML 卡：存量经 API 保存原样保留（升级在前端读时发生）；升级后形态落盘通过校验", async () => {
     const project = await createProject();
-    // 存量 html 卡：API 不改写、不拒绝（兼容期）
+
     const legacy = [{ id: "text-html", type: "textNode", position: { x: 3, y: 4 }, data: { title: "HTML 旧卡", html: "<h1>旧标题</h1><p>旧<b>粗</b>正文</p>" } }];
     const first = await saveCanvas(project.id, legacy, [], "missing");
     expect(first.status).toBe(200);
     const persistedLegacy = parseNodes((await readCanvasRow(project.id))!)[0];
     expect(persistedLegacy.data.html).toBe("<h1>旧标题</h1><p>旧<b>粗</b>正文</p>");
-    // 前端读时升级后的落盘形态：text=Markdown 源，html 已移除
+
     const upgraded = [{ id: "text-html", type: "textNode", position: { x: 3, y: 4 }, data: { title: "HTML 旧卡", text: "# 旧标题\n\n旧**粗**正文" } }];
     const second = await saveCanvas(project.id, upgraded, [], (await readCanvasRow(project.id))!.version);
     expect(second.status).toBe(200);
@@ -120,15 +120,15 @@ describe.skipIf(!process.env.IKFM3L_DATABASE_URL)("Unified text node content con
         promptSource,
       } },
     ];
-    // 保存 API 拒绝携带绑定字段的无 promptSource 伪造（回归）
+
     const forged = [{ id: "text-forged", type: "textNode", position: { x: 0, y: 0 }, data: { text: "x", promptMentions: [{ start: 0, end: 1, index: 1, assetId: "9001" }] } }];
     const rejected = await saveCanvas(project.id, forged, [], "missing");
     expect(rejected.status).toBe(400);
-    // 带 promptSource 的种子只能直写 DB（保存侧校验拒绝伪造入口）
+
     await prisma.client.canvas.create({ data: { project_id: project.id, nodes_json: seed, edges_json: [], viewport_json: {}, version: 1 } });
     const row = (await readCanvasRow(project.id))!;
     expect(parseNodes(row)[0].data.promptSource).toEqual(promptSource);
-    // 前端升级/编辑后的落盘：text 换 Markdown 源、区间锚定不变式仍过（promptSource 不可改）
+
     const edited = [JSON.parse(JSON.stringify(seed[0]))];
     edited[0].data.text = "编辑后 **加粗** 的正文";
     edited[0].data.promptMentions = [];

@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+
+
+
+<mapper namespace="com.bluewhale.billing.infrastructure.persistence.mapper.ReconciliationMapper">
+
+
+  <sql id="latestLedgerBalance">
+    SELECT e.user_id, e.account, MAX(e.id) AS max_id
+    FROM billing_ledger_entries e
+    WHERE e.account IN ('wallet')
+    GROUP BY e.user_id, e.account
+  </sql>
+
+
+
+  <select id="sumLotsRemaining" resultType="long">
+    SELECT COALESCE(SUM(remaining), 0)
+    FROM billing_credit_lots
+  </select>
+
+
+  <select id="sumLedgerBalance" resultType="long">
+    SELECT COALESCE(SUM(e.balance_after), 0)
+    FROM billing_ledger_entries e
+    JOIN (<include refid="latestLedgerBalance"/>) latest ON e.id = latest.max_id
+  </select>
+
+
+
+
+
+
+  <select id="imbalancedUsers" resultType="com.bluewhale.billing.infrastructure.persistence.row.UserImbalanceRow">
+    SELECT combo.user_id            AS user_id,
+           SUM(combo.lots_remaining) AS lots_remaining,
+           SUM(combo.ledger_total)   AS ledger_total
+    FROM (
+        SELECT l.user_id      AS user_id,
+               SUM(l.remaining) AS lots_remaining,
+               0                AS ledger_total
+        FROM billing_credit_lots l
+        GROUP BY l.user_id
+
+        UNION ALL
+
+        SELECT e.user_id             AS user_id,
+               0                      AS lots_remaining,
+               SUM(e.balance_after)   AS ledger_total
+        FROM billing_ledger_entries e
+        JOIN (<include refid="latestLedgerBalance"/>) latest ON e.id = latest.max_id
+        GROUP BY e.user_id
+    ) combo
+    GROUP BY combo.user_id
+    HAVING lots_remaining &lt;&gt; ledger_total
+    ORDER BY ABS(SUM(combo.lots_remaining) - SUM(combo.ledger_total)) DESC, combo.user_id ASC
+    LIMIT #{limit}
+  </select>
+
+</mapper>

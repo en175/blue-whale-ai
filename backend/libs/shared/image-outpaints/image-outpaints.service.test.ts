@@ -1,8 +1,9 @@
-// IKGOQV：扩图创建入口复核矩阵与免费口径单测（先例：image-enhancements.service.test.ts）。
-// 只测外部可见行为：拒绝原因可读、落库参数冻结、免费口径无成本预留。
 import { describe, expect, it, vi } from "vitest";
 
 import { ImageOutpaintsService } from "./image-outpaints.service.js";
+
+const { enqueueImageOutpaintJob } = vi.hoisted(() => ({ enqueueImageOutpaintJob: vi.fn() }));
+vi.mock("@lib/shared/generation/generation-queue.js", () => ({ enqueueImageOutpaintJob }));
 import { IMAGE_OUTPAINT_SOURCE_LIMITS } from "@lib/contracts";
 
 const VALID_BODY = {
@@ -22,6 +23,7 @@ function makeService(overrides: {
   createJob?: unknown;
   storage?: unknown;
   updateAsset?: unknown;
+  billing?: unknown;
 } = {}) {
   const project = overrides.project ?? { findOwnedById: vi.fn().mockResolvedValue({ id: 55n }) };
   const assets =
@@ -41,11 +43,9 @@ function makeService(overrides: {
     client: {
       generation_jobs: { create },
       assets: { update: updateAsset },
-      // 免费口径哨兵：任何成本预留写入都会在这里暴露。
       cost_reservations: { create: costCreate },
     },
   };
-  // 默认 storage 不可用（uploads=null）：缺尺寸时探测跳过，落回拒绝——与修订前行为一致。
   const storage = overrides.storage ?? { uploads: null };
   return {
     service: new ImageOutpaintsService(
@@ -53,6 +53,7 @@ function makeService(overrides: {
       project as never,
       assets as never,
       storage as never,
+      (overrides.billing ?? { jobBilling: async () => undefined, release: async () => {} } as never) as never,
     ),
     create,
     costCreate,
@@ -60,7 +61,6 @@ function makeService(overrides: {
   };
 }
 
-/** 一份最小的真 PNG 头（8 字节签名 + IHDR），宽高按参数写入第 16/20 字节。 */
 function pngHead(width: number, height: number): Uint8Array {
   const head = new Uint8Array(32);
   head.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], 0);
@@ -136,7 +136,6 @@ describe("ImageOutpaintsService.create：归属与媒体类型复核", () => {
   });
 
   it("rejects an asset that does not exist or is not owned by the user", async () => {
-    // 归属过滤在 findOwnedSource 内：不存在与非本人统一 404，不泄露存在性。
     const { service } = makeService({
       assets: { findOwnedSource: vi.fn().mockResolvedValue(null) },
     });
@@ -225,7 +224,6 @@ describe("ImageOutpaintsService.create：源图门槛复核", () => {
   });
 
   it("rejects an asset without recorded dimensions when probing is unavailable", async () => {
-    // 缺尺寸且探测不可用（storage 未配置）→ 落回缺尺寸拒绝，行为与修订前一致。
     const { service } = makeService({
       assets: {
         findOwnedSource: vi.fn().mockResolvedValue({
@@ -253,8 +251,6 @@ describe("ImageOutpaintsService.create：缺尺寸探测回填（IKGOQ0 验收�
   };
 
   it("probes real dimensions from storage, backfills the asset row, and creates the job", async () => {
-    // 库里约四成图片资产宽高为 NULL（画布/资产库上传路径历史上不上报）——探测回填让这些
-    // 存量资产直接可用，不再要求用户重新上传。
     const readHead = vi.fn().mockResolvedValue(pngHead(1776, 2368));
     const { service, create, updateAsset } = makeService({
       assets: { findOwnedSource: vi.fn().mockResolvedValue(assetWithoutDims) },
@@ -271,7 +267,6 @@ describe("ImageOutpaintsService.create：缺尺寸探测回填（IKGOQ0 验收�
   });
 
   it("applies the probed long side to the 4160px gate", async () => {
-    // 探测值同样过门槛：探测出长边超 4160 的图照样拒绝（探测只是补数据，不放松口径）。
     const readHead = vi.fn().mockResolvedValue(pngHead(5000, 1080));
     const { service, updateAsset } = makeService({
       assets: { findOwnedSource: vi.fn().mockResolvedValue(assetWithoutDims) },
@@ -280,11 +275,10 @@ describe("ImageOutpaintsService.create：缺尺寸探测回填（IKGOQ0 验收�
     const result = await service.create("9", "55", VALID_BODY);
     expect(result.code).not.toBe(200);
     expect(result.msg).toContain("4160");
-    expect(updateAsset).toHaveBeenCalledTimes(1); // 回填照做，后续请求不再重复探测
+    expect(updateAsset).toHaveBeenCalledTimes(1);
   });
 
   it("falls back to the missing-dimensions rejection when probing finds nothing readable", async () => {
-    // 探测不到（文件损坏/布局未覆盖）→ 拒绝，此时「请重新上传」名副其实。
     const readHead = vi.fn().mockResolvedValue(null);
     const { service, updateAsset } = makeService({
       assets: { findOwnedSource: vi.fn().mockResolvedValue(assetWithoutDims) },
@@ -297,7 +291,6 @@ describe("ImageOutpaintsService.create：缺尺寸探测回填（IKGOQ0 验收�
   });
 
   it("still creates the job when the probe succeeds but the backfill write fails", async () => {
-    // 回填失败只丢一次优化：本次复核照用探测值放行。
     const readHead = vi.fn().mockResolvedValue(pngHead(1776, 2368));
     const { service, create } = makeService({
       assets: { findOwnedSource: vi.fn().mockResolvedValue(assetWithoutDims) },
@@ -334,7 +327,6 @@ describe("ImageOutpaintsService.create：落任务与免费口径", () => {
         status: "queued",
         user_id: 9n,
         project_id: 55n,
-        expected_output_count: 1,
         input: VALID_BODY,
         next_action_at: expect.any(Date),
       }),
@@ -351,26 +343,17 @@ describe("ImageOutpaintsService.create：落任务与免费口径", () => {
   });
 });
 
-describe("ImageOutpaintsService.create：请求方凭证冻结（断链防护）", () => {
-  // 断链背景：worker（ImageOutpaintJobProcessor，IKGOQW）只从 input.provider_credential 取请求方 sk-，
-  // 创建链路不冻结则必落 provider_credential_missing（先例：图片生成/高清放大）。
-  it("freezes the requester sk- token into job input (provider_credential)", async () => {
-    const { service, create } = makeService();
-    const result = await service.create("9", "55", VALID_BODY, {
-      providerCredential: "sk-live-token",
-    });
-    expect(result.code).toBe(200);
-    expect(create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        input: { ...VALID_BODY, provider_credential: "sk-live-token" },
-      }),
-    });
-  });
-
-  it("omits provider_credential when the requester carries no sk- token", async () => {
-    const { service, create } = makeService();
+describe("ImageOutpaintsService.create：计费输入", () => {
+  it("按 image_outpaint 计价并入队", async () => {
+    const jobBilling = vi.fn().mockResolvedValue(undefined);
+    const { service } = makeService({ billing: { jobBilling, release: vi.fn() } });
     const result = await service.create("9", "55", VALID_BODY);
     expect(result.code).toBe(200);
-    expect(create.mock.calls[0][0].data.input).toEqual(VALID_BODY);
+    expect(jobBilling).toHaveBeenCalledWith(
+      "image_outpaint",
+      "9",
+      expect.objectContaining({ source_asset_id: "88" }),
+    );
+    expect(enqueueImageOutpaintJob).toHaveBeenCalledWith("400");
   });
 });

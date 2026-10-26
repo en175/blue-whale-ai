@@ -1,5 +1,3 @@
-// IKBQEE / ADR-0078：错误码枚举 + 投影补齐 单元测试。
-// 二期：对外输出为 { code: 数值码, message: 中文 }——数值码每错一码、前端可映射。
 import { describe, expect, it } from "vitest";
 
 import {
@@ -19,6 +17,7 @@ import {
   ERROR_MEDIA_EXTRACT_FAILED,
   ERROR_MODEL_UNAVAILABLE,
   ERROR_NO_RESULT,
+  ERROR_PLATFORM_QUOTA_EXHAUSTED,
   ERROR_PROVIDER_CONFIG,
   ERROR_PROVIDER_CREDENTIAL_MISSING,
   ERROR_PROVIDER_FAILED,
@@ -34,6 +33,7 @@ import {
   ERROR_UNSUPPORTED_TYPE,
   ERROR_UPLOAD_FAILED,
   ERROR_VIDEO_DOWNLOAD_FAILED,
+  ERROR_VIDEO_FRAME_INTERPOLATION_FAILED,
   ERROR_VIDEO_GENERATION_FAILED,
   ERROR_VIDEO_HAS_NO_AUDIO_TRACK,
   ERROR_VIDEO_TOO_LARGE,
@@ -48,10 +48,10 @@ describe("error-codes", () => {
     expect(ERROR_INVALID_INPUT).toBe("invalid_input");
     expect(ERROR_PROVIDER_FAILED).toBe("provider_failed");
     expect(ERROR_QUOTA_EXHAUSTED).toBe("quota_exhausted");
+    expect(ERROR_PLATFORM_QUOTA_EXHAUSTED).toBe("platform_quota_exhausted");
   });
 
   it("全部常量都在 GENERATION_ERROR_CODES 白名单内", () => {
-    // 逐个校验每个导出常量已登记——新增失败码忘登记会被此测试捕获。
     const exported = [
       ERROR_INVALID_INPUT,
       ERROR_UNSUPPORTED_TYPE,
@@ -121,19 +121,16 @@ describe("error-codes", () => {
       ERROR_AUDIO_GENERATION_FAILED,
     ];
     const codes = exported.map((c) => GENERATION_ERROR_NUMERIC_CODES[c]);
-    // 每个字符串码都有数值码，且数值码互不重复
     for (const n of codes) {
       expect(typeof n).toBe("number");
     }
     expect(new Set(codes).size).toBe(exported.length);
-    // 特定映射稳定（对外契约）
     expect(GENERATION_ERROR_NUMERIC_CODES[ERROR_QUOTA_EXHAUSTED]).toBe(1001);
     expect(GENERATION_ERROR_NUMERIC_CODES[ERROR_INVALID_INPUT]).toBe(1002);
     expect(GENERATION_ERROR_NUMERIC_CODES[ERROR_PROVIDER_FAILED]).toBe(1011);
     expect(GENERATION_ERROR_NUMERIC_CODES[ERROR_IMAGE_GENERATION_FAILED]).toBe(
       1022,
     );
-    // 未知码兜底
     expect(errorCodeToNumeric("some_unknown_code")).toBe(1000);
     expect(GENERATION_ERROR_UNKNOWN_NUMERIC_CODE).toBe(1000);
   });
@@ -148,7 +145,6 @@ describe("error-codes", () => {
       "unsupported_input",
     );
     expect(resolveErrorCode("invalid_video_response")).toBe("provider_failed");
-    // 未在别名表的码原样返回
     expect(resolveErrorCode("provider_failed")).toBe("provider_failed");
   });
 
@@ -157,6 +153,9 @@ describe("error-codes", () => {
     expect(fallbackErrorCode("media_extract")).toBe("media_extract_failed");
     expect(fallbackErrorCode("image")).toBe("image_generation_failed");
     expect(fallbackErrorCode("audio")).toBe("audio_generation_failed");
+    expect(fallbackErrorCode("video_frame_interpolation")).toBe(
+      ERROR_VIDEO_FRAME_INTERPOLATION_FAILED,
+    );
   });
 });
 
@@ -168,15 +167,13 @@ describe("projectPublicError", () => {
     );
     expect(out).not.toBeNull();
     expect(out!.code).toBe(1011);
-    // 码表优先（ADR-0078）：provider_failed 统一文案，不返上游英文原文。
     expect(out!.message).toBe("生成服务响应异常");
     expect("retryable" in out!).toBe(false);
     expect("params" in out!).toBe(false);
     expect("details" in out!).toBe(false);
   });
 
-  it("quota_exhausted：1001 + 码表文案（上游英文不回显）", () => {
-    // 真实案例 job 1494：provider_failed + overdue balance 英文
+  it("quota_exhausted + 上游英文欠费原文：按证据翻成 1061，上游英文不回显", () => {
     const out = projectPublicError(
       {
         code: "quota_exhausted",
@@ -184,8 +181,8 @@ describe("projectPublicError", () => {
       },
       "image",
     );
-    expect(out!.code).toBe(1001);
-    expect(out!.message).toBe("账户余额不足，请充值后重试");
+    expect(out!.code).toBe(1061);
+    expect(out!.message).toBe("生成服务额度不足，请联系平台管理员");
   });
 
   it("旧码归一：历史 invalid_video_inputs → invalid_reference 数值码 1034 + 码表文案", () => {
@@ -197,9 +194,7 @@ describe("projectPublicError", () => {
     expect(out!.message).toBe("参考素材无效，请重新选择");
   });
 
-  it("IKFL53: content_rejected_reference → 1038 + 文案「参考内容可能涉及版权限制」", () => {
-    // 版权拒绝任务 DB error.code=content_rejected_reference → 后端投影到 1038 + 中文文案，
-    // 不返上游 copyright 英文原文（含 Request id）。
+  it("IKFL53/IKJ8J8: content_rejected_reference → 1038 + 中性兜底文案", () => {
     const out = projectPublicError(
       {
         code: "content_rejected_reference",
@@ -209,13 +204,43 @@ describe("projectPublicError", () => {
       "video",
     );
     expect(out!.code).toBe(1038);
-    expect(out!.message).toBe("参考内容可能涉及版权限制");
+    expect(out!.message).toBe("生成内容可能涉及版权限制，请调整提示词或素材后重试");
+  });
+
+  it("IKJ8J8: content_rejected_audio → 1059 + 音频版权精确文案", () => {
+    const out = projectPublicError(
+      {
+        code: "content_rejected_audio",
+        message:
+          "The generated audio may involve copyright restrictions. Please revise your input and retry.",
+      },
+      "video",
+    );
+    expect(out!.code).toBe(1059);
+    expect(out!.message).toBe("生成的音频可能涉及版权限制，请调整提示词后重试");
   });
 
   it("白名单外码 fallback 到类型兜底：码表文案（视频生成失败）", () => {
     const out = projectPublicError({ code: "some_new_code" }, "video");
-    expect(out!.code).toBe(1021); // video_generation_failed
+    expect(out!.code).toBe(1021);
     expect(out!.message).toBe("视频生成失败");
+  });
+
+  it("IKHLK3: 插帧白名单外码 → 1049 + 插帧文案", () => {
+    const out = projectPublicError({ code: "some_new_code" }, "video_frame_interpolation");
+    expect(out!.code).toBe(1049);
+    expect(out!.message).toBe("视频插帧失败，请重试");
+  });
+
+  it("IKJFGQ：reason 随投影外发 canonical 字符串码——数值码撞号重排时前端识别的稳定锚点", () => {
+    const out = projectPublicError(
+      { code: "task_type_param_constraint", message: "任意" },
+      "video",
+    );
+    expect(out!.code).toBe(1060);
+    expect(out!.reason).toBe("task_type_param_constraint");
+    expect(projectPublicError({ code: "invalid_video_inputs" }, "video")!.reason).toBe("invalid_reference");
+    expect(projectPublicError({ code: "some_new_code" }, "video")!.reason).toBe("video_generation_failed");
   });
 
   it("null 输入返回 null", () => {
@@ -260,11 +285,9 @@ describe("messageFor", () => {
   });
 
   it("I一码一文案：provider_failed 统一文案，media_extract 码表文案（ADR-0083）", () => {
-    // IKDZGM / ADR-0083：一码一文案——provider_failed 不再按 type 分词。
     expect(messageFor(ERROR_PROVIDER_FAILED, "video")).toBe("生成服务响应异常");
     expect(messageFor(ERROR_PROVIDER_FAILED, "audio")).toBe("生成服务响应异常");
     expect(messageFor(ERROR_PROVIDER_FAILED, "image")).toBe("生成服务响应异常");
-    // media_extract 码：码表有文案（1020/1026 均「音频提取失败」），直接查表。
     expect(messageFor(ERROR_MEDIA_EXTRACT_FAILED, "media_extract")).toBe(
       "音频提取失败",
     );
@@ -281,8 +304,51 @@ describe("messageFor", () => {
   });
 
   it("projectPublicError 对 null stored_error 不抛错", () => {
-    // 失败 job 但 stored_error 为 null（历史数据/非对象 error）→ 投影返回 null，
-    // 调用方 jobs.service 会走类型兜底（code/msg 同步）。
     expect(projectPublicError(null, "video")).toBeNull();
+  });
+});
+
+describe("platform_quota_exhausted（ADR-0128：平台额度不足与个人积分不足分离）", () => {
+  it("新码 platform_quota_exhausted → 1061 + 平台文案", () => {
+    const out = projectPublicError(
+      {
+        code: "platform_quota_exhausted",
+        message: "预扣费额度失败，当前分组负载剩余额度不足",
+      },
+      "video",
+    );
+    expect(out!.code).toBe(1061);
+    expect(out!.reason).toBe("platform_quota_exhausted");
+    expect(out!.message).toBe("生成服务额度不足，请联系平台管理员");
+  });
+
+  it("旧记录 quota_exhausted + 上游欠费原文 → 按证据翻成 1061", () => {
+    const out = projectPublicError(
+      {
+        code: "quota_exhausted",
+        message: "预扣费额度失败：当前分组负载剩余额度不足",
+      },
+      "video",
+    );
+    expect(out!.code).toBe(1061);
+    expect(out!.message).toBe("生成服务额度不足，请联系平台管理员");
+  });
+
+  it("旧记录 quota_exhausted 但无额度证据 → 保持 1001（证据不足不推断）", () => {
+    const out = projectPublicError(
+      { code: "quota_exhausted", message: "任务执行失败" },
+      "video",
+    );
+    expect(out!.code).toBe(1001);
+    expect(out!.message).toBe("账户余额不足，请充值后重试");
+  });
+
+  it("普通上游异常不误报余额不足", () => {
+    const out = projectPublicError(
+      { code: "provider_failed", message: "upstream gateway 502" },
+      "video",
+    );
+    expect(out!.code).toBe(1011);
+    expect(out!.message).toBe("生成服务响应异常");
   });
 });

@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Deprecated: use an explicit publish-review-package create/update mode.
 
 set -euo pipefail
 

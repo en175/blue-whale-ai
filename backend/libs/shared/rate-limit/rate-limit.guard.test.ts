@@ -129,7 +129,6 @@ describe("RateLimitGuard", () => {
       headers: { "x-real-ip": "203.0.113.9" },
       body: { username: "alice" },
     });
-    // IP 命中即整请求豁免：account 桶也不计数、不 429
     await expect(guard.canActivate(context as never)).resolves.toBe(true);
     expect(take).not.toHaveBeenCalled();
   });
@@ -176,7 +175,6 @@ describe("RateLimitGuard", () => {
   });
 
   it("exempts a whitelisted IP end-to-end with the real allowlist (wiring check)", async () => {
-    // 不打桩 isAllowed：用真实 RateLimitAllowlist 接进 guard，钉住 X-Real-IP 取键接线
     vi.stubEnv("RATE_LIMIT_ALLOW_IPS", "203.0.113.0/24");
     vi.stubEnv("RATE_LIMIT_ALLOW_ACCOUNTS", "");
     const take = vi.fn().mockResolvedValue({ allowed: false, retryAfter: 1 });
@@ -208,7 +206,6 @@ describe("RateLimitGuard", () => {
       { take } as never,
       new RateLimitAllowlist(),
     );
-    // 客户端伪造 XFF 首值 + 真实连接 IP 不在名单：不豁免
     await expect(
       guard.canActivate(
         makeContext({
@@ -220,7 +217,6 @@ describe("RateLimitGuard", () => {
         }) as never,
       ),
     ).rejects.toMatchObject({ status: 429, code: RATE_LIMITED });
-    // 缺 X-Real-IP（如本地直连）同样按未命中处理，不回落 request.ip
     await expect(
       guard.canActivate(
         makeContext({
@@ -255,5 +251,54 @@ describe("RateLimitGuard", () => {
       ),
     ).rejects.toMatchObject({ status: 429, code: RATE_LIMITED });
     expect(take).toHaveBeenCalledTimes(1);
+  });
+
+  it("phone 维度的桶读 body.phone（发码路由），不读 body.username", async () => {
+    const take = vi.fn().mockResolvedValue({ allowed: true });
+    const options: RateLimitOptions = {
+      buckets: [
+        { scope: "send_code_phone_minute", key: "phone", limit: 1, windowMs: 60_000 },
+      ],
+    };
+    const guard = new RateLimitGuard(
+      { getAllAndOverride: () => options } as never,
+      { take } as never,
+      { isAllowed: () => false } as never,
+    );
+
+    await guard.canActivate(
+      makeContext({
+        headers: { "x-forwarded-for": "203.0.113.9" },
+        body: { phone: "13800001234" },
+      }) as never,
+    );
+
+    expect(take).toHaveBeenCalledWith({
+      scope: "send_code_phone_minute",
+      key: "13800001234",
+      limit: 1,
+      windowMs: 60_000,
+    });
+  });
+
+  it("★ 字段名对不上时桶**静默跳过**——这就是 phone 维度必须存在的原因", async () => {
+    const take = vi.fn();
+    const options: RateLimitOptions = {
+      buckets: [
+        { scope: "send_code_account", key: "account", limit: 1, windowMs: 60_000 },
+      ],
+    };
+    const guard = new RateLimitGuard(
+      { getAllAndOverride: () => options } as never,
+      { take } as never,
+      { isAllowed: () => false } as never,
+    );
+
+    await expect(
+      guard.canActivate(
+        makeContext({ headers: {}, body: { phone: "13800001234" } }) as never,
+      ),
+    ).resolves.toBe(true);
+    expect(take).not.toHaveBeenCalled();
   });
 });

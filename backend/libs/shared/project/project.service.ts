@@ -19,7 +19,6 @@ export class ProjectService {
     return this.repo.findOwnedById(id, ownerId);
   }
 
-  /** 按项目号解出主人（计费归属用，见 ProjectRepo.findOwnerId）。 */
   findOwnerId(id: string) {
     return this.repo.findOwnerId(id);
   }

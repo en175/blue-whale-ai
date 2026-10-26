@@ -1,4 +1,5 @@
 export { getPrismaClient, type PrismaClient } from "./db.js";
+export { assertClockAgreement } from "./clock-agreement.js";
 export { createAuthRepo, type AuthRepo } from "./auth-repo.js";
 export {
   createMaterialAssetRepo,
@@ -6,10 +7,6 @@ export {
   type MaterialAssetStatus,
   type MaterialAssetView,
 } from "./material-asset-repo.js";
-export {
-  createUserInfoRepo,
-  type UserInfoRepo,
-} from "./user-info-repo.js";
 export {
   createProjectRepo,
   type ProjectPage,
@@ -40,7 +37,25 @@ export {
   type JobStatusView,
   type JobPage,
   type JobListFilter,
+  type UserJobIdFilter,
+  type UserJobIdResult,
+  type AdminJobListItem,
+  type AdminJobPage,
+  type AdminJobListFilter,
+  type ChargeTaskSummary,
 } from "./job-repo.js";
+export {
+  decodeExtra,
+  encodeExtra,
+  extraNumber,
+  extraString,
+  loadJobExtras,
+  loadJobExtrasOne,
+  setJobExtras,
+  type ExtraEntries,
+  type ExtraType,
+  type JobExtras,
+} from "./generation-jobs-extra-repo.js";
 export {
   createSnapshotRepo,
   type SnapshotRepo,
@@ -51,7 +66,6 @@ export {
   type SnapshotMentionView,
   type SnapshotAssetRow,
   type SnapshotSceneCardView,
-  type SnapshotPlanApplicationReceiptView,
   type SnapshotSceneCardGenerationRecordView,
   type SnapshotStoryboardPreviewView,
 } from "./snapshot-repo.js";
@@ -67,6 +81,7 @@ export {
 } from "./conversation-repo.js";
 export {
   createModelCapabilityRepo,
+  serializePricingRule,
   DEFAULT_VIDEO_REFERENCE_MAX,
   DEFAULT_AUDIO_REFERENCE_MAX,
   DEFAULT_IMAGE_REFERENCE_MAX,
@@ -83,6 +98,7 @@ export {
   type UpdateModelCapabilityInput,
   type CreateModelCapabilityResult,
 } from "./model-capability-admin-repo.js";
+export { invalidateModelCapabilityCache } from "./model-capability-cache.js";
 export {
   createAssetRepo,
   assetDurationSeconds,
@@ -153,8 +169,11 @@ export {
 export {
   createHomepageHeroRepo,
   HOMEPAGE_HERO_MAX_ENABLED,
+  HOMEPAGE_HERO_SCENES,
+  isHomepageHeroScene,
   HomepageHeroLimitError,
   type HomepageHeroRepo,
+  type HomepageHeroScene,
   type HomepageHeroAdminView,
   type HomepageHeroPublicView,
   type CreateHomepageHeroInput,
@@ -169,8 +188,52 @@ export {
   createGenerationCommandRepo,
   type GenerationCommandRepo,
   type CreateJobInput,
+  type CreateJobOptions,
   type CreatedJob,
 } from "./generation-command-repo.js";
+export { markFailedQueuedAndNotifyBilling } from "./fail-enqueue.js";
+export {
+  CREATE_GENERATION_JOB_OPERATION,
+  FINALIZE_GENERATION_JOB_OPERATION,
+  readCreateIdempotency,
+  type CreateJobIdempotency,
+  type CreateJobResult,
+} from "./generation-job-idempotency.js";
+export {
+  RecoveryContractError,
+  canvasBindingView,
+  decodeRecoveryCursor,
+  encodeRecoveryCursor,
+  listCanvasRecoveryPage,
+  lockCanvasRecoveryForAcceptance,
+  projectCanvasNodeOwnerKeys,
+  projectHasRecoverySubmissions,
+  resolveCanvasRecoveryItems,
+  writeCanvasRecoveryRows,
+  type CanvasRecoveryAcceptance,
+  type CanvasRecoveryPlan,
+  type RecoveryItemView,
+  type RecoveryRecordView,
+} from "./generation-canvas-recovery-repo.js";
+export {
+  canvasRecoverySaveRequestHash,
+  guardLegacyCanvasWrite,
+  recoveryMarkerOfNode,
+  saveCanvasWithRecovery,
+  type CanvasRecoveryReceiptChange,
+  type CanvasRecoverySaveInput,
+  type CanvasRecoverySaveResult,
+} from "./canvas-recovery-save.js";
+export {
+  createFinalizeCommandRepo,
+  createFinalizeJob,
+  findFinalizeSourceJob,
+  type CreateFinalizeJobInput,
+  type FinalizeCommandRepo,
+  type FinalizeJobResult,
+  type FinalizeSourceJob,
+} from "./generation-finalize-repo.js";
+export type { JobBilling, JobBillingSource } from "./job-billing.js";
 export {
   aggregateSlotStatus,
   resolveLogicalSlots,
@@ -215,6 +278,8 @@ export {
   createTopupTierRepo,
   type TopupTierRepo,
   type TopupTierView,
+  type TopupTierStatus,
+  type TopupTierPermission,
   type CreateTopupTierInput,
   type UpdateTopupTierInput,
 } from "./topup-tier-repo.js";
@@ -231,3 +296,30 @@ export {
   type CostAdjustmentItemInput,
   type CostAdjustmentBatchInput,
 } from "./cost-adjustment-repo.js";
+export {
+  createRechargeOrderRepo,
+  RECHARGE_ORDER_STATUS,
+  RECHARGE_ORDER_STATUSES,
+  PAID_REACHED_STATUSES,
+  RECHARGE_ORDER_SNAPSHOT_DEFAULTS,
+  type RechargeOrderRepo,
+  type RechargeOrderView,
+  type RechargeOrderStatus,
+  type CreateRechargeOrderInput,
+  type RechargeOrderListFilter,
+  type RechargeOrderPage,
+  type AbandonedGrants,
+} from "./recharge-order-repo.js";
+export {
+  createRechargeCustomConfigRepo,
+  RECHARGE_CUSTOM_SETTING_KEY,
+  RechargeCustomConfigConflictError,
+  type RechargeCustomConfigRepo,
+  type RechargeCustomConfigView,
+  type SaveRechargeCustomConfigInput,
+} from "./recharge-custom-config-repo.js";
+export {
+  createSystemSettingRepo,
+  type SystemSettingRepo,
+  type SystemSettingRow,
+} from "./system-setting-repo.js";

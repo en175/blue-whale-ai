@@ -1,23 +1,12 @@
--- ============================================================
--- IK6GXG 全量 seed：skill 表 → 0710 版 108 条（cn01-cn108），含 skill_code + 33 封面
--- 生成时间：2026-08-05 | 数据源：测试库已验证的 108 行状态（mysqldump）
--- 适用：全新生产库（blue_whale）——表结构来自 001_baseline.sql（无 skill_code 列）
--- 概览：幂等 ALTER 加 skill_code + 唯一键 + 108 行 INSERT IGNORE（空库/已有库均可跑）
--- 生产执行：从生产机 docker run --rm --network host mysql:8 mysql --default-character-set=utf8mb4 -h10.0.1.176 -P4407 -u<账号> -p<口令> blue_whale < 004_seed_skill_108_full.sql
--- 验收：执行后 skill=108（is_delete=0）、skill_code 108/108 有值、33 封面按 skill_code 挂载
--- ============================================================
 SET NAMES utf8mb4;
 USE blue_whale;
 
--- ---------- 0. 确保 skill_code 列存在（幂等） ----------
 SET @ddl = IF(EXISTS(SELECT 1 FROM information_schema.COLUMNS
   WHERE TABLE_SCHEMA='blue_whale' AND TABLE_NAME='skill' AND COLUMN_NAME='skill_code'),
   'SELECT 1',
   'ALTER TABLE skill ADD COLUMN skill_code VARCHAR(32) NULL DEFAULT NULL COMMENT ''skill cnXX 稳定编号'' AFTER name, ADD UNIQUE KEY uk_skill_code (skill_code)');
 PREPARE s FROM @ddl; EXECUTE s; DEALLOCATE PREPARE s;
 
--- 若列已存在但缺唯一索引（二次执行场景）：
--- ALTER TABLE skill ADD UNIQUE KEY uk_skill_code (skill_code);
 
 START TRANSACTION;
 INSERT IGNORE INTO `skill` (`id`, `name`, `skill_code`, `description`, `content`, `source`, `sort_order`, `cover_url`, `gmt_create`, `gmt_modified`, `version`, `is_delete`) VALUES (1,'Tvc Product Ad','cn01','使用此技能将电商产品视频结构化为精致、高端的电视广告（TVC）。在需要高端品牌影片、电影级产品广告或美学产品叙事时触发。不适用于随意、快节奏或用户生成内容（UGC）风格。','---\nname: custom-ecom-tvc-product-ad\ndescription: 使用此技能将电商产品视频结构化为精致、高端的电视广告（TVC）。在需要高端品牌影片、电影级产品广告或美学产品叙事时触发。不适用于随意、快节奏或用户生成内容（UGC）风格。\nversion: 0.1.0\n---\n\n## 说明\n\n将此格式作为电商产品视频分镜和脚本的创意指导。在整个创作过程中保持品牌安全、高端的基调。\n\n### 创意方向\n- **视觉：** 以产品高光时刻或高价值生活方式场景开场。指定有意图的镜头运动，如慢速推轨、微距推进、受控环绕或优雅的产品特写。\n- **灯光：** 设计高端美学，运用柔和的补光、轮廓光、光泽高光和干净的反光。\n- **内容：** 优先通过视觉叙事而非对话。聚焦产品质感、使用方式和转变过程以展示价值。\n\n### 脚本结构\n- **开场（0:00-0:03）：** 利用感官惊喜、品类对比或精致解决方案设计高端钩子。避免通用美妆镜头。\n- **中段（0:03-0:18）：** 通过受控构图详细展示1-2个功效演示。\n- **结尾（0:18-0:25）：** 以英雄产品特写、品牌标语或最终美学美妆镜头收尾。\n\n### 限制条件\n- **结尾：** 禁止使用平台行动号召短语（例如“立即点击”、“上滑”、“简介链接”）。结尾必须由品牌或情感驱动。\n- **通用：** 避免拥挤场景、过多文字叠加、混乱剪辑或激进硬销语言。\n\n## 使用时机\n\n### 适用场景\n- 制作高端广告、品牌影片或提升产品广告档次。\n- 规划需要受控灯光和精致镜头运动的项目。\n- 目标是通过电影级品质建立品牌渴望和信任。\n\n### 不适用场景\n- 随意、真实或“开箱式”用户生成内容（UGC）视频。\n- 采用直接响应或硬销策略的快节奏、高密度社交媒体广告。\n- 互动广告格式。\n\n## 示例\n\n**脚本框架：**\n- **开场：** 精致产品揭晓；触感动作固定框架。文字：“小细节。大不同。”\n- **中段：** 高端环境中的受控生活方式证明镜头；展示纹理/材质的微距机械镜头。\n- **结尾：** 带品牌标志的英雄产品特写。标语：“为日常自信而生。”\n','official',1,NULL,'2026-07-10 05:11:51','2026-08-05 01:26:28',0,0);

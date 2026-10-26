@@ -2,9 +2,6 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
-// IK6ZEH 回归防护：002_seed.sql 的每行都必须满足 001_baseline.sql 的 NOT NULL 约束。
-// C1 复盘：text 行曾在 supported_sizes 等 5 列写 NULL → fresh MySQL 8.4（STRICT_TRANS_TABLES）
-// 报 1048，listEnabledByType("text") 返回 []，接口 400。单测 mock 了 repo，测不出来，故在此静态断言。
 
 const seedPath = resolve(import.meta.dirname, "../../../prisma/schema/002_seed.sql");
 const baselinePath = resolve(import.meta.dirname, "../../../prisma/schema/001_baseline.sql");
@@ -24,7 +21,6 @@ const NOT_NULL_COLUMNS = [
   "sort_order",
 ];
 
-/** 按顶层逗号切分元组/列值：追踪单引号（'' 转义）与括号深度，忽略引号内/嵌套括号内的逗号。 */
 function splitTopLevel(input: string): string[] {
   const parts: string[] = [];
   let depth = 0;
@@ -62,12 +58,10 @@ function seedTuples(sql: string): Array<{ columns: string[]; values: string[] }>
   const valuesIndex = sql.indexOf(header);
   if (valuesIndex === -1) throw new Error("no VALUES in seed");
   const valuesBody = sql.slice(valuesIndex + header.length);
-  // 元组从 `  (` 开始（顶格为对齐），到 `\n  )` 结束（`,/;` 收尾）。
   const tuples: Array<{ columns: string[]; values: string[] }> = [];
   for (const tupleMatch of valuesBody.matchAll(/\n  \((.*?)\n  \)/gs)) {
     const inner = tupleMatch[1];
     const parts = splitTopLevel(inner);
-    // 去掉尾随的 `,` / `;`
     const last = parts[parts.length - 1].replace(/[,;]\s*$/, "");
     parts[parts.length - 1] = last;
     tuples.push({ columns: COLUMN_NAMES, values: parts });
@@ -91,14 +85,12 @@ const COLUMN_NAMES = [
   "features",
   "enabled",
   "sort_order",
-  "channel_parser",
   "request_mapping",
 ];
 
 describe("002_seed.sql 满足 001_baseline.sql 的 NOT NULL 约束", () => {
   const seed = readFileSync(seedPath, "utf8");
   const baseline = readFileSync(baselinePath, "utf8");
-  // 从 baseline 提取 NOT NULL 非默认列名。
   const tableMatch = baseline.match(
     /CREATE TABLE `generation_model_capability` \(([\s\S]*?)\n\)/,
   );
@@ -108,7 +100,6 @@ describe("002_seed.sql 满足 001_baseline.sql 的 NOT NULL 约束", () => {
     const m = line.match(/`(\w+)`\s+\w+[^,]*(?: NOT NULL)/);
     if (m && !line.includes("DEFAULT")) notNullColumns.add(m[1]);
   }
-  // 忽略带默认值的 NOT NULL（gmt_create/gmt_modified/enabled/sort_order/is_delete 等）。
   for (const col of ["gmt_create", "gmt_modified", "is_delete"]) {
     notNullColumns.delete(col);
   }

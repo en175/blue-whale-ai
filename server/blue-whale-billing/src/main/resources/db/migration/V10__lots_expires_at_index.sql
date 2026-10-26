@@ -1,0 +1,46 @@
+-- billing_credit_lots 补 expires_at 单列索引（过期核销扫描按「已到期」跨全部用户取数）。
+--
+-- 版本号继续往后排（V5 空号见 V6__reservation_title.sql 的说明：跑过 V5 的库在
+-- flyway_schema_history 里留着那一行，版本号不随文件回收）。
+--
+-- ── 先纠正 V3 里一句会被误读的话 ─────────────────────────────────────────────
+-- V3 建表注释写着「过期靠查询条件排除，**不需要定时任务删**」。那句针对的是**删行**，
+-- 到现在仍然成立：本表没有、也不该有删除过期行的任务（删了就没法回答「那 500 分是怎么没的」）。
+-- 但**核销流水**是另一回事——过期要在账本上留痕、在用户流水里出现一行，
+-- 这件事查询条件永远做不到，所以补了一条扫描任务（CreditExpirySweeper，
+-- 每小时一轮）。它只写分录与扣减 remaining，**不删任何行**。
+--
+-- ── 为什么需要这个索引 ────────────────────────────────────────────────────────
+-- 核销扫描的取数是**全表范围**的（不属于任何单个用户）：
+--
+--   FROM billing_credit_lots
+--   WHERE expires_at IS NOT NULL AND expires_at <= NOW() AND remaining > frozen
+--   ORDER BY expires_at ASC LIMIT ?
+--
+-- 本表此前只有 PRIMARY(id)、uk_lots__grant_key(grant_key)、
+-- idx_lots__user_expiry(user_id, expires_at)、idx_lots__user_id(user_id, id)。
+-- 注意 idx_lots__user_expiry 的**首列是 user_id**：它服务的是「某个用户的余额与临期批次」，
+-- 对「全库范围内 expires_at ≤ NOW()」这个区间**一点忙都帮不上**（前导列不是等值条件，
+-- 引擎无法用它收窄范围）。于是这条每小时跑一次（且随任务量增长）的语句此前只能
+-- **全表扫描 + 文件排序**。
+--
+-- ── 为什么是单列、为什么够用 ──────────────────────────────────────────────────
+-- 这一列正好满足三件事：
+--   1. 区间收窄：expires_at <= NOW() 是一次索引区间扫描，范围外的行根本不读；
+--   2. 天然跳过永久批次：NULL 不在任何区间里（{@code expires_at IS NOT NULL} 由区间本身满足），
+--      所以「永久」的批次不参与、也不需要在索引里被过滤掉；
+--   3. 顺序取数：ORDER BY expires_at ASC 与索引同序，**不需要文件排序**，
+--      而 LIMIT 因有序可以提前停 —— 首轮积压时这一点尤其值钱。
+--
+-- ⚠️ `remaining > frozen` 不进索引：它是**可核销量**的判断，不是范围条件，
+--    进索引只会把索引加宽又换不到收窄。它留在回表后过滤。
+--
+-- ⚠️ 大表加索引会锁写。本表随发放增长（一次发放一行），当前量级下是秒级操作；
+--    若线上已到千万级，需要走在线 DDL（pt-online-schema-change / gh-ost）。
+--
+-- ⚠️ 存量批次**不回填** expires_at：NULL（永久）保持 NULL。
+--    「存量余额也进入 2 年有效期」若要落实，那是一次显式的数据迁移（把 gmt_create + 2 年
+--    写进 expires_at），会当场让一部分历史余额过期——那是产品决策，不是本迁移的副作用。
+--    本次只改发放策略（GrantPolicy），影响此后新发的批次。
+ALTER TABLE billing_credit_lots
+  ADD KEY idx_lots__expires_at (expires_at);

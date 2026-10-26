@@ -21,20 +21,36 @@ function makeContext(cookieValue?: string) {
 
 function makeGuard(opts: {
   isPublic?: boolean;
+  verifyToken?: (token: string) => Promise<unknown>;
   resolveSession?: (token: string) => Promise<unknown>;
-  resolveIdentity?: () => Promise<unknown>;
+  resolveAccessState?: () => Promise<unknown>;
+  wasEvicted?: () => Promise<boolean>;
 } = {}) {
   const reflector = {
     getAllAndOverride: () => opts.isPublic ?? false,
   };
   const sessions = {
+    verifyToken:
+      opts.verifyToken ??
+      (async () => ({
+        userId: "8",
+        jti: "jti-1",
+        type: "access",
+        expiresAt: Date.now() + 7 * 24 * 60 * 60 * 1000,
+      })),
     resolveSession: opts.resolveSession ?? (async () => null),
     updateSessionIdentity: async () => undefined,
+    wasEvicted: opts.wasEvicted ?? (async () => false),
   };
-  const account = {
-    resolveTokenIdentity: opts.resolveIdentity ?? (async () => ({ role: 1, status: 1 })),
+  const identity = {
+    resolveAccessState:
+      opts.resolveAccessState ?? (async () => ({ role: 1, status: 1 })),
   };
-  return new AuthGuard(reflector as never, sessions as never, account as never);
+  return new AuthGuard(
+    reflector as never,
+    sessions as never,
+    identity as never,
+  );
 }
 
 const VALID_SESSION = {
@@ -43,11 +59,10 @@ const VALID_SESSION = {
   role: 10,
   status: 1,
   email: "alice@example.com",
-  sk: "sk-real",
   needsRecheck: false,
 };
 
-describe("AuthGuard（HttpOnly cookie 会话校验 + 头回注，ADR-0062 #19）", () => {
+describe("AuthGuard（HttpOnly cookie 会话校验，ADR-0062 #19）", () => {
   it("public 路由放行且不改写请求头、不刷新 cookie", async () => {
     const guard = makeGuard({ isPublic: true });
     const { context, request, cookie } = makeContext();
@@ -64,11 +79,11 @@ describe("AuthGuard（HttpOnly cookie 会话校验 + 头回注，ADR-0062 #19）
     });
   });
 
-  it("合法会话 cookie → 回注 sk-、填充 user、刷新 cookie", async () => {
+  it("合法会话 cookie → 填充 user、刷新 cookie", async () => {
     const guard = makeGuard({ resolveSession: async () => VALID_SESSION });
     const { context, request, cookie } = makeContext("sess_abc");
     await expect(guard.canActivate(context as never)).resolves.toBe(true);
-    expect(request.headers.authorization).toBe("Bearer sk-real");
+    expect(request.headers.authorization).toBeUndefined();
     expect(request.user).toEqual({
       userId: "8",
       status: "enabled",
@@ -83,12 +98,40 @@ describe("AuthGuard（HttpOnly cookie 会话校验 + 头回注，ADR-0062 #19）
     );
   });
 
-  it("会话不存在/过期（resolve 返回 null）→ 401", async () => {
+  it("会话不存在/过期（resolve 返回 null）→ 401 session_expired", async () => {
     const guard = makeGuard();
     const { context } = makeContext("sess_dead");
     await expect(guard.canActivate(context as never)).rejects.toMatchObject({
       status: 401,
+      code: "session_expired",
     });
+  });
+
+  it("被第 4 个浏览器挤出 → 401 session_evicted（前端据此换文案）", async () => {
+    const guard = makeGuard({ wasEvicted: async () => true });
+    const { context } = makeContext("sess_evicted");
+    await expect(guard.canActivate(context as never)).rejects.toMatchObject({
+      status: 401,
+      code: "session_evicted",
+    });
+  });
+
+  it("cookie 的 maxAge 跟随 JWT 剩余时间，不在每次访问时续成 7 天", async () => {
+    const guard = makeGuard({
+      verifyToken: async () => ({
+        userId: "8",
+        jti: "jti-1",
+        type: "access",
+        expiresAt: Date.now() + 60_000,
+      }),
+      resolveSession: async () => VALID_SESSION,
+    });
+    const { context, cookie } = makeContext("sess_abc");
+    await guard.canActivate(context as never);
+
+    const options = cookie.mock.calls[0]?.[2] as { maxAge?: number };
+    expect(options.maxAge).toBeGreaterThan(0);
+    expect(options.maxAge).toBeLessThanOrEqual(60_000);
   });
 
   it("账户停用（status ≠ 1）→ 403", async () => {
@@ -101,10 +144,11 @@ describe("AuthGuard（HttpOnly cookie 会话校验 + 头回注，ADR-0062 #19）
     });
   });
 
-  it("needsRecheck=true 时回源 new-api 复核并回写，禁用立即 403", async () => {
+  it("needsRecheck=true 时回源身份库复核并回写，冻结立即 403", async () => {
     const update = vi.fn();
     const reflector = { getAllAndOverride: () => false };
     const sessions = {
+      verifyToken: async () => ({ userId: "8", jti: "jti-1", type: "access" }),
       resolveSession: async () => ({
         ...VALID_SESSION,
         status: 1,
@@ -112,14 +156,13 @@ describe("AuthGuard（HttpOnly cookie 会话校验 + 头回注，ADR-0062 #19）
       }),
       updateSessionIdentity: update,
     };
-    const account = {
-      // 上游已禁用该账户
-      resolveTokenIdentity: async () => ({ role: 10, status: 0 }),
+    const identity = {
+      resolveAccessState: async () => ({ role: 10, status: 0 }),
     };
     const guard = new AuthGuard(
       reflector as never,
       sessions as never,
-      account as never,
+      identity as never,
     );
     const { context } = makeContext("sess_abc");
     await expect(guard.canActivate(context as never)).rejects.toMatchObject({
@@ -128,11 +171,22 @@ describe("AuthGuard（HttpOnly cookie 会话校验 + 头回注，ADR-0062 #19）
     expect(update).toHaveBeenCalledWith("sess_abc", { role: 10, status: 0 });
   });
 
-  it("needsRecheck=true 但上游不可达 → 沿用缓存身份放行", async () => {
+  it("复核查的是会话里的 userId", async () => {
+    const resolveAccessState = vi.fn(async () => ({ role: 1, status: 1 }));
     const guard = makeGuard({
       resolveSession: async () => ({ ...VALID_SESSION, needsRecheck: true }),
-      resolveIdentity: async () => {
-        throw new Error("upstream down");
+      resolveAccessState,
+    });
+    const { context } = makeContext("sess_abc");
+    await expect(guard.canActivate(context as never)).resolves.toBe(true);
+    expect(resolveAccessState).toHaveBeenCalledWith(8);
+  });
+
+  it("needsRecheck=true 但身份库不可达 → 沿用缓存身份放行", async () => {
+    const guard = makeGuard({
+      resolveSession: async () => ({ ...VALID_SESSION, needsRecheck: true }),
+      resolveAccessState: async () => {
+        throw new Error("db down");
       },
     });
     const { context } = makeContext("sess_abc");
@@ -151,13 +205,54 @@ describe("AuthGuard（HttpOnly cookie 会话校验 + 头回注，ADR-0062 #19）
     });
   });
 
-  it("普通用户（role < 10）→ isAdmin=false，头照常回注", async () => {
+  it("普通用户（role < 10）→ isAdmin=false", async () => {
     const guard = makeGuard({
       resolveSession: async () => ({ ...VALID_SESSION, role: 1 }),
     });
     const { context, request } = makeContext("sess_abc");
     await expect(guard.canActivate(context as never)).resolves.toBe(true);
     expect((request.user as { isAdmin: boolean }).isAdmin).toBe(false);
-    expect(request.headers.authorization).toBe("Bearer sk-real");
+  });
+  it("★ 令牌验签不通过（篡改/过期）→ 401，且**不碰 Redis**", async () => {
+    const resolveSession = vi.fn();
+    const guard = makeGuard({
+      verifyToken: async () => {
+        throw new Error("invalid signature");
+      },
+      resolveSession,
+    });
+    const { context } = makeContext("sess_tampered");
+
+    await expect(guard.canActivate(context as never)).rejects.toMatchObject({
+      status: 401,
+    });
+    expect(resolveSession).not.toHaveBeenCalled();
+  });
+
+  it("★ 请求头优先于 cookie（IKJAZL 迁移期双读）", async () => {
+    const resolveSession = vi.fn(async (token: string) =>
+      token === "header-token" ? VALID_SESSION : null,
+    );
+    const guard = makeGuard({ resolveSession });
+    const { context, request, cookie } = makeContext("cookie-token");
+    request.headers.authorization = "Bearer header-token";
+
+    await expect(guard.canActivate(context as never)).resolves.toBe(true);
+    expect(resolveSession).toHaveBeenCalledWith("header-token");
+    expect(cookie).toHaveBeenCalledWith(
+      "bw_session",
+      "header-token",
+      expect.objectContaining({ httpOnly: true }),
+    );
+  });
+
+  it("请求头不是 Bearer 形态 → 回退读 cookie", async () => {
+    const resolveSession = vi.fn(async () => VALID_SESSION);
+    const guard = makeGuard({ resolveSession });
+    const { context, request } = makeContext("cookie-token");
+    request.headers.authorization = "Basic abc";
+
+    await expect(guard.canActivate(context as never)).resolves.toBe(true);
+    expect(resolveSession).toHaveBeenCalledWith("cookie-token");
   });
 });

@@ -1,7 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-/** 假的 ioredis：只实现本模块用得到的那几个方法，外加故障注入开关。
- *  参照 `rate-limit/rate-limiter.test.ts` 的 house style（vi.hoisted + vi.mock）。 */
 const { FakeRedis, state } = vi.hoisted(() => {
   const state = {
     store: new Map<string, string>(),
@@ -63,7 +61,6 @@ const view = (modelId: string) => ({ model_id: modelId }) as never;
 beforeEach(() => {
   vi.stubEnv("REDIS_HOST", "127.0.0.1");
   vi.stubEnv("REDIS_CONN_STRING", "");
-  // 模块在 NODE_ENV=test 下一律旁路（门控集成测试需要），测缓存本身要把它摘掉。
   vi.stubEnv("NODE_ENV", "production");
   state.store.clear();
   state.lastSetArgs = [];

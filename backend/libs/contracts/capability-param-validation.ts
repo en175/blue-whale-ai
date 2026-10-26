@@ -1,32 +1,71 @@
-// IKE7JP：生成参数对模型能力目录的结构性校验（纯函数，无 IO）。
-// 提交侧（Dock 视频/图片）在接纳当下校验 resolution/size/aspect_ratio/duration 是否
-// 落在能力目录支持范围，失败直接 4xx 返回带可用值的可修复文案，不再拖到 worker 执行期。
-//
-// 与 SceneCard 路径的 checkCapabilityLimit（scene-card-generation-repo.ts）语义一致：
-// 那里的入参是 frozenGenerationParametersSchema（size + aspect_ratio + duration 档位 id），
-// 这里把 Dock 的扁平字段（resolution + aspect_ratio + duration）归一化后同源校验。
-// 后续可把 checkCapabilityLimit 迁到本文件共享（IKE7JP 下一步）。
 
-import { ERROR_CAPABILITY_UNSUPPORTED_RESOLUTION, ERROR_CAPABILITY_UNSUPPORTED_RATIO, ERROR_CAPABILITY_UNSUPPORTED_DURATION } from "./error-codes.js";
 
-/** 提交侧能力目录行（handleCreateGenerationJob 已从 listEnabledByType 取回）。 */
+
+
+
+
+
+
+
+import {
+  ERROR_CAPABILITY_UNSUPPORTED_RESOLUTION,
+  ERROR_CAPABILITY_UNSUPPORTED_RATIO,
+  ERROR_CAPABILITY_UNSUPPORTED_DURATION,
+  ERROR_TASK_TYPE_PARAM_CONSTRAINT,
+  ERROR_CODES,
+  errorCodeToNumeric,
+} from "./error-codes.js";
+
+
 export interface CapabilityLimitInput {
   supported_sizes: Array<{ id?: string; api_value?: string }>;
   supported_aspect_ratios: unknown;
   supported_durations: unknown;
   default_size?: string;
-  /** IKFPYX：按任务类型的比例/时长约束（features.task_types）。命中时覆盖基础比例/时长校验。 */
+
   task_types?: unknown;
 }
 
-/** IKFPYX：视频任务类型（官方口径，由输入素材角色 + 提示词意图判定）。
- *  与火山方舟 Seedance 2.5 使用必读一致：首帧/首尾帧按 references 角色；编辑/延长需参考视频 + 提示词意图。 */
-export type VideoTaskType = "default" | "first_frame" | "first_last_frame" | "edit" | "prolong";
+export const VIDEO_MODES = [
+  "text2video",
+  "omni",
+  "image_reference",
+  "first_frame",
+  "first_last_frame",
+  "edit",
+  "extend",
+] as const;
 
-/** 编辑意图关键词（官方：「编辑视频、增加/加上、删除/去掉、修改/替换/改成」）。 */
-const EDIT_INTENT_KEYWORDS = [
+export type VideoMode = (typeof VIDEO_MODES)[number];
+
+export const EDIT_MODE_VIDEO_REFERENCE_MAX = 1;
+
+const LEGACY_VIDEO_MODE: Record<string, VideoMode> = {
+  default: "text2video",
+  prolong: "extend",
+};
+
+export function isVideoMode(raw: unknown): raw is VideoMode {
+  return typeof raw === "string" && (VIDEO_MODES as readonly string[]).includes(raw);
+}
+
+export function normalizeVideoMode(raw: unknown): VideoMode | null {
+  if (typeof raw !== "string") return null;
+  if (isVideoMode(raw)) return raw;
+  return LEGACY_VIDEO_MODE[raw] ?? null;
+}
+
+
+
+
+
+
+
+
+
+
+export const EDIT_INTENT_KEYWORDS = [
   "编辑视频",
-  "编辑",
   "增加",
   "加上",
   "删除",
@@ -36,24 +75,74 @@ const EDIT_INTENT_KEYWORDS = [
   "改成",
 ] as const;
 
-/** 延长意图关键词（官方：「向前/向后延长、延续、续写」）。 */
-const PROLONG_INTENT_KEYWORDS = ["延长", "延续", "续写", "向前", "向后"] as const;
 
-/** IKFPYX：判定视频任务类型（纯函数，无 IO；backend 与 worker-java 同源口径）。
- *  优先级：首尾帧角色 > 单帧角色 > 参考视频 + 提示词意图（延长先于编辑，后者词面更宽）> default。 */
-export function resolveVideoTaskType(
+
+
+
+
+
+export const PROLONG_INTENT_KEYWORDS = ["向前延长", "向后延长", "延续", "续写"] as const;
+
+
+
+
+
+
+
+
+export const NEGATION_KEYWORDS = ["禁止", "不得", "不要", "不能", "勿", "无需"] as const;
+
+
+const CLAUSE_SEPARATORS = /[，。；！？、,.;!?]/;
+
+
+
+
+function hasIntentKeyword(prompt: string, words: readonly string[]): boolean {
+  return prompt.split(CLAUSE_SEPARATORS).some(
+    (clause) =>
+      !NEGATION_KEYWORDS.some((n) => clause.includes(n)) && words.some((w) => clause.includes(w)),
+  );
+}
+
+export function resolveVideoMode(
   references: ReadonlyArray<{ role: string; type: string }>,
   prompt: string,
-): VideoTaskType {
+): VideoMode {
   const hasFirst = references.some((r) => r.role === "first_frame");
   const hasLast = references.some((r) => r.role === "last_frame");
   if (hasFirst && hasLast) return "first_last_frame";
   if (hasFirst || hasLast) return "first_frame";
-  const hasVideoRef = references.some((r) => r.role === "reference" && r.type === "video");
-  if (!hasVideoRef) return "default";
-  if (PROLONG_INTENT_KEYWORDS.some((w) => prompt.includes(w))) return "prolong";
-  if (EDIT_INTENT_KEYWORDS.some((w) => prompt.includes(w))) return "edit";
-  return "default";
+  const ordinary = references.filter((r) => r.role === "reference");
+  const videoRefCount = ordinary.filter((r) => r.type === "video").length;
+  if (videoRefCount > 0) {
+    if (videoRefCount > EDIT_MODE_VIDEO_REFERENCE_MAX) return "omni";
+    if (hasIntentKeyword(prompt, PROLONG_INTENT_KEYWORDS)) return "extend";
+    if (hasIntentKeyword(prompt, EDIT_INTENT_KEYWORDS)) return "edit";
+    return "omni";
+  }
+  if (ordinary.some((r) => r.type === "audio")) return "omni";
+  if (ordinary.some((r) => r.type === "image")) return "image_reference";
+  return "text2video";
+}
+
+
+
+
+
+
+export const TASK_TYPE_PARAM_CONSTRAINT_MESSAGE =
+  ERROR_CODES[errorCodeToNumeric(ERROR_TASK_TYPE_PARAM_CONSTRAINT)]!;
+
+export const FROZEN_VIDEO_MODE_KEY = "video_mode";
+
+export const LEGACY_FROZEN_VIDEO_MODE_KEY = "video_task_type";
+
+export function frozenVideoModeOf(input: unknown): VideoMode {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) return "text2video";
+  const row = input as Record<string, unknown>;
+  const raw = row[FROZEN_VIDEO_MODE_KEY] ?? row[LEGACY_FROZEN_VIDEO_MODE_KEY];
+  return normalizeVideoMode(raw) ?? "text2video";
 }
 
 function readStringArray(v: unknown): string[] | null {
@@ -66,42 +155,163 @@ function readNumberArray(v: unknown): number[] | null {
     : null;
 }
 
-/** 取该任务类型的约束（未传任务类型/无该类型配置/非法形态 → null = 回落基础能力校验）。
- *  注：`default` 也照常取用——配了 default 约束就应按它校验（否则该配置形同虚设）。 */
-function taskTypeConstraint(
-  capability: CapabilityLimitInput,
-  taskType: VideoTaskType | undefined,
+
+
+
+
+
+
+export function modeAllowedRatios(
+  taskTypes: unknown,
+  mode: VideoMode | undefined,
+): string[] | null {
+  return readStringArray(modeConstraint(taskTypes, mode)?.allowed_ratios);
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+const SPEC_KEY_AXES = ["resolution", "aspect_ratio"] as const;
+
+
+const PIXELS_RE = /^([1-9][0-9]*)x([1-9][0-9]*)$/;
+
+
+
+
+
+
+export function parseSpecKey(key: string): Record<string, string> | null {
+  const out: Record<string, string> = {};
+  for (const part of key.split("|")) {
+    const eq = part.indexOf("=");
+    if (eq <= 0) return null;
+    const axis = part.slice(0, eq);
+    const value = part.slice(eq + 1);
+    if (value.length === 0) return null;
+    if (!(SPEC_KEY_AXES as readonly string[]).includes(axis)) return null;
+    if (out[axis] !== undefined) return null;
+    out[axis] = value;
+  }
+
+  return SPEC_KEY_AXES.every((a) => out[a] !== undefined) ? out : null;
+}
+
+
+export function specKeyOf(resolution: string, aspectRatio: string): string {
+  return `resolution=${resolution}|aspect_ratio=${aspectRatio}`;
+}
+
+
+
+
+
+
+
+
+
+export function normalizeSpecKey(raw: string): string {
+  const parts: Array<[string, string]> = [];
+  for (const pair of raw.split("|")) {
+    const at = pair.indexOf("=");
+    if (at <= 0) return raw.trim().toLowerCase();
+    parts.push([pair.slice(0, at).trim().toLowerCase(), pair.slice(at + 1).trim().toLowerCase()]);
+  }
+  parts.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+  return parts.map(([k, v]) => `${k}=${v}`).join("|");
+}
+
+
+export function parsePixels(value: string): { width: number; height: number } | null {
+  const m = PIXELS_RE.exec(value);
+  return m === null ? null : { width: Number(m[1]), height: Number(m[2]) };
+}
+
+
+
+
+
+
+export function resolveOutputPixels(
+  dimensions: unknown,
+  resolution: string,
+  aspectRatio: string,
+): { width: number; height: number } | null {
+  if (typeof dimensions !== "object" || dimensions === null || Array.isArray(dimensions)) {
+    return null;
+  }
+
+
+  const map = dimensions as Record<string, unknown>;
+  const exact = map[specKeyOf(resolution, aspectRatio)];
+  if (typeof exact === "string") return parsePixels(exact);
+
+  const target = normalizeSpecKey(specKeyOf(resolution, aspectRatio));
+  for (const [key, value] of Object.entries(map)) {
+    if (typeof value !== "string") continue;
+    if (normalizeSpecKey(key) === target) return parsePixels(value);
+  }
+  return null;
+}
+
+
+
+function modeConstraint(
+  taskTypes: unknown,
+  mode: VideoMode | undefined,
 ): Record<string, unknown> | null {
-  if (!taskType) return null;
-  const map = capability.task_types;
+  if (!mode) return null;
+  const map = taskTypes;
   if (!map || typeof map !== "object" || Array.isArray(map)) return null;
-  const entry = (map as Record<string, unknown>)[taskType];
+  const entry = (map as Record<string, unknown>)[mode];
   return entry && typeof entry === "object" && !Array.isArray(entry)
     ? (entry as Record<string, unknown>)
     : null;
 }
 
-/** 提交侧待校验参数（Dock 视频/图片扁平字段，归一化由调用方完成）。 */
-export interface GenerationParamCheckInput {
-  /** 视频分辨率档（如 1080p）或图片尺寸档（如 2k）——与能力行 supported_sizes 的 id/api_value 比对。 */
-  size: string;
-  aspect_ratio: string;
-  /** 视频时长（秒）。图片/音频不校验。 */
-  duration?: number;
-  /** IKFPYX：视频任务类型（命中 features.task_types 时按该类型的比例/时长约束校验）。 */
-  task_type?: VideoTaskType;
+
+
+
+
+export function hasModeConstraint(
+  taskTypes: unknown,
+  mode: VideoMode,
+): boolean {
+  return modeConstraint(taskTypes, mode) !== null;
 }
 
-/** 校验失败原因：带可用值提示，前端可直接展示。 */
+
+export interface GenerationParamCheckInput {
+
+  size: string;
+  aspect_ratio: string;
+
+  duration?: number;
+  mode?: VideoMode;
+}
+
+
 export interface CapabilityParamFailure {
   reason: string;
-  /** 供日志/调试；对外 message 用 reason。 */
+
   field: "size" | "aspect_ratio" | "duration";
-  /** IKE7JP：细分错误码（resolution/ratio/duration 各一，出自码表）。 */
+
   code: string;
 }
 
-/** 尺寸档命中：按 id 或 api_value 比对能力行 supported_sizes 元素。 */
+
 function matchesSize(
   size: string,
   supported: CapabilityLimitInput["supported_sizes"],
@@ -109,7 +319,7 @@ function matchesSize(
   return supported.some((s) => s.id === size || s.api_value === size);
 }
 
-/** 时长档：DB 支持两种形态（档位数组 [3,5,10] 或 {min,max,step} 范围对象）。 */
+
 function durationInRange(
   duration: number,
   supported: CapabilityLimitInput["supported_durations"],
@@ -117,24 +327,43 @@ function durationInRange(
   if (Array.isArray(supported)) {
     return supported.includes(duration);
   }
-  const range = supported as { min?: number; max?: number } | null;
+  const range = supported as { min?: number; max?: number; step?: number } | null;
   if (!range || typeof range.min !== "number" || typeof range.max !== "number") {
-    // 无有效范围定义：不阻断（能力行未配置时长约束时放行，worker 兜底）。
+
     return true;
   }
-  return duration >= range.min && duration <= range.max;
+  if (duration < range.min || duration > range.max) return false;
+  if (range.step === undefined) return true;
+  const steps = (duration - range.min) / range.step;
+  const nearest = range.min + Math.round(steps) * range.step;
+  const tolerance = Number.EPSILON * Math.max(1, Math.abs(duration), Math.abs(nearest)) * 4;
+  return Number.isFinite(nearest) && Math.abs(duration - nearest) <= tolerance;
+}
+
+export function aspectRatioIds(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const out: string[] = [];
+  for (const item of value) {
+    if (typeof item === "string") {
+      if (item) out.push(item);
+      continue;
+    }
+    if (item !== null && typeof item === "object" && !Array.isArray(item)) {
+      const id = (item as { id?: unknown }).id;
+      if (typeof id === "string" && id) out.push(id);
+    }
+  }
+  return out;
 }
 
 function ratios(capability: CapabilityLimitInput): string[] {
-  return Array.isArray(capability.supported_aspect_ratios)
-    ? capability.supported_aspect_ratios
-    : [];
+  return aspectRatioIds(capability.supported_aspect_ratios);
 }
 
-/** 校验提交参数是否落在能力目录支持范围。
- *  IKFPYX：命中 features.task_types[task_type] 时，该类型的 allowed_ratios / allowed_durations
- *  覆盖基础比例/时长校验（支持 duration=-1 自动时长）；未命中回落基础能力行。
- *  @returns 失败原因（带可用值提示）；全部通过返回 null。 */
+
+
+
+
 export function checkGenerationParamLimit(
   capability: CapabilityLimitInput,
   params: GenerationParamCheckInput,
@@ -142,8 +371,8 @@ export function checkGenerationParamLimit(
   const supportedSizes = Array.isArray(capability.supported_sizes)
     ? capability.supported_sizes
     : [];
-  // IKE7JP review：size 为空串（只带 duration 的视频任务）时不按分辨率拦截——
-  // 分辨率未指定时由能力默认值兜底，仅校验明确携带的 duration。
+
+
   if (
     params.size !== "" &&
     supportedSizes.length > 0 &&
@@ -159,14 +388,23 @@ export function checkGenerationParamLimit(
       reason: `当前模型不支持 分辨率/尺寸 ${params.size}，可用：${available}`,
     };
   }
-  // IKFPYX：任务类型约束优先（首帧/首尾帧/edit/prolong 各自的比例与时长口径）。
-  const constraint = taskTypeConstraint(capability, params.task_type);
+  const constraint = modeConstraint(capability.task_types, params.mode);
   const taskRatios = readStringArray(constraint?.allowed_ratios);
   const taskDurations = readNumberArray(constraint?.allowed_durations);
-  const taskLabel = params.task_type ? `当前任务类型（${params.task_type}）` : "当前任务类型";
+  const taskLabel = params.mode ? `当前模式（${params.mode}）` : "当前模式";
 
   const ratioList = taskRatios ?? ratios(capability);
   if (ratioList.length > 0 && !ratioList.includes(params.aspect_ratio)) {
+
+
+
+    if (params.mode === "edit" || params.mode === "extend") {
+      return {
+        field: "aspect_ratio",
+        code: ERROR_TASK_TYPE_PARAM_CONSTRAINT,
+        reason: TASK_TYPE_PARAM_CONSTRAINT_MESSAGE,
+      };
+    }
     return {
       field: "aspect_ratio",
       code: ERROR_CAPABILITY_UNSUPPORTED_RATIO,
@@ -176,7 +414,7 @@ export function checkGenerationParamLimit(
   if (params.duration !== undefined) {
     const d = Number(params.duration);
     if (taskDurations) {
-      // 任务类型约束显式给出可用时长（可含 -1 自动时长）——严格按该清单校验。
+
       if (!taskDurations.includes(d)) {
         return {
           field: "duration",
@@ -184,8 +422,8 @@ export function checkGenerationParamLimit(
           reason: `${taskLabel}不支持 时长 ${d} 秒，可用：${taskDurations.join(" / ")}`,
         };
       }
-    } else {
-      // 基础能力行：仅正数，且在 supported_durations 范围内（不含 -1）。
+    } else if (!(d === -1 && constraint?.allow_auto_duration === true)) {
+
       if (!Number.isFinite(d) || d <= 0) {
         return { field: "duration", code: ERROR_CAPABILITY_UNSUPPORTED_DURATION, reason: "时长必须为正数" };
       }
@@ -212,7 +450,7 @@ export function checkGenerationParamLimit(
   return null;
 }
 
-/** 把 Dock 视频参数解析成校验输入；resolution 缺省回退 size（plan/scene_card 兼容）。 */
+
 export function toGenerationParamCheckInput(input: {
   resolution?: unknown;
   size?: unknown;
@@ -228,8 +466,8 @@ export function toGenerationParamCheckInput(input: {
       : typeof input.size === "string" && input.size.length > 0
         ? input.size
         : "";
-  // IKE7JP review：duration 单独存在（视频只带时长、无 resolution/size）也进入校验——
-  // 不能让只带时长越界一路漏到 worker。size 为空串时 duration 仍有效。
+
+
   const duration =
     input.duration === undefined || input.duration === null
       ? undefined

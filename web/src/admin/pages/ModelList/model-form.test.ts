@@ -4,6 +4,9 @@ import {
   buildCreateParams,
   buildTaskTypes,
   camelFeatureKey,
+  channelFromModel,
+  channelOf,
+  channelsForMedia,
   diffUpdateParams,
   durationsFromModel,
   featureValueTypeOk,
@@ -11,11 +14,19 @@ import {
   mergeMatrix,
   parseGptMatrix,
   pickTaskTypeRatios,
+  pickTaskTypeEnabled,
+  pickTaskTypeDuration,
+  ratiosFromModel,
   readFeature,
   sizesFromModel,
   type FormSnapshot,
+  type RatioForm,
 } from './model-form';
-import type { AdminModel } from '@/api/admin';
+import type { AdminModel } from '@/admin/api/adminModels';
+
+function ratioRows(...ids: string[]): RatioForm[] {
+  return ids.map((id) => ({ id }));
+}
 
 function snapshot(overrides: Partial<FormSnapshot> = {}): FormSnapshot {
   return {
@@ -27,7 +38,7 @@ function snapshot(overrides: Partial<FormSnapshot> = {}): FormSnapshot {
       { id: '1K', label: '1K' },
       { id: '2K', label: '2K' },
     ],
-    ratios: ['1:1', '16:9', '9:16'],
+    ratios: ratioRows('1:1', '16:9', '9:16'),
     durationMin: '',
     durationMax: '',
     durationStep: '',
@@ -39,8 +50,8 @@ function snapshot(overrides: Partial<FormSnapshot> = {}): FormSnapshot {
     defaultDuration: '',
     enabled: true,
     features: {},
-    parser: 'gpt',
-    originalParser: 'gpt',
+    channel: 'gpt-image',
+    originalChannel: 'gpt-image',
     originalHadRequestMapping: true,
     gptMatrix: {
       '1K': { '1:1': '1024x1024', '16:9': '', '9:16': '' },
@@ -61,7 +72,7 @@ const modelRow = (overrides: Partial<AdminModel> = {}): AdminModel => ({
   model_label: 'Seedream 4.0',
   icon: null,
   supported_sizes: [{ id: '1K', label: '1K' }],
-  supported_aspect_ratios: ['1:1'],
+  supported_aspect_ratios: [{ id: '1:1', label: '1:1' }],
   supported_durations: null,
   supported_formats: [],
   default_size: '1K',
@@ -69,7 +80,7 @@ const modelRow = (overrides: Partial<AdminModel> = {}): AdminModel => ({
   default_aspect_ratio: '1:1',
   default_duration: null,
   features: {},
-  channel_parser: 'seedream',
+  channel: 'seedream-image',
   request_mapping: { matrix: { '1K': { '1:1': '1024x1024' } } },
   enabled: true,
   sort_order: 1,
@@ -85,7 +96,7 @@ describe('buildCreateParams', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.provider_id).toBe(DEFAULT_PROVIDER_ID);
-    expect(result.value.channel_parser).toBe('gpt');
+    expect(result.value.channel).toBe('gpt-image');
   });
 
   it('文本模型不提交尺寸/比例/时长', () => {
@@ -94,7 +105,7 @@ describe('buildCreateParams', () => {
         type: 'text',
         modelId: 'MiniMax-M3',
         label: 'MiniMax',
-        parser: 'seedream',
+        channel: 'seedream-text',
       }),
     );
     expect(result.ok).toBe(true);
@@ -102,7 +113,7 @@ describe('buildCreateParams', () => {
     expect(result.value.supported_sizes).toEqual([]);
     expect(result.value.supported_aspect_ratios).toEqual([]);
     expect(result.value.supported_durations).toBeNull();
-    expect(result.value.channel_parser).toBeUndefined();
+    expect(result.value.channel).toBeUndefined();
     expect(result.value.default_duration).toBeNull();
   });
 
@@ -112,7 +123,7 @@ describe('buildCreateParams', () => {
         type: 'audio',
         modelId: 'seed-audio-1.0',
         label: '豆包 Seed Audio 1.0',
-        parser: 'seedream',
+        channel: 'seedream-audio',
         durationMin: '1',
         durationMax: '120',
         formats: ['mp3'],
@@ -123,27 +134,20 @@ describe('buildCreateParams', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.capability_type).toBe('audio');
-    // IKG4UR：音频没有可配时长——上游是 TTS 式接口（请求无 duration），库里该列已置 NULL。
-    // 表单也不再渲染时长控件；即便传了值也不落库，维持「非空 ⟺ 可配」不变式。
     expect(result.value.supported_durations).toBeNull();
     expect(result.value.supported_formats).toEqual(['mp3']);
     expect(result.value.supported_sizes).toEqual([]);
-    expect(result.value.channel_parser).toBeUndefined();
+    expect(result.value.channel).toBeUndefined();
   });
 });
 
-// IKHEXG：`default_size` / `default_aspect_ratio` 在后端是 **NOT NULL**（VarChar）列，「未配」的形态
-// 是**空串**。表单曾把它们序列化成 null（`form.defaultSize.trim() || null`），写闸门又只收字符串
-// → 非图片/视频行（音频 / 文生文）从后台保存**必然 400**（实测：`PUT /api/admin/models/23` 报
-// 「默认尺寸(default_size)须为字符串且≤32字符」）。
-// 另一层：diff 比对两侧都套 `?? null`，库里是 `''` 而提交侧是 `null`，会把「其实等价」判成变更。
 describe('NOT NULL 尺寸/比例列：提交空串而非 null（IKHEXG）', () => {
   const audioSnapshot = () =>
     snapshot({
       type: 'audio',
       modelId: 'seed-audio-1.0',
       label: '豆包 Seed Audio 1.0',
-      parser: 'seedream',
+      channel: 'seedream-audio',
       sizes: [],
       ratios: [],
     });
@@ -180,8 +184,6 @@ describe('NOT NULL 尺寸/比例列：提交空串而非 null（IKHEXG）', () =
     expect(result.value.default_aspect_ratio).toBe('');
   });
 
-  // 上面三条都在证「不要多提交」；这条证反向——真的改了就必须提交。
-  // 少了它，日后把 diff 的归一写过头（比如恒判相等）会静默吞掉真实修改，而测试全绿。
   it('图片行：真的改了尺寸/比例 → 原样提交（正向往返）', () => {
     const initial = modelRow({ default_size: '1K', default_aspect_ratio: '1:1' });
     const result = buildCreateParams(snapshot({ type: 'image', defaultSize: '2K', defaultRatio: '16:9' }));
@@ -193,8 +195,6 @@ describe('NOT NULL 尺寸/比例列：提交空串而非 null（IKHEXG）', () =
   });
 });
 
-// IKG4UR：库中 supported_durations 有数组（管理端写入）与对象（消费端契约/种子写入）两种形态。
-// 只认数组时，打开对象行会读成空、保存把整列覆盖成 null——静默数据损坏。
 describe('durationsFromModel 兼容两种形态（IKG4UR）', () => {
   const model = (durations: unknown) =>
     ({ supported_durations: durations }) as unknown as AdminModel;
@@ -209,7 +209,6 @@ describe('durationsFromModel 兼容两种形态（IKG4UR）', () => {
       max: '30',
       step: '1',
     });
-    // step 可缺省
     expect(durationsFromModel(model({ min: 5, max: 10 }))).toEqual({
       min: '5',
       max: '10',
@@ -235,7 +234,6 @@ describe('durationsFromModel 兼容两种形态（IKG4UR）', () => {
     );
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    // 形态必须保持：写成数组会让 durationInRange 把它当档位列表，4–30 缩成 {1,4,30}
     expect(result.value.supported_durations).toEqual({ min: 4, max: 30, step: 1 });
   });
 
@@ -281,7 +279,7 @@ describe('gpt / banana mapping', () => {
   it('banana 是两列一维映射，不是像素交叉格', () => {
     const result = buildCreateParams(
       snapshot({
-        parser: 'banana',
+        channel: 'banana-image',
         bananaQuality: { '1K': '1k', '2K': '2k' },
         bananaSize: { '1:1': '1x1', '16:9': '16x9' },
       }),
@@ -298,8 +296,8 @@ describe('gpt / banana mapping', () => {
   it('seedream 且本来就是 seedream 的行：矩阵按原样提交，diff 层不产生变更', () => {
     const result = buildCreateParams(
       snapshot({
-        parser: 'seedream',
-        originalParser: 'seedream',
+        channel: 'seedream-image',
+        originalChannel: 'seedream-image',
         seedreamMatrix: { '1K': { '1:1': '1024x1024' } },
       }),
     );
@@ -310,20 +308,18 @@ describe('gpt / banana mapping', () => {
 
   it('seedream 且矩阵编辑器为空、库里本来也没有矩阵：不提交该字段', () => {
     const result = buildCreateParams(
-      snapshot({ parser: 'seedream', originalParser: 'seedream', originalHadRequestMapping: false }),
+      snapshot({ channel: 'seedream-image', originalChannel: 'seedream-image', originalHadRequestMapping: false }),
     );
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    // IKHBDO：`undefined` = 不提交该字段。原先无条件写死 null——虽然后端对
-    // seedream 行的 null 当「不改」，但前端不该依赖这条宽容规则来表达「我什么都没说」。
     expect(result.value.request_mapping).toBeUndefined();
   });
 
   it('seedream：矩阵编辑器改动后按新矩阵提交', () => {
     const result = buildCreateParams(
       snapshot({
-        parser: 'seedream',
-        originalParser: 'seedream',
+        channel: 'seedream-image',
+        originalChannel: 'seedream-image',
         seedreamMatrix: { '1K': { '1:1': '2048x2048', '16:9': '' } },
       }),
     );
@@ -332,22 +328,118 @@ describe('gpt / banana mapping', () => {
     expect(result.value.request_mapping).toEqual({ matrix: { '1K': { '1:1': '2048x2048' } } });
   });
 
-  it('从别的解析器切到 seedream：显式提交 null 清掉旧族矩阵', () => {
+  it('seedream：提交时矩阵键就是档位 id（api_value 恒等于 id，不再换写拼写）', () => {
     const result = buildCreateParams(
-      snapshot({ parser: 'seedream', originalParser: 'gpt', seedreamMatrix: {} }),
+      snapshot({
+        channel: 'seedream-image',
+        originalChannel: 'seedream-image',
+        sizes: [
+          { id: '1k', label: '1K' },
+          { id: '1.5k', label: '1.5K' },
+        ],
+        seedreamMatrix: { '1k': { '1:1': '1024x1024' }, '1.5k': { '1:1': '1536x1536' } },
+      }),
     );
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    // null 是「旧族的矩阵不再适用」的唯一表达；当成「不改」会把 gpt 矩阵留在库里，
-    // worker 会拿它去算 seedream 尺寸，而界面上再也清不掉。
+    expect(result.value.request_mapping).toEqual({
+      matrix: { '1k': { '1:1': '1024x1024' }, '1.5k': { '1:1': '1536x1536' } },
+    });
+  });
+
+  it('★ 无操作保存：矩阵键与 api_value 一起归一到 id 拼写，不留错位（IKHTVR）', () => {
+    const stored = modelRow({
+      supported_sizes: [{ id: '1k', label: '1K' }],
+      request_mapping: { matrix: { '1K': { '1:1': '2048x2048' } } },
+    });
+    const sizes = sizesFromModel(stored.supported_sizes);
+    const result = buildCreateParams(
+      snapshot({
+        channel: 'seedream-image',
+        originalChannel: 'seedream-image',
+        sizes,
+        ratios: ratioRows('1:1'),
+        seedreamMatrix: parseGptMatrix(stored.request_mapping, sizes, ratioRows('1:1')),
+      }),
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const changes = diffUpdateParams(stored, result.value);
+    expect(changes.supported_sizes).toEqual([{ id: '1k', api_value: '1k', label: '1K' }]);
+    expect(changes.request_mapping).toEqual({ matrix: { '1k': { '1:1': '2048x2048' } } });
+  });
+
+  it('★ 存量裸字符串行：原样保存不提交 supported_aspect_ratios（ADR-0123）', () => {
+    const stored = modelRow({ supported_aspect_ratios: ['1:1'] });
+    const sizes = sizesFromModel(stored.supported_sizes);
+    const ratios = ratiosFromModel(stored.supported_aspect_ratios);
+    const result = buildCreateParams(
+      snapshot({
+        channel: 'seedream-image',
+        originalChannel: 'seedream-image',
+        sizes,
+        ratios,
+        seedreamMatrix: parseGptMatrix(stored.request_mapping, sizes, ratios),
+      }),
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const changes = diffUpdateParams(stored, result.value);
+    expect('supported_aspect_ratios' in changes).toBe(false);
+    expect('request_mapping' in changes).toBe(false);
+  });
+
+  it('★ 展示名改动会提交，且只写 label 键（ADR-0123）', () => {
+    const stored = modelRow();
+    const sizes = sizesFromModel(stored.supported_sizes);
+    const ratios = ratiosFromModel(stored.supported_aspect_ratios);
+    const result = buildCreateParams(
+      snapshot({
+        channel: 'seedream-image',
+        originalChannel: 'seedream-image',
+        sizes,
+        ratios: ratios.map((ratio) => ({ ...ratio, label: '方形' })),
+        seedreamMatrix: parseGptMatrix(stored.request_mapping, sizes, ratios),
+      }),
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const changes = diffUpdateParams(stored, result.value);
+    expect(changes.supported_aspect_ratios).toEqual([{ id: '1:1', label: '方形' }]);
+  });
+
+  it('★ 展示名与 id 相同不写 label 键（ADR-0123）', () => {
+    const stored = modelRow({ supported_aspect_ratios: ['1:1'] });
+    const sizes = sizesFromModel(stored.supported_sizes);
+    const ratios = ratiosFromModel(stored.supported_aspect_ratios);
+    const result = buildCreateParams(
+      snapshot({
+        channel: 'seedream-image',
+        originalChannel: 'seedream-image',
+        sizes,
+        ratios: ratios.map((ratio) => ({ ...ratio, label: ratio.id })),
+        seedreamMatrix: parseGptMatrix(stored.request_mapping, sizes, ratios),
+      }),
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.supported_aspect_ratios).toEqual([{ id: '1:1' }]);
+  });
+
+  it('从别的解析器切到 seedream：显式提交 null 清掉旧族矩阵', () => {
+    const result = buildCreateParams(
+      snapshot({ channel: 'seedream-image', originalChannel: 'gpt-image', seedreamMatrix: {} }),
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
     expect(result.value.request_mapping).toBeNull();
   });
 
   it('seedream：矩阵整张被清空（原本有矩阵）→ 拦下而不是静默保留 / 清空', () => {
     const result = buildCreateParams(
       snapshot({
-        parser: 'seedream',
-        originalParser: 'seedream',
+        channel: 'seedream-image',
+        originalChannel: 'seedream-image',
         originalHadRequestMapping: true,
         seedreamMatrix: {},
       }),
@@ -359,7 +451,7 @@ describe('gpt / banana mapping', () => {
 
   it('seedream：矩阵格必须是像素尺寸', () => {
     const result = buildCreateParams(
-      snapshot({ parser: 'seedream', originalParser: 'seedream', seedreamMatrix: { '1K': { '1:1': '1k' } } }),
+      snapshot({ channel: 'seedream-image', originalChannel: 'seedream-image', seedreamMatrix: { '1K': { '1:1': '1k' } } }),
     );
     expect(result.ok).toBe(false);
     if (result.ok) return;
@@ -371,12 +463,12 @@ describe('gpt / banana mapping', () => {
     const sizes = sizesFromModel(initial.supported_sizes);
     const result = buildCreateParams(
       snapshot({
-        parser: 'seedream',
-        originalParser: 'seedream',
+        channel: 'seedream-image',
+        originalChannel: 'seedream-image',
         originalHadRequestMapping: true,
         sizes,
-        ratios: initial.supported_aspect_ratios,
-        seedreamMatrix: parseGptMatrix(initial.request_mapping, sizes, initial.supported_aspect_ratios),
+        ratios: ratiosFromModel(initial.supported_aspect_ratios),
+        seedreamMatrix: parseGptMatrix(initial.request_mapping, sizes, ratiosFromModel(initial.supported_aspect_ratios)),
       }),
     );
     expect(result.ok).toBe(true);
@@ -386,49 +478,47 @@ describe('gpt / banana mapping', () => {
   });
 
   it('gpt → seedream 切换：diff 里带 null，把旧矩阵清掉', () => {
-    const initial = modelRow({ channel_parser: 'gpt' });
+    const initial = modelRow({ capability_type: 'image', channel: 'gpt-image' });
     const result = buildCreateParams(
-      snapshot({ parser: 'seedream', originalParser: 'gpt', seedreamMatrix: {} }),
+      snapshot({ channel: 'seedream-image', originalChannel: 'gpt-image', seedreamMatrix: {} }),
     );
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     const changes = diffUpdateParams(initial, result.value);
-    expect(changes.channel_parser).toBe('seedream');
+    expect(changes.channel).toBe('seedream-image');
     expect(changes.request_mapping).toBeNull();
   });
 });
 
-// IKHBDO：库里 supported_sizes 元素除 id/label 外还带 api_value / width / height。
-// 表单只认 id+label 时，任何一次保存都会把这三个字段整包抹掉（api_value 正是出站真实取值）。
-describe('尺寸行扩展字段（IKHBDO）', () => {
-  it('读回 id / label / api_value / width / height（兼容 camelCase apiValue）', () => {
+describe('尺寸行字段收敛（IKHTVR）', () => {
+  it('读回只取 id / label，忽略 api_value / width / height（含 camelCase 写法）', () => {
     expect(
       sizesFromModel([
-        { id: '1K', label: '1K' },
+        { id: '1k', label: '1K' },
         { id: '2k', label: '2K', api_value: '2k', width: 2048, height: 1152 },
         { id: '3k', label: '3K', apiValue: '3k' },
       ]),
     ).toEqual([
-      { id: '1K', label: '1K', apiValue: '', width: '', height: '' },
-      { id: '2k', label: '2K', apiValue: '2k', width: '2048', height: '1152' },
-      { id: '3k', label: '3K', apiValue: '3k', width: '', height: '' },
+      { id: '1k', label: '1K' },
+      { id: '2k', label: '2K' },
+      { id: '3k', label: '3K' },
     ]);
   });
 
-  it('提交时写回 api_value / width / height，留空的键不写', () => {
+  it('提交时 api_value 按 id 重建，不写 width / height', () => {
     const result = buildCreateParams(
       snapshot({
         sizes: [
-          { id: '4K', label: '4K', apiValue: '4k', width: '4096', height: '4096' },
-          { id: '2K', label: '2K', apiValue: '', width: '', height: '' },
+          { id: '4k', label: '4K' },
+          { id: '2k', label: '' },
         ],
       }),
     );
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.supported_sizes).toEqual([
-      { id: '4K', label: '4K', width: 4096, height: 4096, api_value: '4k' },
-      { id: '2K', label: '2K' },
+      { id: '4k', api_value: '4k', label: '4K' },
+      { id: '2k', api_value: '2k' },
     ]);
   });
 });
@@ -469,13 +559,59 @@ describe('时长区间解析（IKHBDO）', () => {
   });
 });
 
+describe('渠道：读侧归一', () => {
+  const row = (channel: string | null, capability_type: AdminModel['capability_type'] = 'image') =>
+    modelRow({ channel, capability_type });
+
+  it('★ gpt-image 与 gpt-image-openai 是两个不同渠道（同一解析器两种协议，换协议 = 新渠道）', () => {
+    expect(channelFromModel(row('gpt-image'))).toBe('gpt-image');
+    expect(channelFromModel(row('gpt-image-openai'))).toBe('gpt-image-openai');
+  });
+
+  it('★ 大小写 / 空白归一后认得出（读侧宽容，归一只用于比对）', () => {
+    expect(channelFromModel(row('  GPT-Image  '))).toBe('gpt-image');
+  });
+
+  it('★ 认不出的取值 / NULL 按**行的媒介**回落，不静默落到别的媒介的渠道', () => {
+    expect(channelFromModel(row('随便写的'))).toBe('seedream-image');
+    expect(channelFromModel(row('随便写的', 'video'))).toBe('seedream-video');
+    expect(channelFromModel(row(null, 'audio'))).toBe('seedream-audio');
+    expect(channelFromModel(row(null, 'text'))).toBe('seedream-text');
+  });
+
+  it('新建行（没有库里的行）= 该媒介的缺省渠道', () => {
+    expect(channelFromModel(undefined)).toBe('seedream-image');
+  });
+
+  it('渠道 → 解析器与协议：两个 gpt 渠道共用交叉格，协议各不相同；非图片渠道两项皆无', () => {
+    expect(channelOf('seedream-image')).toMatchObject({ media: 'image', parser: 'seedream', protocol: 'inline-image' });
+    expect(channelOf('gpt-image')).toMatchObject({ media: 'image', parser: 'gpt', protocol: 'inline-image' });
+    expect(channelOf('gpt-image-openai')).toMatchObject({ media: 'image', parser: 'gpt', protocol: 'openai-images' });
+    expect(channelOf('banana-image')).toMatchObject({ media: 'image', parser: 'banana', protocol: 'inline-image' });
+    for (const id of ['seedream-video', 'seedream-audio', 'seedream-text'] as const) {
+      expect(channelOf(id)).toMatchObject({ parser: null, protocol: null });
+    }
+  });
+
+  it('下拉只列该媒介自己的渠道（跨媒介的渠道过不了后端媒体闸门）', () => {
+    expect(channelsForMedia('image').map((c) => c.id)).toEqual([
+      'seedream-image',
+      'gpt-image',
+      'gpt-image-openai',
+      'banana-image',
+    ]);
+    expect(channelsForMedia('video').map((c) => c.id)).toEqual(['seedream-video']);
+  });
+});
+
+
 describe('features 键形与类型（IKHBDO）', () => {
   it('读侧回落 camelCase（后端 toFeatures 优先认 camel）', () => {
     expect(readFeature({ imageReferenceMax: 4 }, 'image_reference_max')).toBe(4);
     expect(readFeature({ image_reference_max: 6 }, 'image_reference_max')).toBe(6);
     expect(readFeature({ sequentialImageGeneration: true }, 'sequential_image_generation')).toBe(true);
     expect(hasFeatureKey({ imageReferenceMax: 4 }, 'image_reference_max')).toBe(true);
-    expect(camelFeatureKey('image_protocol')).toBe('imageProtocol');
+    expect(camelFeatureKey('max_prompt_length')).toBe('maxPromptLength');
   });
 
   it('类型不符的脏值不归结构化控件管（会留在高级 JSON 里回写，而不是被删掉）', () => {
@@ -483,7 +619,7 @@ describe('features 键形与类型（IKHBDO）', () => {
     expect(featureValueTypeOk('image_reference_max', '4')).toBe(false);
     expect(featureValueTypeOk('tools', true)).toBe(true);
     expect(featureValueTypeOk('tools', 'yes')).toBe(false);
-    expect(featureValueTypeOk('image_protocol', 'openai-images')).toBe(true);
+    expect(featureValueTypeOk('image_protocol', 'openai-images')).toBe(false);
   });
 });
 
@@ -492,28 +628,73 @@ describe('task_types 结构化编辑（IKHBDO）', () => {
     const features = {
       task_types: {
         first_frame: { allowed_ratios: ['16:9', '9:16'] },
-        prolong: { allowed_ratios: 'not-an-array' },
+        extend: { allowed_ratios: 'not-an-array' },
       },
     };
     const ratios = pickTaskTypeRatios(features);
     expect(ratios.first_frame).toEqual(['16:9', '9:16']);
-    expect(ratios.default).toEqual([]);
-    expect(ratios.prolong).toEqual([]);
+    expect(ratios.text2video).toEqual([]);
+    expect(ratios.extend).toEqual([]);
   });
 
-  it('写回只动 allowed_ratios：其它子键与未知任务类型原样保留', () => {
+  it('写回只动 allowed_ratios / allowed_durations：模式内的其它子键保留', () => {
     const base = {
-      first_frame: { allowed_ratios: ['1:1'], allowed_durations: [5, 10] },
-      custom_type: { allowed_ratios: ['4:3'] },
+      first_frame: { allowed_ratios: ['1:1'], allowed_durations: [5, 10], note: 'x' },
     };
-    expect(buildTaskTypes(base, { first_frame: ['16:9'] })).toEqual({
-      first_frame: { allowed_ratios: ['16:9'], allowed_durations: [5, 10] },
-      custom_type: { allowed_ratios: ['4:3'] },
+    expect(buildTaskTypes(base, { first_frame: ['16:9'] }, { first_frame: true })).toEqual({
+      first_frame: { allowed_ratios: ['16:9'], note: 'x' },
     });
   });
 
-  it('清空某任务类型的比例 → 该键被移除（而不是留下空数组让约束形同虚设）', () => {
-    expect(buildTaskTypes({ default: { allowed_ratios: ['1:1'] } }, { default: [] })).toEqual({});
+  it('未知模式键不再带回：带退役键的行保存一次就恢复合法', () => {
+    const base = {
+      prolong: { allowed_ratios: ['adaptive'] },
+      edit: { allowed_ratios: ['adaptive'] },
+    };
+    expect(buildTaskTypes(base, { edit: ['adaptive'] }, { edit: true }, { edit: 'follow' })).toEqual({
+      edit: { allowed_ratios: ['adaptive'], allowed_durations: [-1] },
+    });
+  });
+
+  it('未勾选已知模式：该键被移除（键不在 = 该模式不开放）', () => {
+    expect(
+      buildTaskTypes({ text2video: { allowed_ratios: ['1:1'] } }, { text2video: [] }, {}),
+    ).toEqual({});
+  });
+
+  it('三态时长策略写回：指定删键 / 仅自动写 [-1] / 自动或指定写 allow_auto_duration', () => {
+    const base = { omni: { allowed_durations: [-1], allow_auto_duration: true } };
+    expect(buildTaskTypes(base, {}, { omni: true }, { omni: 'specified' })).toEqual({ omni: {} });
+    expect(buildTaskTypes(base, {}, { omni: true }, { omni: 'follow' })).toEqual({
+      omni: { allowed_durations: [-1] },
+    });
+    expect(buildTaskTypes(base, {}, { omni: true }, { omni: 'auto-or-specified' })).toEqual({
+      omni: { allow_auto_duration: true },
+    });
+  });
+
+  it('从能力行读回三态', () => {
+    expect(pickTaskTypeDuration({
+      task_types: {
+        edit: { allowed_durations: [-1] },
+        extend: { allow_auto_duration: true },
+        omni: {},
+        text2video: { allowed_durations: [5] },
+        image_reference: { allowed_durations: [-1, 5] },
+      },
+    })).toMatchObject({
+      edit: 'follow',
+      extend: 'auto-or-specified',
+      omni: 'specified',
+      text2video: 'specified',
+      image_reference: 'specified',
+    });
+  });
+
+  it('勾选但比例留空 → 保留空对象（键在 = 开放且无额外约束）', () => {
+    expect(
+      buildTaskTypes({}, { text2video: [] }, { text2video: true }),
+    ).toEqual({ text2video: {} });
   });
 });
 
@@ -524,15 +705,55 @@ describe('mergeMatrix：集合变化时保住其它格（IKHBDO）', () => {
   };
 
   it('删一个尺寸行 → 其余行保留', () => {
-    expect(mergeMatrix(prev, [{ id: '1K', label: '1K' }], ['1:1', '16:9'])).toEqual({
+    expect(mergeMatrix(prev, [{ id: '1K', label: '1K' }], ratioRows('1:1', '16:9'))).toEqual({
       '1K': { '1:1': '1024x1024', '16:9': '1536x864' },
     });
   });
 
   it('删一个比例 chip → 其余列保留，被删列不复活', () => {
-    expect(mergeMatrix(prev, [{ id: '1K' }, { id: '2K' }], ['1:1'])).toEqual({
+    expect(mergeMatrix(prev, [{ id: '1K' }, { id: '2K' }], ratioRows('1:1'))).toEqual({
       '1K': { '1:1': '1024x1024' },
       '2K': { '1:1': '2048x2048' },
+    });
+  });
+});
+
+describe('parseGptMatrix：库中键大小写与表单 id 不一致（IKHTL0）', () => {
+  const sizes = [
+    { id: '1k', label: '1K' },
+    { id: '2k', label: '2K' },
+  ];
+  const ratios = ratioRows('1:1');
+
+  it('库里键大写、表单 id 小写 → 归一到表单 id，格子有值', () => {
+    expect(parseGptMatrix({ matrix: { '1K': { '1:1': '1024x1024' } } }, sizes, ratios)).toEqual({
+      '1k': { '1:1': '1024x1024' },
+      '2k': { '1:1': '' },
+    });
+  });
+
+  it('库里键小写、表单 id 大写 → 同样归一到表单 id', () => {
+    expect(
+      parseGptMatrix(
+        { matrix: { '1k': { '1:1': '1024x1024' } } },
+        [{ id: '1K', label: '1K' }],
+        ratios,
+      ),
+    ).toEqual({ '1K': { '1:1': '1024x1024' } });
+  });
+
+  it('比例键大小写不同也归一', () => {
+    expect(parseGptMatrix({ matrix: { '1k': { auto: '1024x1024' } } }, sizes, ratioRows('Auto'))).toEqual({
+      '1k': { Auto: '1024x1024' },
+      '2k': { Auto: '' },
+    });
+  });
+
+  it('表单里没有的库键原样保留——保存时不得静默抹掉', () => {
+    expect(parseGptMatrix({ matrix: { '4K': { '1:1': '4096x4096' } } }, sizes, ratios)).toEqual({
+      '1k': { '1:1': '' },
+      '2k': { '1:1': '' },
+      '4K': { '1:1': '4096x4096' },
     });
   });
 });
@@ -544,9 +765,8 @@ describe('音频 / 文本行（IKHBDO）', () => {
         type: 'audio',
         modelId: 'seed-audio-1.0',
         label: '音频',
-        parser: 'seedream',
-        originalParser: 'seedream',
-        // 表单不再渲染音频的时长范围控件；即便快照里带了值也不落库（IKG4UR 不变式）
+        channel: 'seedream-audio',
+        originalChannel: 'seedream-audio',
         durationMin: '1',
         durationMax: '120',
         defaultDuration: '12',
@@ -559,4 +779,18 @@ describe('音频 / 文本行（IKHBDO）', () => {
     expect(result.value.supported_durations).toBeNull();
     expect(result.value.default_duration).toBe(12);
   });
+});
+
+
+it('IKLUVP 三态策略保留扩展配置', () => {
+  expect(buildTaskTypes({ extend: { extra: 7 } }, { extend: ['adaptive'] }, { extend: true }, { extend: 'auto-or-specified' })).toEqual({
+    extend: { extra: 7, allowed_ratios: ['adaptive'], allow_auto_duration: true },
+  });
+});
+
+
+it('IKLUVP 配置保存往返保持不变', () => {
+  const task_types = { extend: { allow_auto_duration: true }, edit: { allowed_durations: [-1] }, omni: {} };
+  const features = { task_types };
+  expect(buildTaskTypes(task_types, {}, pickTaskTypeEnabled(features), pickTaskTypeDuration(features))).toEqual(task_types);
 });

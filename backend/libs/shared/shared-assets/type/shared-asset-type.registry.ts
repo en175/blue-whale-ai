@@ -6,8 +6,6 @@ import {
   type SharedAssetTypeStrategy,
 } from "./shared-asset-type.strategy.js";
 
-/** 类型 → 策略注册表：Service 经 (assetType, kind) 分发，不写 if-else。
- *  新增类型 = 注册一个新策略 provider，本类零改动（构造时自动校验重复）。 */
 @Injectable()
 export class SharedAssetTypeRegistry {
   private readonly byTypeKind = new Map<string, SharedAssetTypeStrategy>();

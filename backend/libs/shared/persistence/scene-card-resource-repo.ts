@@ -29,7 +29,6 @@ export type DeleteSceneCardResourceResult =
   | { kind: "version_conflict"; current_version: number }
   | { kind: "idempotency_conflict" };
 
-/** 共享资产场景卡快照的源（IK9QKP）：内容 + 生成预设，归属校验后取用。 */
 export interface SceneCardSharedSnapshotSource {
   title: string;
   summary: string | null;
@@ -72,12 +71,10 @@ export interface SceneCardResourceRepo {
   deleteSceneCardResource(
     input: DeleteSceneCardResourceInput,
   ): Promise<DeleteSceneCardResourceResult>;
-  /** 共享资产场景卡保存用：取归属用户项目下的场景卡内容 + 生成预设（快照源）。 */
   findOwnedSceneCardWithPreset(
     userId: string,
     sceneCardId: string,
   ): Promise<FindOwnedSceneCardWithPresetResult>;
-  /** 共享资产场景卡添加回画布用：在目标项目复制 scene_cards + generation_presets。 */
   copySceneCardToProject(
     input: CopySceneCardToProjectInput,
   ): Promise<CopySceneCardToProjectResult>;

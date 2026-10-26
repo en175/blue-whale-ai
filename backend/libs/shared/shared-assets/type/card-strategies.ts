@@ -15,11 +15,6 @@ import {
   type SharedAssetTypeStrategy,
 } from "./shared-asset-type.strategy.js";
 
-/** 卡片类策略公共逻辑（画布 assetNode，data.kind ∈ style/character/object/environment/custom）：
- *  - 校验 E6：无参考图且无描述 → 拒绝保存；
- *  - 近似去重 R3：同 kind + 同描述视为已存在（参考图集合不参与判定）；空描述跳过去重；
- *  - 名称取描述截断；缩略图取首张参考图。
- *  当前五型共享本实现；未来 per-kind 差异（如角色卡音色必填）在子类覆写 buildSavePlan。 */
 export abstract class CardStrategy implements SharedAssetTypeStrategy {
   abstract readonly kind: SharedAssetKind;
   readonly assetType = "card" as const;

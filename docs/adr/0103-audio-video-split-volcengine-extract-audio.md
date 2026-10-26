@@ -11,7 +11,9 @@
 
 ## Consequences
 
-- `FfmpegExtractor` 与其测试、Dockerfile 的 ffmpeg 安装、backend 的 `ffmpeg-static` 孤儿依赖均为有意保留的死重；后续任何「清理死代码」提案须先对照本 ADR，清理需产品再拍板。
+- `FfmpegExtractor` 与其测试、worker-java Dockerfile 的 ffmpeg 安装、backend 的 `ffmpeg-static` 孤儿依赖原本均为有意保留的死重；后续任何「清理死代码」提案须先对照本 ADR，清理需产品再拍板。
+  - **2026-09-28 backend 侧已清理（产品拍板）**：`ffmpeg-static` 及其全部配套处置移除——依赖声明、`pnpm-workspace.yaml` 的 `allowBuilds` 条目、`backend/Dockerfile` 与 `Dockerfile.typescript-baseline` 的 `FFMPEG_BINARIES_URL`（该变量只为绕开它 postinstall 从 GitHub 下二进制，是验收基线镜像构建失败的独立原因）。audio-mix 浏览器验收套件不再在 `beforeAll` 现生成音频，改用检入夹具 `backend/apps/blue-whale/src/api/canvases/fixtures/sine-440-1s.mp3`（worker 本就只读取/转发字节、不解析音频）。
+  - **Java 侧仍保留**：`FfmpegExtractor`、`MediaExtractJobProcessor` 的本地路径、worker-java 镜像的 ffmpeg 安装均未改动，清理另议。
 - 产物命名从固定 `xxx(audio).mp3` 变为 `xxx(audio).{所选格式}`。
 - 错误码面变化：本地路径特有错误（如 200MiB 的 video_too_large）对火山路径不再出现，新增网关与火山侧错误映射，错误码用位在契约票定义。
 - worker 轮询超限判定与转存时序对齐去字幕（ADR 见 IKGZ7V 整包）既有实现。

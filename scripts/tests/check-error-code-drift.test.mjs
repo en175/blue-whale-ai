@@ -1,6 +1,3 @@
-// check-error-code-drift.mjs 单测：diff 提取、映射解析、域匹配纯函数，
-// 外加临时 git 仓库端到端（staged 改码 → 拦截 / 清理后放行 / 迁移行豁免）。
-// 纯本地临时目录，不触碰任何真实仓库。跑法：node --test scripts/tests/check-error-code-drift.test.mjs
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
@@ -58,7 +55,6 @@ test("isDomainHit：行文本或文件路径含域 token 命中；其他域不�
   assert.equal(isDomainHit("audio_speed_failed（1051）兜底", "x.ts", token), true);
   assert.equal(isDomainHit("归并 1051 兜底", "AudioSpeedJobProcessor.java", token), true);
   assert.equal(isDomainHit("音频混合失败 1051", "AudioMixNote.ts", token), false);
-  // 路径归一：下划线/连字符/大小写差异都算同域
   assert.equal(isDomainHit("兜底 1051", "web/audio-speed/note.ts", token), true);
 });
 
@@ -70,7 +66,6 @@ test("splitGrepLine：拆 path:line:text，路径含冒号时以行号字段为�
   assert.equal(splitGrepLine("noise-without-line"), null);
 });
 
-// ── 端到端：临时 git 仓库 ──────────────────────────────────────
 
 function sh(cwd, cmd, args) {
   return execFileSync(cmd, args, { cwd, encoding: "utf8" });
@@ -84,7 +79,7 @@ function buildRepo() {
   const dir = mkdtempSync(path.join(tmpdir(), "bw-drift-"));
   sh(dir, "git", ["init", "-q"]);
   mkdirSync(path.join(dir, "backend/libs/contracts"), { recursive: true });
-  mkdirSync(path.join(dir, "worker-java/src"), { recursive: true });
+  mkdirSync(path.join(dir, "server/blue-whale-worker/src"), { recursive: true });
   writeFileSync(
     path.join(dir, CONTRACT_PATH),
     [
@@ -94,17 +89,15 @@ function buildRepo() {
       "};",
     ].join("\n"),
   );
-  // 调速域残留（应报）与混合域合法引用（不应报）
   writeFileSync(
-    path.join(dir, "worker-java/src/AudioSpeedJobProcessor.java"),
+    path.join(dir, "server/blue-whale-worker/src/AudioSpeedJobProcessor.java"),
     "/// audio_speed_failed 兜底归并 1051\n",
   );
   writeFileSync(
-    path.join(dir, "worker-java/src/AudioMixJobProcessor.java"),
+    path.join(dir, "server/blue-whale-worker/src/AudioMixJobProcessor.java"),
     "/// 音频混合失败归并 1050\n",
   );
   sh(dir, "git", ["add", "-A"]);
-  // 初始提交：改码场景要求仓库有历史，staged diff 才会出现删除行
   sh(dir, "git", [
     "-c",
     "user.email=drift@test",
@@ -153,7 +146,7 @@ test("端到端：残留清理后放行（exit 0）", () => {
       ].join("\n"),
     );
     writeFileSync(
-      path.join(dir, "worker-java/src/AudioSpeedJobProcessor.java"),
+      path.join(dir, "server/blue-whale-worker/src/AudioSpeedJobProcessor.java"),
       "/// audio_speed_failed 兜底归并 1052\n",
     );
     sh(dir, "git", ["add", "-A"]);
@@ -168,7 +161,7 @@ test("端到端：行内同时含新数值的迁移说明放行", () => {
   const dir = buildRepo();
   try {
     writeFileSync(
-      path.join(dir, "worker-java/src/AudioSpeedJobProcessor.java"),
+      path.join(dir, "server/blue-whale-worker/src/AudioSpeedJobProcessor.java"),
       "/// 原 1051 让号音频混合，现 1052\n",
     );
     writeFileSync(
@@ -191,7 +184,7 @@ test("端到端：行内同时含新数值的迁移说明放行", () => {
 test("端到端：staged 不含 error-codes.ts 时不触发（exit 0）", () => {
   const dir = buildRepo();
   try {
-    writeFileSync(path.join(dir, "worker-java/src/Other.java"), "/// 任意 1051\n");
+    writeFileSync(path.join(dir, "server/blue-whale-worker/src/Other.java"), "/// 任意 1051\n");
     sh(dir, "git", ["add", "-A"]);
     const r = runScript(dir);
     assert.equal(r.status, 0);

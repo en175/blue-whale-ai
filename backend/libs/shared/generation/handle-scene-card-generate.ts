@@ -1,7 +1,10 @@
 import { createHash } from "node:crypto";
 import {
   ASSET_UNAVAILABLE_CODE,
+  ERROR_CAPABILITY_UNSUPPORTED_PARAM,
+  ERROR_INVALID_INPUT,
   ERROR_INVALID_REFERENCE,
+  errorCodeToNumeric,
   IDEMPOTENCY_KEY_REUSED_CODE,
   PARAM_MISSING_CODE,
   PLAN_APPLICATION_CAPABILITY_DRIFT_CODE,
@@ -12,18 +15,13 @@ import {
   sceneCardRegenerationRequestSchema,
 } from "@lib/contracts";
 import type { SceneCardGenerationRepo } from "@lib/shared/persistence/index.js";
-import type { CostReservationSnapshot } from "@lib/core";
-
 import { wireInteger } from "@lib/shared/wire-integer.js";
-import type { GenerationCostEstimator } from "./cost-estimator.js";
 import type { MaterialGate } from "./handle-create-generation-job.js";
 
 function isDecimalId(value: string): boolean {
   return /^[1-9][0-9]*$/.test(value);
 }
 
-/** SceneCard 再生成请求摘要（契约 §9 / CONTEXT L84-89）：方法 + 操作语义 + 资源路径 + body。
- *  同 CommandId 配同一摘要才重放，配不同摘要判冲突。 */
 export function sceneCardGenerateRequestHash(
   projectId: string,
   sceneCardId: string,
@@ -36,9 +34,6 @@ export function sceneCardGenerateRequestHash(
     .digest("hex");
 }
 
-/** 已有 SceneCard 受能力约束的再生成（User 在编辑器点"生成"）。
- *  缺 Idempotency-Key → PARAM_MISSING；sceneCardId 非十进制 → 当作不存在；
- *  body 非 SceneCardRegenerationRequest → 400；版本冲突 → 100406 附当前双版本。 */
 export async function handleSceneCardGenerate(
   userId: string,
   projectId: string,
@@ -47,11 +42,6 @@ export async function handleSceneCardGenerate(
   body: string,
   deps: SceneCardGenerationRepo,
   options?: {
-    providerCredential?: string;
-    /** IK7G9X：成本估算器（可选）。提供时建预留写真实预估金额。 */
-    costEstimator?: GenerationCostEstimator;
-    /** IKF YHJ（ADR-0087）：素材校验门。场景卡再生成是第三条视频创建路径，
-     *  与创建期/重试期共用同一个门实现；缺省不接（未接线时行为与改造前一致）。 */
     materialGate?: MaterialGate;
   },
 ) {
@@ -66,24 +56,13 @@ export async function handleSceneCardGenerate(
   try {
     jsonBody = JSON.parse(body);
   } catch {
-    return fail(400, "请求参数无效");
+    return fail(errorCodeToNumeric(ERROR_INVALID_INPUT), "请求参数无效");
   }
   const parsed = sceneCardRegenerationRequestSchema.safeParse(jsonBody);
-  if (!parsed.success) return fail(400, "请求参数无效");
-  // URL 路径资源身份为权威，body 的 scene_card_id 必须与之相符。
+  if (!parsed.success)
+    return fail(errorCodeToNumeric(ERROR_INVALID_INPUT), "请求参数无效");
   if (parsed.data.scene_card_id !== sceneCardId)
-    return fail(400, "场景卡不一致");
-
-  // IK7G9X：建预留时写真实预估金额（数量级口径；new-api 定价不可达 → 降级 0 + dev）。
-  let costReservation: CostReservationSnapshot | undefined;
-  if (options?.costEstimator) {
-    costReservation =
-      (await options.costEstimator({
-        modelId: parsed.data.parameters.model_id,
-        type: "video",
-        expectedOutputCount: 1,
-      })) ?? undefined;
-  }
+    return fail(errorCodeToNumeric(ERROR_INVALID_INPUT), "场景卡不一致");
 
   const result = await deps.regenerateSceneCard({
     userId,
@@ -97,25 +76,22 @@ export async function handleSceneCardGenerate(
     reference_mode: parsed.data.reference_mode,
     reference_assets: parsed.data.reference_assets,
     capability_snapshot_version: parsed.data.capability_snapshot_version,
-    ...(options?.providerCredential
-      ? { provider_credential: options.providerCredential }
-      : {}),
-    ...(costReservation ? { costReservation } : {}),
     ...(options?.materialGate
       ? {
           guardInput: (jobInput: Record<string, unknown>) =>
             options.materialGate!.assertInputUsable({
               userId,
               jobInput,
-              jobType: "video", // 本入口只建视频 job（见 repo 的 createJobWithinTx 调用点）
+              jobType: "video",
             }),
         }
       : {}),
   });
   switch (result.kind) {
     case "material_blocked":
-      // 与创建期/重试期同款口径：400 + invalid_reference，原因原文外显。
-      return fail(400, result.reason, { code: ERROR_INVALID_REFERENCE });
+      return fail(errorCodeToNumeric(ERROR_INVALID_REFERENCE), result.reason, {
+        code: ERROR_INVALID_REFERENCE,
+      });
     case "applied":
       return ok({
         scene_card_id: wireInteger(result.scene_card_id),
@@ -147,7 +123,10 @@ export async function handleSceneCardGenerate(
         "生成能力已变化，需刷新能力后重试",
       );
     case "capability_limit":
-      return fail(400, result.reason);
+      return fail(
+        errorCodeToNumeric(ERROR_CAPABILITY_UNSUPPORTED_PARAM),
+        result.reason,
+      );
     case "validation_failed":
       return fail(ASSET_UNAVAILABLE_CODE, "引用素材失效或来源缺失");
     case "forbidden":

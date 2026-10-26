@@ -1,0 +1,12 @@
+version: v2
+
+plugins:
+  - remote: buf.build/bufbuild/es:v2.2.3
+    out: ../backend/libs/contracts/gen
+    opt:
+      - target=ts
+      - import_extension=js
+
+
+managed:
+  enabled: false

@@ -1,6 +1,3 @@
-// IKDZGM / ADR-0083：单一码表契约测试。
-// 验证 ERROR_CODES（数字码→中文）完整性：一码一文案、覆盖生成域/账号域/全局码。
-// 关键：与生成域/账号域数值码保持一致（唯一表不漂移）。
 import { describe, expect, it } from "vitest";
 
 import {
@@ -16,6 +13,9 @@ import {
   ERROR_CAPABILITY_UNSUPPORTED_DURATION,
   ERROR_INVALID_REFERENCE,
   ERROR_CONTENT_REJECTED_REFERENCE,
+  ERROR_CONTENT_REJECTED_AUDIO,
+  ERROR_JOB_NOT_RETRYABLE_STATUS,
+  ERROR_JOB_ALREADY_RETRIED,
   ACCOUNT_ERROR_PASSWORD_INCORRECT,
   ACCOUNT_ERROR_NUMERIC_CODES,
   RESOURCE_NOT_FOUND_CODE,
@@ -38,22 +38,19 @@ describe("单一码表（IKDZGM / ADR-0083）", () => {
   });
 
   it("一码一文案：同一数字码不重复 key", () => {
-    // plain 对象天然唯一 key；此处验证关键码值为预期（防漂移）。
-    expect(ERROR_CODES[1001]).toBe("账户余额不足，请充值后重试"); // quota_exhausted
-    expect(ERROR_CODES[1002]).toBe("输入参数无效"); // invalid_input
+    expect(ERROR_CODES[1001]).toBe("账户余额不足，请充值后重试");
+    expect(ERROR_CODES[1002]).toBe("输入参数无效");
   });
 
   it("生成域关键码与 generation 表数值码一致（唯一 Source of Truth）", () => {
     expect(GENERATION_ERROR_NUMERIC_CODES[ERROR_QUOTA_EXHAUSTED]).toBe(1001);
     expect(GENERATION_ERROR_NUMERIC_CODES[ERROR_INVALID_INPUT]).toBe(1002);
-    // 码表里对应数字已有文案
     expect(ERROR_CODES[1001]).toBe(ERROR_CODES[GENERATION_ERROR_NUMERIC_CODES[ERROR_QUOTA_EXHAUSTED]]);
   });
 
   it("IKE7JP：capability_unsupported_param 登记数值码 1030 且一码一文案", () => {
     expect(GENERATION_ERROR_NUMERIC_CODES[ERROR_CAPABILITY_UNSUPPORTED_PARAM]).toBe(1030);
     expect(ERROR_CODES[1030]).toBe("当前模型不支持所选参数，请按提示调整");
-    // 落在 web 端生成域错误窗口（1000-1099，isGenerationDomainError）
     expect(1030).toBeGreaterThanOrEqual(1000);
     expect(1030).toBeLessThanOrEqual(1099);
   });
@@ -72,12 +69,29 @@ describe("单一码表（IKDZGM / ADR-0083）", () => {
     expect(ERROR_CODES[1034]).toBe("参考素材无效，请重新选择");
   });
 
-  it("IKFL53：content_rejected_reference 登记数值码 1038 且一码一文案", () => {
+  it("IKFL53/IKJ8J8：content_rejected_reference 登记数值码 1038，文案为中性兜底", () => {
     expect(GENERATION_ERROR_NUMERIC_CODES[ERROR_CONTENT_REJECTED_REFERENCE]).toBe(1038);
-    expect(ERROR_CODES[1038]).toBe("参考内容可能涉及版权限制");
-    // 落在 web 端生成域错误窗口（1000-1099，isGenerationDomainError）
+    expect(ERROR_CODES[1038]).toBe("生成内容可能涉及版权限制，请调整提示词或素材后重试");
     expect(1038).toBeGreaterThanOrEqual(1000);
     expect(1038).toBeLessThanOrEqual(1099);
+  });
+
+  it("IKJ8J8：content_rejected_audio 登记数值码 1059 且一码一文案", () => {
+    expect(GENERATION_ERROR_NUMERIC_CODES[ERROR_CONTENT_REJECTED_AUDIO]).toBe(1059);
+    expect(ERROR_CODES[1059]).toBe("生成的音频可能涉及版权限制，请调整提示词后重试");
+    expect(1059).toBeGreaterThanOrEqual(1000);
+    expect(1059).toBeLessThanOrEqual(1099);
+  });
+
+  it("IKIPWU：重试不可重试两类专用码 1054/1055 且一码一文案", () => {
+    expect(GENERATION_ERROR_NUMERIC_CODES[ERROR_JOB_NOT_RETRYABLE_STATUS]).toBe(1054);
+    expect(ERROR_CODES[1054]).toBe("当前状态不允许重试，仅失败或部分成功的任务可重试");
+    expect(GENERATION_ERROR_NUMERIC_CODES[ERROR_JOB_ALREADY_RETRIED]).toBe(1055);
+    expect(ERROR_CODES[1055]).toBe("该任务的失败项已全部重试，无需再次重试");
+    expect(1054).toBeGreaterThanOrEqual(1000);
+    expect(1054).toBeLessThanOrEqual(1099);
+    expect(1055).toBeGreaterThanOrEqual(1000);
+    expect(1055).toBeLessThanOrEqual(1099);
   });
 
   it("全局业务码已登记；未知码 messageOf 给缺省文案", () => {

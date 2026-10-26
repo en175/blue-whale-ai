@@ -1,12 +1,7 @@
-// 从原 generation-worker-repo.ts 拆出并裁剪（worker 退役后仅保留 API 侧归属查询）。
-// 素材归属解析：提交任务时复用 worker 的归属逻辑（单份不漂移）。
 import type {PrismaClient} from "@prisma/client";
 
 import type {AssetOwnershipOps} from "./asset-ownership-types.js";
 
-/** IKDD4Z：查当前项目显式关联的素材 id（project_asset 跨项目复用，is_delete=0）。
- *  与 snapshot-repo.ts 的「项目可用素材」语义对齐：关联命中的素材即使 assets.project_id
- *  指向别项目（跨项目复用）也视为本项目可用。 */
 async function findLinkedAssetIds(
   prisma: PrismaClient,
   userId: string,
@@ -23,11 +18,10 @@ async function findLinkedAssetIds(
   return rows.map((r) => r.asset_id);
 }
 
-export function createAssetOwnershipOps(prisma: PrismaClient): Pick<AssetOwnershipOps, "resolveInputAssets"> {
+export function createAssetOwnershipOps(prisma: PrismaClient): AssetOwnershipOps {
   return {
     async resolveInputAssets(assetIds, userId, projectId) {
       if (assetIds.length === 0) return [];
-      // IKDD4Z：归属 = 本项目直接归属 ∪ 全局素材(project_id=0) ∪ project_asset 显式关联（跨项目复用）。
       const linkedAssetIds = await findLinkedAssetIds(prisma, userId, projectId);
       const rows = await prisma.assets.findMany({
         where: {
@@ -50,7 +44,6 @@ export function createAssetOwnershipOps(prisma: PrismaClient): Pick<AssetOwnersh
           width: true,
           height: true,
           duration_ms: true,
-          // IKDJNZ：关联素材库素材 id（生成时命中走 asset://，不走 url）。
           material_id: true,
         },
       });
@@ -74,6 +67,41 @@ export function createAssetOwnershipOps(prisma: PrismaClient): Pick<AssetOwnersh
             ]
           : [];
       });
+    },
+
+    async findStorageKeys(assetIds, userId) {
+      if (assetIds.length === 0) return new Map();
+      const rows = await prisma.assets.findMany({
+        where: {
+          id: { in: assetIds.map((id) => BigInt(id)) },
+          user_id: BigInt(userId),
+          status: "normal",
+          is_delete: false,
+          storage_key: { not: null },
+        },
+        select: { id: true, storage_key: true },
+      });
+      return new Map(
+        rows.flatMap((row) =>
+          row.storage_key === null
+            ? []
+            : [[row.id.toString(), row.storage_key] as const],
+        ),
+      );
+    },
+
+    async saveMediaInfo(assetId, info) {
+      const updated = await prisma.assets.updateMany({
+        where: { id: BigInt(assetId), is_delete: false },
+        data: {
+          duration_ms: info.durationMs,
+          ...(info.width === null ? {} : { width: info.width }),
+          ...(info.height === null ? {} : { height: info.height }),
+          gmt_modified: new Date(),
+          version: { increment: 1 },
+        },
+      });
+      return updated.count === 1;
     },
   };
 }

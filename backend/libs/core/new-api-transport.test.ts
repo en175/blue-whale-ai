@@ -1,5 +1,3 @@
-// IKDQ5F：new-api 传输层 raw 变体 + 超时语义。
-// requestRaw 保留 status + 原文（非信封接口用），超时归 NewApiTimeoutError（可区分 provider_timeout）。
 import { describe, expect, it } from "vitest";
 
 import {
@@ -59,7 +57,6 @@ describe("createNewApiRawRequest（IKDQ5F）", () => {
     const rawRequest = createNewApiRawRequest({
       baseUrl: "http://new-api.test",
       timeoutMs: 50,
-      // 真实 fetch 遵守 signal：abort 时 reject AbortError。mock 同样监听 signal 模拟。
       fetchImpl: (_input, init = {}) =>
         new Promise<Response>((_resolve, reject) => {
           const signal = (init.signal ?? null) as AbortSignal | null;
@@ -84,8 +81,6 @@ describe("createNewApiRawRequest（IKDQ5F）", () => {
     expect((error as NewApiTimeoutError).code).toBe("timeout");
   });
 
-  // IKEA26：fetch 无响应（连接层异常，undici fetch failed / ECONNRESET 等）→ NewApiNetworkError，
-  // 供视频轮询把瞬时网络抖动重排而非判死。
   it("fetch 网络不可达 → NewApiNetworkError（instanceof NewApiError，status 503 / code unreachable）", async () => {
     const rawRequest = createNewApiRawRequest({
       baseUrl: "http://new-api.test",

@@ -2,9 +2,6 @@ import { describe, expect, it } from "vitest";
 
 import { buildTosPresignedGetUrl } from "./tos-presigned-url.js";
 
-// TOS 预签名 URL：Java 走官方 SDK（TOSV2.preSignedURL），无独立签名源可做字节级 golden。
-// 此处用确定性回归 + 结构断言锁算法：同输入必出同 URL，结构符合 TOS4-HMAC-SHA256 预签名规范。
-// ⚠️ 真实 TOS 端到端可接受性须上线前用真实 AK/SK 验一次。
 
 const baseInput = {
   endpoint: "tos-cn-beijing.volces.com",
@@ -27,7 +24,6 @@ describe("buildTosPresignedGetUrl", () => {
       "https://blue-whale-test.tos-cn-beijing.volces.com/gen/sha256/abc.png?",
     )).toBe(true);
     expect(url).toContain("X-Tos-Algorithm=TOS4-HMAC-SHA256");
-    // credential 的 / 须被编码为 %2F（SigV4 规范要求 query 值全量编码）
     expect(url).toContain(
       "X-Tos-Credential=AKtest123%2F20260727%2Fcn-beijing%2Ftos%2Frequest",
     );
@@ -58,7 +54,6 @@ describe("buildTosPresignedGetUrl", () => {
       key: "a b/中/x.png",
       expiresInSeconds: 60,
     });
-    // 空格→%20，中文→UTF-8 百分比，/ 保留
     expect(url).toContain("/a%20b/%E4%B8%AD/x.png?");
   });
 

@@ -1,8 +1,40 @@
-// IKGXM1：抠图创建入口复核矩阵与免费口径单测（先例：image-erasures.service.test.ts）。
-// 只测外部可见行为：拒绝原因可读、落库参数冻结、免费口径无成本预留、凭证冻结、按场景两档上限。
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ImageCutoutsService } from "./image-cutouts.service.js";
+
+const { enqueueImageCutoutJob } = vi.hoisted(() => ({ enqueueImageCutoutJob: vi.fn() }));
+vi.mock("@lib/shared/generation/generation-queue.js", () => ({ enqueueImageCutoutJob }));
+
+const { lockMock, bindingViewMock, readIdemMock, writeRowsMock, writeIdemMock } = vi.hoisted(() => ({
+  lockMock: vi.fn(),
+  bindingViewMock: vi.fn(),
+  readIdemMock: vi.fn(),
+  writeRowsMock: vi.fn(),
+  writeIdemMock: vi.fn(),
+}));
+
+vi.mock("@lib/shared/persistence/index.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@lib/shared/persistence/index.js")>();
+  return {
+    ...actual,
+    lockCanvasRecoveryForAcceptance: lockMock,
+    canvasBindingView: bindingViewMock,
+    readCreateIdempotency: readIdemMock,
+    writeCanvasRecoveryRows: writeRowsMock,
+    transactionWithUniqueRetry: (_prisma: unknown, fn: (tx: unknown) => Promise<unknown>) =>
+      fn(_prisma),
+  };
+});
+
+vi.mock("@lib/shared/persistence/generation-job-idempotency.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@lib/shared/persistence/generation-job-idempotency.js")>();
+  return { ...actual, writeCreateIdempotency: writeIdemMock };
+});
+
+beforeEach(() => {
+  vi.clearAllMocks();
+});
 
 const VALID_GENERAL_BODY = {
   source_asset_id: "88",
@@ -30,7 +62,6 @@ const VALID_PRODUCT_BODY = {
   need_crop_background: true,
 };
 
-/** 默认源素材：4000x3000 png、5MB（general 12MP ≤40MP、human|product 4000≤7680/3000≤4320，三档复核均过）。 */
 function makeImageAsset(overrides: Record<string, unknown> = {}) {
   return {
     type: "image",
@@ -48,27 +79,44 @@ function makeService(overrides: {
   project?: unknown;
   assets?: unknown;
   createJob?: unknown;
+  billing?: unknown;
 } = {}) {
   const project = overrides.project ?? { findOwnedById: vi.fn().mockResolvedValue({ id: 55n }) };
   const assets =
     overrides.assets ??
     {
-      findOwnedSource: vi.fn().mockImplementation(async (id: string) => makeImageAsset()),
+      findOwnedSource: vi.fn().mockImplementation(async (_id: string) => makeImageAsset()),
+    };
+  const billing =
+    overrides.billing ??
+    {
+      jobBilling: vi.fn().mockResolvedValue(undefined),
+      release: vi.fn().mockResolvedValue(undefined),
     };
   const create = overrides.createJob ?? vi.fn().mockResolvedValue({ id: 400n });
   const costCreate = vi.fn();
-  const prisma = {
-    client: {
-      generation_jobs: { create },
-      // 免费口径哨兵：任何成本预留写入都会在这里暴露。
-      cost_reservations: { create: costCreate },
+  const client: Record<string, unknown> = {
+    generation_jobs: {
+      create,
+      findUnique: vi.fn().mockResolvedValue({ status: "processing" }),
     },
+    cost_reservations: { create: costCreate },
   };
+  client.$transaction = vi.fn((fn: (tx: unknown) => Promise<unknown>) =>
+    fn(client),
+  );
+  const prisma = { client };
   return {
-    service: new ImageCutoutsService(prisma as never, project as never, assets as never),
+    service: new ImageCutoutsService(
+      prisma as never,
+      project as never,
+      assets as never,
+      billing as never,
+    ),
     create,
     costCreate,
     assets,
+    billing,
   };
 }
 
@@ -91,7 +139,6 @@ describe("ImageCutoutsService.create：契约 schema 复核", () => {
   });
 
   it("rejects the general scene carrying enhancement keys (scene forbids them)", async () => {
-    // 规格故事 29：通用场景不携带描边与裁剪参数——官方在 general 场景忽略四参，契约 strict 分支无此键。
     const { service } = makeService();
     const result = await service.create("9", "55", {
       ...VALID_GENERAL_BODY,
@@ -178,7 +225,6 @@ describe("ImageCutoutsService.create：归属与媒体类型复核", () => {
 
 describe("ImageCutoutsService.create：输入门槛复核（官方 PDF 输入限制，按场景两档）", () => {
   it("accepts the general scene at the exact long-side boundary 10240 (total pixels within 40MP)", async () => {
-    // 10240x3906 = 39,997,440 ≤ 40MP：长边恰好到档、总像素仍在限内。
     const { service } = makeService({
       assets: { findOwnedSource: vi.fn().mockResolvedValue(makeImageAsset({ width: 10240, height: 3906 })) },
     });
@@ -195,7 +241,6 @@ describe("ImageCutoutsService.create：输入门槛复核（官方 PDF 输入限
   });
 
   it("rejects the general scene when total pixels exceed 40MP (sides within limits)", async () => {
-    // 10000x4001 = 40,010,000 > 40MP：长边 ≤10240、短边 ≤6000 均过，仅总像素超。
     const { service } = makeService({
       assets: { findOwnedSource: vi.fn().mockResolvedValue(makeImageAsset({ width: 10000, height: 4001 })) },
     });
@@ -213,7 +258,6 @@ describe("ImageCutoutsService.create：输入门槛复核（官方 PDF 输入限
           .mockResolvedValueOnce(makeImageAsset({ width: 3000, height: 10241 })),
       },
     });
-    // 横图竖图同口径（长边 = max、短边 = min）。
     expect((await service.create("9", "55", VALID_GENERAL_BODY)).msg).toContain("长边超过");
     expect((await service.create("9", "55", VALID_GENERAL_BODY)).msg).toContain("长边超过");
   });
@@ -254,8 +298,6 @@ describe("ImageCutoutsService.create：输入门槛复核（官方 PDF 输入限
   });
 
   it("applies the two-tier limits per scene: same image passes general but is rejected for human and product", async () => {
-    // 8000x5000 = 40MP：general 档（≤10240/≤6000/≤40MP）恰好全过；human|product 档长边 8000 > 7680 拒
-    // （规格故事 15：切人像/商品后更严上限被正确拦截）。
     const asset = makeImageAsset({ width: 8000, height: 5000 });
     const { service } = makeService({
       assets: { findOwnedSource: vi.fn().mockResolvedValue(asset) },
@@ -329,8 +371,6 @@ describe("ImageCutoutsService.create：输入门槛复核（官方 PDF 输入限
   });
 
   it("lets an asset without recorded dimensions pass to the supplier gate", async () => {
-    // assets.width/height 由前端上报、存量图大量为 null：缺权威尺寸不臆造、不拦，
-    // 交供应商按官方门槛拒（与擦除/高清同口径，规格故事 5）。
     const { service } = makeService({
       assets: {
         findOwnedSource: vi.fn().mockResolvedValue(makeImageAsset({ width: null, height: null })),
@@ -376,27 +416,184 @@ describe("ImageCutoutsService.create：落任务与免费口径", () => {
     expect(Object.keys(data)).not.toContain("provider");
   });
 });
+describe("IKJLTX：已受理意图重放先于素材等可变状态（B.3 受理事务顺序）", () => {
+  const SUBMISSION_ID = "0a1b2c3d-0000-4000-8000-00000000a001";
 
-describe("ImageCutoutsService.create：请求方凭证冻结（断链防护）", () => {
-  // 断链背景：worker（ImageCutoutJobProcessor）只从 input.provider_credential 取请求方 sk-，
-  // 创建链路不冻结则必落 provider_credential_missing（先例：图片生成 / 擦除）。
-  it("freezes the requester sk- token into job input (provider_credential)", async () => {
-    const { service, create } = makeService();
-    const result = await service.create("9", "55", VALID_GENERAL_BODY, {
-      providerCredential: "sk-live-token",
+  const CANVAS_BINDING = {
+    protocol_version: 1,
+    submission_id: SUBMISSION_ID,
+    target_node_id: "node-1",
+    expected_binding_revision: 0,
+    recovery_seed: {
+      target: { role: "result-placeholder", x: 0, y: 0, width: 100, height: 100, name: "" },
+      sources: [],
+    },
+  };
+
+  function stubFreshAcceptance() {
+    readIdemMock.mockResolvedValue(null);
+    lockMock.mockResolvedValue({
+      kind: "plan",
+      plan: { acceptance: {}, bindingRevision: 1, previousTargetSnapshot: null, supersededSubmissionId: null },
     });
-    expect(result.code).toBe(200);
-    expect(create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        input: { ...VALID_GENERAL_BODY, provider_credential: "sk-live-token" },
-      }),
+    bindingViewMock.mockResolvedValue(null);
+  }
+
+  it("素材删除后同载荷重放返回原任务 501 与原关联，不重新拒绝、不重复受理", async () => {
+    stubFreshAcceptance();
+    const findOwnedSource = vi
+      .fn()
+      .mockResolvedValueOnce(makeImageAsset())
+      .mockResolvedValueOnce(null);
+    const { service, create, costCreate } = makeService({
+      assets: { findOwnedSource },
     });
+
+    const first = await service.create(
+      "9",
+      "55",
+      { ...VALID_GENERAL_BODY, canvas_binding: CANVAS_BINDING },
+      SUBMISSION_ID,
+    );
+    expect(first.code).toBe(200);
+    expect(first.data).toMatchObject({ job_id: "400", status: "queued" });
+
+    readIdemMock.mockResolvedValue({ generation_job_id: "501", cursor: 0 });
+    bindingViewMock.mockResolvedValue({
+      protocol_version: 1,
+      submission_id: SUBMISSION_ID,
+      target_node_id: "node-1",
+      binding_revision: 1,
+      job_id: "501",
+      is_current: true,
+    });
+    const replay = await service.create(
+      "9",
+      "55",
+      { ...VALID_GENERAL_BODY, canvas_binding: CANVAS_BINDING },
+      SUBMISSION_ID,
+    );
+    expect(replay.code).toBe(200);
+    expect(replay.data).toMatchObject({
+      job_id: "501",
+      status: "processing",
+      canvas_binding: { submission_id: SUBMISSION_ID, job_id: "501", is_current: true },
+    });
+    expect(findOwnedSource).toHaveBeenCalledTimes(1);
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(costCreate).not.toHaveBeenCalled();
+    expect(writeRowsMock).toHaveBeenCalledTimes(1);
+    expect(writeIdemMock).toHaveBeenCalledTimes(1);
   });
 
-  it("omits provider_credential when the requester carries no sk- token", async () => {
+  it("同键异载荷重放仍判幂等冲突，不落任何新行", async () => {
+    stubFreshAcceptance();
     const { service, create } = makeService();
-    const result = await service.create("9", "55", VALID_HUMAN_BODY);
+    const first = await service.create(
+      "9",
+      "55",
+      { ...VALID_GENERAL_BODY, canvas_binding: CANVAS_BINDING },
+      SUBMISSION_ID,
+    );
+    expect(first.code).toBe(200);
+
+    readIdemMock.mockResolvedValue({ kind: "idempotency_conflict" });
+    const replay = await service.create(
+      "9",
+      "55",
+      { ...VALID_HUMAN_BODY, canvas_binding: CANVAS_BINDING },
+      SUBMISSION_ID,
+    );
+    expect(replay.code).toBe(100409);
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+
+  it("未受理过的非法输入仍走既有校验拒绝，不因回读前置放宽", async () => {
+    readIdemMock.mockResolvedValue(null);
+    const { service, create } = makeService({
+      assets: { findOwnedSource: vi.fn().mockResolvedValue(null) },
+    });
+    const result = await service.create(
+      "9",
+      "55",
+      { ...VALID_GENERAL_BODY, canvas_binding: CANVAS_BINDING },
+      SUBMISSION_ID,
+    );
+    expect(result.code).toBe(100301);
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("跨项目/无权限请求仍先被项目归属校验拒绝，不读幂等", async () => {
+    const { service } = makeService({
+      project: { findOwnedById: vi.fn().mockResolvedValue(null) },
+    });
+    const result = await service.create(
+      "9",
+      "55",
+      { ...VALID_GENERAL_BODY, canvas_binding: CANVAS_BINDING },
+      SUBMISSION_ID,
+    );
+    expect(result.code).toBe(100301);
+    expect(readIdemMock).not.toHaveBeenCalled();
+  });
+
+  it("无 canvas_binding 的历史请求不前置读幂等，保持原建行路径", async () => {
+    const { service, create } = makeService();
+    const result = await service.create("9", "55", VALID_GENERAL_BODY);
     expect(result.code).toBe(200);
-    expect(create.mock.calls[0][0].data.input).toEqual(VALID_HUMAN_BODY);
+    expect(readIdemMock).not.toHaveBeenCalled();
+    expect(lockMock).not.toHaveBeenCalled();
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("ImageCutoutsService.create：按工具计价计费", () => {
+  it("提交前按 image_cutout 取计费钩子，建行后扣款", async () => {
+    const charge = vi.fn().mockResolvedValue(undefined);
+    const release = vi.fn().mockResolvedValue(undefined);
+    const { service, billing, create } = makeService({
+      billing: {
+        jobBilling: vi.fn().mockResolvedValue({ charge, release }),
+        release,
+      },
+    });
+    const result = await service.create("9", "55", VALID_GENERAL_BODY);
+    expect(result.code).toBe(200);
+    expect((billing as { jobBilling: ReturnType<typeof vi.fn> }).jobBilling).toHaveBeenCalledWith(
+      "image_cutout",
+      "9",
+      VALID_GENERAL_BODY,
+    );
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(charge).toHaveBeenCalledWith(400);
+  });
+
+  it("扣款失败时提交上抛，且不产生退款事件", async () => {
+    const charge = vi.fn().mockRejectedValue(new Error("余额不足"));
+    const release = vi.fn().mockResolvedValue(undefined);
+    const { service, create } = makeService({
+      billing: {
+        jobBilling: vi.fn().mockResolvedValue({ charge, release }),
+        release,
+      },
+    });
+    await expect(service.create("9", "55", VALID_GENERAL_BODY)).rejects.toThrow("余额不足");
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(release).not.toHaveBeenCalled();
+  });
+});
+
+describe("ImageCutoutsService.create：计费输入", () => {
+  it("按 image_cutout 计价并入队", async () => {
+    const jobBilling = vi.fn().mockResolvedValue(undefined);
+    const { service } = makeService({ billing: { jobBilling, release: vi.fn() } });
+    const result = await service.create("9", "55", VALID_GENERAL_BODY);
+    expect(result.code).toBe(200);
+    expect(jobBilling).toHaveBeenCalledWith(
+      "image_cutout",
+      "9",
+      expect.objectContaining({ source_asset_id: "88" }),
+    );
+    expect(enqueueImageCutoutJob).toHaveBeenCalledWith("400");
   });
 });

@@ -1,15 +1,16 @@
 # ADR-0010：本地 master 是用户本地集成区，Agent 写入任务必须进 task worktree
 
-- **状态**：Accepted
+- **状态**：已被 [ADR-0115](0115-local-release-code-baseline.md) 替代。以下保留历史决策记录。
 - **日期**：2026-07-09
 - **决策者**：JJNNReno（与 Codex 经 `/grill-with-docs` 会话共同得出）
 - **更新**：
   - 2026-07-12，任务 Work Tree 基线改为同步后的本地 `master`，以保留团队本地优先的模块化开发方式。
   - 2026-07-12，任务验收 commit 门槛移除（IK0E1A）：完成子 issue 即直接走 `commit-task-for-review.sh` 落盘 commit（无需 `--user-authorized`），用户确认环节后移到 merge 本地 master 前。
   - 2026-07-14，PreToolUse Hook 的 merge/pull 拦截改为分支感知（IK0SPN）：`mode_task_acceptance_git` 调用 `current_branch()` 区分 master 集成区与任务分支，master 上 `git merge origin/master` 和 `git pull` 不再被拦截，消除此前 master 双方分叉时 Hook 硬拦与无标准入口放行之间的死锁。任务分支上仍拦截并指向 `sync-task-from-origin.sh`。
-  - 2026-07-25，文档白名单窄例外（[ADR-0025](0025-doc-on-master-allowlist.md)）：AI 可在本地 master 直改散文规格文档（根 `CONTEXT.md` + `docs/**/*.md`），落盘走 `scripts/commit-spec-on-master.sh -m "<描述>"`；规则源（`.claude/`）、代码、`docs/**/*.json` 契约仍必须走 task worktree。
+  - 2026-07-25，文档白名单窄例外（[ADR-0025](0025-doc-on-master-allowlist.md)）：AI 可在本地 master 直改散文规格文档（根 `CONTEXT.md` + `docs/**/*.md`），落盘走 `scripts/commit-spec-on-master.sh -m "<描述>"`；规则源（`.claude/`）、代码、`docs/**/*.json` 契约仍必须走 task worktree。（⚠️ **该直提入口 2026-09-10 已废止**，见下方 2026-09-25 更新——本条仅存历史记录，勿照此执行。）
   - 2026-07-26，本地个人配置窄例外：根 `CLAUDE.local.md` 与 `.codex/config.toml` 仅在 `git check-ignore` 明确命中时允许 Agent 在本地 master 直改；两者保持未跟踪，其他 ignored 文件仍硬拦。
   - 2026-08-11，任务分支普通 commit/push/merge 改为放行；保护分支、发布审查包、错误同步方式与本地 master 合入授权仍由 Hook 兜底。
+  - 2026-09-25，散文文档直改例外收口（[ADR-0025](0025-doc-on-master-allowlist.md) 修正一）：`commit-spec-on-master.sh` 已于 2026-09-10 废止为指路桩，散文文档（根 `CONTEXT.md` + `docs/**/*.md`）现与代码同路，走 `--type docs` task worktree → `commit-task-for-review.sh -m "docs: <描述>"` → 用户授权后 `publish-review-package.sh --user-authorized --create-pr`。**Agent 无任何 master 直改授权；唯一的 master 直写例外是下方本地个人配置。**（`block-master-edit.sh` 的 doc 白名单是否撤除另行决策。）
 
 > 授权交互方式已由 [ADR-0012](0012-agent-noninteractive-authorization.md) 更新：标准入口带 `--user-authorized` 时无二次确认；任务分支普通 Git 操作放行，保护分支、发布审查包和本地 master 合入绕过仍由 Hook 硬拦。
 

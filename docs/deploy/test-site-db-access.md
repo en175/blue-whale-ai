@@ -6,7 +6,7 @@
 
 | 场景 | 通道 | 做法 |
 |---|---|---|
-| 日常开发 | 本地自足栈 | `pnpm db:fresh` + `deploy/typescript-baseline` compose，disposable 数据随便造 |
+| 日常开发 | 本地自足栈 | `prisma db push`（仅限一次性测试库；`pnpm db:fresh` 入口已不存在）+ 本地 Docker MySQL，disposable 数据随便造 |
 | 调试测试站数据 | SSH 隧道 | `scripts/tunnel-testsite-db.sh`（见下） |
 | 集成验收 | HTTP only | `scripts/run-ik50gb-c-testsite-probe.sh`，永不接触数据库 |
 

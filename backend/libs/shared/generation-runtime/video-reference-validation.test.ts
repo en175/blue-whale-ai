@@ -8,11 +8,7 @@ import {
   type ReferenceLimits,
 } from "./video-reference-validation.js";
 
-// IKHBDO：本模块**不含任何模型知识**——「哪个模型支持参考视频/音频」「每个模型各自的上限」
-// 全部来自能力行 features（运营在后台配）。下面每个用例都通过**改配置**证明行为跟着变，
-// 而不是只证明旧默认值仍然通过。
 
-/** 一份能力行 features 投影（字段名与 ModelFeatures 同名，结构对齐）。 */
 function limits(overrides: Partial<ReferenceLimits> = {}): ReferenceLimits {
   return {
     image_reference_max: 9,
@@ -33,7 +29,6 @@ function audioAsset(index = 1): VideoWorkerInputAsset {
   return { id: `aud-${index}`, type: "audio", url: `https://cdn.test/${index}.mp3` };
 }
 
-/** 合法参考视频：1280x720 / mp4 / 指定秒数（满足单边/像素/比例物理约束）。 */
 function videoAsset(
   index: number,
   seconds: number,
@@ -64,9 +59,10 @@ function expectRejected(
   limitsValue: ReferenceLimits,
   assets: VideoWorkerInputAsset[],
   materials: MaterialReference[] = [],
+  mode?: "edit" | "omni" | "extend",
 ) {
   try {
-    validateReferences(limitsValue, assets, materials);
+    validateReferences(limitsValue, assets, materials, mode);
   } catch (error) {
     if (error instanceof VideoInputError) return error;
     throw error;
@@ -83,7 +79,6 @@ describe("validateReferences 参考上限读能力行（IKHBDO）", () => {
     expect(error.code).toBe("reference_limit_exceeded");
     expect(error.message).toBe("参考图最多 14 张");
 
-    // 同一份输入在旧默认 9 下被拒：行为差异只来自配置
     expect(expectRejected(limits({ image_reference_max: 9 }), images(14)).message)
       .toBe("参考图最多 9 张");
   });
@@ -95,6 +90,28 @@ describe("validateReferences 参考上限读能力行（IKHBDO）", () => {
 
     expect(expectRejected(limits({ video_reference_max: 0 }), videos(1)).message)
       .toBe("参考视频最多 0 个");
+  });
+
+  it("IKL406 edit 模式参考视频上限收紧为 1：1 段放行、2 段拒绝", () => {
+    const config = limits({ video_reference_max: 5, max_reference_duration_sec: null });
+    expect(validateReferences(config, videos(1), [], "edit")).toHaveLength(1);
+
+    const error = expectRejected(config, videos(2), [], "edit");
+    expect(error.code).toBe("reference_limit_exceeded");
+    expect(error.message).toBe("参考视频最多 1 个");
+  });
+
+  it("IKL406 edit 模式只卡视频段数：1 段视频 + N 张图片仍放行", () => {
+    const config = limits({ video_reference_max: 5, max_reference_duration_sec: null });
+    expect(
+      validateReferences(config, [videoAsset(1, 5), imageAsset(1), imageAsset(2)], [], "edit"),
+    ).toHaveLength(3);
+  });
+
+  it("IKL406 非 edit 模式不受收紧影响（通用上限照旧）", () => {
+    const config = limits({ video_reference_max: 5, max_reference_duration_sec: null });
+    expect(validateReferences(config, videos(2), [])).toHaveLength(2);
+    expect(validateReferences(config, videos(2), [], "omni")).toHaveLength(2);
   });
 
   it("参考音频上限随 audio_reference_max 变化：2 个放行、3 个拒绝；配 0 = 禁用", () => {
@@ -131,7 +148,6 @@ describe("validateReferences 参考上限读能力行（IKHBDO）", () => {
     expect(error.code).toBe("invalid_reference_media");
     expect(error.message).toBe("参考视频已知总时长不能超过 30 秒");
 
-    // 旧 15s 口径下同样两条就超限：差异只来自配置
     expect(expectRejected(limits({ max_reference_duration_sec: 15 }), [
       videoAsset(1, 15),
       videoAsset(2, 15),
@@ -139,13 +155,11 @@ describe("validateReferences 参考上限读能力行（IKHBDO）", () => {
   });
 
   it("单条参考视频时长上限也读同一配置；未配（null）= 不设上限", () => {
-    // 30s 配置下，单条 20s 视频合法（旧硬编码 15 会拒）
     expect(validateReferences(limits({ max_reference_duration_sec: 30 }), [videoAsset(1, 20)], []))
       .toHaveLength(1);
     expect(expectRejected(limits({ max_reference_duration_sec: 15 }), [videoAsset(1, 20)]).message)
       .toBe("单个参考视频时长必须为 2 至 15 秒");
 
-    // null = 能力行未配上限 → 只保留平台下限 2s
     expect(validateReferences(limits({ max_reference_duration_sec: null }), [videoAsset(1, 120)], []))
       .toHaveLength(1);
     expect(expectRejected(limits({ max_reference_duration_sec: null }), [videoAsset(1, 1)]).message)
@@ -154,7 +168,6 @@ describe("validateReferences 参考上限读能力行（IKHBDO）", () => {
 
   it("素材库引用并入同一套能力行上限（视频素材库引用 + 本地参考一起数）", () => {
     const config = limits({ video_reference_max: 2, max_reference_duration_sec: null });
-    // 1 条本地 + 1 条素材库 = 2，恰好到上限
     expect(validateReferences(config, videos(1), [{ id: "asset-1", type: "video" }])).toHaveLength(2);
     expect(expectRejected(config, videos(1), [
       { id: "asset-1", type: "video" },

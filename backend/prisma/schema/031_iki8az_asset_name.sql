@@ -1,0 +1,3 @@
+SET NAMES utf8mb4;
+
+ALTER TABLE `assets` ADD COLUMN `name` VARCHAR(255) NULL AFTER `type`;

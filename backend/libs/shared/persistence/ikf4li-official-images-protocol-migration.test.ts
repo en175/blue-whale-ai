@@ -25,9 +25,7 @@ describe("IKF4LI 官方 OpenAI Images 协议迁移（契约 §12）", () => {
     expect(standaloneSql).toContain("'new-api', 'gpt-image-2', 'image', 'GPT Image 2'");
     expect(standaloneSql).toContain("'image_protocol', 'openai-images'");
     expect(standaloneSql).toContain("'max_prompt_length', 32000");
-    // 别名机制只留给 banana；gpt-image-2 主行不得再写 i2i_model_name
     expect(standaloneSql).not.toContain("'i2i_model_name',");
-    // 该行 015 创建后停用未删，占着唯一键干净名 → 必须 UPSERT 并显式复活
     expect(standaloneSql).toContain("ON DUPLICATE KEY UPDATE");
     expect(standaloneSql).toContain("is_delete = FALSE");
   });

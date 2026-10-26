@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Probe the real Codex apply_patch hook path without applying any patch.
 
 set -u
 
@@ -141,14 +140,23 @@ run_case() {
 TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/codex-write-hook-probe.XXXXXX")" || fail "unable to create temporary probe root"
 MASTER_REPO="$TMP_ROOT/master"
 TASK_REPO="$TMP_ROOT/task"
-mkdir -p "$MASTER_REPO" "$TASK_REPO" || fail "unable to create temporary Git repositories"
+mkdir -p "$MASTER_REPO" || fail "unable to create temporary Git repository"
 
 git -C "$MASTER_REPO" init -q || fail "unable to initialize temporary master repository"
 git -C "$MASTER_REPO" symbolic-ref HEAD refs/heads/master || fail "unable to set temporary master branch"
-git -C "$TASK_REPO" init -q || fail "unable to initialize temporary task repository"
-git -C "$TASK_REPO" symbolic-ref HEAD refs/heads/feature/probe || fail "unable to set temporary task branch"
+git -C "$MASTER_REPO" config user.name "Hook Probe"
+git -C "$MASTER_REPO" config user.email "hook-probe@example.com"
+mkdir -p "$MASTER_REPO/scripts/lib"
+cp "$REPO_ROOT/scripts/lib/task_metadata.py" "$MASTER_REPO/scripts/lib/task_metadata.py"
 printf 'before\n' >"$MASTER_REPO/existing.txt"
-printf 'before\n' >"$TASK_REPO/existing.txt"
+git -C "$MASTER_REPO" add -A
+git -C "$MASTER_REPO" -c core.hooksPath=/dev/null commit -q -m 'chore: probe base' || fail "unable to commit probe base"
+git -C "$MASTER_REPO" branch release/probe
+git -C "$MASTER_REPO" worktree add -q -b feature/probe "$TASK_REPO" || fail "unable to create temporary task worktree"
+TASK_START="$(git -C "$TASK_REPO" rev-parse HEAD)"
+python3 "$TASK_REPO/scripts/lib/task_metadata.py" repair --worktree "$TASK_REPO" \
+  --target-branch release/probe --start-sha "$TASK_START" --user-authorized >/dev/null \
+  || fail "unable to record temporary task metadata"
 
 run_case master create 2 "$MASTER_REPO"
 run_case master update 2 "$MASTER_REPO"

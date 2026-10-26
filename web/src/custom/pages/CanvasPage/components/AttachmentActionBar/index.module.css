@@ -1,0 +1,58 @@
+
+.actionBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-sm);
+  flex-shrink: 0;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid #333;
+  background-color: #2a2a2a;
+  color: #888;
+  font-size: var(--font-size-sm);
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.pill:hover {
+  color: #ddd;
+  background-color: #333;
+}
+
+.pill[aria-disabled='true'] {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.pill[aria-disabled='true']:hover {
+  color: #888;
+  background-color: #2a2a2a;
+}
+
+.picking {
+  color: var(--color-accent-primary);
+  border: 1px dashed var(--color-accent-primary);
+}
+
+.trailing {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  margin-left: auto;
+}

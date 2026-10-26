@@ -82,6 +82,15 @@
               "command": "\"${CLAUDE_PROJECT_DIR}\"/.claude/hooks/cbm-discovery-gate.sh"
             }
           ]
+        },
+        {
+          "matcher": ".*",
+          "hooks": [
+            {
+              "type": "command",
+              "command": "\"${CLAUDE_PROJECT_DIR}\"/.claude/hooks/block-gitee-alternative-channel.sh"
+            }
+          ]
         }
       ],
       "PostToolUse": [
@@ -139,15 +148,29 @@
               "command": "\"${CLAUDE_PROJECT_DIR}\"/.claude/hooks/cbm-session-reminder.sh"
             }
           ]
-        }
-      ],
-      "SubagentStart": [
+        },
         {
-          "matcher": ".*",
+          "matcher": "startup|resume|clear|compact",
           "hooks": [
             {
               "type": "command",
-              "command": "\"${CLAUDE_PROJECT_DIR}\"/.claude/hooks/cbm-session-reminder.sh"
+              "command": "node \"${CLAUDE_PROJECT_DIR}\"/.claude/hooks/ponytail-zcode.js SessionStart",
+              "enabled": false,
+              "timeout": 5,
+              "statusMessage": "Loading ponytail mode..."
+            }
+          ]
+        }
+      ],
+      "UserPromptSubmit": [
+        {
+          "hooks": [
+            {
+              "type": "command",
+              "command": "node \"${CLAUDE_PROJECT_DIR}\"/.claude/hooks/ponytail-zcode.js UserPromptSubmit",
+              "enabled": false,
+              "timeout": 5,
+              "statusMessage": "Tracking ponytail mode..."
             }
           ]
         }

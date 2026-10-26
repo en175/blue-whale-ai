@@ -1,28 +1,9 @@
-/* ============================================
- * admin 子路由表：后台 9 页，页面按需懒加载
- * ============================================ */
-import { lazy, Suspense } from 'react';
+import { Dashboard, RechargePlans, RechargeCustomConfig, Promotions, MemberDiscounts, ToolPricing, RechargeRecords, ConsumptionRecords, JobRecords, TemplateManage, SkillManage, ModelList, UserManage, OperationLog, SystemConfig, SiteConfig } from './lazyPages';
+import { LazyPage as L } from './LazyPage';
 import { Navigate } from 'react-router-dom';
-import RequireAdmin from '@/router/guards';
+import RequireAdmin from '@/shared/router/guards';
 import AdminLayout from './layouts/AdminLayout';
 
-const Dashboard = lazy(() => import('./pages/Dashboard'));
-const RechargePlans = lazy(() => import('./pages/RechargePlans'));
-const TemplateManage = lazy(() => import('./pages/TemplateManage'));
-const SkillManage = lazy(() => import('./pages/SkillManage'));
-const ModelList = lazy(() => import('./pages/ModelList'));
-const UserManage = lazy(() => import('./pages/UserManage'));
-const OrderManage = lazy(() => import('./pages/OrderManage'));
-const OperationLog = lazy(() => import('./pages/OperationLog'));
-const SystemConfig = lazy(() => import('./pages/SystemConfig'));
-const SiteConfig = lazy(() => import('./pages/SiteConfig'));
-
-/** 懒加载包裹 */
-function L({ children }: { children: React.ReactElement }) {
-  return <Suspense fallback={null}>{children}</Suspense>;
-}
-
-/** 后台路由子树（挂载到根路由） */
 export const adminRoutes = {
   path: '/admin',
   element: (
@@ -33,11 +14,17 @@ export const adminRoutes = {
   children: [
     { index: true, element: <L><Dashboard /></L> },
     { path: 'recharge-plans', element: <L><RechargePlans /></L> },
+    { path: 'recharge-custom-config', element: <L><RechargeCustomConfig /></L> },
+    { path: 'billing-promotions', element: <L><Promotions /></L> },
+    { path: 'billing-member-discounts', element: <L><MemberDiscounts /></L> },
+    { path: 'tool-pricing', element: <L><ToolPricing /></L> },
+    { path: 'recharge-records', element: <L><RechargeRecords /></L> },
+    { path: 'consumption-records', element: <L><ConsumptionRecords /></L> },
+    { path: 'job-records', element: <L><JobRecords /></L> },
     { path: 'templates', element: <L><TemplateManage /></L> },
     { path: 'skills', element: <L><SkillManage /></L> },
     { path: 'models', element: <L><ModelList /></L> },
     { path: 'users', element: <L><UserManage /></L> },
-    { path: 'orders', element: <L><OrderManage /></L> },
     { path: 'logs', element: <L><OperationLog /></L> },
     { path: 'site-config', element: <L><SiteConfig /></L> },
     { path: 'settings', element: <L><SystemConfig /></L> },

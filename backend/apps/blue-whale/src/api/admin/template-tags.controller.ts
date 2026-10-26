@@ -49,7 +49,6 @@ export class AdminTemplateTagsController {
     }
   }
 
-  /** IKA64P：标签隐藏开关（首页即时生效） */
   @Put("visibility")
   async setVisibility(@Body() body: Record<string, unknown>) {
     const tagCode = typeof body.tag_code === "string" ? body.tag_code.trim() : "";

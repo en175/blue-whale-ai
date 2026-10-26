@@ -1,15 +1,8 @@
-// IK74V8：从 skill-repo.test.ts 拆出（≤800 行硬线）。用例逐块搬运，断言不变。
 import type {PrismaClient} from "@prisma/client";
 import {describe, expect, it, vi} from "vitest";
 import {agentRunPinSchema, type AgentRunPin} from "@lib/contracts";
 import {createSkillRepo, SkillInUseError} from "./skill-repo.js";
 
-// SkillRepo 资产边界（契约 docs/specs/2026-08-03-creative-skill-asset-contract.md §2/§3/§6/§11）：
-// wire 主键一律 creative_skill_id；自增 id/skill_id、content/body/prompt 永不出库；
-// mine = 官方引用（official）∪ 名下个人技能（personal）；个人技能跨用户按不存在处理；
-// library v2（IK60WT）：分类过滤、featured/most_used/newest 排序、zh/en 语言解析、
-// keyword 命中解析语言 name/description + search_keywords（绝不匹配 content）、
-// usage_count = creative_skill_activation COUNT(DISTINCT user_id)。
 import {OTHER_RESOURCE, TARGET_RESOURCE, candidateOf, expectWhitelistOnly, pinWithSkills, signRunPin, withTransaction} from "./skill-repo.testlib.js";
 
 describe("SkillRepo — 我的技能与个人技能生命周期", () => {
@@ -57,8 +50,6 @@ describe("SkillRepo — 我的技能与个人技能生命周期", () => {
   }
 
   it("listMine 官方引用标题中文优先解析（name_zh → 回退单语 name），与技能库一致（IKCXOK）", async () => {
-    // 真实存量：name_zh 已填充、name_en 为 NULL、skill.name 是英文标题 —— 修复前直接
-    // 透传 s.name 出英文；修复后走 §11.4 resolveName("zh") 中文优先，返回 name_zh。
     const { prisma } = createUnionPrisma();
     const page = await createSkillRepo(prisma).listMine("9", {
       pageNum: 1,
@@ -109,7 +100,6 @@ describe("SkillRepo — 我的技能与个人技能生命周期", () => {
       pageSize: 10,
     });
 
-    // 统一按最近添加/创建时间倒序（§12.5）：官方引用时间更晚排在前，个人技能在后。
     expect(page.total).toBe(2);
     expect(page.records).toEqual([
       {
@@ -135,7 +125,6 @@ describe("SkillRepo — 我的技能与个人技能生命周期", () => {
     expect(userSkillFindMany).toHaveBeenCalledWith(
       expect.objectContaining({ orderBy: { gmt_create: "desc" } }),
     );
-    // 个人技能查询带 owner 谓词（§16.1）：他人的个人技能不会进入结果。
     expect(queryRawUnsafe).toHaveBeenCalledWith(
       expect.stringContaining("owner_user_id = ?"),
       9n,
@@ -215,7 +204,7 @@ describe("SkillRepo — 我的技能与个人技能生命周期", () => {
     const queryRawUnsafe = vi.fn().mockImplementation((sql: string) => {
       if (sql.includes("SELECT name FROM creative_skill")) return [{ name: "故事板助手" }];
       if (sql.includes("COUNT(*) AS c FROM agent_runs")) return [{ c: 0n }];
-      return []; // 终态引用列表为空
+      return [];
     });
     const executeRawUnsafe = vi.fn().mockImplementation((sql: string) => {
       if (sql.includes("creative_skill_version")) return 2;
@@ -228,7 +217,6 @@ describe("SkillRepo — 我的技能与个人技能生命周期", () => {
     await expect(
       createSkillRepo(prisma).deletePersonal("9", "my_personal"),
     ).resolves.toBe(true);
-    // 禁删检查执行两次（步骤 2 + 步骤 4 X 锁后复检）
     const countCalls = queryRawUnsafe.mock.calls.filter((call) =>
       (call[0] as string).includes("COUNT(*) AS c FROM agent_runs"),
     );
@@ -238,7 +226,6 @@ describe("SkillRepo — 我的技能与个人技能生命周期", () => {
       expect.stringContaining("DELETE FROM creative_skill_version"),
       "my_personal",
     );
-    // 最小事实（§13.2/§16.2）：激活埋点只增不改，删除技能不得触碰埋点表。
     for (const call of executeRawUnsafe.mock.calls) {
       expect(call[0] as string).not.toContain("creative_skill_activation");
     }
@@ -248,7 +235,7 @@ describe("SkillRepo — 我的技能与个人技能生命周期", () => {
   });
 
   it("deletePersonal 非 owner 调用不命中：本体与版本行都不动", async () => {
-    const queryRawUnsafe = vi.fn().mockResolvedValue([]); // name SELECT 0 命中
+    const queryRawUnsafe = vi.fn().mockResolvedValue([]);
     const executeRawUnsafe = vi.fn();
     const prisma = {
       ...withTransaction({ $queryRawUnsafe: queryRawUnsafe, $executeRawUnsafe: executeRawUnsafe }),
@@ -329,7 +316,7 @@ describe("SkillRepo — 我的技能与个人技能生命周期", () => {
       if (sql.includes("SELECT name FROM creative_skill")) {
         return [{ name: "故事板助手" }];
       }
-      return [{ c: 1n }]; // 禁删检查命中
+      return [{ c: 1n }];
     });
     const executeRawUnsafe = vi.fn();
     const prisma = {
@@ -346,7 +333,6 @@ describe("SkillRepo — 我的技能与个人技能生命周期", () => {
       creativeSkillId: "story_board",
     });
     expect(executeRawUnsafe).not.toHaveBeenCalled();
-    // fail-closed 写法：终态之外一律视为进行中（含 queued/running/awaiting_input）
     const countSql = queryRawUnsafe.mock.calls[1][0] as string;
     expect(countSql).toContain(
       "status NOT IN ('completed', 'failed', 'cancelled')",
@@ -384,7 +370,6 @@ describe("SkillRepo — 我的技能与个人技能生命周期", () => {
     const [updateSql, pinValue, runId] = updateCall as [string, string, bigint];
     expect(updateSql).toContain("gmt_modified = CURRENT_TIMESTAMP(3)");
     expect(runId).toBe(5n);
-    // 写回 pin：目标技能两数组移除（正文供应消失）、activations 保留（「曾使用」最小事实）
     const written = JSON.parse(pinValue) as AgentRunPin;
     expect(agentRunPinSchema.safeParse(written).success).toBe(true);
     expect(written.auto_creative_skill_candidates).toEqual([]);
@@ -392,7 +377,6 @@ describe("SkillRepo — 我的技能与个人技能生命周期", () => {
     expect(written.activated_creative_skill_versions).toEqual(
       targetPin.activated_creative_skill_versions,
     );
-    // digest 重算正确（与契约规范化输入同构）
     const { pin_digest: _pinDigest, ...writtenSource } = written;
     expect(written.pin_digest).toBe(signRunPin(writtenSource).pin_digest);
   });
@@ -441,7 +425,6 @@ describe("SkillRepo — 我的技能与个人技能生命周期", () => {
       }
       if (sql.includes("COUNT(*) AS c FROM agent_runs")) return [{ c: 0n }];
       if (sql.includes("SELECT id, run_pin FROM agent_runs")) {
-        // NULL run_pin（防御兜底）与不引用目标技能的 pin（scrub 无变化）都不触发写库
         return [
           { id: 6n, run_pin: null },
           { id: 7n, run_pin: JSON.stringify(otherPin) },
@@ -468,7 +451,7 @@ describe("SkillRepo — 我的技能与个人技能生命周期", () => {
   });
 
   it("deletePersonal X 锁后复检命中进行中引用时整体回滚（版本行未删）", async () => {
-    const activeCounts = [0n, 1n]; // 第一次检查 0，DELETE 后复检命中 1
+    const activeCounts = [0n, 1n];
     const queryRawUnsafe = vi.fn().mockImplementation((sql: string) => {
       if (sql.includes("SELECT name FROM creative_skill")) {
         return [{ name: "故事板助手" }];
@@ -488,7 +471,6 @@ describe("SkillRepo — 我的技能与个人技能生命周期", () => {
 
     const promise = createSkillRepo(prisma).deletePersonal("9", "story_board");
     await expect(promise).rejects.toThrow(SkillInUseError);
-    // 整体回滚：版本行 DELETE 未执行
     expect(
       executeRawUnsafe.mock.calls.some((call) =>
         (call[0] as string).includes("DELETE FROM creative_skill_version"),

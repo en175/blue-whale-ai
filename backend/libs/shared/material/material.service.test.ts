@@ -3,7 +3,17 @@ import { NewApiError } from "@lib/core";
 
 import { MATERIAL_ACTIONS, MaterialService } from "./material.service.js";
 
-const AUTH = "Bearer sk-test-key";
+const UPSTREAM_KEY = "sk-test-key";
+const AUTH = `Bearer ${UPSTREAM_KEY}`;
+
+function settingsStub(key: string | null = UPSTREAM_KEY) {
+  return {
+    requireUpstreamKey: async () => {
+      if (key === null) throw new Error("上游凭证未配置");
+      return key;
+    },
+  } as never;
+}
 
 function stubFetch(responder: (url: string, init: RequestInit) => Response) {
   const calls: Array<{ url: string; init: RequestInit }> = [];
@@ -25,11 +35,8 @@ function json(body: unknown, status = 200): Response {
   });
 }
 
-/** 构造 MaterialService：mock PrismaService（groupRepo 未用时传哑对象），隔离数据库。 */
 function makeService(prisma?: unknown) {
-  return new MaterialService(
-    prisma as never,
-  );
+  return new MaterialService(prisma as never, settingsStub());
 }
 
 describe("MaterialService —— 纯过境调用", () => {
@@ -58,20 +65,18 @@ describe("MaterialService —— 纯过境调用", () => {
     const calls = stubFetch(() => json({}));
     const service = makeService();
     await expect(
-      service.callAction(AUTH, "GetModerationResult", {}),
+      service.callAction("GetModerationResult", {}),
     ).rejects.toMatchObject({ status: 400, code: "InvalidAction" });
     expect(calls).toHaveLength(0);
   });
 
-  it("缺少上游执行凭证拒绝（401）", async () => {
-    stubFetch(() => json({}));
-    const service = makeService();
+  it("未配置上游凭证时 requireUpstreamKey 抛，且不发起请求", async () => {
+    const calls = stubFetch(() => json({}));
+    const service = new MaterialService({} as never, settingsStub(null));
     await expect(
-      service.callAction(undefined, "ListAssetGroups", {}),
-    ).rejects.toMatchObject({ status: 401 });
-    await expect(
-      service.callAction("Bearer not-sk", "ListAssetGroups", {}),
-    ).rejects.toMatchObject({ status: 401 });
+      service.callAction("ListAssetGroups", {}),
+    ).rejects.toThrow("上游凭证未配置");
+    expect(calls).toHaveLength(0);
   });
 
   it("上游信封与状态码原样透传（404 不抛错）", async () => {
@@ -81,14 +86,14 @@ describe("MaterialService —— 纯过境调用", () => {
     };
     stubFetch(() => json(errorBody, 404));
     const service = makeService();
-    const res = await service.callAction(AUTH, "GetAsset", { Id: "Asset-x" });
+    const res = await service.callAction("GetAsset", { Id: "Asset-x" });
     expect(res).toEqual({ status: 404, body: errorBody });
   });
 
   it("请求以 Bearer sk- 打网关 /api/material/{Action}", async () => {
     const calls = stubFetch(() => json({ Result: { Id: "group-1" } }));
     const service = makeService();
-    await service.callAction(AUTH, "CreateAssetGroup", {
+    await service.callAction("CreateAssetGroup", {
       Name: "g",
       GroupType: "AIGC",
     });
@@ -105,7 +110,7 @@ describe("MaterialService —— 纯过境调用", () => {
   it("CreateVisualValidateSession 纯透传（前端传入的 CallbackURL 原样保留）", async () => {
     const calls = stubFetch(() => json({ BytedToken: "bt-1", H5Link: "https://h5" }));
     const service = makeService();
-    await service.callAction(AUTH, "CreateVisualValidateSession", {
+    await service.callAction("CreateVisualValidateSession", {
       Name: "真人组",
       CallbackURL: "https://web.test/auth-success",
       ProjectName: "p",
@@ -120,7 +125,7 @@ describe("MaterialService —— 纯过境调用", () => {
   it("CreateVisualValidateSession 未传 CallbackURL 时也纯透传", async () => {
     const calls = stubFetch(() => json({ BytedToken: "bt-1", H5Link: "https://h5" }));
     const service = makeService();
-    await service.callAction(AUTH, "CreateVisualValidateSession", {
+    await service.callAction("CreateVisualValidateSession", {
       Name: "真人组",
     });
     expect(JSON.parse(String(calls[0].init.body))).toEqual({
@@ -131,7 +136,7 @@ describe("MaterialService —— 纯过境调用", () => {
   it("其他 Action 请求体原样透传（含任意自定义字段）", async () => {
     const calls = stubFetch(() => json({ Result: {} }));
     const service = makeService();
-    await service.callAction(AUTH, "CreateAsset", {
+    await service.callAction("CreateAsset", {
       GroupId: "group-1",
       URL: "https://cdn.test/a.jpg",
       Name: "a",
@@ -152,10 +157,10 @@ describe("MaterialService —— 纯过境调用", () => {
     stubFetch(() => json({}));
     const service = makeService();
     await expect(
-      service.callAction(AUTH, "ListAssetGroups", {}),
+      service.callAction("ListAssetGroups", {}),
     ).rejects.toBeInstanceOf(NewApiError);
     await expect(
-      service.callAction(AUTH, "ListAssetGroups", {}),
+      service.callAction("ListAssetGroups", {}),
     ).rejects.toMatchObject({ status: 503 });
   });
 });
@@ -176,7 +181,6 @@ describe("MaterialService —— ensureVirtualDefaultGroup（IKDE6X）", () => {
     vi.unstubAllGlobals();
   });
 
-  /** mock 本地 material_groups 查询：findVirtualDefault / upsert。upsert 默认 vi.fn 防 undefined。 */
   function makeGroupPrisma(overrides: {
     findVirtualDefault?: unknown;
     upsert?: unknown;
@@ -208,18 +212,15 @@ describe("MaterialService —— ensureVirtualDefaultGroup（IKDE6X）", () => {
     });
     const service = makeService(prisma as never);
 
-    const groupId = await service.ensureVirtualDefaultGroup(AUTH, "9");
+    const groupId = await service.ensureVirtualDefaultGroup("9");
 
     expect(groupId).toBe("group-virt-1");
-    // 上游建组：组名 默认分组：<uid>。
     expect(calls).toHaveLength(1);
     expect(calls[0].url).toBe("http://gateway.test/api/material/CreateAssetGroup");
-    // IKEXX8：网关文档 GroupType 必填——显式携带 AIGC，不赌上游默认值。
     expect(JSON.parse(String(calls[0].init.body))).toEqual({
       Name: "默认分组：9",
       GroupType: "AIGC",
     });
-    // 本地落表：virtual 默认组。
     expect(prisma.client.material_groups.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
         where: {
@@ -251,11 +252,11 @@ describe("MaterialService —— ensureVirtualDefaultGroup（IKDE6X）", () => {
     });
     const service = makeService(prisma as never);
 
-    const groupId = await service.ensureVirtualDefaultGroup(AUTH, "9");
+    const groupId = await service.ensureVirtualDefaultGroup("9");
 
     expect(groupId).toBe("group-virt-1");
-    expect(calls).toHaveLength(0); // 未调上游
-    expect(prisma.client.material_groups.upsert).not.toHaveBeenCalled(); // 未落表
+    expect(calls).toHaveLength(0);
+    expect(prisma.client.material_groups.upsert).not.toHaveBeenCalled();
   });
 
   it("上游建组返回非 group- 前缀 Id：抛 502，不落表", async () => {
@@ -266,7 +267,7 @@ describe("MaterialService —— ensureVirtualDefaultGroup（IKDE6X）", () => {
     const service = makeService(prisma as never);
 
     await expect(
-      service.ensureVirtualDefaultGroup(AUTH, "9"),
+      service.ensureVirtualDefaultGroup("9"),
     ).rejects.toMatchObject({ status: 502, code: "create_default_material_group_failed" });
     expect(calls).toHaveLength(1);
     expect(prisma.client.material_groups.upsert).not.toHaveBeenCalled();
@@ -280,7 +281,7 @@ describe("MaterialService —— ensureVirtualDefaultGroup（IKDE6X）", () => {
     const service = makeService(prisma as never);
 
     await expect(
-      service.ensureVirtualDefaultGroup(AUTH, "9"),
+      service.ensureVirtualDefaultGroup("9"),
     ).rejects.toMatchObject({ status: 400 });
     expect(calls).toHaveLength(1);
     expect(prisma.client.material_groups.upsert).not.toHaveBeenCalled();
@@ -295,9 +296,8 @@ describe("MaterialService —— ensureVirtualDefaultGroup（IKDE6X）", () => {
     const service = makeService(prisma as never);
 
     await expect(
-      service.ensureVirtualDefaultGroup(AUTH, "9"),
+      service.ensureVirtualDefaultGroup("9"),
     ).rejects.toThrow("db down");
-    // 上游：先建组，再补偿删组。
     expect(calls[0].url).toBe("http://gateway.test/api/material/CreateAssetGroup");
     expect(calls[1].url).toBe("http://gateway.test/api/material/DeleteAssetGroup");
     expect(JSON.parse(String(calls[1].init.body))).toEqual({ Id: "group-virt-1" });
@@ -359,6 +359,7 @@ describe("MaterialService —— 组查询分流 tryServeLocalGroupAction（IKEX
           Id: "group-20260911103222-ps9db",
           Name: "默认分组：9",
           GroupType: "AIGC",
+          CoverUrl: null,
           CreateTime: "2026-09-11T02:32:22Z",
           UpdateTime: "2026-09-11T02:32:22Z",
         },
@@ -368,17 +369,10 @@ describe("MaterialService —— 组查询分流 tryServeLocalGroupAction（IKEX
     });
   });
 
-  it("ListAssetGroups 无 Filter / LivenessFace / 陌生值：返回 null（透传上游）", async () => {
+  it("ListAssetGroups 无 Filter / 陌生 GroupType：返回 null（保持透传，不改变既有语义）", async () => {
     const service = makeService(makeGroupPrisma());
     expect(
       await service.tryServeLocalGroupAction("9", "ListAssetGroups", {
-        PageNumber: 1,
-        PageSize: 20,
-      }),
-    ).toBeNull();
-    expect(
-      await service.tryServeLocalGroupAction("9", "ListAssetGroups", {
-        Filter: { GroupType: "LivenessFace" },
         PageNumber: 1,
         PageSize: 20,
       }),
@@ -390,7 +384,42 @@ describe("MaterialService —— 组查询分流 tryServeLocalGroupAction（IKEX
     ).toBeNull();
   });
 
-  it("GetAssetGroup 命中本地虚拟组：返回详情信封；未命中返回 null（真人组透传）", async () => {
+  it("ListAssetGroups LivenessFace：读本地真人组，不再透传上游（ADR-0126）", async () => {
+    const realRow = {
+      ...upstreamRow,
+      material_group_id: "group-real-1",
+      kind: "real",
+      name: "我的真人组",
+      cover_url: "https://cdn.test/cover.png",
+      is_default: false,
+    };
+    const count = vi.fn().mockResolvedValue(1);
+    const findMany = vi.fn().mockResolvedValue([realRow]);
+    const calls = stubFetch(() => json({}));
+    const service = makeService(makeGroupPrisma({ count, findMany }));
+
+    const res = await service.tryServeLocalGroupAction("9", "ListAssetGroups", {
+      Filter: { GroupType: "LivenessFace" },
+      PageNumber: 1,
+      PageSize: 20,
+    });
+
+    expect(calls).toHaveLength(0);
+    const body = res!.body as Record<string, any>;
+    expect(body.ResponseMetadata.Action).toBe("ListAssetGroups");
+    expect(body.Result.Items).toEqual([
+      {
+        Id: "group-real-1",
+        Name: "我的真人组",
+        GroupType: "LivenessFace",
+        CoverUrl: "https://cdn.test/cover.png",
+        CreateTime: "2026-09-11T02:32:22Z",
+        UpdateTime: "2026-09-11T02:32:22Z",
+      },
+    ]);
+  });
+
+  it("GetAssetGroup 命中本地组：返回详情信封；本地无行返回 null（透传上游）", async () => {
     const serviceHit = makeService(
       makeGroupPrisma({ findFirst: vi.fn().mockResolvedValue(upstreamRow) }),
     );
@@ -404,6 +433,7 @@ describe("MaterialService —— 组查询分流 tryServeLocalGroupAction（IKEX
       Id: "group-20260911103222-ps9db",
       Name: "默认分组：9",
       GroupType: "AIGC",
+      CoverUrl: null,
       CreateTime: "2026-09-11T02:32:22Z",
       UpdateTime: "2026-09-11T02:32:22Z",
     });
@@ -424,9 +454,6 @@ describe("MaterialService —— 组查询分流 tryServeLocalGroupAction（IKEX
   });
 });
 
-// IKF YHJ：上游判素材失败时的统一处置 + GetAsset 本地优先。
-// 两件事必须配套：处置会删掉上游素材，删完之后再打上游只会拿到 NotFound，
-// 所以 GetAsset 必须先在本地短接，否则前端看到的是「不存在」而不是「未通过」。
 describe("MaterialService —— 素材失败处置与 GetAsset 本地优先（IKFYHJ）", () => {
   const originalBaseUrl = process.env.NEW_API_BASE_URL;
 
@@ -439,12 +466,10 @@ describe("MaterialService —— 素材失败处置与 GetAsset 本地优先（I
     vi.unstubAllGlobals();
   });
 
-  /** 造一个只提供素材状态行的 prisma 替身；返回可断言的 spy。 */
   function makePrisma(row: { status: string; errorCode?: string | null; errorMessage?: string | null } | null) {
     const mirrorStatus = vi.fn().mockResolvedValue(undefined);
     const clearMany = vi.fn().mockResolvedValue({ count: 1 });
     const prisma = {
-      // 服务内部走 `this.prisma.client`（PrismaService 的约定），mock 要照这个形状给。
       client: {
         material_assets: {
           findFirst: vi.fn().mockResolvedValue(
@@ -470,14 +495,12 @@ describe("MaterialService —— 素材失败处置与 GetAsset 本地优先（I
     const { prisma, mirrorStatus, clearMany } = makePrisma(null);
     const calls = stubFetch(() => json({ Result: {} }));
 
-    await new MaterialService(prisma as never).handleUpstreamMaterialFailure({
+    await new MaterialService(prisma as never, settingsStub()).handleUpstreamMaterialFailure({
       userId: "9",
       materialId: "asset-a",
-      authorization: AUTH,
       errorCode: "Sensitive",
       errorMessage: "命中审核",
     });
-    // 删上游是刻意的 fire-and-forget，等一拍让它落地
     await new Promise((r) => setTimeout(r, 0));
 
     expect(mirrorStatus).toHaveBeenCalledWith(
@@ -486,11 +509,10 @@ describe("MaterialService —— 素材失败处置与 GetAsset 本地优先（I
         data: expect.objectContaining({ status: "Failed", error_code: "Sensitive" }),
       }),
     );
-    // 关联两列一起清（只清 material_id 会留下悬空的 group 关联）
     expect(clearMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { material_id: "asset-a", user_id: 9n },
-        data: expect.objectContaining({ material_id: null, material_group_id: null }),
+        data: expect.objectContaining({ material_id: null }),
       }),
     );
     expect(calls.map((c) => c.url)).toEqual(["http://gateway.test/api/material/DeleteAsset"]);
@@ -500,10 +522,9 @@ describe("MaterialService —— 素材失败处置与 GetAsset 本地优先（I
     const { prisma, mirrorStatus, clearMany } = makePrisma(null);
     const calls = stubFetch(() => json({ Result: {} }));
 
-    await new MaterialService(prisma as never).handleUpstreamMaterialFailure({
+    await new MaterialService(prisma as never, settingsStub()).handleUpstreamMaterialFailure({
       userId: "9",
       materialId: "asset-gone",
-      authorization: AUTH,
       deleteUpstream: false,
     });
     await new Promise((r) => setTimeout(r, 0));
@@ -518,11 +539,10 @@ describe("MaterialService —— 素材失败处置与 GetAsset 本地优先（I
     stubFetch(() => json({ ResponseError: { Code: "InternalError" } }, 500));
 
     await expect(
-      new MaterialService(prisma as never).handleUpstreamMaterialFailure({
+      new MaterialService(prisma as never, settingsStub()).handleUpstreamMaterialFailure({
         userId: "9",
         materialId: "asset-a",
-        authorization: AUTH,
-      }),
+        }),
     ).resolves.toBeUndefined();
     await new Promise((r) => setTimeout(r, 0));
   });
@@ -531,7 +551,7 @@ describe("MaterialService —— 素材失败处置与 GetAsset 本地优先（I
     const { prisma } = makePrisma({ status: "Failed", errorCode: "Sensitive", errorMessage: "命中审核" });
     const calls = stubFetch(() => json({}));
 
-    const served = await new MaterialService(prisma as never).tryServeLocalFailedAsset(
+    const served = await new MaterialService(prisma as never, settingsStub()).tryServeLocalFailedAsset(
       "9", "GetAsset", { Id: "asset-a" },
     );
 
@@ -547,22 +567,404 @@ describe("MaterialService —— 素材失败处置与 GetAsset 本地优先（I
     async (status) => {
       const { prisma } = makePrisma({ status });
       await expect(
-        new MaterialService(prisma as never).tryServeLocalFailedAsset("9", "GetAsset", { Id: "asset-a" }),
+        new MaterialService(prisma as never, settingsStub()).tryServeLocalFailedAsset("9", "GetAsset", { Id: "asset-a" }),
       ).resolves.toBeNull();
     },
   );
 
   it("tryServeLocalFailedAsset：无本地行 / 非 GetAsset / id 非法 → 都放行走透传", async () => {
     const none = makePrisma(null);
-    const svc = new MaterialService(none.prisma as never);
+    const svc = new MaterialService(none.prisma as never, settingsStub());
     await expect(svc.tryServeLocalFailedAsset("9", "GetAsset", { Id: "asset-a" })).resolves.toBeNull();
     await expect(
-      new MaterialService(makePrisma({ status: "Failed" }).prisma as never)
+      new MaterialService(makePrisma({ status: "Failed" }).prisma as never, settingsStub())
         .tryServeLocalFailedAsset("9", "ListAssets", { Id: "asset-a" }),
     ).resolves.toBeNull();
     await expect(
-      new MaterialService(makePrisma({ status: "Failed" }).prisma as never)
+      new MaterialService(makePrisma({ status: "Failed" }).prisma as never, settingsStub())
         .tryServeLocalFailedAsset("9", "GetAsset", { Id: "not-an-asset" }),
     ).resolves.toBeNull();
+  });
+});
+
+describe("MaterialService —— 上传口回显素材状态的读口（IKI65H）", () => {
+  const makeStatusPrisma = (row: { status: string } | null, failure?: Error) => {
+    const findFirst = failure
+      ? vi.fn().mockRejectedValue(failure)
+      : vi.fn().mockResolvedValue(
+          row === null
+            ? null
+            : {
+                id: 1n,
+                material_id: "asset-a",
+                user_id: 9n,
+                material_group_id: "group-1",
+                status: row.status,
+                error_code: null,
+                error_message: null,
+                status_checked_at: null,
+              },
+        );
+    return { prisma: { client: { material_assets: { findFirst } } }, findFirst };
+  };
+
+  it("有状态行：原样回该行的 status（不推断、不归一）", async () => {
+    const { prisma, findFirst } = makeStatusPrisma({ status: "Failed" });
+    await expect(
+      new MaterialService(prisma as never, settingsStub()).materialStatusReader().load("9", "asset-a"),
+    ).resolves.toBe("Failed");
+    expect(findFirst).toHaveBeenCalledWith({
+      where: { material_id: "asset-a", user_id: 9n },
+    });
+  });
+
+  it("无状态行：回 null（存量素材可能从未建过行）", async () => {
+    const { prisma } = makeStatusPrisma(null);
+    await expect(
+      new MaterialService(prisma as never, settingsStub()).materialStatusReader().load("9", "asset-a"),
+    ).resolves.toBeNull();
+  });
+
+  it("查库失败：不抛，按无状态行回 null", async () => {
+    const { prisma } = makeStatusPrisma(null, new Error("db down"));
+    await expect(
+      new MaterialService(prisma as never, settingsStub()).materialStatusReader().load("9", "asset-a"),
+    ).resolves.toBeNull();
+  });
+});
+
+describe("MaterialService —— ADR-0126 新行为", () => {
+  const originalBaseUrl = process.env.NEW_API_BASE_URL;
+  const LINKED = "asset-20261009171413-s7hqx";
+
+  beforeEach(() => {
+    process.env.NEW_API_BASE_URL = "http://gateway.test";
+  });
+  afterEach(() => {
+    if (originalBaseUrl === undefined) delete process.env.NEW_API_BASE_URL;
+    else process.env.NEW_API_BASE_URL = originalBaseUrl;
+    vi.unstubAllGlobals();
+  });
+
+  function prismaStub(input: {
+    linked?: string | null;
+    rowStatus?: string | null;
+    localRows?: Array<{ materialId: string; assetId: string; url: string }>;
+  } = {}) {
+    const clearMany = vi.fn().mockResolvedValue({ count: 1 });
+    const deleteMany = vi.fn().mockResolvedValue({ count: 1 });
+    const mirrorMany = vi.fn().mockResolvedValue({ count: 1 });
+    const prisma = {
+      client: {
+        assets: {
+          findMany: vi.fn().mockResolvedValue(
+            (input.localRows ?? []).map((r) => ({
+              id: BigInt(r.assetId),
+              material_id: r.materialId,
+              url: r.url,
+            })),
+          ),
+          findFirst: vi.fn().mockResolvedValue(
+            input.linked == null ? null : { material_id: input.linked },
+          ),
+          updateMany: clearMany,
+        },
+        material_assets: {
+          findFirst: vi.fn().mockResolvedValue(
+            input.rowStatus == null
+              ? null
+              : {
+                  id: 1n,
+                  material_id: LINKED,
+                  user_id: 9n,
+                  material_group_id: "group-1",
+                  status: input.rowStatus,
+                  error_code: null,
+                  error_message: null,
+                  status_checked_at: null,
+                },
+          ),
+          updateMany: mirrorMany,
+          deleteMany,
+        },
+      },
+    };
+    return { prisma, clearMany, deleteMany, mirrorMany };
+  }
+
+  describe("listLibraryAssets", () => {
+    it("已导入的素材补 asset_id / url，未导入的留 null；状态以上游为准", async () => {
+      const { prisma } = prismaStub({
+        localRows: [{ materialId: "asset-a", assetId: "526", url: "https://cdn.test/a.png" }],
+      });
+      stubFetch(() =>
+        json({
+          Result: {
+            TotalCount: 2,
+            Items: [
+              { Id: "asset-a", Status: "Active" },
+              { Id: "asset-b", Status: "Active" },
+            ],
+          },
+        }),
+      );
+
+      const data = await makeService(prisma).listLibraryAssets({
+        userId: "9",
+        body: { Filter: { GroupType: "LivenessFace" } },
+      });
+
+      expect(data.TotalCount).toBe(2);
+      expect(data.Items).toEqual([
+        { Id: "asset-a", Status: "Active", asset_id: "526", url: "https://cdn.test/a.png" },
+        { Id: "asset-b", Status: "Active", asset_id: null, url: null },
+      ]);
+    });
+
+    it("上游省略 Items（合法空列表）→ 回 { TotalCount, Items: [] }，不是 {}", async () => {
+      const { prisma } = prismaStub();
+      stubFetch(() => json({ Result: { TotalCount: 0 } }));
+
+      await expect(
+        makeService(prisma).listLibraryAssets({ userId: "9", body: {} }),
+      ).resolves.toEqual({ TotalCount: 0, Items: [] });
+    });
+  });
+
+  describe("cascadeDeleteUpstreamMaterial", () => {
+    it("上游 2xx → 清本地关联与状态行", async () => {
+      const { prisma, clearMany, deleteMany } = prismaStub();
+      const calls = stubFetch(() => json({ Result: {} }));
+
+      await makeService(prisma).cascadeDeleteUpstreamMaterial({
+        userId: "9",
+        materialId: LINKED,
+      });
+
+      expect(calls.map((c) => c.url)).toEqual([
+        "http://gateway.test/api/material/DeleteAsset",
+      ]);
+      expect(clearMany).toHaveBeenCalledOnce();
+      expect(deleteMany).toHaveBeenCalledOnce();
+    });
+
+    it("上游说它已不存在（NotFound.asset）→ 视为成功，照常清本地", async () => {
+      const { prisma, clearMany } = prismaStub();
+      stubFetch(() => json({ ResponseError: { Code: "NotFound.asset" } }, 404));
+
+      await expect(
+        makeService(prisma).cascadeDeleteUpstreamMaterial({ userId: "9", materialId: LINKED }),
+      ).resolves.toBeUndefined();
+      expect(clearMany).toHaveBeenCalledOnce();
+    });
+
+    it("上游 5xx → 抛错且**不清本地**（本地一行不动）", async () => {
+      const { prisma, clearMany, deleteMany } = prismaStub();
+      stubFetch(() => json({ ResponseError: { Code: "InternalError" } }, 500));
+
+      await expect(
+        makeService(prisma).cascadeDeleteUpstreamMaterial({ userId: "9", materialId: LINKED }),
+      ).rejects.toThrow("素材库服务不可用，删除失败，请稍后重试");
+      expect(clearMany).not.toHaveBeenCalled();
+      expect(deleteMany).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("preflightCreateAsset", () => {
+    it("没带 SourceAssetId / 该资产没入库过 → 放行", async () => {
+      const a = prismaStub({ linked: LINKED, rowStatus: "Active" });
+      await expect(
+        makeService(a.prisma).preflightCreateAsset({ userId: "9", sourceAssetId: undefined }),
+      ).resolves.toBeNull();
+
+      const b = prismaStub({ linked: null });
+      await expect(
+        makeService(b.prisma).preflightCreateAsset({ userId: "9", sourceAssetId: "996239" }),
+      ).resolves.toBeNull();
+    });
+
+    it("已入库且就绪 → 幂等短路：同款信封 + AlreadyLinked，且**不打上游**", async () => {
+      const { prisma, clearMany, deleteMany } = prismaStub({ linked: LINKED, rowStatus: "Active" });
+      const calls = stubFetch(() => json({}));
+
+      const short = await makeService(prisma).preflightCreateAsset({
+        userId: "9",
+        sourceAssetId: "996239",
+      });
+
+      expect(calls).toHaveLength(0);
+      expect(short?.status).toBe(200);
+      expect(short?.body).toMatchObject({
+        ResponseMetadata: { Action: "CreateAsset" },
+        Result: { Id: LINKED, AlreadyLinked: true },
+      });
+      expect(clearMany).not.toHaveBeenCalled();
+      expect(deleteMany).not.toHaveBeenCalled();
+    });
+
+    it("历史判失败 → 清掉它（上游 + 本地）后放行，让这次重新入库", async () => {
+      const { prisma, clearMany, deleteMany } = prismaStub({ linked: LINKED, rowStatus: "Failed" });
+      const calls = stubFetch(() => json({ Result: {} }));
+
+      const short = await makeService(prisma).preflightCreateAsset({
+        userId: "9",
+        sourceAssetId: "996239",
+      });
+      await new Promise((r) => setTimeout(r, 0));
+
+      expect(short).toBeNull();
+      expect(clearMany).toHaveBeenCalledOnce();
+      expect(deleteMany).toHaveBeenCalledOnce();
+      expect(calls.map((c) => c.url)).toEqual([
+        "http://gateway.test/api/material/DeleteAsset",
+      ]);
+    });
+
+    it("上游不可达 → 放行且**不清历史**（判不了就不拦）", async () => {
+      const { prisma, clearMany, deleteMany } = prismaStub({
+        linked: LINKED,
+        rowStatus: "Processing",
+      });
+      stubFetch(() => json({ ResponseError: { Code: "InternalError" } }, 500));
+
+      await expect(
+        makeService(prisma).preflightCreateAsset({ userId: "9", sourceAssetId: "996239" }),
+      ).resolves.toBeNull();
+      expect(clearMany).not.toHaveBeenCalled();
+      expect(deleteMany).not.toHaveBeenCalled();
+    });
+
+    it("上游仍 Processing（未到终态）→ 放行且**不清历史**（别把在途素材判成失败并删掉）", async () => {
+      const { prisma, clearMany, deleteMany } = prismaStub({
+        linked: LINKED,
+        rowStatus: "Processing",
+      });
+      const calls = stubFetch(() =>
+        json({ Result: { Id: LINKED, Status: "Processing" } }),
+      );
+
+      await expect(
+        makeService(prisma).preflightCreateAsset({ userId: "9", sourceAssetId: "996239" }),
+      ).resolves.toBeNull();
+      expect(clearMany).not.toHaveBeenCalled();
+      expect(deleteMany).not.toHaveBeenCalled();
+      expect(calls.map((c) => c.url)).toEqual([
+        "http://gateway.test/api/material/GetAsset",
+      ]);
+    });
+  });
+
+  describe("ingestUpstreamMaterialStatuses", () => {
+    it("列表逐条镜像；Failed 触发统一处置（删上游 + 清关联）", async () => {
+      const { prisma, mirrorMany, clearMany } = prismaStub();
+      const calls = stubFetch(() => json({ Result: {} }));
+
+      await makeService(prisma).ingestUpstreamMaterialStatuses("9", {
+        Result: {
+          TotalCount: 2,
+          Items: [
+            { Id: "asset-ok", Status: "Active" },
+            { Id: "asset-bad", Status: "Failed", Error: { Code: "Sensitive", Message: "命中审核" } },
+          ],
+        },
+      });
+      await new Promise((r) => setTimeout(r, 0));
+
+      expect(mirrorMany).toHaveBeenCalledTimes(3);
+      expect(clearMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { material_id: "asset-bad", user_id: 9n } }),
+      );
+      expect(calls.map((c) => c.url)).toEqual([
+        "http://gateway.test/api/material/DeleteAsset",
+      ]);
+    });
+
+    it("脏项（非 asset- 前缀 / 缺 Status / 非对象）被丢弃，不污染镜像", async () => {
+      const { prisma, mirrorMany } = prismaStub();
+      stubFetch(() => json({}));
+
+      await makeService(prisma).ingestUpstreamMaterialStatuses("9", {
+        Result: {
+          Items: [
+            { Id: "asset-good", Status: "Processing" },
+            { Id: "not-an-asset", Status: "Active" },
+            { Id: "asset-no-status" },
+            "garbage",
+          ],
+        },
+      });
+
+      expect(mirrorMany).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("recordClaimedRealGroup", () => {
+    function groupPrisma(existing: unknown = null) {
+      const upsert = vi.fn().mockResolvedValue({});
+      return {
+        prisma: {
+          client: {
+            material_groups: {
+              findFirst: vi.fn().mockResolvedValue(existing),
+              upsert,
+            },
+          },
+        },
+        upsert,
+      };
+    }
+
+    it("领组时落 kind=real 行，组名取自 ListAssetGroups（GetAssetGroup 对组名回空串）", async () => {
+      const { prisma, upsert } = groupPrisma();
+      const calls = stubFetch(() =>
+        json({
+          Result: {
+            TotalCount: 2,
+            Items: [
+              { Id: "group-other", Name: "别的组", GroupType: "LivenessFace" },
+              { Id: "group-real-1", Name: "我的真人组", GroupType: "LivenessFace" },
+            ],
+          },
+        }),
+      );
+
+      await makeService(prisma).recordClaimedRealGroup("9", "group-real-1");
+
+      expect(calls.map((c) => c.url)).toEqual([
+        "http://gateway.test/api/material/ListAssetGroups",
+      ]);
+      expect(upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          create: expect.objectContaining({
+            material_group_id: "group-real-1",
+            kind: "real",
+            name: "我的真人组",
+          }),
+        }),
+      );
+    });
+
+    it("列表里找不到该组 → 名字回落成组 id（行照落，不丢）", async () => {
+      const { prisma, upsert } = groupPrisma();
+      stubFetch(() => json({ Result: { TotalCount: 0, Items: [] } }));
+
+      await makeService(prisma).recordClaimedRealGroup("9", "group-real-1");
+
+      expect(upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          create: expect.objectContaining({ name: "group-real-1" }),
+        }),
+      );
+    });
+
+    it("已有本地行 → 跳过（领组后前端会继续轮询）", async () => {
+      const { prisma, upsert } = groupPrisma({ id: 1n });
+      const calls = stubFetch(() => json({}));
+
+      await makeService(prisma).recordClaimedRealGroup("9", "group-real-1");
+
+      expect(calls).toHaveLength(0);
+      expect(upsert).not.toHaveBeenCalled();
+    });
   });
 });

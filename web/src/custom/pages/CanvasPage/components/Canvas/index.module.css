@@ -1,0 +1,80 @@
+.canvasContainer {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  z-index: 0;
+  isolation: isolate;
+}
+
+.canvasContainer :global(.react-flow__node) {
+  font-size: var(--font-size-sm);
+}
+
+.canvasContainer :global(.react-flow__edge-path) {
+  stroke-width: 3;
+}
+
+.canvasContainer :global(.react-flow__connection-path) {
+  stroke-width: 3;
+}
+
+.canvasContainer :global(.react-flow__connectionline path) {
+  stroke-width: 3;
+}
+
+.canvasContainer :global(.react-flow__handle) {
+  width: 8px;
+  height: 8px;
+  background-color: var(--color-accent-primary);
+  border: 2px solid var(--color-bg-primary);
+}
+
+.canvasContainer :global(.react-flow__pane.selection) {
+  cursor: default;
+}
+
+.canvasContainer {
+  --xy-selection-background-color: rgba(220, 220, 220, 0.10);
+  --xy-selection-border: 1px dashed rgba(220, 220, 220, 0.65);
+}
+
+.dragMode :global(.react-flow__node),
+.dragMode :global(.react-flow__node *),
+.dragMode :global(.react-flow__nodesselection),
+.dragMode :global(.react-flow__nodesselection *) {
+  pointer-events: none !important;
+}
+
+.snapGuides {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 9;
+}
+
+.snapGuides line {
+  stroke: var(--color-accent-primary);
+  stroke-width: 1;
+}
+
+.dragMode :global(.react-flow__handle) {
+  pointer-events: auto !important;
+}
+
+.dragMode :global(.react-flow__pane) {
+  cursor: grab;
+}
+
+.dragMode :global(.react-flow__pane.dragging) {
+  cursor: grabbing;
+}
+
+.canvasContainer :global(.react-flow__node.draggable) {
+  cursor: default;
+}
+
+.canvasContainer :global(.react-flow__node.draggable.dragging) {
+  cursor: grabbing;
+}

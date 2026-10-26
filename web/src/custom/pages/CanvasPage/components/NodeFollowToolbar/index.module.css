@@ -1,0 +1,6 @@
+.toolbarLayer {
+  position: absolute;
+  transform: translate3d(-50%, 0, 0);
+  isolation: isolate;
+  z-index: 30;
+}

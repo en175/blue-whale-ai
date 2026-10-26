@@ -22,7 +22,6 @@ function isEnvelope(value: unknown): value is ResultEnvelope<unknown> {
   );
 }
 
-/** 管理端信封 { success, data } / { success: false, error }：透传不包裹。 */
 function isAdminEnvelope(value: unknown): boolean {
   return (
     typeof value === "object" &&
@@ -32,8 +31,6 @@ function isAdminEnvelope(value: unknown): boolean {
   );
 }
 
-/** 统一响应信封：控制器返回裸数据时包成 { code: 200, msg: null, data }；
- *  已是 ok()/fail() 信封（含 code/msg/data）则透传；流/Buffer/@BypassTransform 透传不包裹。 */
 @Injectable()
 export class TransformInterceptor<T>
   implements NestInterceptor<T, ResultEnvelope<T> | T>

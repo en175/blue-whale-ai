@@ -1,0 +1,637 @@
+
+.dialogWrap {
+  position: absolute;
+  bottom: var(--spacing-lg);
+  left: 50%;
+  transform: translateX(-50%);
+  width: 740px;
+  max-width: 90%;
+  z-index: 10;
+  animation: dialogFadeIn 0.2s ease;
+}
+
+.dialogWrapFollow {
+  bottom: auto;
+  left: 0;
+  transform: none;
+  animation: dialogFadeInFollow 0.2s ease;
+}
+
+.dialog {
+  position: relative;
+  height: auto;
+  min-height: 0;
+  max-height: calc(100vh - 2 * var(--spacing-lg));
+  overflow-y: auto;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  background-color: var(--color-bg-overlay);
+  border: 1px solid var(--color-border-overlay);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-overlay);
+  padding: var(--spacing-lg);
+}
+
+@keyframes dialogFadeIn {
+  from { opacity: 0; transform: translateX(-50%) translateY(8px); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+@keyframes dialogFadeInFollow {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.dialogExpanded {
+  height: 66.66vh;
+}
+
+.editorWrap {
+  font-size: var(--font-size-md);
+  flex: 0 0 auto;
+  height: auto;
+  min-height: 5.4em;
+  position: relative;
+}
+
+.dialogExpanded .editorWrap {
+  flex: 1;
+  min-height: 0;
+}
+
+.editorArea {
+  min-height: 5.4em;
+  max-height: 7.2em;
+  overflow-y: auto;
+}
+
+.dialogExpanded .editorArea {
+  height: 100%;
+  max-height: none;
+}
+
+.actionBarRow {
+  margin-bottom: var(--spacing-md);
+  flex-shrink: 0;
+}
+
+.iconBtn {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-tertiary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.iconBtn:hover {
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-hover);
+}
+
+.mediaRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: var(--spacing-xs);
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+
+.mediaDot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background-color: var(--color-text-tertiary);
+  flex-shrink: 0;
+}
+
+.fileChipRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: var(--spacing-sm);
+  flex-wrap: wrap;
+  flex-shrink: 0;
+}
+
+.fileChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 180px;
+  padding: 3px 10px;
+  border-radius: 20px;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  background-color: rgba(255, 255, 255, 0.08);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fileChip span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fileChipRemove {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  color: var(--color-text-tertiary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  flex-shrink: 0;
+  padding: 0;
+  transition: all var(--transition-fast);
+}
+
+.fileChipRemove:hover {
+  color: #fff;
+  background-color: rgba(255, 255, 255, 0.15);
+}
+
+.bottomBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: var(--spacing-sm);
+  flex-shrink: 0;
+}
+
+.barLeft {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.addBtn {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: 1px solid var(--color-border-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  flex-shrink: 0;
+}
+
+.addBtn:hover {
+  color: var(--color-text-primary);
+  border-color: var(--color-border-hover);
+  background-color: var(--color-bg-hover);
+}
+
+.modeWrap {
+  position: relative;
+}
+
+.modeBtn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--color-text-primary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.modeBtn:hover {
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-hover);
+}
+
+.modeArrow {
+  transition: transform var(--transition-fast);
+}
+
+.modeArrowUp {
+  transform: rotate(180deg);
+}
+
+.modeDropdown {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  min-width: 130px;
+  background-color: #2a2a2a;
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  padding: var(--spacing-xs);
+  animation: popupFadeIn 0.15s ease;
+}
+
+@keyframes popupFadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.modeOption {
+  display: block;
+  width: 100%;
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  transition: all var(--transition-fast);
+}
+
+.modeOption:hover {
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-hover);
+}
+
+.modeOptionActive {
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-active);
+  font-weight: 500;
+}
+
+.modeOptionDisabled {
+  color: #666;
+  cursor: default;
+  opacity: 0.45;
+}
+
+.modeOptionDisabled:hover {
+  color: #666;
+  background: transparent;
+}
+
+.barDivider {
+  font-size: var(--font-size-sm);
+  color: var(--color-border-primary);
+}
+
+.hiddenInput {
+  display: none;
+}
+
+.fileCount {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-tertiary);
+  margin-left: 4px;
+  white-space: nowrap;
+}
+
+.barRight {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+}
+
+.sendBtn {
+  width: 28.8px;
+  height: 28.8px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: #2a2a2a;
+  color: #777;
+  border: none;
+  cursor: not-allowed;
+  transition: all var(--transition-fast);
+}
+
+.sendBtnActive {
+  background-color: #4a4a4a;
+  color: #fff;
+  cursor: pointer;
+}
+
+.sendBtnActive:hover {
+  background-color: #555;
+}
+
+.configToggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  color: #777;
+  background-color: #2a2a2a;
+  border: none;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.configToggle:hover {
+  color: #fff;
+  background-color: #3a3a3a;
+}
+
+.configToggleArrow {
+  transition: transform var(--transition-fast);
+}
+
+.configToggleArrowOpen {
+  transform: rotate(180deg);
+}
+
+.configBtn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.charCount {
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+  line-height: 1;
+}
+
+.charCountWarn {
+  color: #e5484d;
+  font-weight: 500;
+}
+
+
+.configBtn:hover {
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-hover);
+}
+
+.configPanel {
+  position: absolute;
+  bottom: 54px;
+  left: 0;
+  right: 0;
+  margin: 0 auto;
+  width: 480px;
+  max-width: calc(100% - 24px);
+  padding: var(--spacing-lg);
+  background-color: #232323;
+  border: 1px solid var(--color-border-primary);
+  border-radius: 12px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
+  z-index: 5;
+  animation: popupFadeIn 0.15s ease;
+  box-sizing: border-box;
+}
+
+.configCloseBtn {
+  position: absolute;
+  top: var(--spacing-sm);
+  right: var(--spacing-sm);
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-tertiary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  z-index: 1;
+}
+
+.configCloseBtn:hover {
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-hover);
+}
+
+.configLabel {
+  display: block;
+  margin-bottom: var(--spacing-sm);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-tertiary);
+}
+
+.audioRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: var(--spacing-sm);
+}
+
+.audioHint {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-tertiary);
+}
+
+.audioSwitch {
+  position: relative;
+  width: 36px;
+  height: 20px;
+  padding: 0;
+  border-radius: 999px;
+  background-color: #3a3a3a;
+  border: none;
+  cursor: pointer;
+  transition: background-color var(--transition-fast);
+  flex-shrink: 0;
+}
+
+.audioSwitch:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.audioSwitchOn {
+  background-color: var(--color-accent-primary);
+}
+
+.audioSwitchKnob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background-color: #fff;
+  transition: transform var(--transition-fast);
+}
+
+.audioSwitchOn .audioSwitchKnob {
+  transform: translateX(16px);
+}
+
+.sampleTerm {
+  margin: 0 0 var(--spacing-sm);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-tertiary);
+}
+
+.configRow {
+  display: flex;
+  gap: var(--spacing-md);
+  margin-bottom: var(--spacing-lg);
+}
+
+.durationHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.durationHead .configLabel {
+  margin-bottom: var(--spacing-sm);
+}
+
+.durationValue {
+  margin-bottom: var(--spacing-sm);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.durationSlider {
+  width: 100%;
+}
+
+.durationTicks {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 6px;
+  padding: 0 6px;
+}
+
+.tick {
+  width: 2px;
+  height: 6px;
+  border-radius: 1px;
+  background-color: #4a4a4a;
+}
+
+.tickActive {
+  height: 8px;
+  background-color: #fff;
+}
+
+.durationRange {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 4px;
+  margin-bottom: var(--spacing-lg);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-tertiary);
+}
+
+.ratioGroup {
+  display: flex;
+  gap: var(--spacing-sm);
+}
+
+.ratioBtn {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 10px 0;
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  background-color: #2a2a2a;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.ratioBtn:hover {
+  color: var(--color-text-primary);
+}
+
+.ratioBtnActive {
+  color: var(--color-text-primary);
+  background-color: #333;
+  border-color: var(--color-border-hover);
+  font-weight: 600;
+}
+
+
+.refRoleArea {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm, 8px);
+  margin-bottom: var(--spacing-lg, 16px);
+}
+
+.refSlot {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: var(--spacing-sm, 8px);
+}
+
+.refConflictHint {
+  font-size: 12px;
+  color: #e8590c;
+  line-height: 1.4;
+}
+
+.readOnlyHint {
+  font-size: 12px;
+  color: var(--color-text-tertiary);
+  line-height: 1.4;
+}
+
+.followHint {
+  font-size: 12px;
+  color: var(--color-text-tertiary);
+  line-height: 1.4;
+}
+
+.mentionDock {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  z-index: 40;
+}
+
+.mentionDock > button {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+  padding: 6px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-bg-elevated, #fff);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}

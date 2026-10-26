@@ -1,27 +1,32 @@
 import { createHash } from "node:crypto";
 import {
+  ERROR_CAPABILITY_UNSUPPORTED_PARAM,
+  ERROR_INVALID_INPUT,
   IDEMPOTENCY_KEY_REUSED_CODE,
   PARAM_MISSING_CODE,
   PLAN_APPLICATION_CAPABILITY_DRIFT_CODE,
   PLAN_APPLICATION_QUOTA_INSUFFICIENT_CODE,
+  RECOVERY_REASONS,
   RESOURCE_NOT_FOUND_CODE,
   SCENE_CARD_VERSION_CONFLICT_CODE,
+  errorCodeToNumeric,
   fail,
   ok,
   storyboardPreviewCreateRequestSchema,
+  type CanvasBinding,
 } from "@lib/contracts";
-import type { StoryboardPreviewRepo } from "@lib/shared/persistence/index.js";
-import type { CostReservationSnapshot } from "@lib/core";
+import {
+  RecoveryContractError,
+  type CanvasRecoveryAcceptance,
+  type StoryboardPreviewRepo,
+} from "@lib/shared/persistence/index.js";
 
 import { wireInteger } from "@lib/shared/wire-integer.js";
-import type { GenerationCostEstimator } from "./cost-estimator.js";
 
 function isDecimalId(value: string): boolean {
   return /^[1-9][0-9]*$/.test(value);
 }
 
-/** StoryboardPreview 创建请求摘要（契约 §9 / CONTEXT L43-47）：方法 + 操作语义 + 资源路径 + body。
- *  同 CommandId 配同一摘要才重放，配不同摘要判冲突（100302）。 */
 export function storyboardPreviewRequestHash(
   projectId: string,
   sceneCardId: string,
@@ -34,10 +39,6 @@ export function storyboardPreviewRequestHash(
     .digest("hex");
 }
 
-/** 从 SceneCard 显式触发分镜预览（CONTEXT L43-47，可选旁路）。
- *  缺 Idempotency-Key → PARAM_MISSING；sceneCardId 非十进制 → 当作不存在；
- *  body 非 StoryboardPreviewCreateRequest → 400；能力漂移 → 100403；
- *  版本冲突 → 100406 附当前 SceneCard 版本；余额不足 → 100405。 */
 export async function handleStoryboardPreviewCreate(
   userId: string,
   projectId: string,
@@ -46,10 +47,7 @@ export async function handleStoryboardPreviewCreate(
   body: string,
   deps: StoryboardPreviewRepo,
   options?: {
-    providerCredential?: string;
     quotaCheck?: () => Promise<{ sufficient: boolean }>;
-    /** IK7G9X：成本估算器（可选）。提供时建预留写真实预估金额。 */
-    costEstimator?: GenerationCostEstimator;
   },
 ) {
   if (!idempotencyKey || idempotencyKey.trim().length === 0) {
@@ -63,42 +61,60 @@ export async function handleStoryboardPreviewCreate(
   try {
     jsonBody = JSON.parse(body);
   } catch {
-    return fail(400, "请求参数无效");
+    return fail(errorCodeToNumeric(ERROR_INVALID_INPUT), "请求参数无效");
   }
   const parsed = storyboardPreviewCreateRequestSchema.safeParse(jsonBody);
-  if (!parsed.success) return fail(400, "请求参数无效");
-  // URL 路径资源身份为权威，body 的 scene_card_id 必须与之相符。
+  if (!parsed.success) {
+    if (
+      typeof jsonBody === "object" && jsonBody !== null
+      && "canvas_binding" in jsonBody
+    ) {
+      return fail(400, "canvas_binding 载荷无效", { reason: RECOVERY_REASONS.invalidPayload });
+    }
+    return fail(errorCodeToNumeric(ERROR_INVALID_INPUT), "请求参数无效");
+  }
   if (parsed.data.scene_card_id !== sceneCardId)
-    return fail(400, "场景卡不一致");
-  // 图片 worker 必须持有明文凭证（修正四：去密）；缺失时在任何事务写入前拒绝，避免创建必然失败的预览与 Job。
-  if (!options?.providerCredential) {
-    return fail(PARAM_MISSING_CODE, "缺少生成凭证");
+    return fail(errorCodeToNumeric(ERROR_INVALID_INPUT), "场景卡不一致");
+  const canvasBinding: CanvasBinding | undefined = parsed.data.canvas_binding;
+  if (canvasBinding && idempotencyKey.trim() !== canvasBinding.submission_id) {
+    return fail(400, "Idempotency-Key 必须等于 canvas_binding.submission_id", {
+      reason: RECOVERY_REASONS.invalidPayload,
+    });
   }
+  const requestHash = storyboardPreviewRequestHash(projectId, sceneCardId, body);
+  const canvasRecovery: CanvasRecoveryAcceptance | undefined = canvasBinding
+    ? {
+        projectId,
+        userId,
+        binding: canvasBinding,
+        operation: "scene_card.storyboard_preview",
+        requestHash,
+        idempotencyKey: canvasBinding.submission_id,
+        taskType: "image",
+      }
+    : undefined;
 
-  // IK7G9X：建预留时写真实预估金额（数量级口径；new-api 定价不可达 → 降级 0 + dev）。
-  let costReservation: CostReservationSnapshot | undefined;
-  if (options?.costEstimator) {
-    costReservation =
-      (await options.costEstimator({
-        modelId: parsed.data.parameters.model_id,
-        type: "image",
-        expectedOutputCount: parsed.data.parameters.count,
-      })) ?? undefined;
+  let result;
+  try {
+    result = await deps.createStoryboardPreview({
+      userId,
+      projectId,
+      sceneCardId,
+      idempotencyKey,
+      requestHash,
+      base_scene_card_version: parsed.data.base_scene_card_version,
+      parameters: parsed.data.parameters,
+      capability_snapshot_version: parsed.data.capability_snapshot_version,
+      ...(options?.quotaCheck ? { quotaCheck: options.quotaCheck } : {}),
+      ...(canvasRecovery ? { canvasRecovery } : {}),
+    });
+  } catch (error) {
+    if (error instanceof RecoveryContractError) return error.envelope;
+    throw error;
   }
-
-  const result = await deps.createStoryboardPreview({
-    userId,
-    projectId,
-    sceneCardId,
-    idempotencyKey,
-    requestHash: storyboardPreviewRequestHash(projectId, sceneCardId, body),
-    base_scene_card_version: parsed.data.base_scene_card_version,
-    parameters: parsed.data.parameters,
-    capability_snapshot_version: parsed.data.capability_snapshot_version,
-    provider_credential: options.providerCredential,
-    ...(options?.quotaCheck ? { quotaCheck: options.quotaCheck } : {}),
-    ...(costReservation ? { costReservation } : {}),
-  });
+  const bindingView = canvasBinding
+    ? await deps.canvasBindingView(projectId, canvasBinding.submission_id)
+    : null;
   switch (result.kind) {
     case "applied":
       return ok({
@@ -106,12 +122,14 @@ export async function handleStoryboardPreviewCreate(
         scene_card_id: wireInteger(result.scene_card_id),
         generation_job_id: wireInteger(result.generation_job_id),
         cursor: wireInteger(result.cursor),
+        ...(bindingView ? { canvas_binding: bindingView } : {}),
       });
     case "replayed":
       return ok({
         preview_id: wireInteger(result.preview_id),
         scene_card_id: wireInteger(result.scene_card_id),
         generation_job_id: wireInteger(result.generation_job_id),
+        ...(bindingView ? { canvas_binding: bindingView } : {}),
       });
     case "idempotency_conflict":
       return fail(
@@ -130,7 +148,10 @@ export async function handleStoryboardPreviewCreate(
         "生成能力已变化，需刷新能力后重试",
       );
     case "capability_limit":
-      return fail(400, result.reason);
+      return fail(
+        errorCodeToNumeric(ERROR_CAPABILITY_UNSUPPORTED_PARAM),
+        result.reason,
+      );
     case "quota_insufficient":
       return fail(PLAN_APPLICATION_QUOTA_INSUFFICIENT_CODE, "余额不足");
     case "forbidden":

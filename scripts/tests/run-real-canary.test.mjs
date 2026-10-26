@@ -1,6 +1,3 @@
-// run-real-canary.mjs 纯函数单测（T18/IK67HJ）：digest 计算与比对、脱敏、
-// SSE 断线续传合并去重、对象存储身份判定、Canvas 放置规划。
-// 纯内存测试，不打任何网络/数据库。
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
@@ -68,7 +65,6 @@ test("证据结论：存在任一 FAIL 时不得输出 PASS", () => {
   assert.equal(evidenceVerdict([{ ok: true }, { ok: false }]), "FAIL");
 });
 
-/** 构造最小合法 Snapshot 夹具。 */
 function makeSnapshot() {
   return {
     conversation_messages: [{ message_id: "11", role: "user", sequence_no: 1 }],
@@ -110,7 +106,7 @@ test("factDigest：同一 Snapshot 两次计算结果一致", () => {
 test("factDigest：数字与字符串 id 归一化后 digest 相同", () => {
   const a = makeSnapshot();
   const b = makeSnapshot();
-  b.generation_jobs[0].job_id = 101; // wire integer 数字形态
+  b.generation_jobs[0].job_id = 101;
   b.scene_cards[0].scene_card_id = 41;
   assert.deepEqual(computeFactDigest(a), computeFactDigest(b));
 });
@@ -239,7 +235,6 @@ test("对象存储身份：TOS 转存 URL 通过，provider 直引 URL 不通过
   );
   assert.equal(ok.ok, true);
 
-  // 视频媒体 relay 的 generated/ key scheme 同样是合法对象存储身份。
   const videoRelay = checkStorageIdentity(
     "https://bw-bucket.tos-cn-beijing.volces.com/generated/42/video/abc.mp4",
     "42",
@@ -266,7 +261,6 @@ test("对象存储身份：TOS 转存 URL 通过，provider 直引 URL 不通过
   assert.equal(checkStorageIdentity("", "42", "image").ok, false);
 });
 
-/** 含成功输出槽的 Snapshot 夹具（放置协议用）。 */
 function makePlacementSnapshot() {
   return {
     generation_jobs: [
@@ -325,7 +319,6 @@ test("放置规划：提取 pending 槽并构造 generation-output 节点", () =
   assert.equal(videoNode.id, "generation-output:302");
   assert.equal(videoNode.width, 400);
   assert.equal(videoNode.height, 225);
-  // 两节点不得重叠。
   const overlap =
     imageNode.position.x < videoNode.position.x + videoNode.width &&
     videoNode.position.x < imageNode.position.x + imageNode.width &&

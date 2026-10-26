@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.bluewhale.billing.infrastructure.persistence.mapper.PricingCatalogMapper">
+
+
+
+  <select id="selectActive" resultType="com.bluewhale.billing.infrastructure.persistence.po.PricingCatalogEntity">
+    SELECT id, catalog_version, status, document, schema_version, document_hash,
+           effective_from, effective_to, published_by, published_at, note
+    FROM billing_pricing_catalogs
+    WHERE status = 'active'
+    ORDER BY catalog_version DESC
+    LIMIT 1
+  </select>
+
+
+  <select id="selectMaxVersion" resultType="int">
+    SELECT COALESCE(MAX(catalog_version), 0) FROM billing_pricing_catalogs
+  </select>
+
+</mapper>

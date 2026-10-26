@@ -1,0 +1,40 @@
+# IKJRH0 清理范围与保留清单
+
+本轮修订以 `3e689cf6fc77edff58573fb137349024ebcecfa2` 为起点，补清复审发现的全仓维护范围遗漏。清理按 TypeScript AST、Pygments 2.19.2 词法 token 及 Python AST 盘点。字符串、模板、正则和测试数据不作为代码注释删除。
+
+## 范围
+
+发布线先同步至 `8c43ea43fc372ce086c5f1807576d7e882578784`，本次更新又同步至 `634b93e3254d290107cec4188652a9898e29f050`。该次同步的 11 个冲突保留发布线的积分查询、模型配置和画布提交逻辑，只重放注释清理。五个 TypeScript 文件的语法树及去注释编译输出一致，六个 Java／XML 文件的非注释 token 一致。验证期间发布线又前进至 `b035f0a2620ebc73ecedd05beac2193922bbfa66`。后续同步的 CanvasPage 冲突保留资产保存与下载 hook 接入，语法树和去注释编译输出一致，新 hook 与发布线字节一致。机器清单刷新为相对 `d8ef485bd20ea7cb10fced61b0cdbbf05f880524` 的工作区源码快照，逐文件 SHA256 绑定内容。
+
+同步后盘点 3368 个跟踪文件，其中 2605 个属于已识别代码语言。Markdown、JSON、图片和其他资料分别识别为文档、数据或静态资产。ignore 规则按原生行语法识别，Nginx 模板使用 nginx 词法器。逐语言数量及逐文件保留项见 [机器清单](ikjrh0-comment-inventory.json)。清理文件清单以 Git diff 为准。
+
+首批修订修改 470 个维护文件，删除 7147 个普通注释 token。后续补清 10 个维护文件，其中八个工程文件删除 97 行普通说明，proto 删除八行未被消费的说明，另删除一处 ESLint 指令后缀解释。合计涉及 480 个维护文件。包括两个 Web 测试、405 个 Java 文件、两个 YAML 文件、11 个 XML 文件、四个 properties 文件、两个 Dockerfile、42 个未受 checksum 或逐字对账约束的 SQL 文件、Prisma 普通行说明及一个 Hook 普通说明。
+
+## 保留依据
+
+| 内容 | 消费者与必要性 |
+| --- | --- |
+| shebang、编码声明、检查指令、许可证 | 解释器、TypeScript、Vitest、ShellCheck 等直接消费；逐文件行号见机器清单。 |
+| 七个 Python 模块 docstring | `argparse.ArgumentParser(description=__doc__)` 用于实际 `--help` 输出。 |
+| `AccountCredits/data.ts` 两个占位哨兵 | `data.test.ts` 读取源码并断言标记；沿用存量计数，不设置通用 TODO 豁免。 |
+| Hook 审计标记 | `check-hook-contracts.py` 要求运行时 Gate 源文同时包含共享审计器路径与操作参数，实际 Python 实现调用该审计器。 |
+| Prisma 的 `///` 文档 | Prisma client 生成器读取 API 文档元数据；普通 `//` 说明已清理，schema 校验通过。 |
+| ZCode 两条区域标记 | 已安装 ZCode 的 `splitWorkspaceFileSearchIgnoreSections` 按这两个完整常量拆分区域；同步与恢复操作保留自定义区。移除标记会返回空拆分结果，原生 ignore 规则保持不变。 |
+| 五个 proto 的 API 文档 | `buf.gen.yaml` 的 protoc-gen-es 生成 SDK 文件文档与类型 JSDoc；以同版本生成器对两份临时源码生成，删除未消费的八行后五个 SDK 文件字节完全相等；剩余非空文档在生成物中核对。计费对账另读取维度与错误语义原文。 |
+| 已应用 Prisma／Flyway migration | 历史迁移 checksum 依赖文件字节，原样保留。 |
+| 与 migration 逐字相等的 SQL 副本 | 三轨测试直接比较全文。机器清单列出对应 migration，避免将整棵 SQL 目录豁免。其余 SQL 普通说明已清理。 |
+| `schema/011_e_layer_decimal_duration.sql` 的前置查询 token | `e-layer-parity.test.ts` 直接断言回填候选查询原文。删除时已复现失败，保留该 token 后对应测试通过。 |
+| `VocalSplitError.java` 的契约链接 token | `vocal-split.test.ts` 直接断言 `@link` 原文。删除时已复现失败，保留该 token 后对应测试通过。其余 Java 普通注释已清理。 |
+| 文档与原型 HTML | 属于说明与设计资产，按工单范围分别识别。字符串、模板、正则、测试数据及不可手工修改的生成物不清理。 |
+
+## 等价检查与验证边界
+
+两个 Web 文件删除 118 个普通说明 token 后，TypeScript 去注释编译输出与实际 Vitest hoist 转换的执行输出一致，71 个用例通过。468 个非 JS 修改文件的非注释 token 一致，包含字符串内空白；XML 的元素、属性和 SQL token 一致。两个 YAML 文件经 SnakeYAML 2.2 解析的值一致，Prisma schema 校验通过。
+
+本轮首次源码消费者测试为 1370 个通过、两个失败、163 个环境条件跳过。两项失败分别定位到上述 SQL 查询和 Java 契约链接；保留原文后在任务工作树运行相关测试，21 个用例通过。计费源文对账 11 个用例通过。首次完整验证在独立复核发现新遗漏后主动终止，未计为完整通过。完整验证以最终修订 HEAD 的选择器凭证为准，跳过不计为真库或浏览器通过。
+
+Pygments 对 Prisma 及两个 Java 文件的个别既有语法 token 有解析缺口，本轮不将词法结果冒称完整语法证明。Prisma 使用实际校验器补查；Java 由 Maven 编译与测试补查。此前修复时 CBM 查询返回 `Transport closed`，消费者结论使用固定起点源码及实际复现。本次同步时 CBM 可查询，但任务索引仍记录旧版本，新画布 hook 缺失，冲突文件元数据已变化。相关结论通过当前源码和等价检查补查。
+
+## Java 测试夹具
+
+`server/blue-whale-worker/src/test/resources/db/bluewhale-schema.sql` 是已有 MySQL 测试夹具，本轮只删除注释，DDL token 不变。其模型来源为 `backend/prisma/schema.prisma`，历史追加表及列以对应 migration 为准。更新夹具属于后续模型变更，不由本轮清理重建或执行迁移。

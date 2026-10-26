@@ -1,10 +1,3 @@
-/** SKILL.md frontmatter 解析（IK60WU；IK60WW 提为共享纯函数；IK60X1 上移到 core）。
- *  BFF handleCreateSkill、客户端上传校验（validate-skill-upload.ts）与
- *  agent-worker 总结管道（契约 §15）共用，保证编写/上传/总结三条创建路径的
- *  格式语义一致。
- *
- *  格式：---\nname: xxx\ndescription: xxx\n---\n正文内容
- *  返回 null 表示格式不合法（无 frontmatter 或缺闭合）。 */
 export function parseSkillMd(content: string): {
   name: string;
   description: string;
@@ -34,8 +27,6 @@ export function parseSkillMd(content: string): {
   };
 }
 
-/** parseSkillMd 的对称重建（IK60WZ 只读查看/复制，契约 §13.1）：
- *  name/description → frontmatter，body 原样接回，产出完整 SKILL.md 文本。 */
 export function serializeSkillMd(input: {
   name: string;
   description: string;

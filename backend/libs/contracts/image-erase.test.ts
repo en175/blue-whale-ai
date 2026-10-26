@@ -1,8 +1,3 @@
-// IKGOT3：image_erase（图片擦除）跨进程契约双端一致性断言。
-// 防漂移约定（沿用 image-enhance.test.ts 读种子文本的同源断言模式）：TS 侧常量直接 import 断言值；
-// worker-java 无法 import TS 常量，本测试直接读 Java 源码文本逐值对账——任一侧改动未同步即红。
-// 契约权威章节：docs/specs/2026-09-10-ikel4a-worker-java-migration-contract.md §15。
-// 后续票（IKGOT4 创建入口 / IKGOT6 worker 执行 / 前端）照抄 §15 与 image-erase.ts，不得发明字段名。
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
@@ -27,25 +22,23 @@ import {
   imageEraseInputSchema,
 } from "./image-erase.js";
 
-// 读 worker-java 侧常量源码（对账基准；3 级 .. = 仓库根）。
 const jobTypeJava = readFileSync(
   new URL(
-    "../../../worker-java/src/main/java/com/bluewhale/worker/domain/contract/JobTypeEnum.java",
+    "../../../server/blue-whale-worker/src/main/java/com/bluewhale/worker/domain/contract/JobTypeEnum.java",
     import.meta.url,
   ),
   "utf8",
 );
 const contractJava = readFileSync(
   new URL(
-    "../../../worker-java/src/main/java/com/bluewhale/worker/domain/contract/ImageEraseContract.java",
+    "../../../server/blue-whale-worker/src/main/java/com/bluewhale/worker/domain/contract/ImageEraseContract.java",
     import.meta.url,
   ),
   "utf8",
 );
-// tag 字面量已上移到 GenerationMqRoute（ImageEraseContract.TAG 只做转发），故 tag 的对账基准改读该枚举。
 const mqRouteJava = readFileSync(
   new URL(
-    "../../../worker-java/src/main/java/com/bluewhale/worker/domain/contract/GenerationMqRouteEnum.java",
+    "../../../server/blue-whale-worker/src/main/java/com/bluewhale/worker/domain/contract/GenerationMqRouteEnum.java",
     import.meta.url,
   ),
   "utf8",
@@ -94,12 +87,10 @@ describe("image_erase 契约不变量（§15.1–15.4，TS 侧）", () => {
       erase_scene: "full_screen_text_erase",
     };
     expect(imageEraseInputSchema.parse(valid)).toEqual(valid);
-    // strict：未知键（含禁填的 mask_asset_id）拒。
     expect(imageEraseInputSchema.safeParse({ ...valid, extra: 1 }).success).toBe(false);
     expect(
       imageEraseInputSchema.safeParse({ ...valid, mask_asset_id: "456" }).success,
     ).toBe(false);
-    // 源素材 id 沿用 Asset id 口径（非 0 开头数字串）。
     expect(imageEraseInputSchema.safeParse({ ...valid, source_asset_id: "0" }).success).toBe(
       false,
     );
@@ -119,7 +110,6 @@ describe("image_erase 契约不变量（§15.1–15.4，TS 侧）", () => {
       mask_asset_id: "456",
     };
     expect(imageEraseInputSchema.parse(valid)).toEqual(valid);
-    // mask_asset_id 必填（缺键拒）。
     const { mask_asset_id: _omitted, ...withoutMask } = valid;
     expect(imageEraseInputSchema.safeParse(withoutMask).success).toBe(false);
     expect(imageEraseInputSchema.safeParse({ ...valid, mask_asset_id: "0" }).success).toBe(

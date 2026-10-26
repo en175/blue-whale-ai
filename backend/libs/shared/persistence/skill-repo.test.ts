@@ -1,14 +1,7 @@
-// IK74V8：从 skill-repo.test.ts 拆出（≤800 行硬线）。用例逐块搬运，断言不变。
 import type {PrismaClient} from "@prisma/client";
 import {describe, expect, it, vi} from "vitest";
 import {createSkillRepo, SkillNameConflictError, SkillNameReservedError} from "./skill-repo.js";
 
-// SkillRepo 资产边界（契约 docs/specs/2026-08-03-creative-skill-asset-contract.md §2/§3/§6/§11）：
-// wire 主键一律 creative_skill_id；自增 id/skill_id、content/body/prompt 永不出库；
-// mine = 官方引用（official）∪ 名下个人技能（personal）；个人技能跨用户按不存在处理；
-// library v2（IK60WT）：分类过滤、featured/most_used/newest 排序、zh/en 语言解析、
-// keyword 命中解析语言 name/description + search_keywords（绝不匹配 content）、
-// usage_count = creative_skill_activation COUNT(DISTINCT user_id)。
 import {expectWhitelistOnly} from "./skill-repo.testlib.js";
 
 describe("SkillRepo — 技能库读路径与激活埋点", () => {
@@ -69,7 +62,6 @@ describe("SkillRepo — 技能库读路径与激活埋点", () => {
     expectWhitelistOnly(page.records);
   });
 
-  // ===== library v2（IK60WT，契约 §11）夹具 =====
 
   type LibraryRow = Record<string, unknown>;
 
@@ -92,7 +84,6 @@ describe("SkillRepo — 技能库读路径与激活埋点", () => {
     };
   }
 
-  /** listLibrary 夹具：skill 行 + creative 映射 + activation 聚合（按 SQL 分发）。 */
   function createLibraryPrisma(opts: {
     rows: LibraryRow[];
     creativeMap?: { source_skill_id: bigint; creative_skill_id: string }[];
@@ -147,7 +138,6 @@ describe("SkillRepo — 技能库读路径与激活埋点", () => {
         description_zh: "中文简介A",
         description_en: "Desc A",
       }),
-      // zh 列为 NULL：回退英文列
       libraryRow({
         id: 2n,
         name: "旧名B",
@@ -155,7 +145,6 @@ describe("SkillRepo — 技能库读路径与激活埋点", () => {
         name_en: "Name B",
         description_en: "Desc B",
       }),
-      // zh/en 均为空（空串视同 NULL）：回退既有单语字段
       libraryRow({
         id: 3n,
         name: "旧名C",
@@ -181,22 +170,16 @@ describe("SkillRepo — 技能库读路径与激活埋点", () => {
       ["旧名C", "旧简介C"],
     ]);
 
-    // 缺省 lang 视同 zh
     const dft = await repo.listLibrary("9", { pageNum: 1, pageSize: 10 });
     expect(dft.records[0]?.name).toBe("中文名A");
   });
 
   it("keyword 命中解析语言的 name/description（含回退列），未参与解析的列不命中", async () => {
     const rows = [
-      // 解析语言 zh 的 name 命中
       libraryRow({ id: 1n, name_zh: "海报生成" }),
-      // zh 列为空回退英文列，解析值即英文列 → 命中
       libraryRow({ id: 2n, name: "无关B", name_en: "海报Poster" }),
-      // zh 列非空时英文列不是解析值 → 不命中
       libraryRow({ id: 3n, name_zh: "中文C", name_en: "海报Poster" }),
-      // 解析语言 zh 的 description 命中
       libraryRow({ id: 4n, name_zh: "文案D", description_zh: "一键海报" }),
-      // description_zh 非空时 description_en 不命中
       libraryRow({
         id: 5n,
         name_zh: "文案E",
@@ -244,15 +227,10 @@ describe("SkillRepo — 技能库读路径与激活埋点", () => {
 
   it("IKBMA3：多词 keyword 按空白拆词 + 全词命中（AND），跨 name/description/search_keywords", async () => {
     const rows = [
-      // name 同时含两个词 → 命中
       libraryRow({ id: 1n, name_zh: "智能视频生成" }),
-      // 「视频」在 name、「生成」在 description → 命中（跨字段 AND）
       libraryRow({ id: 2n, name_zh: "视频剪辑", description_zh: "一键生成短视频" }),
-      // 「视频」「生成」都在 search_keywords → 命中（仅关键词库命中）
       libraryRow({ id: 3n, name_zh: "口播文案", search_keywords: "视频带货 文案生成" }),
-      // 只含一个词 → 不命中
       libraryRow({ id: 4n, name_zh: "智能海报" }),
-      // 一个词都没有 → 不命中
       libraryRow({ id: 5n, name_zh: "深度写作" }),
     ];
     const { prisma } = createLibraryPrisma({ rows });
@@ -375,14 +353,12 @@ describe("SkillRepo — 技能库读路径与激活埋点", () => {
       pageSize: 10,
     });
 
-    // 乙/丙同 5 人，sort_order 乙(2) < 丙(3) → 乙在前；丁无埋点记 0 垫底。
     expect(page.records.map((r) => [r.name, r.usage_count])).toEqual([
       ["乙", 5],
       ["丙", 5],
       ["甲", 2],
       ["丁", 0],
     ]);
-    // 去重语义由 SQL 保证：COUNT(DISTINCT user_id)。
     expect(queryRawUnsafe).toHaveBeenCalledWith(
       expect.stringContaining("COUNT(DISTINCT user_id)"),
       "skill_a",
@@ -411,8 +387,6 @@ describe("SkillRepo — 技能库读路径与激活埋点", () => {
     expect(page.records.map((r) => r.name)).toEqual(["海报3"]);
   });
 
-  // IKEEFV：recordActivation 与 creative_skill_activation 埋点表一并移除
-  //（写路径全仓零调用方），原两个埋点测试随删除下线。
 
   it("resolveOfficialSkillId 命中官方映射时返回 skill.id 字符串", async () => {
     const queryRawUnsafe = vi
@@ -433,7 +407,6 @@ describe("SkillRepo — 技能库读路径与激活埋点", () => {
   });
 
   it("个人技能 ID 与未知 ID 解析失败（resolve 返回 null，按不存在处理）", async () => {
-    // creative_skill 查询带 asset_domain='official' 谓词：个人域/未知 ID 在 DB 层 0 命中。
     const count = vi.fn();
     const prisma = {
       skill: { count },
@@ -485,12 +458,8 @@ describe("SkillRepo — 技能库读路径与激活埋点", () => {
     ).resolves.toBeNull();
   });
 
-  /** addReference 夹具（IK60WX）：官方名 + 个人 Name Key 冲突计数（按 SQL 分发）。 */
 });
 
-// 个人技能名称可用性（IK60WU 契约 §5.2；IK60X1 总结管道提议名预检 §15.4）：
-// 官方保留名 → reserved；同用户同 Name Key → conflict；否则 ok；
-// createPersonalSkill 与预检共用同一套校验。
 describe("SkillRepo.checkPersonalNameAvailable / createPersonalSkill 名称校验", () => {
   function prismaWithNames(input: {
     officialNames: string[];

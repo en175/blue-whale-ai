@@ -1,18 +1,13 @@
-# Blue-Whale-AI Kimi CLI hooks 配置片段。
-#
-# 由 scripts/install-kimi-hooks.sh 以 managed block 幂等写入用户级
-# ~/.kimi-code/config.toml（Kimi CLI 不支持项目级 hooks，仅用户级挂载）。
-# 本文件同时是 shim 的 opt-in 标记：项目根存在本文件，
-# ~/.kimi-code/hooks/blue-whale-hook.sh 才把事件路由到 .kimi-code/../.claude/hooks/
-# 权威 Gate（与 Claude Code / Codex / ZCode 同一实现，契约见 docs/agents/hooks/）。
-#
-# 条目与 .claude/settings.json 的阻断/观察契约一一对应（10 PreToolUse + 6 PostToolUse）；
-# kimi 阻断契约一致：exit 0 放行，stderr + exit 2 阻断，其余非零 fail-open。
-#
-# 不挂 SessionStart：kimi 的 SessionStart 是观察型事件（fire-and-forget），stdout 不注入
-# 上下文（实测 wire.jsonl 无注入文本），cbm-session-reminder.sh 与
-# superpowers-session-start.sh 在 kimi 下挂载即为死配置。kimi 会话启动 context 由
-# 原生 AGENTS.md 加载机制覆盖（见 README「Kimi CLI 挂载」节）。
+
+[[hooks]]
+event = "SessionStart"
+command = 'node "${KIMI_CODE_HOME:-$HOME/.kimi-code}/hooks/ponytail-hook.js" SessionStart'
+timeout = 5
+
+[[hooks]]
+event = "UserPromptSubmit"
+command = 'node "${KIMI_CODE_HOME:-$HOME/.kimi-code}/hooks/ponytail-hook.js" UserPromptSubmit'
+timeout = 5
 
 [[hooks]]
 event = "PreToolUse"
@@ -63,7 +58,6 @@ event = "PreToolUse"
 matcher = "mcp__gitee-ent__update_enterprise_issue"
 command = 'bash "$HOME/.kimi-code/hooks/blue-whale-hook.sh" block-issue-without-repo.sh'
 
-# PostToolUse（kimi 仅观察、不阻断）：PR 创建成功后撕票消费发布标记（ADR-0011）。
 [[hooks]]
 event = "PostToolUse"
 matcher = "mcp__gitee-ent__create_enterprise_repo_pull"
@@ -79,8 +73,6 @@ event = "PostToolUse"
 matcher = "mcp__gitee-ent__create_enterprise_repo_release"
 command = 'bash "$HOME/.kimi-code/hooks/blue-whale-hook.sh" confirm-release-action.sh'
 
-# PostToolUse 观察型提醒（不阻断、不自动改状态）：工单状态流转提醒，
-# 规则见 docs/agents/issue-tracker.md「任务状态机」。
 [[hooks]]
 event = "PostToolUse"
 matcher = "Bash"
@@ -95,3 +87,8 @@ command = 'bash "$HOME/.kimi-code/hooks/blue-whale-hook.sh" remind-issue-state.s
 event = "PostToolUse"
 matcher = "mcp__gitee-ent__merge_enterprise_pull"
 command = 'bash "$HOME/.kimi-code/hooks/blue-whale-hook.sh" remind-issue-state.sh'
+
+[[hooks]]
+event = "PreToolUse"
+matcher = ".*"
+command = 'bash "$HOME/.kimi-code/hooks/blue-whale-hook.sh" block-gitee-alternative-channel.sh'

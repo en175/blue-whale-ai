@@ -1,80 +1,138 @@
+import { wallClockRfc3339, wallClockRfc3339OrNull } from "@lib/core";
+import { Prisma } from "@prisma/client";
 import type { PrismaClient } from "@prisma/client";
 
-/** 充值档位 repo（Prisma-backed），blue_whale 侧 CRUD。
- *  支付执行逻辑在 Go new-api，本 repo 只管档位数据。 */
+
+export type TopupTierStatus = "draft" | "active" | "inactive";
+
+export type TopupTierPermission = "all" | "user_group" | "member_tier";
 
 export interface TopupTierView {
   id: string;
   name: string;
-  amount: number;
+  baseCredits: number;
   originalPrice: number;
   discount: number;
   price: number;
   isRecommended: boolean;
-  status: "active" | "inactive";
+  status: TopupTierStatus;
   startTime: string | null;
   endTime: string | null;
   sortOrder: number;
+  version: number;
   createdAt: string;
   updatedAt: string;
+
+  description: string;
+  bonusCredits: number;
+  activityTag: string;
+  buttonText: string;
+  firstPurchaseEligible: boolean;
+  creditsValidMonths: number;
+  permission: TopupTierPermission;
+  permissionAllowlist: string[];
+  permissionDeniedHint: string;
 }
 
 export interface CreateTopupTierInput {
   name?: string;
-  amount: number;
+  baseCredits: number;
   originalPrice: number;
   discount: number;
   isRecommended?: boolean;
-  status?: "active" | "inactive";
+  status?: TopupTierStatus;
   startTime?: string | null;
   endTime?: string | null;
+  description?: string;
+  bonusCredits?: number;
+  activityTag?: string;
+  buttonText?: string;
+  firstPurchaseEligible?: boolean;
+  creditsValidMonths?: number;
+  permission?: TopupTierPermission;
+  permissionAllowlist?: string[] | null;
+  permissionDeniedHint?: string;
 }
 
 export interface UpdateTopupTierInput {
   name?: string;
-  amount?: number;
+  baseCredits?: number;
   originalPrice?: number;
   discount?: number;
   isRecommended?: boolean;
-  status?: "active" | "inactive";
+  status?: TopupTierStatus;
   startTime?: string | null;
   endTime?: string | null;
   sortOrder?: number;
+  description?: string;
+  bonusCredits?: number;
+  activityTag?: string;
+  buttonText?: string;
+  firstPurchaseEligible?: boolean;
+  creditsValidMonths?: number;
+  permission?: TopupTierPermission;
+  permissionAllowlist?: string[] | null;
+  permissionDeniedHint?: string;
 }
 
 export interface TopupTierRepo {
-  /** 管理端：列出全部档位（含停用），按 sort_order 排序 */
   listAll(): Promise<TopupTierView[]>;
-  /** 用户端：列出有效档位（active + 时间窗口内），按 sort_order 排序 */
   listActive(): Promise<TopupTierView[]>;
   getById(id: string): Promise<TopupTierView | null>;
   create(input: CreateTopupTierInput): Promise<TopupTierView>;
   update(id: string, input: UpdateTopupTierInput): Promise<TopupTierView | null>;
   remove(id: string): Promise<boolean>;
-  /** 批量更新排序 */
   updateSortOrder(items: { id: string; sortOrder: number }[]): Promise<void>;
-  /** 当前最大 sort_order */
-  maxSortOrder(): Promise<number>;
 }
 
-/* ---------- helpers ---------- */
+
+function nullableJson(v: unknown): Prisma.InputJsonValue | typeof Prisma.DbNull {
+  return v == null ? Prisma.DbNull : (v as Prisma.InputJsonValue);
+}
+
+function toAllowlist(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const out: string[] = [];
+  for (const item of raw) {
+    const text =
+      typeof item === "string"
+        ? item.trim()
+        : typeof item === "number" && Number.isSafeInteger(item) && item >= 0
+          ? String(item)
+          : "";
+    if (!/^\d{1,19}$/.test(text)) continue;
+    const id = String(BigInt(text));
+    if (!out.includes(id)) out.push(id);
+  }
+  return out;
+}
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function toView(row: any): TopupTierView {
   return {
     id: row.id.toString(),
     name: row.name,
-    amount: Number(row.amount),
+    baseCredits: Number(row.base_credits),
     originalPrice: Number(row.original_price),
     discount: Number(row.discount),
     price: Number(row.price),
     isRecommended: row.is_recommended,
     status: row.status,
-    startTime: row.start_time ? new Date(row.start_time).toISOString() : null,
-    endTime: row.end_time ? new Date(row.end_time).toISOString() : null,
+    startTime: wallClockRfc3339OrNull(row.start_time),
+    endTime: wallClockRfc3339OrNull(row.end_time),
     sortOrder: row.sort_order,
-    createdAt: new Date(row.gmt_create).toISOString(),
-    updatedAt: new Date(row.gmt_modified).toISOString(),
+    version: row.version,
+    createdAt: wallClockRfc3339(new Date(row.gmt_create)),
+    updatedAt: wallClockRfc3339(new Date(row.gmt_modified)),
+    description: row.description,
+    bonusCredits: Number(row.bonus_credits),
+    activityTag: row.activity_tag,
+    buttonText: row.button_text,
+    firstPurchaseEligible: row.first_purchase_eligible === 1,
+    creditsValidMonths: row.credits_valid_months,
+    permission: row.permission,
+    permissionAllowlist: toAllowlist(row.permission_allowlist),
+    permissionDeniedHint: row.permission_denied_hint,
   };
 }
 
@@ -83,7 +141,6 @@ function parseDateTime(v: string | null | undefined): Date | null {
   return new Date(v);
 }
 
-/** id 守卫：仅接受十进制正整数串。BigInt("abc") 会抛错，不能让路径参数直接炸成 500。 */
 function parseId(id: string): bigint | null {
   if (typeof id !== "string" || !/^\d{1,19}$/.test(id)) return null;
   try {
@@ -93,7 +150,6 @@ function parseId(id: string): bigint | null {
   }
 }
 
-/* ---------- factory ---------- */
 
 export function createTopupTierRepo(prisma: PrismaClient): TopupTierRepo {
   return {
@@ -137,19 +193,30 @@ export function createTopupTierRepo(prisma: PrismaClient): TopupTierRepo {
       });
       const nextSort = (maxSort._max.sort_order ?? 0) + 1;
       const price = Math.round(input.originalPrice * input.discount * 100) / 100;
+      const baseCredits = BigInt(Math.round(input.baseCredits));
 
       const row = await prisma.topup_tiers.create({
         data: {
-          name: input.name || `${input.amount}积分`,
-          amount: BigInt(Math.round(input.amount)),
+          name: input.name || `${input.baseCredits}积分`,
+          base_credits: baseCredits,
+          amount: baseCredits,
           original_price: input.originalPrice,
           discount: input.discount,
           price,
           is_recommended: input.isRecommended ?? false,
-          status: input.status ?? "active",
+          status: input.status ?? "draft",
           start_time: parseDateTime(input.startTime),
           end_time: parseDateTime(input.endTime),
           sort_order: nextSort,
+          description: input.description ?? "",
+          bonus_credits: BigInt(Math.round(input.bonusCredits ?? 0)),
+          activity_tag: input.activityTag ?? "",
+          button_text: input.buttonText ?? "立享加赠",
+          first_purchase_eligible: input.firstPurchaseEligible ? 1 : 0,
+          credits_valid_months: input.creditsValidMonths ?? 24,
+          permission: input.permission ?? "all",
+          permission_allowlist: nullableJson(input.permissionAllowlist),
+          permission_denied_hint: input.permissionDeniedHint ?? "",
         },
       });
       return toView(row);
@@ -167,9 +234,17 @@ export function createTopupTierRepo(prisma: PrismaClient): TopupTierRepo {
       const discount = Number(input.discount ?? existing.discount);
       const price = Math.round(originalPrice * discount * 100) / 100;
 
-      const data: Record<string, unknown> = { price, gmt_modified: new Date() };
+      const data: Record<string, unknown> = {
+        price,
+        version: { increment: 1 },
+        gmt_modified: new Date(),
+      };
       if (input.name !== undefined) data.name = input.name;
-      if (input.amount !== undefined) data.amount = BigInt(Math.round(input.amount));
+      if (input.baseCredits !== undefined) {
+        const credits = BigInt(Math.round(input.baseCredits));
+        data.base_credits = credits;
+        data.amount = credits;
+      }
       if (input.originalPrice !== undefined) data.original_price = input.originalPrice;
       if (input.discount !== undefined) data.discount = input.discount;
       if (input.isRecommended !== undefined) data.is_recommended = input.isRecommended;
@@ -177,6 +252,25 @@ export function createTopupTierRepo(prisma: PrismaClient): TopupTierRepo {
       if (input.startTime !== undefined) data.start_time = parseDateTime(input.startTime);
       if (input.endTime !== undefined) data.end_time = parseDateTime(input.endTime);
       if (input.sortOrder !== undefined) data.sort_order = input.sortOrder;
+      if (input.description !== undefined) data.description = input.description;
+      if (input.bonusCredits !== undefined) {
+        data.bonus_credits = BigInt(Math.round(input.bonusCredits));
+      }
+      if (input.activityTag !== undefined) data.activity_tag = input.activityTag;
+      if (input.buttonText !== undefined) data.button_text = input.buttonText;
+      if (input.firstPurchaseEligible !== undefined) {
+        data.first_purchase_eligible = input.firstPurchaseEligible ? 1 : 0;
+      }
+      if (input.creditsValidMonths !== undefined) {
+        data.credits_valid_months = input.creditsValidMonths;
+      }
+      if (input.permission !== undefined) data.permission = input.permission;
+      if (input.permissionAllowlist !== undefined) {
+        data.permission_allowlist = nullableJson(input.permissionAllowlist);
+      }
+      if (input.permissionDeniedHint !== undefined) {
+        data.permission_denied_hint = input.permissionDeniedHint;
+      }
 
       const row = await prisma.topup_tiers.update({
         where: { id: pid },
@@ -211,14 +305,6 @@ export function createTopupTierRepo(prisma: PrismaClient): TopupTierRepo {
           }),
         ),
       );
-    },
-
-    async maxSortOrder() {
-      const r = await prisma.topup_tiers.aggregate({
-        where: { is_delete: 0 },
-        _max: { sort_order: true },
-      });
-      return r._max.sort_order ?? 0;
     },
   };
 }

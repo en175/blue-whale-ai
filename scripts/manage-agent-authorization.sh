@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# AI Agent internal entrypoint for granting and revoking scoped remote-action authorization.
 
 set -u
 

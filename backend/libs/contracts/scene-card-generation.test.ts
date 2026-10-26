@@ -173,10 +173,6 @@ describe("SceneCardRegenerationRequest contract", () => {
     ).toThrow(/首尾帧模式不能与普通参考素材混用/);
   });
 
-  // IKHBDO：原先这里断言「参考素材最多 12 个」。契约层拿不到能力行，数量上限不能写死在这里——
-  // 判定下移到手握能力行的 scene-card-generation-repo（checkReferenceCountLimits）。
-  // 本用例保留原「超量参考」的输入形状，断言改为**契约层不再拦**（上限由能力行决定，
-  // 例如配了 30 的模型必须能提交 13 个）。
   it("不再在契约层拦参考数量（上限由能力行在 repo 层判定）", () => {
     const references = Array.from({ length: 13 }, (_, index) => ({
       ...referenceAsset,
@@ -283,7 +279,6 @@ describe("SceneCardGenerationRecordView contract", () => {
       scene_card_id: "5001",
       summary_status: "generating",
       first_generation_job_id: "9001",
-      plan_message_id: "1001",
     });
     expect(view.summary_status).toBe("generating");
   });
@@ -295,18 +290,18 @@ describe("SceneCardGenerationRecordView contract", () => {
         scene_card_id: "5001",
         summary_status: "pending",
         first_generation_job_id: "9001",
-        plan_message_id: "1001",
       }),
     ).toThrow();
   });
 
-  it("拒绝缺 plan_message_id", () => {
+  it("拒绝多余的 plan_message_id（已随计划通道退役）", () => {
     expect(() =>
       sceneCardGenerationRecordViewSchema.parse({
         record_id: "8001",
         scene_card_id: "5001",
         summary_status: "success",
         first_generation_job_id: "9001",
+        plan_message_id: "1001",
       }),
     ).toThrow();
   });

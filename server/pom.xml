@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+
+
+
+
+  <groupId>com.bluewhale</groupId>
+  <artifactId>blue-whale-java</artifactId>
+  <version>0.0.1-SNAPSHOT</version>
+  <packaging>pom</packaging>
+  <name>blue-whale-java</name>
+  <description>Blue-Whale Java 模块聚合根：blue-whale-common（共享基础设施）+ worker（执行面）+ billing（控制面）。</description>
+
+  <modules>
+    <module>blue-whale-common</module>
+    <module>blue-whale-worker</module>
+    <module>blue-whale-billing</module>
+  </modules>
+</project>

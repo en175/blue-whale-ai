@@ -22,10 +22,6 @@ function mockReq(
   } as never;
 }
 
-/**
- * 中间件现在还挂 finish/close 监听器写访问日志（IKB29O），所以假的 res 得有 once 与
- * statusCode。`fire` 用来在断言里模拟响应结束——不调用它就是「请求还没答完」。
- */
 function mockRes(statusCode = 200) {
   const headers: Record<string, string> = {};
   const listeners: Record<string, (() => void)[]> = {};
@@ -103,7 +99,6 @@ describe("traceMiddleware", () => {
   });
 
   it("next 后上下文不泄漏到外层", () => {
-    // "abc" 在 D6 之前是合法的（旧规则只要求可见 ASCII），现在长度不足 8 会被拒收。
     const req = mockReq({ [TRACE_ID_HEADER]: "abc-12345" });
     const res = mockRes() as never;
 
@@ -111,15 +106,12 @@ describe("traceMiddleware", () => {
       expect(getCurrentTraceId()).toBe("abc-12345");
     });
 
-    // next 同步返回后，外层无 trace 上下文
     expect(getCurrentTraceId()).toBeNull();
   });
 });
 
 describe("traceMiddleware 响应头", () => {
   it("把 traceId 回给客户端——用户报障时唯一能报出来的东西", () => {
-    // New API 早就这么做（middleware/request-id.go）。我们不回带的时候，浏览器里查不到
-    // 任何 id，一次报障只能描述成"刚才那次对话"。
     const req = mockReq();
     const res = mockRes();
     let inside: string | null = null;
@@ -143,7 +135,6 @@ describe("traceMiddleware 响应头", () => {
 
 describe("traceMiddleware 入站校验（D6）", () => {
   it("旧规则放行的脏值现在被拒收，另生成一个合规 id", () => {
-    // 旧规则是「长度 ≤256 的可见 ASCII」，含空格也放行——而这是每一条跨服务查询的键。
     for (const dirty of ["has space", "abc", 'quote"inside']) {
       const req = mockReq({ [TRACE_ID_HEADER]: dirty });
       const res = mockRes();
@@ -181,7 +172,6 @@ describe("访问日志与来源地址（IKB29O）", () => {
       try {
         lines.push(JSON.parse(String(args[0])) as Record<string, unknown>);
       } catch {
-        /* 不是我们的行 */
       }
     };
     const log = vi.spyOn(console, "log").mockImplementation(collect);
@@ -198,7 +188,6 @@ describe("访问日志与来源地址（IKB29O）", () => {
   }
 
   it("每个请求一行，含方法、路径、状态、耗时与调用方地址", () => {
-    // 此前这个服务一行访问日志都没有：一次在路由之前就失败的请求，连「到达过」都证明不了。
     const res = mockRes(200);
     const lines = captureLines(() => {
       traceMiddleware(
