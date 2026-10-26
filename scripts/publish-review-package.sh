@@ -200,9 +200,9 @@ if [ "$MODE" = create ] && [ "$TARGET_BRANCH_EXPLICIT" = 0 ]; then
 fi
 "${PYTHON[@]}" "$SCRIPT_ROOT/scripts/lib/task_metadata.py" check-target --branch "$TARGET_BRANCH" >/dev/null \
   || fail_status 2 INVALID_TARGET_BRANCH "目标分支必须是 master、release/* 或 dev/test/release：$TARGET_BRANCH"
-start_sha="$("${metadata[@]}" --target-branch "$TARGET_BRANCH" --field start_sha)" \
-  || fail_status 12 TASK_BASE_INVALID "任务起点或目标发布线与元数据不符。"
-inherited_sha="$("${metadata[@]}" --target-branch "$TARGET_BRANCH" --field inherited_sha)" \
+start_sha="$("${metadata[@]}" --field start_sha)" \
+  || fail_status 12 TASK_BASE_INVALID "任务起点元数据无效。"
+inherited_sha="$("${metadata[@]}" --field inherited_sha)" \
   || fail_status 12 TASK_BASE_INVALID "任务继承提交元数据无效。"
 [ -z "$inherited_sha" ] || fail_status 12 INTEGRATION_CHILD_NO_PR "整包子票不能独立发布 PR；请由父整合分支统一发布。"
 
@@ -240,11 +240,11 @@ fi
 if ! git -C "$ROOT" merge-base --is-ancestor "$upstream_sha" "$head_sha"; then
   fail_status 10 NEEDS_SYNC "当前分支未包含 ${upstream_ref}。先运行 scripts/sync-task-from-origin.sh sync --target-branch ${TARGET_BRANCH} --json。" branch "$branch" target_branch "$TARGET_BRANCH" head "$head_sha" upstream_sha "$upstream_sha"
 fi
-if ! verification_output="$(node "$SCRIPT_ROOT/scripts/verify-change-scope.mjs" ensure --stage pr --json 2>&1)"; then
+if ! verification_output="$(node "$SCRIPT_ROOT/scripts/verify-change-scope.mjs" ensure --stage pr --target-branch "$TARGET_BRANCH" --json 2>&1)"; then
   fail_status 11 VERIFICATION_FAILED "本地发布前检查未通过，禁止推送。修复后重新发布；基础设施重试仍须按测试策略显式执行。" detail "$verification_output" head "$head_sha"
 fi
-if ! verification_output="$(node "$SCRIPT_ROOT/scripts/verify-change-scope.mjs" check --stage pr --json 2>&1)"; then
-  fail_status 11 VERIFICATION_REQUIRED "当前 HEAD 缺少覆盖发布要求的验证凭证。先运行 node scripts/verify-change-scope.mjs run --stage pr。" detail "$verification_output" head "$head_sha"
+if ! verification_output="$(node "$SCRIPT_ROOT/scripts/verify-change-scope.mjs" check --stage pr --target-branch "$TARGET_BRANCH" --json 2>&1)"; then
+  fail_status 11 VERIFICATION_REQUIRED "当前 HEAD 缺少覆盖发布要求的验证凭证。先运行 node scripts/verify-change-scope.mjs run --stage pr --target-branch ${TARGET_BRANCH}。" detail "$verification_output" head "$head_sha"
 fi
 if [ "$(git -C "$ROOT" rev-parse HEAD)" != "$head_sha" ]; then
   fail_status 11 HEAD_CHANGED "本地检查期间 HEAD 已变化，禁止发布旧提交的审查标记。" head "$head_sha"
