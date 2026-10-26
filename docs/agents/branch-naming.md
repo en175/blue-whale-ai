@@ -20,7 +20,28 @@
 
 **不单列**：`refactor/`（归 `feature/` 或 `fix/`）、`ci/build/perf/test`（归 `chore/` 或 `feature/`）。
 
-## release 分支（发布批次，独立命名）
+## 环境分支（dev / test / release）
+
+三条长期存在的环境分支，**不受工单命名规范约束**，不带前缀、不带中文简述：
+
+| 分支 | 环境 | 说明 |
+|---|---|---|
+| `dev` | 开发环境 | 日常联调 |
+| `test` | 测试环境 | 提测验收 |
+| `release` | 生产环境 | 生产版本 |
+
+### 规则
+
+- **不受白名单约束**：`dev` / `test` / `release` 是固定环境名，不套用五前缀，也不要求中文简述。
+- **新任务分支仍从 `master` 拉**：工单改动在 `feature|fix|hotfix|docs|chore` 分支上完成，命名规范不变。
+- **PR 指定目标环境**：发 PR 时显式指定合入 `dev`、`test` 或 `release`，分别对应开发、测试、生产环境。
+- **裸 `release` 与 `release/` 前缀互斥**：Git 不允许 `refs/heads/release` 与 `refs/heads/release/*` 并存。启用裸 `release` 前必须先清空全部 `release/*` 批次分支。
+
+### 切换状态
+
+环境分支规范先于工具链落地。当前活动发布线仍为 `release/YYYY.MM.DD`，`release/*` 尚未退役；工具链（发布线同步、状态机、PR 发布入口、pre-push）仍按 `release/*` 校验。切换步骤与约束见 [ADR-0133](../adr/0133-environment-branches.md)。
+
+## release 分支（发布批次，逐步退役）
 
 发布分支不建 worktree、不挂工单，走独立入口 `scripts/manage-release-branch.sh`。命名：
 
@@ -50,6 +71,7 @@ release/YYYY.MM.DD_<中文描述> # 日期 + 中文描述（6–15 字）
 - **唯一管理入口**：`scripts/manage-release-branch.sh` 的 `list/current/create/activate`；`create/activate` 需发布负责人授权，旧活动批次未收口时拒绝换期。发布后清理走 `scripts/cleanup-release-branch.sh`。
 - **校验**：与任务分支同一权威校验器（`scripts/start-task-worktree.py --validate-branch`，pre-push 复用），不合规命名首次 push 即被拒。
 - `release/prod` 等历史遗留 ASCII 分支不迁移，只收尾不新建。
+- 本命名体系逐步退役，由裸 `release` 环境分支取代；退役顺序见 [ADR-0133](../adr/0133-environment-branches.md)。
 
 > 前缀粒度是**任务级**（这批改动啥性质），不是提交级。一个 `feature` 分支可含 `feat`+`docs`+`refactor` 多次提交。提交级语义用 [Conventional Commits](commit-and-review.md)（type：`feat`/`fix`/`docs`/`refactor`/`chore`/…）。
 

@@ -62,6 +62,7 @@
 ## 分支命名
 
 - 前缀必须在白名单内（hook 强制）：`feature/` / `fix/` / `hotfix/` / `docs/` / `chore/`。不在白名单 → `--force-with-lease` 被拦；前端相关推送须先按 [构建门禁](../../agent-rules/frontend-build-push.md) 取得有效凭证，其他推送维持原流程。
+- `dev` / `test` / `release` 是固定环境分支名，不受白名单约束；切换进度见 [ADR-0133](../adr/0133-environment-branches.md)。
 - 完整规则：`docs/agents/branch-naming.md`，决策：`docs/adr/0004-branch-naming.md`
 
 ## Task Worktree
