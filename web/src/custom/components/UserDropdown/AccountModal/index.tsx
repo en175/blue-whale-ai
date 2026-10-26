@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import Modal from '@/custom/components/Modal';
 import {
@@ -38,6 +38,7 @@ export default function AccountModal({
   const [confirmedNickname, setConfirmedNickname] = useState<string | null>(null);
   const [editingNickname, setEditingNickname] = useState(false);
   const [nicknameError, setNicknameError] = useState('');
+  const [nicknameComposing, setNicknameComposing] = useState(false);
   const [showRecords, setShowRecords] = useState(false);
   const [showRebind, setShowRebind] = useState(false);
 
@@ -64,20 +65,35 @@ export default function AccountModal({
     },
   });
 
+  const draftIssue = nicknameValidationMessage(draft);
+  const saving = saveNickname.isPending;
+  const nicknameInvalid = Boolean(nicknameError) || Boolean(draftIssue);
+  const canSave = !nicknameInvalid && !nicknameComposing && draft.trim() !== savedNickname && !saving;
+
+  useEffect(() => {
+    if (!saving) return;
+    const blockClose = (event: BeforeUnloadEvent) => event.preventDefault();
+    window.addEventListener('beforeunload', blockClose);
+    return () => window.removeEventListener('beforeunload', blockClose);
+  }, [saving]);
+
+  const handleCancel = () => {
+    if (!saving) onClose();
+  };
+
   const submitNickname = () => {
-    const nextNickname = draft.trim();
     const issue = nicknameValidationMessage(draft);
-    if (saveNickname.isPending) return;
+    if (saving || nicknameComposing) return;
     if (issue) {
       setNicknameError(issue);
       return;
     }
-    if (nextNickname === savedNickname) {
+    if (draft.trim() === savedNickname) {
       exitNicknameEdit();
       return;
     }
     setNicknameError('');
-    saveNickname.mutate(nextNickname, {
+    saveNickname.mutate(draft.trim(), {
       onError: (error) => {
         setNicknameError(isApiError(error) ? error.message : '昵称保存失败，请重试');
       },
@@ -90,7 +106,7 @@ export default function AccountModal({
         open
         title="账号信息"
         footer={null}
-        onCancel={onClose}
+        onCancel={handleCancel}
         width="min(640px, 92vw)"
         classNames={{
           container: styles.modal,
@@ -108,25 +124,31 @@ export default function AccountModal({
             <div className={styles.nicknameEditor}>
               <div className={styles.nicknameLine}>
                 <input
-                  className={nicknameError ? `${styles.nicknameInput} ${styles.nicknameInputInvalid}` : styles.nicknameInput}
+                  className={nicknameInvalid ? `${styles.nicknameInput} ${styles.nicknameInputInvalid}` : styles.nicknameInput}
                   aria-label="昵称"
-                  aria-invalid={nicknameError ? true : undefined}
+                  aria-invalid={nicknameInvalid ? true : undefined}
+                  disabled={saving}
                   value={draft}
+                  onCompositionStart={() => setNicknameComposing(true)}
+                  onCompositionEnd={(event) => {
+                    setNicknameComposing(false);
+                    setNicknameDraft(event.currentTarget.value);
+                  }}
                   onChange={(event) => {
                     const nextDraft = event.target.value;
                     setNicknameDraft(nextDraft);
                     if (nicknameError) setNicknameError(nicknameValidationMessage(nextDraft) ?? '');
                   }}
                 />
-                <button type="button" className={styles.grayButton} disabled={saveNickname.isPending} onClick={submitNickname}>
-                  {saveNickname.isPending ? '保存中…' : '保存'}
+                <button type="button" className={styles.grayButton} disabled={!canSave} onClick={submitNickname}>
+                  {saving ? '保存中…' : '保存'}
                 </button>
-                <button type="button" className={styles.grayButton} onClick={exitNicknameEdit}>
+                <button type="button" className={styles.grayButton} disabled={saving} onClick={exitNicknameEdit}>
                   取消
                 </button>
               </div>
-              <div className={nicknameError ? `${styles.nicknameMeta} ${styles.nicknameMetaError}` : styles.nicknameMeta}>
-                <span role={nicknameError ? 'alert' : undefined}>{nicknameError || NICKNAME_RULE_MESSAGE}</span>
+              <div className={nicknameInvalid ? `${styles.nicknameMeta} ${styles.nicknameMetaError}` : styles.nicknameMeta}>
+                <span role={nicknameInvalid ? 'alert' : undefined}>{nicknameError || NICKNAME_RULE_MESSAGE}</span>
                 <span>{nicknameCount}/20</span>
               </div>
             </div>

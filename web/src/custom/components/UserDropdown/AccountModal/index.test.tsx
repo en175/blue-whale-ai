@@ -95,11 +95,31 @@ function setInputValue(input: HTMLInputElement, value: string) {
   input.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
+function saveButton() {
+  return buttonByText('保存');
+}
+
+function nicknameMetaText() {
+  return document.body.querySelector<HTMLSpanElement>('[role="alert"]') ?? null;
+}
+
+function countText() {
+  return [...document.body.querySelectorAll<HTMLSpanElement>('span')].find(
+    (span) => /^\d+\/20$/.test(span.textContent ?? ''),
+  );
+}
+
+async function enterNicknameEdit() {
+  await waitForProfile();
+  await act(async () => buttonByText('修改')?.click());
+}
+
 beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   vi.mocked(fetchCaptcha).mockClear();
   vi.mocked(sendCode).mockClear();
   vi.mocked(updateNickname).mockClear();
+  vi.mocked(updateNickname).mockImplementation(async (nickname: string) => ({ nickname, changed: true }));
 });
 
 afterEach(async () => {
@@ -157,7 +177,8 @@ describe('AccountModal', () => {
       vi.mocked(updateNickname).mockClear();
       if (!nicknameInput()) await act(async () => buttonByText('修改')?.click());
       await act(async () => setInputValue(nicknameInput()!, invalid));
-      await act(async () => buttonByText('保存')?.click());
+      expect(saveButton()?.disabled).toBe(true);
+      await act(async () => saveButton()?.click());
       expect(updateNickname).not.toHaveBeenCalled();
       expect(nicknameInput()?.getAttribute('aria-invalid')).toBe('true');
       expect(document.body.textContent).toContain(
@@ -167,8 +188,100 @@ describe('AccountModal', () => {
     }
   });
 
-  it('更换手机号先做图形验证，通过后按原号用途发短信', async () => {
+  it('未修改昵称时保存不可用，改回原值后再次不可用', async () => {
     await renderAccountModal();
+    await enterNicknameEdit();
+    expect(saveButton()?.disabled).toBe(true);
+
+    await act(async () => setInputValue(nicknameInput()!, '蓝鲸用户_NACRQY'));
+    expect(saveButton()?.disabled).toBe(false);
+
+    await act(async () => setInputValue(nicknameInput()!, '蓝鲸用户_NACRQX'));
+    expect(saveButton()?.disabled).toBe(true);
+    await act(async () => saveButton()?.click());
+    expect(updateNickname).not.toHaveBeenCalled();
+  });
+
+  it('非法昵称禁用保存且不提交', async () => {
+    await renderAccountModal();
+    await enterNicknameEdit();
+
+    await act(async () => setInputValue(nicknameInput()!, '含 空格'));
+    expect(saveButton()?.disabled).toBe(true);
+    expect(nicknameInput()?.getAttribute('aria-invalid')).toBe('true');
+    expect(nicknameMetaText()).not.toBeNull();
+    await act(async () => saveButton()?.click());
+    expect(updateNickname).not.toHaveBeenCalled();
+
+    await act(async () => setInputValue(nicknameInput()!, '新昵称'));
+    expect(saveButton()?.disabled).toBe(false);
+    expect(nicknameInput()?.hasAttribute('aria-invalid')).toBe(false);
+    expect(nicknameMetaText()).toBeNull();
+  });
+
+  it('输入法组词中禁用保存，选词完成后可保存', async () => {
+    await renderAccountModal();
+    await enterNicknameEdit();
+    const input = nicknameInput()!;
+
+    await act(async () => input.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true })));
+    await act(async () => setInputValue(input, 'nihao'));
+    expect(saveButton()?.disabled).toBe(true);
+    await act(async () => saveButton()?.click());
+    expect(updateNickname).not.toHaveBeenCalled();
+
+    await act(async () => input.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true })));
+    await act(async () => setInputValue(input, '你好'));
+    expect(saveButton()?.disabled).toBe(false);
+  });
+
+  it('超长输入计数标红并禁用保存', async () => {
+    await renderAccountModal();
+    await enterNicknameEdit();
+    await act(async () => setInputValue(nicknameInput()!, 'a'.repeat(21)));
+
+    expect(countText()?.textContent).toBe('21/20');
+    expect(nicknameInput()?.getAttribute('aria-invalid')).toBe('true');
+    expect(nicknameMetaText()).not.toBeNull();
+    expect(saveButton()?.disabled).toBe(true);
+    await act(async () => saveButton()?.click());
+    expect(updateNickname).not.toHaveBeenCalled();
+  });
+
+  it('保存中锁住输入、取消和关闭，成功后才退出编辑', async () => {
+    let finish: (value: { nickname: string; changed: boolean }) => void = () => undefined;
+    vi.mocked(updateNickname).mockImplementation(
+      () => new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+    const { onClose } = await renderAccountModal();
+    await enterNicknameEdit();
+    await act(async () => setInputValue(nicknameInput()!, '新昵称'));
+    await act(async () => saveButton()?.click());
+
+    expect(nicknameInput()?.disabled).toBe(true);
+    expect(buttonByText('保存中…')?.disabled).toBe(true);
+    expect(buttonByText('取消')?.disabled).toBe(true);
+
+    await act(async () => buttonByText('取消')?.click());
+    await act(async () => document.body.querySelector<HTMLButtonElement>('button[aria-label="关闭"]')?.click());
+    expect(onClose).not.toHaveBeenCalled();
+    expect(nicknameInput()).not.toBeNull();
+    expect(nicknameInput()?.value).toBe('新昵称');
+    expect(buttonByText('保存中…')).toBeTruthy();
+
+    await act(async () => {
+      finish({ nickname: '新昵称', changed: true });
+      await Promise.resolve();
+    });
+    await act(async () => {
+      await vi.waitFor(() => expect(nicknameInput()).toBeNull());
+    });
+    expect(document.body.textContent).toContain('新昵称');
+  });
+
+  it('更换手机号先做图形验证，通过后按原号用途发短信', async () => {    await renderAccountModal();
     await waitForProfile();
     await act(async () => buttonByText('更换')?.click());
 
