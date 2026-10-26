@@ -34,7 +34,7 @@
 
 ## 开工
 
-**集成分支**就是未来的 PR 源分支，从当前本地发布线工作树用普通开工入口建立：
+**集成分支**就是未来的 PR 源分支，用普通开工入口建立：
 
 ```bash
 scripts/start-task-worktree.sh --type <类型> --issue <父工单号> --summary <6–15字中文简述> --target-branch <master|dev|test|release>
@@ -42,7 +42,7 @@ scripts/start-task-worktree.sh --type <类型> --issue <父工单号> --summary 
 
 进入返回的 worktree，用 `python3 scripts/lib/task_metadata.py read --json` 核对记录的 `target_branch` 与 `start_sha`，后续同步、验证、发布、清理全程使用该记录。核对目录 CBM 项目后，按状态权威判定开工或恢复，再按 issue-tracker.md 认领并回读父工单，建 worktree 不代替该 API 调用。
 
-**子任务 worktree**同样从当前本地发布线工作树建立，必须带 `--target-branch` 和 `--integration-worktree` 指向集成 worktree 的绝对路径：
+**子任务 worktree**同样用开工入口建立，必须带 `--target-branch` 和 `--integration-worktree` 指向集成 worktree 的绝对路径：
 
 ```bash
 scripts/start-task-worktree.sh --type <类型> --issue <子工单号> --summary <6–15字中文简述> --target-branch <master|dev|test|release> --integration-worktree <集成worktree绝对路径>

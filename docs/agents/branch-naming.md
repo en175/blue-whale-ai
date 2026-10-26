@@ -107,7 +107,7 @@ scripts/start-task-worktree.sh --type chore --no-issue --summary 完善工作树
 py -3 scripts/start-task-worktree.py --type fix --issue IK094T --summary 修复工作树写入护栏 --target-branch test
 ```
 
-Agent 从当前发布线工作树调用入口，不直接拼接完整分支名或 Work Tree 目录名。`--target-branch` 必填，声明这条任务之后 PR 合入哪条环境分支；起点固定取 `origin/master`。`hotfix` 前缀本身不授予生产修复权限。
+Agent 在任意本地检出调用入口，不直接拼接完整分支名或 Work Tree 目录名。`--target-branch` 必填，声明这条任务之后 PR 合入哪条分支；起点固定取 `origin/master`，与调用目录无关。`hotfix` 前缀本身不授予生产修复权限。
 
 ### 实例
 

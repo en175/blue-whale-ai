@@ -69,10 +69,10 @@
 
 - 只读代码任务在当前本地 release 工作树运行 `scripts/sync-release-line.sh --json`，并核对该目录的索引。纯非代码资料阅读不触发 Git 同步。
 - **任务起点固定是 `origin/master`**。开工入口先 fetch，再从 `origin/master` 的精确 SHA 建任务分支；本地未推送提交和发布线工作树的改动都不进入任务起点。
-- 写入任务，包括普通散文文档与 chore，从发布线工作树运行 `scripts/start-task-worktree.sh --type <feature|fix|hotfix|docs|chore> (--issue <工单号>|--no-issue) --summary <6–15字中文简述> --target-branch <master|dev|test|release>`。`--target-branch` 必填，决定这条任务之后 PR 合入哪条环境分支。`--type hotfix` 只决定分支命名，不授予生产 hotfix 权限。
+- 写入任务，包括普通散文文档与 chore，在任意本地检出（主检出区或发布线工作树）运行 `scripts/start-task-worktree.sh --type <feature|fix|hotfix|docs|chore> (--issue <工单号>|--no-issue) --summary <6–15字中文简述> --target-branch <master|dev|test|release>`。`--target-branch` 必填，决定这条任务之后 PR 合入哪条分支。`--type hotfix` 只决定分支命名，不授予生产 hotfix 权限。
 - 任务区记录 `target_branch`（PR 目标）和 `start_sha`（master 起点）；旧任务区缺记录时只能显式运行 `scripts/lib/task_metadata.py repair`，须有人类授权和可核对的目标、起点。
 - 完成后用 `scripts/commit-task-for-review.sh -m "<message>"` 形成可审查提交。发布前运行 PR 阶段验证，确认任务起点已进入远端目标分支，再用 `scripts/publish-review-package.sh --user-authorized --create-pr --target-branch <master|dev|test|release>` 推送并建立 PR。`--target-branch` 必填且须与任务元数据一致——改投别的环境要重建任务区。草稿参数和依据见「PR 草稿条件与回读」，创建 Gitee PR 时显式传同一 `draft` 值。
-- 合并进目标环境分支后，在任务区运行 `scripts/cleanup-task-worktree.sh`。入口校验远端目标已包含任务 HEAD，只删本地任务区与本地分支，远端任务源分支保留。
+- 合并进目标分支后，在任务区运行 `scripts/cleanup-task-worktree.sh`。入口校验远端目标已包含任务 HEAD，只删本地任务区与本地分支，远端任务源分支保留。
 - 旧 `scripts/commit-spec-on-master.sh` 已废止；`scripts/merge-task-to-local-master.sh` 不属于日常发布线流程。原本地 master 集成区和散文直写例外已由 [ADR-0115](../adr/0115-local-release-code-baseline.md) 替代。仅已忽略的根 `CLAUDE.local.md` 与 `.codex/config.toml` 保留本地个人配置窄例外。
 
 详细步骤见 [worktree-workflow.md](worktree-workflow.md)。

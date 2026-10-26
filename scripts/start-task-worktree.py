@@ -195,7 +195,7 @@ def create_worktree(args):
 
 def parse_start_args(argv):
     parser = argparse.ArgumentParser(
-        description="同步本地活动发布线，再创建结构化中文任务 Work Tree。"
+        description="从 origin/master 建立结构化中文任务 Work Tree，并记录 PR 目标分支。"
     )
     parser.add_argument("--type", dest="task_type", choices=ALLOWED_TYPES, required=True)
     issue_group = parser.add_mutually_exclusive_group(required=True)

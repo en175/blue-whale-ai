@@ -16,13 +16,13 @@ scripts/sync-release-line.sh --json
 
 ## 写入任务
 
-任何可能改动仓库的普通任务都从当前本地发布线目录运行唯一入口。散文文档和 chore 也走同一路径：
+任何可能改动仓库的普通任务都运行唯一入口。散文文档和 chore 也走同一路径。入口可在任意本地检出（主检出区或发布线工作树）调用，起点与调用目录无关：
 
 ```bash
 scripts/start-task-worktree.sh --type <feature|fix|hotfix|docs|chore> (--issue <工单号>|--no-issue) --summary <6–15字中文简述> --target-branch <master|dev|test|release>
 ```
 
-入口抓取远端后固定从 `origin/master` 的精确提交建立中文任务分支和独立 worktree。`--target-branch` 必填，声明这条任务之后 PR 合入哪条环境分支；它不参与起点选择。未提交文件留在发布线工作树，不会复制到任务区。任务区的 Git 私有目录保存 `task_branch`、`target_branch` 和 `start_sha`。读取方式：
+入口抓取远端后固定从 `origin/master` 的精确提交建立中文任务分支和独立 worktree。`--target-branch` 必填，声明这条任务之后 PR 合入哪条分支；它不参与起点选择。当前检出区的未提交文件不会复制到任务区。任务区的 Git 私有目录保存 `task_branch`、`target_branch` 和 `start_sha`。读取方式：
 
 ```bash
 python3 scripts/lib/task_metadata.py read --json
