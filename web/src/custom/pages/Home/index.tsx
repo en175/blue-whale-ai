@@ -1,5 +1,7 @@
 import { useState } from 'react';
 import UserDropdown from '@/custom/components/UserDropdown';
+import CreditsBadge from './components/CreditsBadge';
+import CreditsShopButton from './components/CreditsShopButton';
 import ChatBox from './components/ChatBox';
 import CardGallery from './components/CardGallery';
 import styles from './index.module.css';
@@ -11,6 +13,8 @@ export default function Home() {
     <div className={styles.home}>
       {}
       <div className={styles.topBar}>
+        <CreditsShopButton />
+        <CreditsBadge />
         <UserDropdown />
       </div>
 
