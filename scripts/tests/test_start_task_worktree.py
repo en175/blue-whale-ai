@@ -86,6 +86,7 @@ class StartTaskWorktreeTest(unittest.TestCase):
         created = run(BASH, self.main / "scripts/manage-release-branch.sh", "create",
                       "--summary", "发布流程验证", "--user-authorized", "--json", cwd=self.main)
         self.release_branch = json.loads(created.stdout)["branch"]
+        self.master_branch = "master"
         run("git", "worktree", "add", self.repo, self.release_branch, cwd=self.main)
 
         run("git", "clone", self.origin, self.actor, cwd=self.root)
@@ -108,7 +109,10 @@ class StartTaskWorktreeTest(unittest.TestCase):
         return run("git", "rev-parse", "HEAD", cwd=repo).stdout.strip()
 
     def invoke(self, *args):
-        return run(sys.executable, self.repo / "scripts/start-task-worktree.py", *args, cwd=self.repo, check=False)
+        if args[:1] == ("--validate-branch",) or "--target-branch" in args:
+            return run(sys.executable, self.repo / "scripts/start-task-worktree.py", *args, cwd=self.repo, check=False)
+        return run(sys.executable, self.repo / "scripts/start-task-worktree.py", *args,
+                   "--target-branch", self.release_branch, cwd=self.repo, check=False)
 
     def pre_push(self, branch, sha=None, remote_sha=None):
         sha = sha or run("git", "rev-parse", "HEAD", cwd=self.repo).stdout.strip()
@@ -142,7 +146,7 @@ class StartTaskWorktreeTest(unittest.TestCase):
 
     def assert_worktree_matches_release(self):
         task = self.task_worktree()
-        master_sha = run("git", "rev-parse", self.release_branch, cwd=self.repo).stdout.strip()
+        master_sha = run("git", "rev-parse", "origin/master", cwd=self.repo).stdout.strip()
         task_sha = run("git", "rev-parse", "HEAD", cwd=task).stdout.strip()
         self.assertEqual(master_sha, task_sha)
         return task
@@ -173,6 +177,8 @@ class StartTaskWorktreeTest(unittest.TestCase):
             "--no-issue",
             "--summary",
             "补全工作树使用说明",
+            "--target-branch",
+            self.release_branch,
             cwd=self.repo,
             check=False,
         )
@@ -269,7 +275,7 @@ class StartTaskWorktreeTest(unittest.TestCase):
         self.assertEqual(before, run("git", "rev-parse", self.release_branch, cwd=self.repo).stdout.strip())
         self.assertEqual(0, len(self.task_worktrees()))
 
-    def test_dirty_release_files_remain_local_and_do_not_enter_task(self):
+    def test_local_uncommitted_files_do_not_enter_task_base(self):
         (self.repo / "dirty.txt").write_text("dirty\n", encoding="utf-8")
         result = self.invoke(
             "--type", "chore", "--no-issue", "--summary", "完善工作树启动流程"
@@ -278,28 +284,27 @@ class StartTaskWorktreeTest(unittest.TestCase):
         self.assertFalse((self.task_worktree() / "dirty.txt").exists())
         self.assertTrue((self.repo / "dirty.txt").exists())
 
-    def test_rejects_in_progress_merge_without_aborting_it(self):
+    def test_in_progress_merge_does_not_move_task_base(self):
         self.commit(self.repo, "shared.txt", "same\n", "fix: 修改本地共享内容")
         self.commit(self.actor, "shared.txt", "same\n", "fix: 修改远程共享内容")
-        run("git", "push", "origin", self.release_branch, cwd=self.actor)
-        run("git", "fetch", "origin", self.release_branch, cwd=self.repo)
-        run("git", "merge", "--no-commit", "--no-ff", f"origin/{self.release_branch}", cwd=self.repo)
-        self.assertEqual("", run("git", "status", "--porcelain", cwd=self.repo).stdout)
+        run("git", "push", "origin", "HEAD:master", cwd=self.actor)
+        run("git", "fetch", "origin", self.master_branch, cwd=self.repo)
+        run("git", "merge", "--no-commit", "--no-ff", f"origin/{self.master_branch}", cwd=self.repo)
         merge_head = run("git", "rev-parse", "--verify", "MERGE_HEAD", cwd=self.repo).stdout.strip()
 
         result = self.invoke(
             "--type", "fix", "--no-issue", "--summary", "保护进行中合并状态"
         )
 
-        self.assertNotEqual(0, result.returncode)
-        self.assertIn("未结束的 Git 操作", result.stderr)
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assert_worktree_matches_release()
         self.assertEqual(
             merge_head,
             run("git", "rev-parse", "--verify", "MERGE_HEAD", cwd=self.repo).stdout.strip(),
         )
-        self.assertEqual(0, len(self.task_worktrees()))
+        run("git", "merge", "--abort", cwd=self.repo)
 
-    def test_local_ahead_is_preserved_as_worktree_base(self):
+    def test_local_ahead_is_not_part_of_task_base(self):
         local_sha = self.commit(
             self.repo, "local.txt", "local\n", "feat: 添加本地模块改动"
         )
@@ -307,23 +312,22 @@ class StartTaskWorktreeTest(unittest.TestCase):
             "--type", "feature", "--no-issue", "--summary", "保留本地模块更新"
         )
         self.assertEqual(0, result.returncode, result.stderr)
-        self.assertEqual(local_sha, run("git", "rev-parse", self.release_branch, cwd=self.repo).stdout.strip())
         task = self.assert_worktree_matches_release()
+        self.assertNotEqual(local_sha, run("git", "rev-parse", "HEAD", cwd=task).stdout.strip())
         self.assertIn(self.release_branch, result.stdout)
-        self.assertIn(local_sha, result.stdout)
         metadata = self.read_metadata(task)
         self.assertEqual(self.release_branch, metadata["target_branch"])
-        self.assertEqual(local_sha, metadata["start_sha"])
+        self.assertNotEqual(local_sha, metadata["start_sha"])
 
-    def test_integration_child_inherits_fixed_parent_commit_after_release_sync(self):
+    def test_integration_child_inherits_fixed_parent_commit_after_master_sync(self):
         parent_start = self.invoke(
             "--type", "feature", "--issue", "IKPARENT", "--summary", "建立整包集成分支"
         )
         self.assertEqual(0, parent_start.returncode, parent_start.stderr)
         parent = self.repo.parent / "feature-ikparent"
         parent_head = self.commit(parent, "parent.txt", "parent\n", "feat: parent change")
-        release_head = self.commit(self.actor, "release.txt", "release\n", "chore: advance release")
-        run("git", "push", "origin", self.release_branch, cwd=self.actor)
+        master_head = self.commit(self.actor, "remote.txt", "remote\n", "chore: advance master")
+        run("git", "push", "origin", "HEAD:master", cwd=self.actor)
 
         child_start = self.invoke(
             "--type", "feature", "--issue", "IKCHILD", "--summary", "继承整包集成提交",
@@ -334,10 +338,10 @@ class StartTaskWorktreeTest(unittest.TestCase):
         child = self.repo.parent / "feature-ikchild"
         child_head = run("git", "rev-parse", "HEAD", cwd=child).stdout.strip()
         metadata = self.read_metadata(child)
-        self.assertEqual(release_head, metadata["start_sha"])
+        self.assertEqual(master_head, metadata["start_sha"])
         self.assertEqual(child_head, metadata["inherited_sha"])
         self.assertEqual(
-            [release_head, parent_head],
+            [master_head, parent_head],
             run("git", "show", "-s", "--format=%P", "HEAD", cwd=child).stdout.strip().split(),
         )
         self.assertEqual(parent_head, run("git", "rev-parse", "HEAD", cwd=parent).stdout.strip())
@@ -351,7 +355,7 @@ class StartTaskWorktreeTest(unittest.TestCase):
             run("git", "rev-parse", "HEAD", cwd=child).stdout.strip(), cwd=parent)
         parent_plan = json.loads(run("node", parent / "scripts/verify-change-scope.mjs", "plan", "--json",
                                      cwd=parent).stdout)
-        self.assertEqual(sorted(["child.txt", "parent.txt"]), parent_plan["changedFiles"])
+        self.assertEqual(sorted(["child.txt", "parent.txt", "remote.txt"]), parent_plan["changedFiles"])
 
     def test_real_integration_child_merges_without_losing_parent_or_child(self):
         parent_start = self.invoke(
@@ -446,20 +450,14 @@ class StartTaskWorktreeTest(unittest.TestCase):
         metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
         metadata["target_branch"] = "release/other"
         metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
-        before_sync = run("git", "rev-parse", "HEAD", cwd=self.repo).stdout.strip()
-        after_sync = self.commit(self.actor, "release.txt", "release\n", "chore: advance release")
-        run("git", "push", "origin", self.release_branch, cwd=self.actor)
 
         other_target = self.invoke(
             "--type", "feature", "--issue", "IKCHILD", "--summary", "继承整包集成提交",
             "--integration-worktree", str(parent),
         )
         self.assertNotEqual(0, other_target.returncode)
-        self.assertIn("目标发布线", other_target.stderr)
-        self.assertIn(before_sync, other_target.stderr)
-        self.assertIn(after_sync, other_target.stderr)
+        self.assertIn("不匹配", other_target.stderr)
         self.assertFalse((self.repo.parent / "feature-ikchild").exists())
-        self.assertEqual(after_sync, run("git", "rev-parse", "HEAD", cwd=self.repo).stdout.strip())
 
     def test_integration_conflict_cleans_child_and_keeps_synced_release(self):
         self.assertEqual(0, self.invoke(
@@ -467,9 +465,8 @@ class StartTaskWorktreeTest(unittest.TestCase):
         ).returncode)
         parent = self.repo.parent / "feature-ikparent"
         parent_head = self.commit(parent, "shared.txt", "parent\n", "feat: parent change")
-        before_sync = run("git", "rev-parse", "HEAD", cwd=self.repo).stdout.strip()
-        after_sync = self.commit(self.actor, "shared.txt", "release\n", "chore: advance release")
-        run("git", "push", "origin", self.release_branch, cwd=self.actor)
+        after_sync = self.commit(self.actor, "shared.txt", "release\n", "chore: advance master")
+        run("git", "push", "origin", "HEAD:master", cwd=self.actor)
 
         child_start = self.invoke(
             "--type", "feature", "--issue", "IKCHILD", "--summary", "继承整包集成提交",
@@ -477,12 +474,12 @@ class StartTaskWorktreeTest(unittest.TestCase):
         )
 
         self.assertNotEqual(0, child_start.returncode)
-        self.assertIn(before_sync, child_start.stderr)
+        self.assertIn("整包继承合并失败", child_start.stderr)
         self.assertIn(after_sync, child_start.stderr)
         self.assertFalse((self.repo.parent / "feature-ikchild").exists())
         self.assertNotEqual(0, run("git", "show-ref", "--verify", "refs/heads/feature/IKCHILD-继承整包集成提交",
                                    cwd=self.repo, check=False).returncode)
-        self.assertEqual(after_sync, run("git", "rev-parse", "HEAD", cwd=self.repo).stdout.strip())
+        self.assertEqual(parent_head, run("git", "rev-parse", "HEAD", cwd=parent).stdout.strip())
         self.assertEqual(parent_head, run("git", "rev-parse", "HEAD", cwd=parent).stdout.strip())
 
     def read_metadata(self, task, *args):
@@ -516,105 +513,44 @@ class StartTaskWorktreeTest(unittest.TestCase):
         self.assertNotEqual(0, conflict.returncode)
         self.assertIn("冲突", conflict.stderr)
 
-    def test_remote_ahead_fast_forwards_master_before_creation(self):
+    def test_remote_ahead_master_is_task_base(self):
         remote_sha = self.commit(
             self.actor, "remote.txt", "remote\n", "feat: 添加远程模块改动"
         )
-        run("git", "push", "origin", self.release_branch, cwd=self.actor)
+        run("git", "push", "origin", "HEAD:master", cwd=self.actor)
         result = self.invoke(
             "--type", "feature", "--no-issue", "--summary", "融合远程模块更新"
         )
         self.assertEqual(0, result.returncode, result.stderr)
-        self.assertEqual(remote_sha, run("git", "rev-parse", self.release_branch, cwd=self.repo).stdout.strip())
-        self.assert_worktree_matches_release()
+        task = self.assert_worktree_matches_release()
+        self.assertEqual(remote_sha, run("git", "rev-parse", "HEAD", cwd=task).stdout.strip())
 
-    def test_diverged_master_merges_both_histories_before_creation(self):
+    def test_task_base_ignores_local_unpushed_commits(self):
         local_sha = self.commit(
             self.repo, "local.txt", "local\n", "feat: 添加本地模块改动"
         )
         remote_sha = self.commit(
             self.actor, "remote.txt", "remote\n", "feat: 添加远程模块改动"
         )
-        run("git", "push", "origin", self.release_branch, cwd=self.actor)
+        run("git", "push", "origin", "HEAD:master", cwd=self.actor)
 
         result = self.invoke(
             "--type", "feature", "--no-issue", "--summary", "融合本地远程更新"
         )
         self.assertEqual(0, result.returncode, result.stderr)
-        run("git", "merge-base", "--is-ancestor", local_sha, self.release_branch, cwd=self.repo)
-        run("git", "merge-base", "--is-ancestor", remote_sha, self.release_branch, cwd=self.repo)
-        parents = run("git", "rev-list", "--parents", "-n", "1", self.release_branch, cwd=self.repo).stdout.split()
-        self.assertEqual(3, len(parents), parents)
-        self.assert_worktree_matches_release()
+        task = self.assert_worktree_matches_release()
+        task_head = run("git", "rev-parse", "HEAD", cwd=task).stdout.strip()
+        self.assertEqual(remote_sha, task_head)
+        self.assertNotEqual(local_sha, task_head)
 
-    def test_conflict_aborts_and_does_not_create_worktree(self):
-        local_sha = self.commit(
-            self.repo, "shared.txt", "local\n", "fix: 修改本地共享内容"
-        )
-        self.commit(self.actor, "shared.txt", "remote\n", "fix: 修改远程共享内容")
-        run("git", "push", "origin", self.release_branch, cwd=self.actor)
-
+    def test_repo_without_origin_master_fails_closed(self):
+        empty = self.root / "empty.git"
+        run("git", "init", "--bare", empty, cwd=self.root)
+        run("git", "remote", "set-url", "origin", str(empty), cwd=self.repo)
         result = self.invoke(
             "--type", "fix", "--no-issue", "--summary", "处理共享内容冲突"
         )
-        self.assertNotEqual(0, result.returncode)
-        self.assertIn("冲突", result.stderr)
-        self.assertEqual(local_sha, run("git", "rev-parse", self.release_branch, cwd=self.repo).stdout.strip())
-        self.assertEqual("", run("git", "status", "--porcelain", cwd=self.repo).stdout)
-        self.assertEqual(0, len(self.task_worktrees()))
-
-    @unittest.skipIf(
-        os.name == "nt",
-        "Windows CreateProcess 无法执行无扩展名脚本，PATH 注入假 git 仅在 POSIX 有效"
-        "（对应 test-hooks.sh 的 IS_WINDOWS 降级先例）",
-    )
-    def test_conflict_abort_failure_reports_honestly_without_claiming_success(self):
-        self.commit(self.repo, "shared.txt", "local\n", "fix: 修改本地共享内容")
-        self.commit(self.actor, "shared.txt", "remote\n", "fix: 修改远程共享内容")
-        run("git", "push", "origin", self.release_branch, cwd=self.actor)
-
-        fake_dir = self.root / "fake-git-bin"
-        fake_dir.mkdir()
-        real_git = shutil.which("git")
-        fake_git = fake_dir / "git"
-        fake_git.write_text(
-            "#!/usr/bin/env bash\n"
-            "prev=\n"
-            'for arg in "$@"; do\n'
-            '  if [ "$prev" = "merge" ] && [ "$arg" = "--abort" ]; then\n'
-            '    echo "fatal: simulated abort failure (index lock)" >&2\n'
-            "    exit 1\n"
-            "  fi\n"
-            '  prev="$arg"\n'
-            "done\n"
-            'exec "{real}" "$@"\n'.format(real=real_git),
-            encoding="utf-8",
-        )
-        fake_git.chmod(0o755)
-
-        env = dict(os.environ)
-        env["PATH"] = "{fake}{sep}{path}".format(
-            fake=fake_dir, sep=os.pathsep, path=env["PATH"]
-        )
-
-        result = subprocess.run(
-            [
-                sys.executable,
-                str(self.repo / "scripts/start-task-worktree.py"),
-                "--type", "fix", "--no-issue", "--summary", "处理共享内容冲突",
-            ],
-            cwd=str(self.repo),
-            env=env,
-            text=True,
-            encoding="utf-8",
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
-
         self.assertNotEqual(0, result.returncode, result.stderr)
-        self.assertIn("合并失败", result.stderr)
-        self.assertNotIn("已自动 abort", result.stderr)
-        self.assertIn("请检查未完成的 Git 合并", result.stderr)
         self.assertEqual(0, len(self.task_worktrees()))
 
     def test_wrapper_skips_microsoft_store_python3_stub(self):
@@ -634,7 +570,8 @@ class StartTaskWorktreeTest(unittest.TestCase):
 
         result = subprocess.run(
             [BASH, str(self.repo / "scripts/start-task-worktree.sh"),
-             "--type", "fix", "--no-issue", "--summary", "跳过桩检测场景"],
+             "--type", "fix", "--no-issue", "--summary", "跳过桩检测场景",
+             "--target-branch", self.release_branch],
             cwd=str(self.repo),
             env=env,
             text=True,
@@ -681,7 +618,8 @@ class StartTaskWorktreeTest(unittest.TestCase):
 
         result = subprocess.run(
             [BASH, str(self.repo / "scripts/start-task-worktree.sh"),
-             "--type", "fix", "--no-issue", "--summary", "回退py启动器场景"],
+             "--type", "fix", "--no-issue", "--summary", "回退py启动器场景",
+             "--target-branch", self.release_branch],
             cwd=str(self.repo),
             env=env,
             text=True,

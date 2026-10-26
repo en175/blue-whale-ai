@@ -19,16 +19,16 @@ scripts/sync-release-line.sh --json
 任何可能改动仓库的普通任务都从当前本地发布线目录运行唯一入口。散文文档和 chore 也走同一路径：
 
 ```bash
-scripts/start-task-worktree.sh --type <feature|fix|hotfix|docs|chore> (--issue <工单号>|--no-issue) --summary <6–15字中文简述>
+scripts/start-task-worktree.sh --type <feature|fix|hotfix|docs|chore> (--issue <工单号>|--no-issue) --summary <6–15字中文简述> --target-branch <dev|test|release>
 ```
 
-入口在同一把锁下同步发布线、记录本地 release 的精确提交，并从该提交建立中文任务分支和独立 worktree。未提交文件留在 release 工作树，不会复制到任务区。任务区的 Git 私有目录保存 `task_branch`、`target_branch` 和 `start_sha`。读取方式：
+入口抓取远端后固定从 `origin/master` 的精确提交建立中文任务分支和独立 worktree。`--target-branch` 必填，声明这条任务之后 PR 合入哪条环境分支；它不参与起点选择。未提交文件留在发布线工作树，不会复制到任务区。任务区的 Git 私有目录保存 `task_branch`、`target_branch` 和 `start_sha`。读取方式：
 
 ```bash
 python3 scripts/lib/task_metadata.py read --json
 ```
 
-缺少或不一致的元数据会阻断提交安全判断、验证、发布和清理。旧任务区只可在核对真实目标与起点、获得人类授权后运行 `task_metadata.py repair --target-branch <release/*> --start-sha <SHA> --user-authorized`。不得静默回退 master。
+缺少或不一致的元数据会阻断提交安全判断、验证、发布和清理。旧任务区只可在核对真实目标与起点、获得人类授权后运行 `task_metadata.py repair --target-branch <dev|test|release> --start-sha <SHA> --user-authorized`。不得静默回退 master。
 
 macOS、Linux 和 Git Bash 使用 `.sh`；Windows PowerShell/CMD 可用 `py -3 scripts/start-task-worktree.py ...`。Windows 的真实 Git Bash 与 Python launcher 兼容性仍需在 Windows 机器上人工验证。
 
@@ -36,10 +36,10 @@ macOS、Linux 和 Git Bash 使用 `.sh`；Windows PowerShell/CMD 可用 `py -3 s
 
 ## 验证与发布
 
-提交后先按 [testing-strategy.md](testing-strategy.md) 运行收口验证，读取 `check --json`。发布前抓取任务记录的目标 release。若任务分支落后，运行：
+提交后先按 [testing-strategy.md](testing-strategy.md) 运行收口验证，读取 `check --json`。**任务起点是 `origin/master`，目标分支可能领先**——目标上有 master 尚未合入的提交时，PR 阶段验证会返回 `PR_TARGET_NOT_SYNCED`。发布前先抓取任务记录的目标分支；若任务分支落后，运行：
 
 ```bash
-scripts/sync-task-from-origin.sh sync --target-branch <release/*> --json
+scripts/sync-task-from-origin.sh sync --target-branch <dev|test|release> --json
 ```
 
 它为原提交建立恢复点并针对该目标 rebase；冲突时自动 abort。推送前失败可按入口状态 rollback；进入 push 状态后须核对远端 SHA，不能自动回滚。目标前进或 HEAD 变化后重新运行 `node scripts/verify-change-scope.mjs run --stage pr`。验证凭证绑定任务起点、有效 diff 基线、目标远端 SHA、HEAD、文件集合与输入。
@@ -47,7 +47,7 @@ scripts/sync-task-from-origin.sh sync --target-branch <release/*> --json
 发布入口要求工作区干净、目标与元数据一致、远端目标包含任务起点，且 PR 阶段凭证有效。若本地 release 的领先提交尚未进入远端，该入口拒绝推送，避免把其他任务的提交带入 PR：
 
 ```bash
-scripts/publish-review-package.sh --user-authorized --create-pr --target-branch <release/*> --json
+scripts/publish-review-package.sh --user-authorized --create-pr --target-branch <dev|test|release> --json
 # 草稿参数及依据见 git-workflow.md「PR 草稿条件与回读」
 ```
 

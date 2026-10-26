@@ -1126,7 +1126,7 @@ test("local release commits stay outside task verification and block publication
     assert.equal(conflict.status, 2);
     assert.match(conflict.stderr, /显式基线.*任务起点/);
 
-    const publish = spawnSync("bash", [PUBLISH, "--user-authorized", "--create-pr", "--json"], {
+    const publish = spawnSync("bash", [PUBLISH, "--user-authorized", "--create-pr", "--target-branch", "release/prod", "--json"], {
       cwd: repository, encoding: "utf8", env: childEnvironment(),
     });
     assert.equal(publish.status, 12, publish.stderr);
@@ -1414,7 +1414,7 @@ test("automatic publication preserves failed high-risk evidence despite classifi
         cwd: repository, encoding: "utf8", env: environment,
       });
       assert.equal(blocked.status, 5, blocked.stderr);
-      const publish = spawnSync("bash", [PUBLISH, "--user-authorized", "--create-pr", "--json"], {
+      const publish = spawnSync("bash", [PUBLISH, "--user-authorized", "--create-pr", "--target-branch", "release/prod", "--json"], {
         cwd: repository, encoding: "utf8", env: environment,
       });
       assert.equal(publish.status, 11, publish.stderr);
@@ -1587,7 +1587,7 @@ test("publishing automatically verifies when the current HEAD has no receipt", (
 
     const result = spawnSync(
       "bash",
-      [PUBLISH, "--user-authorized", "--create-pr", "--json"],
+      [PUBLISH, "--user-authorized", "--create-pr", "--target-branch", "release/prod", "--json"],
       { cwd: repository, encoding: "utf8", env: childEnvironment() },
     );
 
@@ -1614,7 +1614,7 @@ test("allows publishing when the current HEAD has a valid verification receipt",
 
     const publish = spawnSync(
       "bash",
-      [PUBLISH, "--user-authorized", "--create-pr", "--json"],
+      [PUBLISH, "--user-authorized", "--create-pr", "--target-branch", "release/prod", "--json"],
       { cwd: repository, encoding: "utf8", env: childEnvironment() },
     );
 
@@ -1656,7 +1656,7 @@ test("publishing reuses a scoped completion receipt for ordinary code changes", 
 
     const publish = spawnSync(
       "bash",
-      [PUBLISH, "--user-authorized", "--create-pr", "--json"],
+      [PUBLISH, "--user-authorized", "--create-pr", "--target-branch", "release/prod", "--json"],
       { cwd: repository, encoding: "utf8", env: environment },
     );
     assert.equal(publish.status, 0, publish.stderr);
@@ -1849,7 +1849,7 @@ test("local publication enables hooks, builds before push, and reuses the same r
   const repository = createFrontendRepository({ localPublish: true });
   try {
     const publish = (environment = {}) => spawnSync("bash",
-      [PUBLISH, "--user-authorized", "--create-pr", "--json"], {
+      [PUBLISH, "--user-authorized", "--create-pr", "--target-branch", "release/prod", "--json"], {
         cwd: repository, encoding: "utf8", env: { ...childEnvironment(), ...environment },
       });
     const head = git(repository, "rev-parse", "HEAD");
@@ -1882,7 +1882,7 @@ test("typecheck and either build mode failure leave create and update remotes un
       const repository = createFrontendRepository({ localPublish: true });
       try {
         const ref = "refs/heads/chore/验证本地自动构建";
-        let args = ["--create-pr"];
+        let args = ["--create-pr", "--target-branch", "release/prod"];
         let before = "";
         if (mode === "update") {
           git(repository, "push", "origin", `HEAD:${ref}`);

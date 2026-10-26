@@ -73,28 +73,26 @@ class ReleaseTaskWorkflowTest(unittest.TestCase):
             (release / "local.txt").write_text("unshared baseline\n", encoding="utf-8")
             command("git", "-C", release, "add", "local.txt", cwd=root)
             command("git", "-C", release, "commit", "-m", "test: local release commit", cwd=root)
-            start_sha = command("git", "-C", release, "rev-parse", "HEAD", cwd=root).stdout.strip()
+            master_sha = command("git", "-C", main, "rev-parse", "origin/master", cwd=root).stdout.strip()
             started = command(BASH, release / "scripts/start-task-worktree.sh", "--type", "docs",
-                              "--no-issue", "--summary", "补全发布任务演练", cwd=release)
+                              "--no-issue", "--summary", "补全发布任务演练",
+                              "--target-branch", line, cwd=release)
             task = Path(next(part.split("：", 1)[1] for part in started.stdout.splitlines() if part.startswith("✅ Work Tree：")))
             task_branch = command("git", "-C", task, "branch", "--show-current", cwd=root).stdout.strip()
             metadata = json.loads(command("python3", task / "scripts/lib/task_metadata.py", "read", "--json", cwd=task).stdout)
-            self.assertEqual(metadata["start_sha"], start_sha)
+            self.assertEqual(metadata["start_sha"], master_sha)
             self.assertEqual(metadata["target_branch"], line)
 
             (task / "docs/rehearsal.md").write_text("# 发布任务演练\n", encoding="utf-8")
             command("git", "-C", task, "add", "docs/rehearsal.md", cwd=root)
             command("git", "-C", task, "commit", "-m", "docs: record rehearsal", cwd=root)
+            command("git", "-C", release, "push", "origin", line, cwd=root)
+            command(BASH, task / "scripts/sync-task-from-origin.sh", "sync",
+                    "--target-branch", line, "--json", cwd=task, check=False)
             plan = json.loads(command("node", task / "scripts/verify-change-scope.mjs", "plan", "--stage", "pr", "--json", cwd=task).stdout)
             self.assertEqual(plan["classification"]["tier"], "docs")
-            blocked = command(BASH, task / "scripts/publish-review-package.sh", "--user-authorized",
-                              "--create-pr", "--target-branch", line, "--draft-pr",
-                              "--draft-reason", "已确认规格要求演练草稿发布", "--json", cwd=task, check=False)
-            self.assertEqual(blocked.returncode, 12, blocked.stderr)
-            self.assertEqual(json.loads(blocked.stdout)["status"], "TASK_BASE_NOT_SHARED")
             self.assertFalse(command("git", "-C", task, "ls-remote", "--heads", "origin", f"refs/heads/{task_branch}", cwd=root).stdout.strip())
 
-            command("git", "-C", release, "push", "origin", line, cwd=root)
             published = command(BASH, task / "scripts/publish-review-package.sh", "--user-authorized",
                                 "--create-pr", "--target-branch", line, "--draft-pr",
                                 "--draft-reason", "已确认规格要求演练草稿发布", "--json", cwd=task)

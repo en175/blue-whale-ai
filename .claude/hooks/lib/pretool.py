@@ -16,6 +16,8 @@ from typing import Any
 
 SEPARATORS = {";", "&", "&&", "|", "||", "(", ")"}
 WORK_BRANCH_PREFIXES = ("feature/", "fix/", "hotfix/", "docs/", "chore/")
+ENVIRONMENT_BRANCHES = ("dev", "test", "release")
+PROTECTED_BRANCHES = ("master", "main") + ENVIRONMENT_BRANCHES
 PRETOOL_GIT_BIN = os.environ.get("PRETOOL_GIT_BIN") or "git"
 NON_ALIAS_SUBCOMMANDS = {
     "add",
@@ -530,12 +532,12 @@ def mode_protected_push_target(command: str) -> int:
         targets = explicit_targets(invocation)
         if targets:
             for target in targets:
-                if target in {"master", "main"}:
+                if target in PROTECTED_BRANCHES:
                     print(target)
                     return 0
         else:
             branch = current_branch(invocation.cwd)
-            if branch in {"master", "main"}:
+            if branch in PROTECTED_BRANCHES:
                 print(branch)
                 return 0
     return 1
@@ -546,12 +548,12 @@ def mode_release_push_target(command: str) -> int:
         targets = explicit_targets(invocation)
         if targets:
             for target in targets:
-                if target.startswith("release/"):
+                if target.startswith("release/") or target in ENVIRONMENT_BRANCHES:
                     print(target)
                     return 0
         else:
             branch = current_branch(invocation.cwd)
-            if branch.startswith("release/"):
+            if branch.startswith("release/") or branch in ENVIRONMENT_BRANCHES:
                 print(branch)
                 return 0
     return 1
@@ -711,6 +713,11 @@ def mode_dangerous_pattern(command: str) -> int:
     return 1
 
 
+def mode_target_branch(command: str) -> int:
+    branch = command.strip()
+    return 0 if (branch.startswith("release/") and len(branch) > len("release/")) or branch in ENVIRONMENT_BRANCHES else 1
+
+
 def mode_invokes(command: str, executable_name: str, required_arg: str | None = None) -> int:
     return 0 if invokes_command(command, executable_name, required_arg) else 1
 
@@ -755,6 +762,8 @@ def main() -> int:
         return mode_publish_review_mode(command)
     if mode == "dangerous-pattern":
         return mode_dangerous_pattern(command)
+    if mode == "target-branch":
+        return mode_target_branch(command)
     if mode == "invokes":
         if len(sys.argv) not in {3, 4}:
             return 2
