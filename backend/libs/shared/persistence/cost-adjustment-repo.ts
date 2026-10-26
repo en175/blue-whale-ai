@@ -1,10 +1,6 @@
-// IK9VZ0：cost_adjustments 审计表 repo——多退少补结算结果的接收落库（蓝鲸端只记账，不改余额）。
-// 幂等：batch_no 整批唯一（整批重复 → 返回 null）；(generation_job_id, action_type) 单项唯一
-// （不同 batch 对同 job 同 action 重复调整 → createMany 抛 P2002，事务回滚，由调用方感知）。
 import type { PrismaClient } from "@prisma/client";
 
 export interface CostAdjustmentItemInput {
-  /** job 归属（可空：无 job 的调整仅靠整批幂等兜底）。 */
   generationJobId?: string;
   userId: string;
   projectId?: string;
@@ -15,18 +11,12 @@ export interface CostAdjustmentItemInput {
 
 export interface CostAdjustmentBatchInput {
   batchNo: string;
-  /** new-api 结算时间（审计留痕）。 */
   settledAt?: string;
   items: CostAdjustmentItemInput[];
 }
 
 export function createCostAdjustmentRepo(prisma: PrismaClient) {
   return {
-    /**
-     * 整批落审计（batch_no 幂等）。
-     * 返回 { count: N } 表示落库 N 行；返回 null 表示整批重复（batch_no 已存在，跳过）。
-     * 只写 cost_adjustments 审计表，不改任何余额/预留（余额调整执行在 new-api 端）。
-     */
     async createBatch(
       input: CostAdjustmentBatchInput,
     ): Promise<{ count: number } | null> {
@@ -55,8 +45,6 @@ export function createCostAdjustmentRepo(prisma: PrismaClient) {
           return { count: input.items.length };
         });
       } catch (error) {
-        // IK9VZ0 I4：并发同 batch / 同 job×action 唯一冲突（P2002）→ 幂等返回 null，
-        // 调用方按 duplicate 处理（串行重复在 count 检查已拦截；此处兜底并发竞态）。
         if (
           error &&
           typeof error === "object" &&
@@ -71,11 +59,6 @@ export function createCostAdjustmentRepo(prisma: PrismaClient) {
   };
 }
 
-/**
- * IK9VZ0：对齐 cost_reservations 记账——以 new-api 结算结果为准修正 settled 预留的实扣金额。
- * 语义：supplement（补扣）→ actual += amount_fen；refund（退款）→ actual -= amount_fen（下限 0）。
- * 仅对 status=settled 的预留生效；未结算/不存在则跳过。只读后写，不改余额。
- */
 export async function alignReservationBySettlement(
   prisma: PrismaClient,
   jobId: string,

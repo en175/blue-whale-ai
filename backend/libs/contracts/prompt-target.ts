@@ -4,14 +4,6 @@ import type { CanvasEdge } from "./canvas-edges.js";
 
 export const promptBindingsSchema = z.array(promptMentionSchema.pick({ index: true, assetId: true }));
 
-export const promptReferenceRequestSchema = z.object({
-  planNodeId: z.string().min(1).max(128),
-  targetNodeId: z.string().min(1).max(128),
-  expectedVersion: z.number().int().nonnegative(),
-  modelId: z.string().min(1).optional(),
-  syncBindings: promptBindingsSchema.optional(),
-}).strict();
-
 export type PromptBinding = z.infer<typeof promptBindingsSchema>[number];
 export function promptBindingList(mentions: PromptMention[]): PromptBinding[] {
   return [...new Map(mentions.map(m => [m.index, { index: m.index, assetId: m.assetId }])).values()].sort((a, b) => a.index - b.index);
@@ -19,7 +11,6 @@ export function promptBindingList(mentions: PromptMention[]): PromptBinding[] {
 
 export interface PromptInputSources { manual: boolean; planNodeIds: string[] }
 
-/** Removing a plan releases only its contribution; explicit media disconnects stay disconnected. */
 export function releaseRemovedPromptSources<T extends CanvasEdge>(before: T[], after: T[]): T[] {
   const removed = before.filter(edge => edge.data?.promptReference !== undefined
     && !after.some(next => next.source === edge.source && next.target === edge.target));
@@ -38,8 +29,6 @@ export const promptPlanSnapshotSchema = z.object({
   canvasVersion: z.number().int().nonnegative(),
   plans: z.array(z.object({ nodeId: z.string(), text: z.string(), mentions: z.array(promptMentionSchema) })),
   images: z.array(z.object({ assetId: z.string().regex(/^[1-9][0-9]*$/), url: z.string().url() })),
-  // IKG6EK / ADR-0088：providerPrompt 已退役——正文由提交方给全、引用标记转移在接纳管线完成，
-  // 快照退为方案绑定校验与审计事实。历史行仍带该字段：本 schema 非 strict，解析时按未知键丢弃。
   videoReferences: z.array(z.object({
     assetId: z.string().regex(/^[1-9][0-9]*$/).optional(),
     materialId: z.string().min(1).optional(),

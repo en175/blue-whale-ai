@@ -1,0 +1,182 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<mapper namespace="com.bluewhale.billing.infrastructure.persistence.mapper.TransactionMapper">
+
+
+
+  <sql id="transactionUnion">
+
+      SELECT CONCAT('lot:', l.id) AS tx_id,
+
+             CASE l.source
+               WHEN 'purchased'    THEN 'recharge'
+               WHEN 'compensation' THEN 'compensation'
+               WHEN 'bonus'        THEN 'bonus'
+               WHEN 'daily'        THEN 'daily'
+               WHEN 'invite'       THEN 'invite'
+               WHEN 'redeem'       THEN 'redeem'
+               WHEN 'subscription' THEN 'subscription'
+               WHEN 'gift'         THEN 'gift'
+               WHEN 'register'     THEN 'gift'
+               ELSE 'gift'
+             END AS type,
+             'in' AS direction,
+             CASE l.source
+               WHEN 'purchased'    THEN '充值到账'
+               WHEN 'compensation' THEN '事故补偿'
+               WHEN 'bonus'        THEN '充值赠送'
+               WHEN 'daily'        THEN '每日登录赠送'
+               WHEN 'invite'       THEN '邀请奖励'
+               WHEN 'redeem'       THEN '兑换码兑换'
+               WHEN 'subscription' THEN '会员赠送'
+               WHEN 'gift'         THEN '运营赠送'
+               WHEN 'register'     THEN '注册赠送'
+               ELSE '积分发放'
+             END AS title,
+             l.amount     AS amount,
+             NULL         AS reserved_credits,
+             NULL         AS generation_job_id,
+             'done'       AS status,
+             NULL         AS charge_state,
+             l.gmt_create AS created_at,
+             l.gmt_create AS settled_at,
+             'grant'      AS kind,
+             l.id         AS src_id,
+             l.user_id    AS user_id,
+             NULL         AS lot_source,
+             NULL         AS lot_created_at
+      FROM billing_credit_lots l
+      <where>
+        <if test="userId != null">l.user_id = #{userId}</if>
+      </where>
+
+      UNION ALL
+
+
+
+
+
+
+
+
+      SELECT CONCAT('res:', r.id) AS tx_id,
+             'consume' AS type,
+             'out'     AS direction,
+             CASE WHEN r.status = 'refunded'
+                  THEN CASE WHEN r.title = '' THEN '生成退回'
+                            ELSE CONCAT(r.title, ' · 退回') END
+                  ELSE CASE WHEN r.title = '' THEN '生成消费' ELSE r.title END
+             END AS title,
+             CASE WHEN r.status = 'refunded' THEN 0 ELSE r.reserved_credits END AS amount,
+             r.reserved_credits AS reserved_credits,
+             r.generation_job_id AS generation_job_id,
+             'done' AS status,
+             r.status AS charge_state,
+             r.gmt_create AS created_at,
+             r.gmt_modified AS settled_at,
+             'consume' AS kind,
+             r.id AS src_id,
+             r.user_id AS user_id,
+             NULL AS lot_source,
+             NULL AS lot_created_at
+      FROM billing_cost_reservations r
+      <where>
+        <if test="userId != null">r.user_id = #{userId}</if>
+      </where>
+
+      UNION ALL
+
+
+
+
+      SELECT CONCAT('led:', LEFT(e.idempotency_key,
+                                 CHAR_LENGTH(e.idempotency_key) - CHAR_LENGTH(e.account) - 1)) AS tx_id,
+             CASE e.biz_type WHEN 'expire' THEN 'expire' ELSE 'compensation' END AS type,
+             CASE WHEN SUM(CASE WHEN e.direction = 'credit' THEN e.amount ELSE -e.amount END) >= 0
+                  THEN 'in' ELSE 'out' END AS direction,
+             CASE e.biz_type WHEN 'expire' THEN '积分过期' ELSE '人工调账' END AS title,
+             ABS(SUM(CASE WHEN e.direction = 'credit' THEN e.amount ELSE -e.amount END)) AS amount,
+             NULL AS reserved_credits,
+             NULL AS generation_job_id,
+             'done' AS status,
+             NULL AS charge_state,
+             MIN(e.gmt_create) AS created_at,
+             MIN(e.gmt_create) AS settled_at,
+             'ledger' AS kind,
+             MIN(e.id) AS src_id,
+             MIN(e.user_id) AS user_id,
+             MIN(l2.source) AS lot_source,
+             MIN(l2.gmt_create) AS lot_created_at
+      FROM billing_ledger_entries e
+      LEFT JOIN billing_credit_lots l2
+             ON l2.id = CAST(e.biz_id AS UNSIGNED) AND l2.user_id = e.user_id
+            AND e.biz_type = 'expire'
+      WHERE e.account IN ('wallet')
+        AND e.idempotency_key LIKE CONCAT('%:', e.account)
+        AND e.biz_type IN ('expire', 'adjust')
+        <if test="userId != null">AND e.user_id = #{userId}</if>
+      GROUP BY tx_id, e.biz_type
+      HAVING SUM(CASE WHEN e.direction = 'credit' THEN e.amount ELSE -e.amount END) != 0
+  </sql>
+
+
+
+  <sql id="transactionTypeFilter">
+    <if test="typeFilter != null and typeFilter.size() > 0">
+      AND t.type IN
+      <foreach item="item" collection="typeFilter" open="(" separator="," close=")">#{item}</foreach>
+    </if>
+  </sql>
+
+  <sql id="transactionWindowFilter">
+    <if test="createdFrom != null">AND t.created_at &gt;= #{createdFrom}</if>
+    <if test="createdTo != null">AND t.created_at &lt;= #{createdTo}</if>
+    <if test="generationJobIds != null and generationJobIds.size() > 0">
+      AND t.generation_job_id IN
+      <foreach item="item" collection="generationJobIds" open="(" separator="," close=")">#{item}</foreach>
+    </if>
+  </sql>
+
+  <select id="selectPage" resultType="com.bluewhale.billing.infrastructure.persistence.row.TransactionRow">
+    SELECT t.tx_id, t.user_id, t.type, t.direction, t.title, t.amount, t.reserved_credits,
+           t.status, t.charge_state, t.created_at, t.settled_at, t.generation_job_id, t.kind, t.src_id,
+           t.lot_source, t.lot_created_at
+    FROM (
+      <include refid="transactionUnion"/>
+    ) t
+    <where>
+      <include refid="transactionTypeFilter"/>
+      <include refid="transactionWindowFilter"/>
+    </where>
+    ORDER BY t.created_at DESC, t.kind ASC, t.src_id DESC
+    LIMIT #{limit} OFFSET #{offset}
+  </select>
+
+
+  <select id="countPage" resultType="long">
+    SELECT COUNT(*)
+    FROM (
+      <include refid="transactionUnion"/>
+    ) t
+    <where>
+      <include refid="transactionTypeFilter"/>
+      <include refid="transactionWindowFilter"/>
+    </where>
+  </select>
+
+</mapper>

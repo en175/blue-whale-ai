@@ -4,35 +4,14 @@ import { describe, expect, it } from "vitest";
 
 import { toFeatures } from "./model-capability-repo.js";
 
-/* ============================================
- * 能力行字段裁决表（ADR-0110）
- *
- * 这条规则以前只活在会话与注释里，四个独立副本照样长了出来——因为违反它不会让任何东西变红。
- * 本文件把它变成机械检查：`toFeatures` 恒返回**全字段**对象（缺省补齐），
- * 所以 `Object.keys(toFeatures({}))` 就是「当前已知的全部能力字段」。断言这个集合与下面的
- * RULINGS 精确相等，于是：
- *   - 新增字段而没留裁决 → 红；
- *   - 删字段而表没同删 → 红；
- *   - 裁决指向的测试文件没了（指向腐烂）→ 红；
- *   - 一个字段既没有「配置赢」的证明、又没登记为已知缺口 → 红。
- *
- * 每行回答四件事：谁读它、缺省是多少、哪条测试证明「配置在场时配置赢」、是否根本不驱动行为。
- * `configWinsTest: null` 是**显式登记的缺口**（配 `gapReason`），不是省略——
- * 一行「消费方是 X，暂无配置驱动行为的测试」比留个洞有用。
- * ============================================ */
 
 const REPO_ROOT = fileURLToPath(new URL("../../../../", import.meta.url));
 
 interface Ruling {
-  /** 消费方：读这个字段的代码 + 它门控什么。无消费方就写明「当前无读取点」。 */
   consumer: string;
-  /** 未配置时生效的值（`DEFAULT_*` 常量或语义缺省）。 */
   fallback: string;
-  /** 证明「配置在场时配置赢」的测试（仓库相对路径）；null = 已知缺口，必须同时给 gapReason。 */
   configWinsTest: string | null;
-  /** `configWinsTest` 为 null 且非 inert 时必填：缺口登记（缺在哪、为什么还没补）。 */
   gapReason?: string;
-  /** 非空 = 该字段当前不驱动任何行为，此处写明原因（纯目录透出 / 无读取点）。 */
   inert?: string;
 }
 
@@ -46,7 +25,7 @@ const RULINGS: Record<string, Ruling> = {
       "backend/libs/shared/generation/prompt-plan-snapshot.test.ts",
   },
   watermark: {
-    consumer: "当前无读取点（仅 handle-list-models 透出消费端 + 后台表单位）",
+    consumer: "当前无读取点（仅 handle-list-models 透出消费端；后台表单位已删，水印行为改读 system_settings.watermark）",
     fallback: "false",
     configWinsTest: null,
     inert: "目录透出键：仓库内无任何消费方，不驱动行为，故无「配置赢」可言",
@@ -112,11 +91,11 @@ const RULINGS: Record<string, Ruling> = {
   },
   i2i_model_name: {
     consumer:
-      "worker-java ImageChannelMapper / ImageJobProcessor（有参考图时出站改用该上游模型名，直接从能力行 features 读）；" +
+      "worker-java ImageChannelParser / ImageJobProcessor（有参考图时出站改用该上游模型名，直接从能力行 features 读）；" +
       "handle-list-models 把它从消费端剥除（出站调用值不下发浏览器）",
     fallback: "null（不分流，出站用目录 id 本身）",
     configWinsTest:
-      "worker-java/src/test/java/com/bluewhale/worker/application/processor/ImageJobProcessorI2iAliasTest.java",
+      "server/blue-whale-worker/src/test/java/com/bluewhale/worker/application/processor/ImageJobProcessorI2iAliasTest.java",
   },
   max_prompt_length: {
     consumer:
@@ -165,7 +144,7 @@ const RULINGS: Record<string, Ruling> = {
       "backend/libs/shared/generation/handle-create-generation-job.ts（resolveReferenceAssets 图片上限）；" +
       "backend/libs/shared/canvas/prompt-target.ts；" +
       "web/src/lib/model-reference-limits.ts（imageReferenceMaxOf / imageReferenceMaxOfForAudio）；" +
-      "worker-java ImageChannelMapper.parseMaxReferenceImages（图片链路镜像缺省）；冻结进 job.input.reference_limits",
+      "worker-java ImageChannelParser.parseMaxReferenceImages（图片链路镜像缺省）；冻结进 job.input.reference_limits",
     fallback:
       "按行类型分（IKHEXG）：图片/视频行 DEFAULT_IMAGE_REFERENCE_MAX = 10" +
       "（与网关 maxImageEditImages / ARK 复合编辑上限对齐，IKA72G）；" +
@@ -189,16 +168,40 @@ const RULINGS: Record<string, Ruling> = {
     configWinsTest:
       "backend/libs/shared/persistence/scene-card-generation-repo.test.ts",
   },
+  video_dimensions: {
+    consumer:
+      "backend/libs/contracts/capability-param-validation.ts（resolveOutputPixels：按 resolution+aspect_ratio 查宽高）" +
+      "经 handle-create-generation-job 的 composeInput 冻成 job.input.output_width / output_height，" +
+      "随 Hold 到 billing 的 specs 后被 TokenEstimator（server/blue-whale-billing/.../pricing/TokenEstimator.java）消费。" +
+      "写侧形态闸门在 backend/libs/shared/model-capability/constants.ts（featuresFieldErr）",
+    fallback:
+      "null（未配 = 不冻结宽高）；此时 billing 回落目录里那份 tokenEstimate.dimensions（过渡期双向兼容）",
+    configWinsTest:
+      "backend/libs/shared/generation/handle-create-generation-job.test.ts",
+  },
+  sample_mode: {
+    consumer:
+      "backend/libs/shared/generation/handle-create-generation-job.ts（ruleSampleMode：创建侧样片门控，" +
+      "位不为 true → 400 capability_unsupported_param）与 handle-quote-generation-job.ts（报价侧同一判定，" +
+      "未放行 → 空报价双 null）。契约 backend/libs/contracts/video-sample-mode.ts（IKIZQ7）。" +
+      "写侧形态闸门在 backend/libs/shared/model-capability/constants.ts（featuresFieldErr 布尔裁定）",
+    fallback: "false（样片默认关闭：能力行未声明即拒绝样片提交/不给样片报价；放行 = 运营显式配置）",
+    configWinsTest:
+      "backend/libs/shared/generation/handle-create-generation-job.test.ts",
+  },
+  omni_reference_task_type: {
+    consumer:
+      "backend/libs/shared/generation/handle-create-generation-job.ts（按该位把 input.omni_reference_task_type_allowed 冻结进快照）；" +
+      "server/blue-whale-worker 的 NewApiVideoClient（按冻结位决定是否下发上游 metadata.omni_reference_task_type）。" +
+      "写侧形态闸门在 backend/libs/shared/model-capability/constants.ts（featuresFieldErr 布尔裁定）",
+    fallback: "false（能力行未声明即不下发该参数）",
+    configWinsTest:
+      "backend/libs/shared/generation/handle-create-generation-job.test.ts",
+  },
 };
 
-/** 能力行里存在、但 `toFeatures` 不产出的字段：上面的枚举机制**看不见**它们，改动不会被拦。
- *  逐个列出，避免留下「以为覆盖了」的错觉：
- *  - `image_protocol`（出站图片协议，ADR-0085 / 023 迁移）：由 worker-java `ImageChannelMapper`
- *    直接从库中 features JSON 读，TS 侧不归一、也不下发消费端。
- *  断言方向是双向的——这些字段一旦被接进 `toFeatures`，用例即红，逼它搬进 RULINGS 走同一条裁决。 */
 const FIELDS_OUTSIDE_NORMALISER = ["image_protocol"] as const;
 
-/** `toFeatures` 的产出键集 = 当前已知的全部能力字段。 */
 const NORMALISED_FIELDS: string[] = Object.keys(toFeatures({})).sort();
 
 describe("模型能力字段裁决表（ADR-0110）", () => {

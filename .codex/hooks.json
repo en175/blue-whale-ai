@@ -80,6 +80,15 @@
             "command": "bash \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-pretool.sh\" cbm-discovery-gate.sh"
           }
         ]
+      },
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-pretool.sh\" block-gitee-alternative-channel.sh"
+          }
+        ]
       }
     ],
     "PostToolUse": [
@@ -137,6 +146,17 @@
             "command": "bash \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-pretool.sh\" cbm-session-reminder.sh"
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "PONYTAIL_CLIENT=codex PONYTAIL_PROJECT_DIR=\"$(git rev-parse --show-toplevel)\" node \"$(git rev-parse --show-toplevel)/.claude/hooks/ponytail-activate.js\"",
+            "timeout": 5,
+            "additionalContextLimit": 6000
+          }
+        ],
+        "matcher": "startup|resume|clear|compact"
       }
     ],
     "SubagentStart": [
@@ -146,6 +166,28 @@
           {
             "type": "command",
             "command": "bash \"$(git rev-parse --show-toplevel)/.codex/hooks/run-claude-pretool.sh\" cbm-session-reminder.sh"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "PONYTAIL_CLIENT=codex PONYTAIL_PROJECT_DIR=\"$(git rev-parse --show-toplevel)\" node \"$(git rev-parse --show-toplevel)/.claude/hooks/ponytail-subagent.js\"",
+            "timeout": 5,
+            "additionalContextLimit": 6000
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "PONYTAIL_CLIENT=codex PONYTAIL_PROJECT_DIR=\"$(git rev-parse --show-toplevel)\" node \"$(git rev-parse --show-toplevel)/.claude/hooks/ponytail-mode-tracker.js\"",
+            "timeout": 5,
+            "additionalContextLimit": 6000
           }
         ]
       }

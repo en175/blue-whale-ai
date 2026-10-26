@@ -6,21 +6,6 @@ export {
   type ReadinessReport,
   type ServiceName,
 } from "./readiness.js";
-export type {
-  AgentAction,
-  AgentAdapter,
-  AgentAlignmentStage,
-  AgentHistoryMessage,
-  AgentMentionProjection,
-  AgentRequest,
-  AgentResult,
-  GenerationAdapter,
-  GenerationRequest,
-  GenerationResult,
-  PlanApplicationKindCore,
-  PlanCardCandidateCore,
-  PlanGenerationParameterOverridesCore,
-} from "./runtime-ports.js";
 export {
   signVolcengineRequest,
   type SignVolcengineRequestInput,
@@ -39,6 +24,7 @@ export {
   type ArkImageRequest,
   type ArkImageResult,
 } from "./ark-image-client.js";
+export { ApiError } from "./errors/http-error.js";
 export {
   createNewApiClient,
   createNewApiRawRequest,
@@ -49,27 +35,12 @@ export {
   type NewApiRawResult,
   CLIENT_SYSTEM_BLUEWHALE,
   type NewApiClientOptions,
-  type NewApiAccountCapabilities,
-  type NewApiAccountIdentity,
   type NewApiImage,
   type NewApiImageEditInput,
   type NewApiImageInput,
-  type NewApiLog,
-  type NewApiLoginInput,
-  type NewApiLoginResult,
-  type NewApiRegisterInput,
-  type NewApiChangePasswordInput,
-  type NewApiUsage,
   type NewApiVideoInput,
   type NewApiVideoSubmission,
   type NewApiVideoTask,
-  type NewApiAdminManageUserInput,
-  type NewApiAdminTopUpRow,
-  type NewApiAdminUserRow,
-  type NewApiAgentRunQuotaResult,
-  type NewApiLogRow,
-  type NewApiLogStat,
-  type NewApiPageInfo,
   type NewApiPricingItem,
   type NewApiPricingResult,
 } from "./new-api-client.js";
@@ -78,14 +49,6 @@ export {
   type MaterialLibraryClient,
   type MaterialLibraryResponse,
 } from "./material-library-client.js";
-export {
-  loadGenerationCostConfig,
-  quotaToFen,
-  buildCostVersions,
-  type GenerationCostConfig,
-  type CostReservationSnapshot,
-  type CostReservationVersions,
-} from "./generation-cost.js";
 export type { NewApiImageReceipt } from "./new-api-generation-ops.js";
 export { transferReferenceMarkers } from "./transfer-reference-markers.js";
 export {
@@ -94,25 +57,29 @@ export {
   type AccessTokenClaims,
 } from "./jwt.js";
 export {
-  classifyPlanApplicationAvailability,
-  type PlanApplicationAvailabilityInput,
-  type PlanApplicationAvailabilityStatus,
-} from "./plan-application-availability.js";
-export {
   requestSmsCode,
   type RequestSmsCodeInput,
   type RequestSmsCodeDeps,
   type RequestSmsCodeResult,
   type VerificationCodeRecord,
 } from "./auth/request-sms-code.js";
+export { PHONE_RE, isValidPhone, maskPhone } from "./auth/phone.js";
+export { isTelecomPhone } from "./auth/carrier.js";
 export {
-  loginWithCode,
-  InvalidVerificationCodeError,
-  type LoginWithCodeInput,
-  type LoginWithCodeDeps,
-  type LoginResult,
-  type AuthUser,
-} from "./auth/login-with-code.js";
+  CAPTCHA_TTL_MS,
+  CAPTCHA_CODE_LENGTH,
+  CAPTCHA_WIDTH,
+  CAPTCHA_HEIGHT,
+  CAPTCHA_ALPHABET,
+  normalizeCaptchaAnswer,
+  isCaptchaAnswerCorrect,
+} from "./auth/captcha.js";
+export {
+  normalizeNickname,
+  NICKNAME_MIN_LENGTH,
+  NICKNAME_MAX_LENGTH,
+  type NicknameValidation,
+} from "./auth/nickname.js";
 export { parseSkillMd, serializeSkillMd } from "./skills/skill-md.js";
 export {
   acceptConversationMessage,
@@ -158,7 +125,15 @@ export {
   TRACEPARENT_HEADER,
   runWithTraceId,
 } from "./trace.js";
-// logger / tls-writer 依赖火山 SDK，走子路径 "@lib/core/logging"，
-// 不进主 barrel，避免所有 core 消费者被静态绑定（见 logging.ts 头注释）。
 
 export { extractTextNodeText } from "./text-node-content.js";
+
+export {
+  wallClockOffset,
+  wallClockRfc3339,
+  wallClockRfc3339OrNull,
+  wallClockDay,
+  wallClockHuman,
+  wallClockHumanFromIso,
+  wallClockMillis,
+} from "./wall-clock.js";

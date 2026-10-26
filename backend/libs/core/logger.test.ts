@@ -45,27 +45,21 @@ describe("createLogger —— 结构化字段", () => {
     const parsed = JSON.parse(String(logSpy.mock.calls[0]![0]));
     expect(parsed).toMatchObject({
       severity_text: "info",
-      // 进程级常量，不是 createLogger 收到的那个名字，也没有环境变量能改它。
       service_name: "blue-whale-backend",
-      // 模块名没丢，它换了个位置——服务名和模块名各自有字段，不再抢同一个。
       logger_name: "unit-svc",
       deployment_environment_name: "test",
       service_version: LOG_SERVICE_VERSION,
       trace_id: "",
       body: "hello tls",
     });
-    // 恒为北京时间 +08:00（与库同一个墙上时钟），且不随 TZ 变。
     expect(parsed.timestamp).toMatch(
       /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}\+08:00$/,
     );
-    // 仓库相对路径，不是构建机上的绝对路径——后者说的是构建机而不是文件，副本之间比不了。
     expect(parsed.code_file_path).toMatch(
       /^backend\/libs\/core\/logger\.test\.ts$/,
     );
-    // 行号自成一个字段，不再和路径粘在一起——粘着既过滤不了也排序不了（D2）。
     expect(typeof parsed.code_line_number).toBe("number");
     expect(parsed.code_line_number).toBeGreaterThan(0);
-    // 旧字段表里没有「哪个副本」这个概念。
     expect(String(parsed.service_instance_id)).toMatch(/.+-\d+$/);
     expect(typeof parsed.code_function_name).toBe("string");
     expect(records).toHaveLength(1);
@@ -118,8 +112,6 @@ describe("createLogger —— 结构化字段", () => {
   });
 
   it("服务名是进程级常量，环境变量改不动它", () => {
-    // CONTAINER_NAME 没了。忘配一次的后果是同一个容器里每个模块自报一个不同的服务名，
-    // 线上实测 bw-backend 报的是 trace-middleware——那是个中间件，不是服务。
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     const { writer } = fakeWriter();
     createLogger("trace-middleware", {
@@ -139,8 +131,6 @@ describe("createLogger —— 结构化字段", () => {
   });
 
   it("另一个可部署单元用 setLogServiceName 声明自己，写日志那一刻才取值", () => {
-    // 各模块的 createLogger 在模块顶层求值，跑在 main.ts 的函数体之前——
-    // 建 logger 时取值就意味着声明永远来不及。这条断言锁的就是「晚取值」。
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     const { writer } = fakeWriter();
     const logger = createLogger("video-worker", { ...QUIET, writer });
@@ -282,22 +272,19 @@ describe("createLogger —— 结构化 metric 事件（IK7G9Y）", () => {
 
 describe("toBlueWhaleTimestamp —— 与库同一个墙上时钟（IKHJ0Q）", () => {
   it("恒为北京时间 +08:00，带毫秒", () => {
-    // 2026-09-21 从 UTC 改回 +08:00：库里存的 `datetime` 就是北京时间墙钟，日志贴着库走。
-    // 注意接口响应仍是 UTC（JSON.stringify / toISOString 恒产 Z），日志不对齐接口——取舍见
-    // logger.ts 的文档块。
     expect(toBlueWhaleTimestamp(1756800000000)).toBe("2025-09-02T16:00:00.000+08:00");
   });
 
-  it("不随进程时区变化", () => {
-    // 安全性本身：跨服务按字符串排序只在各家写同一个时区时成立，而从 TZ 推导出来的值，
-    // 离「某个容器改了 TZ、于是悄悄换了个时区」只有一步。
+  it("跟随进程时区：时区由部署给，不再在代码里钉偏移", () => {
     const original = process.env.TZ;
     try {
-      for (const tz of ["UTC", "America/New_York", "Asia/Shanghai"]) {
+      const cases: Array<[string, string]> = [
+        ["UTC", "2025-09-02T08:00:00.000+00:00"],
+        ["Asia/Shanghai", "2025-09-02T16:00:00.000+08:00"],
+      ];
+      for (const [tz, expected] of cases) {
         process.env.TZ = tz;
-        expect(toBlueWhaleTimestamp(1756800000000)).toBe(
-          "2025-09-02T16:00:00.000+08:00",
-        );
+        expect(toBlueWhaleTimestamp(1756800000000)).toBe(expected);
       }
     } finally {
       if (original === undefined) delete process.env.TZ;
@@ -312,7 +299,6 @@ describe("toBlueWhaleTimestamp —— 与库同一个墙上时钟（IKHJ0Q）", 
 
 describe("createLogger —— 来源地址与脱敏（IKB29O）", () => {
   it("请求里的每一行都带调用方地址，不只是访问日志那一行", () => {
-    // 出问题的从来不是你预先标注好的那一行，所以地址进 ALS 而不是只写在入口。
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     const { writer } = fakeWriter();
     const logger = createLogger("unit-svc", { ...QUIET, writer });
@@ -362,7 +348,6 @@ describe("createLogger —— 来源地址与脱敏（IKB29O）", () => {
   });
 
   it("runWithTraceId 在深处换 trace 时保住地址", () => {
-    // worker 领到一条消息、请求被重放——这些地方拿不到 req，抹掉地址的那一行恰恰最可能出错。
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     const { writer } = fakeWriter();
     const logger = createLogger("unit-svc", { ...QUIET, writer });

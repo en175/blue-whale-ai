@@ -1,0 +1,592 @@
+[
+  {
+    "case_id": "T",
+    "mode_zh": "文生视频",
+    "matrix_ref": "IKIZH2 九组矩阵 · T 文生视频",
+    "note": "钉桩≠供应商实测通过：本组数据按 IKIZH2 矩阵的推断候选构造，未发起任何付费上游调用；样片入口保持关闭，放行仍以九组真实两阶段回执为准。",
+    "submit_input": {
+      "model": "doubao-seedance-2-5-260628",
+      "prompt": "一只猫在跑步",
+      "duration": 5.0,
+      "ratio": "16:9",
+      "first_frame": null,
+      "last_frame": null,
+      "references": []
+    },
+    "expected_submit_body": {
+      "model": "doubao-seedance-2-5-260628",
+      "prompt": "一只猫在跑步",
+      "duration": 5.0,
+      "response_format": "url",
+      "draft": true,
+      "metadata": {
+        "duration": 5.0,
+        "resolution": "480p",
+        "ratio": "16:9",
+        "content": []
+      }
+    },
+    "poll_response": {
+      "code": "success",
+      "data": {
+        "task_id": "task-T",
+        "status": "SUCCESS",
+        "result_url": "https://tos.test/sample-T.mp4",
+        "usage": {
+          "total_tokens": 40594
+        },
+        "data": {
+          "created_at": 1790647200,
+          "resolution": "480p",
+          "draft": true
+        }
+      }
+    },
+    "expect": {
+      "status": "succeeded",
+      "total_tokens": 40594,
+      "upstream_created_at_ms": 1790647200000
+    }
+  },
+  {
+    "case_id": "I",
+    "mode_zh": "图生视频（首帧）",
+    "matrix_ref": "IKIZH2 九组矩阵 · I 图生首帧：首帧 1 张、比例 adaptive",
+    "note": "钉桩≠供应商实测通过：本组数据按 IKIZH2 矩阵的推断候选构造，未发起任何付费上游调用；样片入口保持关闭，放行仍以九组真实两阶段回执为准。",
+    "submit_input": {
+      "model": "doubao-seedance-2-5-260628",
+      "prompt": "让画面动起来",
+      "duration": 5.0,
+      "ratio": "adaptive",
+      "first_frame": "https://tos.test/first-frame.png",
+      "last_frame": null,
+      "references": []
+    },
+    "expected_submit_body": {
+      "model": "doubao-seedance-2-5-260628",
+      "prompt": "让画面动起来",
+      "duration": 5.0,
+      "response_format": "url",
+      "draft": true,
+      "metadata": {
+        "duration": 5.0,
+        "resolution": "480p",
+        "ratio": "adaptive",
+        "content": [
+          {
+            "type": "image_url",
+            "image_url": {
+              "url": "https://tos.test/first-frame.png",
+              "role": "first_frame"
+            },
+            "role": "first_frame"
+          }
+        ]
+      }
+    },
+    "poll_response": {
+      "code": "success",
+      "data": {
+        "task_id": "task-I",
+        "status": "SUCCESS",
+        "result_url": "https://tos.test/sample-I.mp4",
+        "usage": {
+          "total_tokens": 42110
+        },
+        "data": {
+          "created_at": 1790647210,
+          "resolution": "480p",
+          "draft": true
+        }
+      }
+    },
+    "expect": {
+      "status": "succeeded",
+      "total_tokens": 42110,
+      "upstream_created_at_ms": 1790647210000
+    }
+  },
+  {
+    "case_id": "FL",
+    "mode_zh": "首尾帧",
+    "matrix_ref": "IKIZH2 九组矩阵 · FL 首尾帧：首帧与尾帧各 1 张、比例 adaptive",
+    "note": "钉桩≠供应商实测通过：本组数据按 IKIZH2 矩阵的推断候选构造，未发起任何付费上游调用；样片入口保持关闭，放行仍以九组真实两阶段回执为准。",
+    "submit_input": {
+      "model": "doubao-seedance-2-5-260628",
+      "prompt": "从首帧过渡到尾帧",
+      "duration": 5.0,
+      "ratio": "adaptive",
+      "first_frame": "https://tos.test/first-frame.png",
+      "last_frame": "https://tos.test/last-frame.png",
+      "references": []
+    },
+    "expected_submit_body": {
+      "model": "doubao-seedance-2-5-260628",
+      "prompt": "从首帧过渡到尾帧",
+      "duration": 5.0,
+      "response_format": "url",
+      "draft": true,
+      "metadata": {
+        "duration": 5.0,
+        "resolution": "480p",
+        "ratio": "adaptive",
+        "content": [
+          {
+            "type": "image_url",
+            "image_url": {
+              "url": "https://tos.test/first-frame.png",
+              "role": "first_frame"
+            },
+            "role": "first_frame"
+          },
+          {
+            "type": "image_url",
+            "image_url": {
+              "url": "https://tos.test/last-frame.png",
+              "role": "last_frame"
+            },
+            "role": "last_frame"
+          }
+        ]
+      }
+    },
+    "poll_response": {
+      "code": "success",
+      "data": {
+        "task_id": "task-FL",
+        "status": "SUCCESS",
+        "result_url": "https://tos.test/sample-FL.mp4",
+        "usage": {
+          "total_tokens": 43880
+        },
+        "data": {
+          "created_at": 1790647220,
+          "resolution": "480p",
+          "draft": true
+        }
+      }
+    },
+    "expect": {
+      "status": "succeeded",
+      "total_tokens": 43880,
+      "upstream_created_at_ms": 1790647220000
+    }
+  },
+  {
+    "case_id": "R1",
+    "mode_zh": "全能参考：图片",
+    "matrix_ref": "IKIZH2 九组矩阵 · R1 全能参考图片：reference_image、比例 16:9",
+    "note": "钉桩≠供应商实测通过：本组数据按 IKIZH2 矩阵的推断候选构造，未发起任何付费上游调用；样片入口保持关闭，放行仍以九组真实两阶段回执为准。",
+    "submit_input": {
+      "model": "doubao-seedance-2-5-260628",
+      "prompt": "参考这张图生成新画面",
+      "duration": 5.0,
+      "ratio": "16:9",
+      "first_frame": null,
+      "last_frame": null,
+      "references": [
+        {
+          "type": "image",
+          "url": "https://tos.test/reference-image.png",
+          "role": null
+        }
+      ]
+    },
+    "expected_submit_body": {
+      "model": "doubao-seedance-2-5-260628",
+      "prompt": "参考这张图生成新画面",
+      "duration": 5.0,
+      "response_format": "url",
+      "draft": true,
+      "metadata": {
+        "duration": 5.0,
+        "resolution": "480p",
+        "ratio": "16:9",
+        "content": [
+          {
+            "type": "image_url",
+            "image_url": {
+              "url": "https://tos.test/reference-image.png",
+              "role": "reference_image"
+            },
+            "role": "reference_image"
+          }
+        ]
+      }
+    },
+    "poll_response": {
+      "code": "success",
+      "data": {
+        "task_id": "task-R1",
+        "status": "SUCCESS",
+        "result_url": "https://tos.test/sample-R1.mp4",
+        "usage": {
+          "total_tokens": 44950
+        },
+        "data": {
+          "created_at": 1790647230,
+          "resolution": "480p",
+          "draft": true
+        }
+      }
+    },
+    "expect": {
+      "status": "succeeded",
+      "total_tokens": 44950,
+      "upstream_created_at_ms": 1790647230000
+    }
+  },
+  {
+    "case_id": "R2",
+    "mode_zh": "全能参考：纯音频",
+    "matrix_ref": "IKIZH2 九组矩阵 · R2 全能参考纯音频：reference_audio、音频单段 2-30 秒",
+    "note": "钉桩≠供应商实测通过：本组数据按 IKIZH2 矩阵的推断候选构造，未发起任何付费上游调用；样片入口保持关闭，放行仍以九组真实两阶段回执为准。",
+    "submit_input": {
+      "model": "doubao-seedance-2-5-260628",
+      "prompt": "参考这段音频的节奏生成画面",
+      "duration": 5.0,
+      "ratio": "16:9",
+      "first_frame": null,
+      "last_frame": null,
+      "references": [
+        {
+          "type": "audio",
+          "url": "https://tos.test/reference-audio.mp3",
+          "role": null
+        }
+      ]
+    },
+    "expected_submit_body": {
+      "model": "doubao-seedance-2-5-260628",
+      "prompt": "参考这段音频的节奏生成画面",
+      "duration": 5.0,
+      "response_format": "url",
+      "draft": true,
+      "metadata": {
+        "duration": 5.0,
+        "resolution": "480p",
+        "ratio": "16:9",
+        "content": [
+          {
+            "type": "audio_url",
+            "audio_url": {
+              "url": "https://tos.test/reference-audio.mp3",
+              "role": "reference_audio"
+            },
+            "role": "reference_audio"
+          }
+        ]
+      }
+    },
+    "poll_response": {
+      "code": "success",
+      "data": {
+        "task_id": "task-R2",
+        "status": "SUCCESS",
+        "result_url": "https://tos.test/sample-R2.mp4",
+        "usage": {
+          "total_tokens": 45530
+        },
+        "data": {
+          "created_at": 1790647240,
+          "resolution": "480p",
+          "draft": true
+        }
+      }
+    },
+    "expect": {
+      "status": "succeeded",
+      "total_tokens": 45530,
+      "upstream_created_at_ms": 1790647240000
+    }
+  },
+  {
+    "case_id": "R3",
+    "mode_zh": "全能参考：视频参考",
+    "matrix_ref": "IKIZH2 九组矩阵 · R3 全能参考视频：reference_video + 参考意图提示词；出站显式 omni_reference_task_type=reference，用户比例/时长原样透传（IKJ79A 删 TEMP FIX 后新行为）",
+    "note": "钉桩≠供应商实测通过：本组数据按 IKIZH2 矩阵的推断候选构造，未发起任何付费上游调用；样片入口保持关闭，放行仍以九组真实两阶段回执为准。",
+    "submit_input": {
+      "model": "doubao-seedance-2-5-260628",
+      "prompt": "参考这段视频的风格生成新镜头",
+      "duration": 5.0,
+      "ratio": "16:9",
+      "first_frame": null,
+      "last_frame": null,
+      "references": [
+        {
+          "type": "video",
+          "url": "https://tos.test/reference-video.mp4",
+          "role": null
+        }
+      ]
+    },
+    "expected_submit_body": {
+      "model": "doubao-seedance-2-5-260628",
+      "prompt": "参考这段视频的风格生成新镜头",
+      "duration": 5.0,
+      "response_format": "url",
+      "draft": true,
+      "metadata": {
+        "duration": 5.0,
+        "resolution": "480p",
+        "ratio": "16:9",
+        "omni_reference_task_type": "reference",
+        "content": [
+          {
+            "type": "video_url",
+            "video_url": {
+              "url": "https://tos.test/reference-video.mp4",
+              "role": "reference_video"
+            },
+            "role": "reference_video"
+          }
+        ]
+      }
+    },
+    "poll_response": {
+      "code": "success",
+      "data": {
+        "task_id": "task-R3",
+        "status": "SUCCESS",
+        "result_url": "https://tos.test/sample-R3.mp4",
+        "usage": {
+          "total_tokens": 48210
+        },
+        "data": {
+          "created_at": 1790647250,
+          "resolution": "480p",
+          "draft": true
+        }
+      }
+    },
+    "expect": {
+      "status": "succeeded",
+      "total_tokens": 48210,
+      "upstream_created_at_ms": 1790647250000
+    }
+  },
+  {
+    "case_id": "R4",
+    "mode_zh": "全能参考：图 + 视频 + 音频混合",
+    "matrix_ref": "IKIZH2 九组矩阵 · R4 混合参考：reference_image + reference_video + reference_audio 各一份；含视频参考 → 显式 omni_reference_task_type=reference，比例/时长透传（IKJ79A 新行为）",
+    "note": "钉桩≠供应商实测通过：本组数据按 IKIZH2 矩阵的推断候选构造，未发起任何付费上游调用；样片入口保持关闭，放行仍以九组真实两阶段回执为准。",
+    "submit_input": {
+      "model": "doubao-seedance-2-5-260628",
+      "prompt": "综合参考图、视频与音频生成画面",
+      "duration": 5.0,
+      "ratio": "16:9",
+      "first_frame": null,
+      "last_frame": null,
+      "references": [
+        {
+          "type": "image",
+          "url": "https://tos.test/reference-image.png",
+          "role": null
+        },
+        {
+          "type": "video",
+          "url": "https://tos.test/reference-video.mp4",
+          "role": null
+        },
+        {
+          "type": "audio",
+          "url": "https://tos.test/reference-audio.mp3",
+          "role": null
+        }
+      ],
+      "video_task_type": null
+    },
+    "expected_submit_body": {
+      "model": "doubao-seedance-2-5-260628",
+      "prompt": "综合参考图、视频与音频生成画面",
+      "duration": 5.0,
+      "response_format": "url",
+      "draft": true,
+      "metadata": {
+        "duration": 5.0,
+        "resolution": "480p",
+        "ratio": "16:9",
+        "omni_reference_task_type": "reference",
+        "content": [
+          {
+            "type": "image_url",
+            "image_url": {
+              "url": "https://tos.test/reference-image.png",
+              "role": "reference_image"
+            },
+            "role": "reference_image"
+          },
+          {
+            "type": "video_url",
+            "video_url": {
+              "url": "https://tos.test/reference-video.mp4",
+              "role": "reference_video"
+            },
+            "role": "reference_video"
+          },
+          {
+            "type": "audio_url",
+            "audio_url": {
+              "url": "https://tos.test/reference-audio.mp3",
+              "role": "reference_audio"
+            },
+            "role": "reference_audio"
+          }
+        ]
+      }
+    },
+    "poll_response": {
+      "code": "success",
+      "data": {
+        "task_id": "task-R4",
+        "status": "SUCCESS",
+        "result_url": "https://tos.test/sample-R4.mp4",
+        "usage": {
+          "total_tokens": 51040
+        },
+        "data": {
+          "created_at": 1790647260,
+          "resolution": "480p",
+          "draft": true
+        }
+      }
+    },
+    "expect": {
+      "status": "succeeded",
+      "total_tokens": 51040,
+      "upstream_created_at_ms": 1790647260000
+    }
+  },
+  {
+    "case_id": "E",
+    "mode_zh": "全能参考：视频编辑",
+    "matrix_ref": "IKIZH2 九组矩阵 · E 视频编辑：reference_video + 编辑意图提示词；出站 omni=edit，ratio/duration 原样透传（IKK1T4 取消静默改写）",
+    "note": "钉桩≠供应商实测通过：本组数据按 IKIZH2 矩阵的推断候选构造，未发起任何付费上游调用；样片入口保持关闭，放行仍以九组真实两阶段回执为准。",
+    "submit_input": {
+      "model": "doubao-seedance-2-5-260628",
+      "prompt": "把视频里的杯子改成红色",
+      "duration": 5.0,
+      "ratio": "adaptive",
+      "first_frame": null,
+      "last_frame": null,
+      "references": [
+        {
+          "type": "video",
+          "url": "https://tos.test/edit-source.mp4",
+          "role": null
+        }
+      ],
+      "video_task_type": "edit"
+    },
+    "expected_submit_body": {
+      "model": "doubao-seedance-2-5-260628",
+      "prompt": "把视频里的杯子改成红色",
+      "duration": 5.0,
+      "response_format": "url",
+      "draft": true,
+      "metadata": {
+        "duration": 5.0,
+        "resolution": "480p",
+        "ratio": "adaptive",
+        "omni_reference_task_type": "edit",
+        "content": [
+          {
+            "type": "video_url",
+            "video_url": {
+              "url": "https://tos.test/edit-source.mp4",
+              "role": "reference_video"
+            },
+            "role": "reference_video"
+          }
+        ]
+      }
+    },
+    "poll_response": {
+      "code": "success",
+      "data": {
+        "task_id": "task-E",
+        "status": "SUCCESS",
+        "result_url": "https://tos.test/sample-E.mp4",
+        "usage": {
+          "total_tokens": 43980
+        },
+        "data": {
+          "created_at": 1790647270,
+          "resolution": "480p",
+          "draft": true
+        }
+      }
+    },
+    "expect": {
+      "status": "succeeded",
+      "total_tokens": 43980,
+      "upstream_created_at_ms": 1790647270000
+    }
+  },
+  {
+    "case_id": "X",
+    "mode_zh": "全能参考：视频延长",
+    "matrix_ref": "IKIZH2 九组矩阵 · X 视频延长：reference_video + 延长意图提示词；出站 omni=extend、ratio=adaptive、时长透传用户所选（IKJ79A 新行为；官方 extend 允许时长自选）",
+    "note": "钉桩≠供应商实测通过：本组数据按 IKIZH2 矩阵的推断候选构造，未发起任何付费上游调用；样片入口保持关闭，放行仍以九组真实两阶段回执为准。",
+    "submit_input": {
+      "model": "doubao-seedance-2-5-260628",
+      "prompt": "把这段视频向后延长几秒",
+      "duration": 5.0,
+      "ratio": "adaptive",
+      "first_frame": null,
+      "last_frame": null,
+      "references": [
+        {
+          "type": "video",
+          "url": "https://tos.test/extend-source.mp4",
+          "role": null
+        }
+      ],
+      "video_task_type": "extend"
+    },
+    "expected_submit_body": {
+      "model": "doubao-seedance-2-5-260628",
+      "prompt": "把这段视频向后延长几秒",
+      "duration": 5.0,
+      "response_format": "url",
+      "draft": true,
+      "metadata": {
+        "duration": 5.0,
+        "resolution": "480p",
+        "ratio": "adaptive",
+        "omni_reference_task_type": "extend",
+        "content": [
+          {
+            "type": "video_url",
+            "video_url": {
+              "url": "https://tos.test/extend-source.mp4",
+              "role": "reference_video"
+            },
+            "role": "reference_video"
+          }
+        ]
+      }
+    },
+    "poll_response": {
+      "code": "success",
+      "data": {
+        "task_id": "task-X",
+        "status": "SUCCESS",
+        "result_url": "https://tos.test/sample-X.mp4",
+        "usage": {
+          "total_tokens": 52660
+        },
+        "data": {
+          "created_at": 1790647280,
+          "resolution": "480p",
+          "draft": true
+        }
+      }
+    },
+    "expect": {
+      "status": "succeeded",
+      "total_tokens": 52660,
+      "upstream_created_at_ms": 1790647280000
+    }
+  }
+]

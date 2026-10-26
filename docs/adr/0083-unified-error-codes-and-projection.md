@@ -87,7 +87,7 @@ ADR-0078 只统一了**生成域**的错误码（28 个字符串码 + 数值码 
 
 ## 豁免（明确不并）
 
-- `text/completions.ts` 的 `invalid_model`/`invalid_messages`/`model_not_in_whitelist`：**OpenAI 兼容外部契约**，前端按 OpenAI 错误形状解析，不入统一码表。
+- `text/completions.ts` 的 `invalid_model`/`invalid_messages`/`model_not_in_whitelist`：**OpenAI 兼容外部契约**，前端按 OpenAI 错误形状解析，不入统一码表。<br>**2026-10-13：该文件连同 `/api/text/completions` 端点已整体退役**（两侧均无调用方），本条豁免随之失效——见 [ADR-0114](0114-new-api-as-upstream-identity-and-billing-services.md) §8 补记。
 - `toUpstreamError`：职责是"透传 new-api 状态码"，不是业务错误码——状态码透传语义保留。
 
 ## 后果

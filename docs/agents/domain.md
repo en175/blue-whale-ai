@@ -4,14 +4,14 @@
 
 ## 探索前先读
 
-- 根 `CONTEXT.md` —— 项目领域语言 / ubiquitous language 单一权威源。
+- 根 `GLOSSARY.md` —— 项目领域语言 / ubiquitous language 单一权威源。
 - `docs/adr/` —— 读触及你即将改动区域的 ADR。（单上下文，无 `src/<context>/docs/adr/`。）
 
 上述文件不存在时**静默继续**——不报告缺失、不预先建议创建。`/domain-modeling`（经 `/grill-with-docs`、`/improve-codebase-architecture` 触达）会在术语 / 决策真正落地时惰性创建它们。
 
 ## 编辑这些文档
 
-根 `CONTEXT.md` 与 `docs/**/*.md` 是散文规格文档，编辑它们**无需开 task worktree**：AI 可在本地 master 直改，落盘走 `scripts/commit-spec-on-master.sh -m "<描述>"`（[ADR-0025](../adr/0025-doc-on-master-allowlist.md)，不 push、不开 PR）。`docs/**/*.json` schema / 契约、fixtures 不是散文，仍走 worktree。
+根 `GLOSSARY.md` 与 `docs/**/*.md` 的普通编辑也要从当前发布线建立 task worktree，并按任务目标 release 验证、提 PR。原直写 master 例外已由 [ADR-0115](../adr/0115-local-release-code-baseline.md) 替代。`docs/**/*.json` schema / 契约和 fixtures 同样走任务区，验证按影响面选择。
 
 ## 文件结构
 
@@ -19,16 +19,16 @@
 
 ```
 /
-├── CONTEXT.md
+├── GLOSSARY.md
 ├── docs/adr/        ← 架构决策记录，最高编号 0012
 └── ...
 ```
 
-无 `CONTEXT-MAP.md`，非 monorepo 多上下文。
+无 `GLOSSARY-MAP.md`，非 monorepo 多上下文。
 
 ## 用 glossary 的词汇
 
-输出（issue 标题、重构提案、假设、测试名）命名领域概念时，用 `CONTEXT.md` 定义的术语，不漂移到 glossary 明确回避的同义词。
+输出（issue 标题、重构提案、假设、测试名）命名领域概念时，用 `GLOSSARY.md` 定义的术语，不漂移到 glossary 明确回避的同义词。
 
 需要用的概念不在 glossary 里，是信号——你在发明项目不用的语言（重新考虑），或真实缺口（记下给 `/domain-modeling`）。
 

@@ -1,6 +1,16 @@
 # 画质工具家族交互对齐：会话期模态隐藏 chrome、触发钮最近工具语义、发送钮统一 Dock 主发送钮样式
 
+以下首段记录原始决策及当时实现。当前工具会话范围、状态归属和高清/HD 工具条行为以本页“2026-10-02 修正”节为准。
+
 画布画质工具家族（高清/扩图/裁切/擦除/抠图，「高清 ▾」下拉承载）确立三条家族级交互规则，回应整包验收发现的三处交互断裂。菜单现序为高清/扩图/裁切/擦除/抠图（代码 `qualityMenuItems` 顺序）——ADR-0098 正文「高清/扩图/擦除/抠图/裁切」的排位记述系笔误，裁切实际位于擦除之前，以本 ADR 记录的顺序为准，ADR-0098 原文不改。其一，**会话期模态隐藏 chrome**：进入擦除/裁切/抠图/扩图任一编辑会话后，界面进入「工具状态」模态——生成 Dock 六面板（视频/图片/音频/音乐/文生文/高清）不可见不可开：进入会话的既有互斥 `dismissAllGenPanels()` 维持全量关闭，选中联动 `syncPanelVisible` 在会话期不回弹面板，会话期任何打开请求（左侧工具栏、点草稿卡、重新编辑、音频/音乐互切等八处打开入口）先按四路退出口径退出会话（未发送参数丢弃）再放行面板打开；媒体卡悬浮工具条整条不渲染，高清面板打开期间对全部图片卡同样隐藏；Dock 已建草稿与面板编辑内容静默保留（面板编辑实时写回节点 data 的既有口径不变），会话退出后按既有口径恢复。实现为派生会话态 `editSessionActive`（`eraseTargetNodeId` / `cutoutNodeId` / `cropTargetNodeId` / `outpaintNodeId` 四个目标 id state 的或运算，渲染期派生、不新增状态机），统一前置函数 `exitEditSessionForGenPanel`（依次幂等调用 `exitEraseEditing` / `exitCutoutSession` / `exitCropMode` / `endOutpaintSession`），以及 MediaNode data 上渲染期派生注入的 `soloToolbarHidden`（注入条件 `showEnhanceDialog` 或目标卡命中四会话任一）。本 ADR 与 IKGYYD 工具条钉屏幕迁移（ADR-0099）同批次合并：工具条迁出 MediaNode 后，模态显隐由 CanvasPage 钉屏幕层 `NodeFollowToolbar` 的 `show` 门（`showSoloMediaToolbar && !editSessionActive && !showEnhanceDialog`，对全部媒体卡生效）承担，`soloToolbarHidden` 注入退为集成测试可观测标记。其二，**触发钮最近工具语义**：「高清 ▾」触发钮的文案与图标显示全局记忆的最近使用画质工具，默认「高清」（enhance）；最近工具是全局单值——不分画布文档、跨卡片共享，localStorage 单 key 持久（`bw-recent-quality-tool`，`bw-` 前缀 kebab-case，同 `snapPreference.ts` 惯例）；悬浮触发钮自动展开菜单、移出延迟 120ms 关闭（容忍指针滑向菜单的间隙）；点击触发钮直启所显示工具——直启复用菜单项既有 `onSelect` handler，进入会话/打开面板而非直接发送（ADR-0098 对一键直发的否决继续有效，直启≠直发）；所显示工具对当前卡不可用时整钮置灰（复用菜单项既有置灰门槛，`aria-disabled` + 点击无效，悬停说明缺省按置灰原因/提示），hover 仍展开菜单可见原因并改选。实现为纯逻辑模块 `recentQualityTool.ts`（无 React 依赖，打法同 `imageCutout.ts`）：`readRecentQualityTool` / `persistRecentQualityTool` / `subscribeRecentQualityTool` 三入口收敛读写与订阅（`useSyncExternalStore` 形态，任一卡使用工具即同步刷新全部图片卡触发钮），写入收敛在单一入口（菜单选择与触发钮直启两条路径共用 `launch`），工具 id 集合 enhance / outpaint / crop / erase / cutout 与 `qualityMenuItems` 同源。其三，**发送钮统一**：五工具的发送/确认钮统一为 Dock 主发送钮样式（灰底圆角方形、白 ↑ 图标，色值同源 `BottomDialog` `.sendBtn` / `.sendBtnActive`：默认 `#2a2a2a` 底 `#777` 箭头、激活 `#4a4a4a` 底 `#fff` 箭头、hover `#555`、圆角 8px）；统一的是形态与色值，尺寸随各自布局（抠图/扩图横条 32×32、擦除发送条 30×30、裁切确认钮与高清面板 28.8×28.8）；各组件置灰守卫（原生 disabled + title 原因）与门槛保留，裁切恒可确认故恒激活态（「确认」文案保留在 title）；不抽共享组件——CutoutToolbar / OutpaintDialog / ImageEraseDialog / CropDialog / ImageEnhanceDialog 各自对齐（高清面板本已是同款）。ADR-0095（扩图横条修订）与 ADR-0098（抠图）对以上三项本来沉默——它们只规定各工具的参数承载形态、门槛与建卡口径，未规定会话期 chrome 显隐、触发钮记忆语义与发送钮家族样式；本 ADR 是家族级补充而非推翻，各工具 ADR 的其余结论继续有效。
+
+## 2026-10-02 修正
+
+IKIXK8 已确认规格将工具会话接入范围扩为 13 个编辑会话与高清、HD、插帧 3 个面板工具。运行时是会话状态、初始化、完整退出、会话纪元和界面提交锁的唯一所有者，内部复用协调器的互斥、画布事件消费和 Esc 让位规则；页面提供画布事件、渲染与现有任务宿主能力。这允许迁移状态所有权，仍禁止额外维护与运行时重复的全局模式状态机。
+
+第一条家族规则继续约束编辑会话与插帧面板的模态行为。高清与 HD 面板保持符合显示条件的媒体卡工具条可见，可见同卡重入保留面板内容且仍执行门槛；插帧每次进入按当前卡任务在途状态重算只读。抠图、扩图继续消费节点点击并让位专属 Esc，空选中中间通知保持会话。普通生成面板准入先退出工具会话，Dock 草稿和编辑内容保留。
+
+工具定义与必要专属装配在唯一注册入口绑定渲染、节点装饰和原媒体节点回调，不建设通用表单或事件总线。界面提交锁与任务请求锁分开：退出只清界面锁，旧响应不关闭后来会话、复位其锁或弹旧错误。任务创建、卡片与来源边、保存、轮询、终态、失败卡重试、刷新恢复和任务结果项目归属仍留现有任务宿主，后续统一归 IKIXK9。
 
 ## Considered Options
 
@@ -12,7 +22,7 @@
 
 ## Consequences
 
-- 悬浮工具条渲染门原位于 `MediaNode/index.tsx`（`showSoloToolbar` × `soloToolbarHidden` × 数据门）；IKGYYD 钉屏幕迁移（ADR-0099，与本 ADR 同批次合并）后已随迁至 CanvasPage 钉屏幕层 `NodeFollowToolbar` 的 `show` 门，「高清面板打开期间对全部图片卡隐藏」的语义由全局布尔 `!editSessionActive && !showEnhanceDialog` 保持。
+- 悬浮工具条渲染门原位于 `MediaNode/index.tsx`（`showSoloToolbar` × `soloToolbarHidden` × 数据门）；IKGYYD 钉屏幕迁移（ADR-0099，与本 ADR 同批次合并）后已随迁至 CanvasPage 钉屏幕层 `NodeFollowToolbar` 的 `show` 门，原先「高清面板打开期间对全部图片卡隐藏」的语义已由上述修正替代；当前高清/HD 保持工具条可见，编辑会话与插帧由注册装配的模态派生控制。
 - localStorage 键名 `bw-recent-quality-tool` 与默认值「高清」是产品口径的一部分：换键等于全体用户最近工具记忆重置；读取对无 localStorage / 坏值回退默认，不拦截渲染。
 - 触发钮置灰是「整钮置灰但 hover 仍展开」的口径（`aria-disabled` 而非原生 disabled，正是为保留 hover 展开改选）；与菜单项「单项置灰」并存。
 - ADR-0098 的菜单排位记述以本 ADR 记录的正确顺序（高清/扩图/裁切/擦除/抠图）为准，原文不改。

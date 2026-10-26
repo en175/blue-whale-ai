@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Push a task branch for either first-time PR creation or an existing PR update.
 
 set -euo pipefail
 
@@ -10,17 +9,15 @@ MODE=""
 MODE_COUNT=0
 PR_IID=""
 PR_SNAPSHOT=""
-TARGET_BRANCH="master"
+TARGET_BRANCH=""
 TARGET_BRANCH_EXPLICIT=0
+CREATE_DRAFT=0
+DRAFT_REASON=""
 AS_JSON=0
 PYTHON=()
 ALLOW_SCOPE_FILES=()
 . "$SCRIPT_ROOT/scripts/lib/python3-command.sh"
 
-# Windows 下子进程 python（inherit 管道）默认按 GBK 编码输出，中文会被
-# 写成 GBK 字节；父进程按 utf-8 解码会崩溃。强制 UTF-8 与 Python 源码内
-# reconfigure(utf-8) 对齐；POSIX 环境下 PYTHONIOENCODING 同样只是把本就
-# 默认的 utf-8 显式化，不影响其他操作系统。
 export PYTHONIOENCODING=utf-8
 
 if select_python3_command; then
@@ -74,13 +71,15 @@ fail_status() {
 usage() {
   cat <<'EOF'
 用法：
-  scripts/publish-review-package.sh --user-authorized --create-pr [--target-branch master|release/<name>] [--json]
+  scripts/publish-review-package.sh --user-authorized --create-pr [--target-branch release/<name>] [--draft-pr --draft-reason <依据>] [--json]
   scripts/publish-review-package.sh --user-authorized --update-pr <PR编号> --pr-snapshot <JSON文件> [--allow-scope-file <路径>] [--json]
 
 --create-pr         首次推送并生成创建 PR 的短期发布标记
 --update-pr <IID>   安全更新已有 PR 的远端源分支，不生成创建标记
---pr-snapshot FILE  Agent 通过 Gitee MCP 刚读取并规范化的 PR 快照；update 必填
---target-branch NAME 创建 PR 的目标分支；默认 master，仅允许 master 或 release/*
+--pr-snapshot FILE  Gitee MCP 新鲜快照；- 从标准输入读取，入口退出时清理临时文件
+--target-branch NAME 创建 PR 的目标分支；默认任务记录的 release/*
+--draft-pr          创建草稿 PR，须同时传 --draft-reason
+--draft-reason TEXT 用户明确要求或已确认规则、规格的单行依据；写入发布标记
 --allow-scope-file  明确允许本轮审查修订新增到冻结范围的文件；可重复
 EOF
 }
@@ -95,6 +94,15 @@ while [ "$#" -gt 0 ]; do
       MODE="create"
       MODE_COUNT=$((MODE_COUNT + 1))
       shift
+      ;;
+    --draft-pr)
+      CREATE_DRAFT=1
+      shift
+      ;;
+    --draft-reason)
+      [ "$#" -ge 2 ] || fail_status 2 DRAFT_REASON_REQUIRED "--draft-reason 缺少草稿依据。"
+      DRAFT_REASON="$2"
+      shift 2
       ;;
     --update-pr)
       [ "$#" -ge 2 ] || fail_status 2 INVALID_PR_IID "--update-pr 缺少 PR 编号。"
@@ -135,13 +143,31 @@ done
 
 [ "$AUTHORIZED" = 1 ] || fail_status 2 AUTHORIZATION_REQUIRED "缺少 --user-authorized。必须先获得用户明确授权。"
 [ "$MODE_COUNT" = 1 ] || fail_status 2 INVALID_MODE "--create-pr 与 --update-pr 必须且只能选择一个。"
-case "$TARGET_BRANCH" in master|release/?*) ;; *) fail_status 2 INVALID_TARGET_BRANCH "目标分支仅允许 master 或 release/*：$TARGET_BRANCH" ;; esac
+if [ "$MODE" = update ] && [ "$CREATE_DRAFT" = 1 ]; then
+  fail_status 2 INVALID_ARGUMENT "--draft-pr 仅用于首次创建 PR。"
+fi
+if [ "$CREATE_DRAFT" = 1 ]; then
+  case "$DRAFT_REASON" in
+    *[![:space:]]*) ;;
+    *) fail_status 2 DRAFT_REASON_REQUIRED "草稿须提供用户明确要求或已确认规则、规格的具体依据。" ;;
+  esac
+  case "$DRAFT_REASON" in
+    *$'\n'*|*$'\r'*) fail_status 2 DRAFT_REASON_REQUIRED "草稿依据须为单行文本。" ;;
+  esac
+elif [ -n "$DRAFT_REASON" ]; then
+  fail_status 2 INVALID_ARGUMENT "--draft-reason 须与 --draft-pr 一起使用。"
+fi
 if [ "$MODE" = update ]; then
   case "$PR_IID" in
     ''|*[!0-9]*|0) fail_status 2 INVALID_PR_IID "PR 编号必须是正整数。" ;;
   esac
   [ -n "$PR_SNAPSHOT" ] || fail_status 2 PR_SNAPSHOT_REQUIRED "更新已有 PR 前必须通过 Gitee MCP 读取快照并传入 --pr-snapshot。"
   [ "$TARGET_BRANCH_EXPLICIT" = 0 ] || fail_status 2 INVALID_TARGET_BRANCH "更新 PR 的目标分支由快照决定，请勿传 --target-branch。"
+  if [ "$PR_SNAPSHOT" = "-" ]; then
+    PR_SNAPSHOT="$(mktemp "${TMPDIR:-/tmp}/blue-whale-pr-snapshot.XXXXXX")"
+    trap 'rm -f -- "$PR_SNAPSHOT"' EXIT
+    cat > "$PR_SNAPSHOT"
+  fi
   [ -f "$PR_SNAPSHOT" ] || fail_status 8 PR_EVIDENCE_INVALID "PR 快照文件不存在：$PR_SNAPSHOT"
   [ "${#PYTHON[@]}" -gt 0 ] || fail_status 1 PYTHON_UNAVAILABLE "读取 PR 快照需要可用的 Python 3。"
   TARGET_BRANCH="$("${PYTHON[@]}" - "$PR_SNAPSHOT" <<'PY'
@@ -149,12 +175,10 @@ import json, sys
 print(json.load(open(sys.argv[1], encoding="utf-8")).get("target_branch", ""))
 PY
 )" || fail_status 8 PR_EVIDENCE_INVALID "无法从 PR 快照读取目标分支。"
-  case "$TARGET_BRANCH" in master|release/?*) ;; *) fail_status 8 PR_EVIDENCE_INVALID "PR 目标分支仅允许 master 或 release/*。" ;; esac
+  case "$TARGET_BRANCH" in release/?*) ;; *) fail_status 8 PR_EVIDENCE_INVALID "PR 目标分支必须是 release/*。" ;; esac
 fi
 
 ROOT="$(git rev-parse --show-toplevel)"
-# Git Bash on Windows：git rev-parse 返回 `D:/...`（大写盘符），pwd 返回 `/d/...`（小写 posix）。
-# case 比较/路径拼接受影响，统一走 pwd 风格。
 ROOT="$(cd "$ROOT" && pwd)"
 branch="$(git -C "$ROOT" symbolic-ref --short HEAD 2>/dev/null || true)"
 case "$branch" in
@@ -168,17 +192,61 @@ if [ -n "$(git -C "$ROOT" status --porcelain)" ]; then
   fail_status 1 DIRTY_WORKTREE "工作区不干净。请先提交或处理改动。"
 fi
 
+[ "${#PYTHON[@]}" -gt 0 ] || fail_status 1 PYTHON_UNAVAILABLE "读取任务起点需要可用的 Python 3。"
+metadata=("${PYTHON[@]}" "$SCRIPT_ROOT/scripts/lib/task_metadata.py" read --worktree "$ROOT")
+if [ "$MODE" = create ] && [ "$TARGET_BRANCH_EXPLICIT" = 0 ]; then
+  TARGET_BRANCH="$("${metadata[@]}" --field target_branch)" \
+    || fail_status 12 TASK_BASE_INVALID "无法读取任务记录的目标发布线。"
+fi
+case "$TARGET_BRANCH" in release/?*) ;; *) fail_status 2 INVALID_TARGET_BRANCH "目标分支必须是 release/*：$TARGET_BRANCH" ;; esac
+start_sha="$("${metadata[@]}" --target-branch "$TARGET_BRANCH" --field start_sha)" \
+  || fail_status 12 TASK_BASE_INVALID "任务起点或目标发布线与元数据不符。"
+inherited_sha="$("${metadata[@]}" --target-branch "$TARGET_BRANCH" --field inherited_sha)" \
+  || fail_status 12 TASK_BASE_INVALID "任务继承提交元数据无效。"
+[ -z "$inherited_sha" ] || fail_status 12 INTEGRATION_CHILD_NO_PR "整包子票不能独立发布 PR；请由父整合分支统一发布。"
+
+if ! hooks_output="$("${PYTHON[@]}" - "$SCRIPT_ROOT/scripts/lib" "$ROOT" 2>&1 <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1])
+from release_line_sync import SyncError, configure_git_hooks
+try:
+    configure_git_hooks(sys.argv[2])
+except SyncError as exc:
+    print(str(exc), file=sys.stderr)
+    sys.exit(1)
+PY
+)"; then
+  fail_status 11 HOOKS_SETUP_FAILED "本地 Git Hook 自动启用失败，禁止推送。" detail "$hooks_output"
+fi
+
 if ! fetch_detail="$(git -C "$ROOT" fetch origin "$TARGET_BRANCH" 2>&1)"; then
   fail_status 7 REMOTE_READ_FAILED "无法读取 origin/${TARGET_BRANCH}；可按规则最多重试两次。" detail "$fetch_detail"
 fi
 head_sha="$(git -C "$ROOT" rev-parse HEAD)"
 upstream_ref="origin/${TARGET_BRANCH}"
 upstream_sha="$(git -C "$ROOT" rev-parse "$upstream_ref")"
+if ! target_line="$(git -C "$ROOT" ls-remote --heads origin "refs/heads/$TARGET_BRANCH" 2>&1)"; then
+  fail_status 7 REMOTE_READ_FAILED "无法复核远端目标；可按规则最多重试两次。" detail "$target_line"
+fi
+actual_target_sha="${target_line%%[[:space:]]*}"
+if [ "$actual_target_sha" != "$upstream_sha" ]; then
+  fail_status 7 REMOTE_TARGET_CHANGED "远端目标在 fetch 后变化；重新读取并验证。" fetched_sha "$upstream_sha" actual_sha "$actual_target_sha"
+fi
+if ! git -C "$ROOT" merge-base --is-ancestor "$start_sha" "$upstream_sha"; then
+  pending="$(git -C "$ROOT" log --format='%h %s' --reverse "$upstream_sha..$start_sha")"
+  fail_status 12 TASK_BASE_NOT_SHARED "origin/${TARGET_BRANCH} 尚未包含任务起点；先让以下基线提交进入目标分支。" target_branch "$TARGET_BRANCH" start_sha "$start_sha" pending_commits "$pending"
+fi
 if ! git -C "$ROOT" merge-base --is-ancestor "$upstream_sha" "$head_sha"; then
   fail_status 10 NEEDS_SYNC "当前分支未包含 ${upstream_ref}。先运行 scripts/sync-task-from-origin.sh sync --target-branch ${TARGET_BRANCH} --json。" branch "$branch" target_branch "$TARGET_BRANCH" head "$head_sha" upstream_sha "$upstream_sha"
 fi
-if ! verification_output="$(node "$SCRIPT_ROOT/scripts/verify-change-scope.mjs" check --base "$upstream_ref" --stage pr --json 2>&1)"; then
+if ! verification_output="$(node "$SCRIPT_ROOT/scripts/verify-change-scope.mjs" ensure --stage pr --json 2>&1)"; then
+  fail_status 11 VERIFICATION_FAILED "本地发布前检查未通过，禁止推送。修复后重新发布；基础设施重试仍须按测试策略显式执行。" detail "$verification_output" head "$head_sha"
+fi
+if ! verification_output="$(node "$SCRIPT_ROOT/scripts/verify-change-scope.mjs" check --stage pr --json 2>&1)"; then
   fail_status 11 VERIFICATION_REQUIRED "当前 HEAD 缺少覆盖发布要求的验证凭证。先运行 node scripts/verify-change-scope.mjs run --stage pr。" detail "$verification_output" head "$head_sha"
+fi
+if [ "$(git -C "$ROOT" rev-parse HEAD)" != "$head_sha" ]; then
+  fail_status 11 HEAD_CHANGED "本地检查期间 HEAD 已变化，禁止发布旧提交的审查标记。" head "$head_sha"
 fi
 
 remote_ref="refs/heads/$branch"
@@ -191,10 +259,6 @@ if [ -n "$remote_line" ]; then
 fi
 
 slug="$(printf '%s' "$branch" | tr '/' '%')"
-# Git Bash on Windows：git 的路径输出是 `C:/...`（MSYS 绝对路径），而 $ROOT
-# 已统一为 pwd 风格 `/c/...`。若直接把 `C:/...` 当作相对路径拼到 $ROOT 后，
-# 会得到 `/c/.../main/.gitC:/...` 的混合垃圾路径，marker 写错目录。
-# 先用 cygpath 把 Windows 风格绝对路径转成 POSIX 风格，再统一 cd/pwd 归一化。
 common="$(git -C "$ROOT" rev-parse --git-common-dir 2>/dev/null || true)"
 case "$common" in
   [A-Za-z]:*)
@@ -214,6 +278,21 @@ common="$(cd "$common" && pwd)"
 marker_path="$common/agent-release-review-package-$slug"
 git_dir="$(git -C "$ROOT" rev-parse --absolute-git-dir)"
 recovery_file="$git_dir/agent-sync-recovery.json"
+if [ -f "$recovery_file" ]; then
+  [ "${#PYTHON[@]}" -gt 0 ] || fail_status 1 PYTHON_UNAVAILABLE "同步恢复点需要可用的 Python 3；Microsoft Store 桩不可用。"
+  if ! "${PYTHON[@]}" - "$recovery_file" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as stream:
+    recovery = json.load(stream)
+if recovery.get("rebase_tree_failed"):
+    raise SystemExit(3)
+PY
+  then
+    fail_status 1 INVALID_RECOVERY "同步后的文件树核对失败，禁止发布；先核对恢复点与子任务内容。"
+  fi
+fi
 
 mark_recovery_state() {
   state="$1"
@@ -236,23 +315,31 @@ clear_push_state_only_if_remote_unchanged() {
 
 if [ "$MODE" = create ]; then
   if [ -n "$remote_sha" ] && ! git -C "$ROOT" merge-base --is-ancestor "$remote_sha" "$head_sha"; then
-    fail_status 5 REMOTE_SOURCE_CHANGED "远端同名分支含本地未包含的提交；创建模式拒绝覆盖。" expected_remote_sha "$remote_sha" head "$head_sha"
+    fail_status 5 REMOTE_SOURCE_CHANGED "远端同名分支含本地未包含的提交；先核对远端提交归属，创建模式拒绝覆盖。" expected_remote_sha "$remote_sha" head "$head_sha"
   fi
   if ! mark_recovery_state in_flight; then
     fail_status 9 PUSH_STATE_PERSIST_FAILED "无法在推送前持久化 fail-closed 状态。"
   fi
-  if ! git -C "$ROOT" push -u origin "HEAD:$remote_ref"; then
+  if ! git -C "$ROOT" push origin "$head_sha:$remote_ref"; then
     clear_push_state_only_if_remote_unchanged "$remote_sha"
     fail_status 1 PUSH_FAILED "首次发布推送失败。"
   fi
   if ! mark_recovery_state pushed; then
     fail_status 9 PUSH_STATE_PERSIST_FAILED "远端已推送，但本地状态确认写入失败；恢复点保持 fail closed，禁止 rollback。"
   fi
+  git -C "$ROOT" branch --set-upstream-to="origin/$branch" "$branch" >/dev/null \
+    || fail_status 9 UPSTREAM_SETUP_FAILED "远端已推送，但本地分支跟踪配置失败。"
   mkdir -p "$common"
   umask 077
+  draft_marker=false
+  [ "$CREATE_DRAFT" = 0 ] || draft_marker=true
   cat >"$marker_path" <<EOF
 branch=$branch
 target=$TARGET_BRANCH
+head=$head_sha
+target_sha=$upstream_sha
+draft=$draft_marker
+draft_reason=$DRAFT_REASON
 created_at=$(date +%s)
 EOF
   emit_status PUSHED_CREATE_PR branch "$branch" head "$head_sha"
@@ -274,6 +361,7 @@ if (
     data.get("branch") != branch
     or data.get("synced_head") != head
     or data.get("target_branch", "master") != target
+    or data.get("rebase_tree_failed")
 ):
     raise SystemExit(3)
 print(data.get("remote_branch_sha", ""))
@@ -282,7 +370,7 @@ PY
   expected_remote_sha="$recovery_values"
 else
   if ! git -C "$ROOT" merge-base --is-ancestor "$remote_sha" "$head_sha"; then
-    fail_status 5 REMOTE_SOURCE_CHANGED "本地更新未包含当前远端源分支，拒绝覆盖未知提交。" expected_remote_sha "$remote_sha" head "$head_sha"
+    fail_status 5 REMOTE_SOURCE_CHANGED "本地更新未包含当前远端源分支。重新读取 Gitee PR 与远端提交并核对归属；未知提交不得覆盖。implement-spec 合回修复见 docs/agents/git-workflow.md。" expected_remote_sha "$remote_sha" head "$head_sha"
   fi
 fi
 
@@ -294,7 +382,7 @@ task_commit_count="$(git -C "$ROOT" rev-list --count "$upstream_ref"..HEAD)"
 merge_commit_count="$(git -C "$ROOT" rev-list --count --merges "$upstream_ref"..HEAD)"
 changed_files="$(git -C "$ROOT" diff --name-only "$upstream_ref"...HEAD)"
 if [ "$merge_commit_count" -gt 0 ]; then
-  fail_status 6 SCOPE_MERGE_COMMIT_DETECTED "PR 创建后范围冻结；任务分支包含 merge commit，停止更新。" merge_commit_count "$merge_commit_count" task_commit_count "$task_commit_count" changed_files "$changed_files" pull_request_id "$PR_IID"
+  fail_status 6 SCOPE_MERGE_COMMIT_DETECTED "PR 创建后范围冻结；任务分支包含 merge commit。若属于 implement-spec 子任务合回且本轮已获 PR 更新授权，按 docs/agents/git-workflow.md 的受控线性化流程修复并重新评审；其他来源停止更新。" merge_commit_count "$merge_commit_count" task_commit_count "$task_commit_count" changed_files "$changed_files" pull_request_id "$PR_IID"
 fi
 
 [ "${#PYTHON[@]}" -gt 0 ] || fail_status 1 PYTHON_UNAVAILABLE "PR 快照硬校验需要可用的 Python 3。"
@@ -312,12 +400,15 @@ fi
 if ! mark_recovery_state in_flight; then
   fail_status 9 PUSH_STATE_PERSIST_FAILED "无法在推送前持久化 fail-closed 状态。"
 fi
-if ! git -C "$ROOT" push --force-with-lease="$remote_ref:$expected_remote_sha" -u origin "HEAD:$remote_ref"; then
+if ! git -C "$ROOT" push --force-with-lease="$remote_ref:$expected_remote_sha" origin "$head_sha:$remote_ref"; then
   clear_push_state_only_if_remote_unchanged "$expected_remote_sha"
   fail_status 5 REMOTE_LEASE_CHANGED "安全强推失败；远端可能已经变化。" expected_remote_sha "$expected_remote_sha" pull_request_id "$PR_IID"
 fi
 if ! mark_recovery_state pushed; then
   fail_status 9 PUSH_STATE_PERSIST_FAILED "远端已推送，但本地状态确认写入失败；恢复点保持 fail closed，禁止 rollback。"
 fi
+git -C "$ROOT" branch --set-upstream-to="origin/$branch" "$branch" >/dev/null \
+  || fail_status 9 UPSTREAM_SETUP_FAILED "远端已推送，但本地分支跟踪配置失败。"
 rm -f "$marker_path"
-emit_status PUSHED_UPDATE_PR branch "$branch" head "$head_sha" pull_request_id "$PR_IID" previous_remote_sha "$remote_sha" task_commit_count "$task_commit_count" merge_commit_count "$merge_commit_count" changed_files "$changed_files"
+changed_files_count="$(printf '%s' "$changed_files" | awk 'END { print NR }')"
+emit_status PUSHED_UPDATE_PR branch "$branch" head "$head_sha" pull_request_id "$PR_IID" previous_remote_sha "$remote_sha" task_commit_count "$task_commit_count" merge_commit_count "$merge_commit_count" changed_files_count "$changed_files_count"

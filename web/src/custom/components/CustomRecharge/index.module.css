@@ -1,0 +1,184 @@
+.section {
+  margin-top: 34px;
+}
+
+.sectionHead {
+  margin-bottom: 20px;
+  text-align: center;
+}
+
+.sectionTitle {
+  margin: 0;
+  color: #fff;
+  font-size: 34px;
+  font-weight: 700;
+}
+
+.card {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr) 190px;
+  gap: 26px;
+  align-items: center;
+  min-height: 190px;
+  padding: 24px;
+  background-color: #151515;
+  border: 1px solid #2a2a2a;
+  border-radius: 16px;
+}
+
+.summary {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.pointsLine {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.bolt {
+  color: #8fd9ff;
+  flex-shrink: 0;
+}
+
+.pointsValue {
+  font-size: 34px;
+  line-height: 1;
+  color: #fff;
+}
+
+.controls {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.controlRow {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.slider {
+  flex: 1;
+  --drag-slider-fill: #3e8efc;
+  --drag-slider-thumb: #3e8efc;
+}
+
+.inputWrap {
+  flex-shrink: 0;
+  width: 112px;
+  height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: #0f0f0f;
+  border: 1px solid #303030;
+  border-radius: 9px;
+}
+
+.inputWrap:focus-within {
+  border-color: #4a4a4a;
+}
+
+.input {
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: #eee;
+  font-size: 15px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.input:disabled {
+  color: #888;
+}
+
+.rangeLabels {
+  display: flex;
+  justify-content: space-between;
+  color: #777;
+  font-size: 12px;
+}
+
+.correction {
+  font-size: var(--font-size-sm);
+  color: #d8a33a;
+}
+
+.side {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+}
+
+.livePrice {
+  color: #fff;
+  font-size: 18px;
+  font-weight: 800;
+  text-align: center;
+}
+
+.buyBtn {
+  height: 42px;
+  border: none;
+  border-radius: 9px;
+  background-color: #62caff;
+  color: #061321;
+  font-size: 15px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.buyBtn:hover {
+  background-color: #7ad4ff;
+}
+
+.buyBtn:disabled {
+  background-color: #252525;
+  color: #777;
+  cursor: not-allowed;
+}
+
+.hint {
+  color: #777;
+  font-size: 12px;
+  text-align: center;
+}
+
+.denied {
+  font-size: var(--font-size-sm);
+  color: #d8a33a;
+}
+
+.error {
+  font-size: var(--font-size-sm);
+  color: #e5534b;
+}
+
+.loading {
+  padding: 24px;
+  color: #888;
+  font-size: var(--font-size-sm);
+}
+
+@media (max-width: 860px) {
+  .card {
+    grid-template-columns: 1fr;
+  }
+}

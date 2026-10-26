@@ -1,47 +1,52 @@
-// IKH8BO：视频场景切分（火山 MediaKit segment-scenes）建任务服务，仿 video-enhancements /
-// video-subtitle-erasures 的免费轻量入口，契约 @lib/contracts/video-scene-split。校验源视频
-// 资产归属 → 复核输入门槛（时长 ≤2 小时，duration_ms null 放行）→ 插
-// generation_jobs(type=video_scene_split)。免费口径（同去字幕 / HD / 音视频分离）：不写成本
-// 预留、不接成本估算、不走余额拦截门。
-// 幂等（IKH8BO 验收）：body 携带 client_token（≤64 可打印 ASCII、大小写敏感，口径对齐火山
-// 官方 API 的 client_token 参数约束），接入 command_idempotency（先例 storyboard-preview /
-// generation.retry / scene_card.regenerate）：同 token 同参数摘要重放首次 job_id、同 token
-// 异参数摘要判冲突（100302）；幂等行与任务行**同一事务**原子落库（无半创建状态），唯一键
-// 竞态由 transactionWithUniqueRetry 兜底。
-// 「任务与画布占位数据同事务创建」的落法：画布单写入方架构（IKFS5W：后端停写 nodes_json，
-// 前端 PUT /api/canvases/:projectId 唯一写入方）——后端不直接写画布，占位卡绑定数据
-// （input.target_node_id，IKH8BO 契约扩展）随任务行同事务原子落库；前端发送前本地建任务
-// 占位卡、按本键把 job 映射到卡（轮询终态 / 完成扇出 / 失败重试），占位卡随画布保存。
 import { createHash } from "node:crypto";
+import type { Prisma } from "@prisma/client";
 import { Injectable } from "@nestjs/common";
 import {
-  FAILURE_CODE,
+  CANVAS_RECOVERY_PROTOCOL_VERSION,
   IDEMPOTENCY_KEY_REUSED_CODE,
   PARAM_MISSING_CODE,
-  RESOURCE_NOT_FOUND_CODE,
+  RECOVERY_REASONS,
   VIDEO_SCENE_SPLIT_INPUT_KEYS,
   VIDEO_SCENE_SPLIT_JOB_TYPE,
   VIDEO_SCENE_SPLIT_MAX_DURATION_MS,
   VIDEO_SCENE_SPLIT_SOURCE,
+  canvasBindingSchema,
   fail,
   ok,
   videoSceneSplitInputSchema,
+  type CanvasBinding,
   type VideoSceneSplitInput,
 } from "@lib/contracts";
-import { createGenerationCommandRepo } from "@lib/shared/persistence/index.js";
-import { transactionWithUniqueRetry } from "@lib/shared/persistence/conversation-repo.js";
+import {
+  readAcceptedMediaToolReplay,
+  renderMediaToolReplay,
+} from "@lib/shared/generation/media-tool-recovery.js";
+import { logger } from "@lib/infra/logging/blue-whale-logger.js";
+import {
+  RecoveryContractError,
+  canvasBindingView,
+} from "@lib/shared/persistence/index.js";
+import {
+} from "@lib/shared/persistence/job-billing.js";
+import { enqueueVideoSceneSplitJob } from "@lib/shared/generation/generation-queue.js";
+import {
+  enqueueMediaToolJob,
+} from "@lib/shared/media-tools/media-tool-submission.js";
+import { acceptDedicatedToolJob, DedicatedToolConflictError } from "@lib/shared/media-tools/dedicated-tool-acceptance.js";
+import {
+  requireOwnedProject,
+  resolveOwnedMediaSource,
+} from "@lib/shared/media-tools/owned-media-source.js";
+import { MediaToolBillingService } from "@lib/shared/media-tool-pricing/media-tool-billing.service.js";
+import { AssetStorageService } from "@lib/shared/assets/storage.service.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";
 import { AssetService } from "@lib/shared/assets/assets.service.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 
-/** 幂等表 operation 值（先例命名「领域.动作」：scene_card.regenerate / generation.retry 同款）。 */
 const IDEMPOTENCY_OPERATION = "video_scene_split.create";
 
-/** client_token 约束（官方 PDF 口径：≤64 可打印 ASCII、大小写敏感——本仓不做任何归一化，
- *  逐字节存储比对；可打印 ASCII = 0x20~0x7E，至少 1 位）。 */
 const CLIENT_TOKEN_PATTERN = /^[\x20-\x7E]{1,64}$/;
 
-/** zod 校验失败 → 人能读懂的原因（按首个出错键名映射；前端置灰只是体验层，这里返回可读文案）。 */
 const PARSE_ERROR_MESSAGES: Record<string, string> = {
   [VIDEO_SCENE_SPLIT_INPUT_KEYS.sourceAssetId]: "缺少或非法的源素材 ID（source_asset_id）",
   [VIDEO_SCENE_SPLIT_INPUT_KEYS.targetNodeId]: "缺少目标节点 ID（target_node_id）",
@@ -59,15 +64,14 @@ function readableParseError(
   return PARSE_ERROR_MESSAGES[key] ?? "请求参数不合法";
 }
 
-/** 同 token 重放冲突判定用的请求摘要（sha256）：显式定序拼接三业务键，规避 JSON 键序漂移
- *  （先例 scene-cards.controller 的 method:path:content 口径）。 */
-function requestHashOf(projectId: string, input: VideoSceneSplitInput): string {
+function requestHashOf(projectId: string, input: VideoSceneSplitInput, canvasBinding?: CanvasBinding | null): string {
   return createHash("sha256")
     .update(
       `POST:/api/projects/${projectId}/video-scene-splits` +
         `:${input[VIDEO_SCENE_SPLIT_INPUT_KEYS.sourceAssetId]}` +
         `\0${input[VIDEO_SCENE_SPLIT_INPUT_KEYS.targetNodeId]}` +
-        `\0${input[VIDEO_SCENE_SPLIT_INPUT_KEYS.granularity]}`,
+        `\0${input[VIDEO_SCENE_SPLIT_INPUT_KEYS.granularity]}` +
+        (canvasBinding ? `\0${JSON.stringify(canvasBinding)}` : ""),
     )
     .digest("hex");
 }
@@ -78,42 +82,111 @@ export class VideoSceneSplitsService {
     private readonly prisma: PrismaService,
     private readonly project: ProjectService,
     private readonly assets: AssetService,
+    private readonly storage: AssetStorageService,
+    private readonly billing: MediaToolBillingService,
   ) {}
 
   async create(
     userId: string,
     projectId: string,
     body: Record<string, unknown>,
-    // 与去字幕 / HD / 音视频分离同构（video-subtitle-erasures.service.ts 的 internal 形参）：
-    // 请求方 sk- 凭证冻结进 job input.provider_credential，worker 处理时直接取用。
-    internal: { providerCredential?: string } = {},
   ) {
-    // client_token 是业务键之上的基础设施键（不进契约 zod——它校验业务 payload；token 的
-    // 消费方是 command_idempotency 表，不冻结进 job input）：先行剥离再过契约 schema。
-    const { client_token: clientToken, ...businessBody } = body ?? {};
+    const { client_token: clientToken, canvas_binding: canvasBindingBody, ...businessBody } = body ?? {};
     if (typeof clientToken !== "string" || !CLIENT_TOKEN_PATTERN.test(clientToken)) {
       return fail(PARAM_MISSING_CODE, "缺少或非法的 client_token（幂等键，≤64 位可打印 ASCII、大小写敏感）");
     }
 
-    // 契约 schema 复核（strict 三键）：粒度档枚举（fine / standard / coarse）在此拦截，
-    // 档位→segment_threshold 数值翻译单源在契约 VIDEO_SCENE_SPLIT_SEGMENT_THRESHOLD（worker
-    // 出站处换算，本入口不重复定义数值，只冻结枚举档）。
+    let canvasBinding: CanvasBinding | null = null;
+    if (canvasBindingBody !== undefined && canvasBindingBody !== null) {
+      const parsedBinding = canvasBindingSchema.safeParse(canvasBindingBody);
+      if (!parsedBinding.success) {
+        return fail(400, "canvas_binding 载荷无效", { reason: RECOVERY_REASONS.invalidPayload });
+      }
+      canvasBinding = parsedBinding.data;
+      if (clientToken !== canvasBinding.submission_id) {
+        return fail(400, "client_token 必须等于 canvas_binding.submission_id", {
+          reason: RECOVERY_REASONS.invalidPayload,
+        });
+      }
+    }
+
     const parsed = videoSceneSplitInputSchema.safeParse(businessBody);
     if (!parsed.success) {
       return fail(PARAM_MISSING_CODE, readableParseError(parsed.error.issues));
     }
     const input: VideoSceneSplitInput = parsed.data;
-    const requestHash = requestHashOf(projectId, input);
+    const requestHash = requestHashOf(projectId, input, canvasBinding);
 
-    const project = await this.project.findOwnedById(projectId, userId);
-    if (!project) return fail(RESOURCE_NOT_FOUND_CODE, "资源不存在");
+    const projectError = await requireOwnedProject({
+      projects: this.project,
+      projectId,
+      userId,
+    });
+    if (projectError) return projectError;
 
-    // 单事务原子创建（先例 storyboard-preview-repo「零副作用前置」）：幂等命中判定、资产复核
-    // 与两行写入（generation_jobs + command_idempotency）同一事务——重放是既有结果，不被此刻
-    // 的素材状态改写（generation-command-repo guardInput 同口径）；同 token 并发竞态由
-    // (project_id, operation, idempotency_key) 唯一键 + transactionWithUniqueRetry 收敛。
-    return transactionWithUniqueRetry(this.prisma.client, async (tx) => {
-      const existing = await tx.command_idempotency.findUnique({
+    let replay: Awaited<ReturnType<typeof readAcceptedMediaToolReplay>> | null;
+    try {
+      replay = canvasBinding
+        ? await readAcceptedMediaToolReplay(this.prisma.client, {
+            projectId,
+            userId,
+            taskType: VIDEO_SCENE_SPLIT_JOB_TYPE,
+            operation: IDEMPOTENCY_OPERATION,
+            requestHash,
+            binding: canvasBinding,
+          })
+        : await readAcceptedMediaToolReplay(this.prisma.client, {
+            projectId,
+            operation: IDEMPOTENCY_OPERATION,
+            requestHash,
+            key: clientToken,
+          });
+    } catch (error) {
+      logger.warn(
+        `[video-scene-split] 幂等预检失败，回落到事务内校验：${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      replay = null;
+    }
+    if (replay) {
+      return renderMediaToolReplay(replay, () =>
+        fail(IDEMPOTENCY_KEY_REUSED_CODE, "client_token 已被使用（同 token 仅可重放相同参数）"),
+      );
+    }
+
+    const source = await resolveOwnedMediaSource({
+      prisma: this.prisma.client,
+      assets: this.assets,
+      storage: this.storage,
+      userId,
+      assetId: input[VIDEO_SCENE_SPLIT_INPUT_KEYS.sourceAssetId],
+      expectedTypes: ["video"],
+      wrongTypeMessage: "仅支持对视频资产发起场景切分",
+      durationMessage: "源视频时长读取失败，请稍后重试或更换素材",
+      maxDurationMs: VIDEO_SCENE_SPLIT_MAX_DURATION_MS,
+      maxDurationMessage: "暂支持 2 小时以内的视频场景切分",
+    });
+    if (!source.ok) return source.envelope;
+    const duration = source.duration!;
+
+    const frozenInput = { ...input, duration: duration.seconds } as Prisma.InputJsonObject;
+    const jobBilling = await this.billing.jobBilling(
+      VIDEO_SCENE_SPLIT_JOB_TYPE,
+      userId,
+      frozenInput,
+    );
+    const acceptanceBilling = jobBilling
+      ? {
+          charge: (jobId: number) => jobBilling.charge(jobId),
+          release: (jobId: number, reason: string) =>
+            this.billing.release(userId, jobId, reason),
+        }
+      : undefined;
+
+    const replayStored = async () => {
+      if (canvasBinding) return null;
+      const existing = await this.prisma.client.command_idempotency.findUnique({
         where: {
           project_id_operation_idempotency_key: {
             project_id: BigInt(projectId),
@@ -123,102 +196,114 @@ export class VideoSceneSplitsService {
         },
         select: { request_hash: true, generation_job_id: true },
       });
-      if (existing) {
-        if (existing.request_hash !== requestHash) {
-          return fail(IDEMPOTENCY_KEY_REUSED_CODE, "client_token 已被使用（同 token 仅可重放相同参数）");
-        }
-        if (existing.generation_job_id === null) {
-          return fail(IDEMPOTENCY_KEY_REUSED_CODE, "client_token 已被使用（同 token 仅可重放相同参数）");
-        }
-        const replayed = await tx.generation_jobs.findUnique({
-          where: { id: existing.generation_job_id },
-          select: { status: true },
-        });
-        if (!replayed) {
-          return fail(IDEMPOTENCY_KEY_REUSED_CODE, "client_token 已被使用（同 token 仅可重放相同参数）");
-        }
-        // 同 token 重放不重复建任务：返回首次 job_id 与其当前状态（前端照常轮询）。
-        return ok({
-          job_id: existing.generation_job_id.toString(),
-          status: replayed.status,
-        });
+      if (!existing) return null;
+      if (existing.request_hash !== requestHash || existing.generation_job_id === null) {
+        return fail(IDEMPOTENCY_KEY_REUSED_CODE, "client_token 已被使用（同 token 仅可重放相同参数）");
       }
+      const replayed = await this.prisma.client.generation_jobs.findUnique({
+        where: { id: existing.generation_job_id },
+        select: { status: true },
+      });
+      if (!replayed) {
+        return fail(IDEMPOTENCY_KEY_REUSED_CODE, "client_token 已被使用（同 token 仅可重放相同参数）");
+      }
+      return ok({
+        job_id: existing.generation_job_id.toString(),
+        status: replayed.status,
+      });
+    };
 
-      // findOwnedSource 按 user_id 归属过滤（status=normal 且未删除）：非本人素材一律 404，
-      // 不泄露存在性。
-      const asset = await this.assets.findOwnedSource(
-        input[VIDEO_SCENE_SPLIT_INPUT_KEYS.sourceAssetId],
+    let createdJobId: string | null = null;
+    let conflictEnvelope: ReturnType<typeof fail> | null = null;
+    try {
+      const previous = await replayStored();
+      if (previous) return previous;
+      const accepted = await acceptDedicatedToolJob({
+        prisma: this.prisma.client,
+        jobBilling: acceptanceBilling,
         userId,
-      );
-      if (!asset) return fail(RESOURCE_NOT_FOUND_CODE, "资源不存在");
-      if (asset.type !== "video") {
-        return fail(FAILURE_CODE, "仅支持对视频资产发起场景切分");
-      }
-
-      // 输入门槛复核（官方 PDF 使用限制表「视频时长 ≤2 小时」；常量单源在契约
-      // video-scene-split.ts，web 按钮门槛预检同源）。assets.duration_ms 由前端上报、存量
-      // 大量为 null：缺权威值不臆造、不拦——放行交供应商按官方门槛拒（与去字幕 / HD 同口径）。
-      if (asset.duration_ms != null && asset.duration_ms > VIDEO_SCENE_SPLIT_MAX_DURATION_MS) {
-        return fail(FAILURE_CODE, "暂支持 2 小时以内的视频场景切分");
-      }
-
-      // 契约 schema parse 后原样冻结（重试原样沿用）。provider_credential 是业务键之上的
-      // 基础设施键（不进契约 zod——凭证由服务端注入）：请求方 sk- 明文冻结进 job input，
-      // worker（worker 票按附录 C 注册的处理器）处理时直接取用；未携带/非 sk- 时不写键。
-      const frozenInput: VideoSceneSplitInput & { provider_credential?: string } = {
-        ...input,
-        ...(internal.providerCredential
-          ? { provider_credential: internal.providerCredential }
-          : {}),
-      };
-
-      const job = await tx.generation_jobs.create({
-        data: {
+        projectId,
+        toolType: VIDEO_SCENE_SPLIT_JOB_TYPE,
+        operation: IDEMPOTENCY_OPERATION,
+        requestHash,
+        idempotencyKey: clientToken,
+        canvasBinding,
+        conflictMessage: "client_token 已被使用（同 token 仅可重放相同参数）",
+        onConflict: () => {
+          conflictEnvelope = fail(
+            IDEMPOTENCY_KEY_REUSED_CODE,
+            "client_token 已被使用（同 token 仅可重放相同参数）",
+          );
+          throw new DedicatedToolConflictError();
+        },
+        createData: {
           user_id: BigInt(userId),
           project_id: BigInt(projectId),
           type: VIDEO_SCENE_SPLIT_JOB_TYPE,
           source: VIDEO_SCENE_SPLIT_SOURCE,
           status: "queued",
           progress: 0,
-          expected_output_count: 1,
           input: frozenInput,
-          // 过去 60s：回拨口径同去字幕 / HD / media_extract——DATETIME(0) 秒精度进位会让
-          // 同秒 claim 的 lte now 判 false，任务悬挂。
           next_action_at: new Date(Date.now() - 60_000),
         },
       });
-      // 幂等行与任务行同事务（验收「任务记录与画布占位数据同事务创建」的原子性载体）：
-      // accepted_cursor 无事件流语义，恒 0（表非空约束占位）。
-      await tx.command_idempotency.create({
-        data: {
-          project_id: BigInt(projectId),
-          operation: IDEMPOTENCY_OPERATION,
-          idempotency_key: clientToken,
-          request_hash: requestHash,
-          generation_job_id: job.id,
-          accepted_cursor: 0n,
-        },
-      });
+      if (accepted.replayed) {
+        const jobId = accepted.jobId ?? "";
+        const replayed = jobId
+          ? await this.prisma.client.generation_jobs.findUnique({
+              where: { id: BigInt(jobId) },
+              select: { status: true },
+            })
+          : null;
+        return ok({
+          job_id: jobId,
+          status: replayed?.status ?? "queued",
+          ...(canvasBinding
+            ? {
+                canvas_binding: await canvasBindingView(
+                  this.prisma.client,
+                  projectId,
+                  canvasBinding.submission_id,
+                ),
+              }
+            : {}),
+        });
+      }
+      createdJobId = accepted.jobId;
+      if (createdJobId !== null) {
+        await enqueueMediaToolJob({
+          prisma: this.prisma.client,
+          billing: this.billing,
+          userId,
+          toolType: VIDEO_SCENE_SPLIT_JOB_TYPE,
+          jobId: createdJobId,
+          enqueue: enqueueVideoSceneSplitJob,
+        });
+      }
       return ok({
-        job_id: job.id.toString(),
+        job_id: createdJobId ?? "",
         status: "queued",
+        ...(canvasBinding
+          ? {
+              canvas_binding: {
+                protocol_version: CANVAS_RECOVERY_PROTOCOL_VERSION,
+                submission_id: canvasBinding.submission_id,
+                target_node_id: canvasBinding.target_node_id,
+                binding_revision: accepted.bindingRevision ?? 0,
+                job_id: createdJobId ?? "",
+                is_current: true,
+              },
+            }
+          : {}),
       });
-    });
-  }
-
-  /** 入队失败兜底：queued 任务直接置 failed，避免场景切分任务在 worker 领取前静默悬挂。
-   *  IKBQEE / ADR-0078：details 落调试原文，禁展示用户。逻辑在 repo.markFailedQueued（IKDZGH 收敛）。 */
-  async markFailed(
-    jobId: string,
-    code: string,
-    message: string,
-    details?: Record<string, unknown>,
-  ): Promise<void> {
-    await createGenerationCommandRepo(this.prisma.client).markFailedQueued(
-      jobId,
-      code,
-      message,
-      details,
-    );
+    } catch (error) {
+      if (error instanceof DedicatedToolConflictError && conflictEnvelope) {
+        return conflictEnvelope;
+      }
+      if (error instanceof RecoveryContractError) return error.envelope;
+      const replayed = await replayStored();
+      if (replayed) return replayed;
+      throw error;
+    }
   }
 }

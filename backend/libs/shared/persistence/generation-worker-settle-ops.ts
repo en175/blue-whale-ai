@@ -1,15 +1,9 @@
-// IK74V8：从 generation-worker-repo.ts 拆出（≤800 行硬线）。逐块搬运，语义不变。
-// 作业结算：完成、失败、额度结算与作业日志追加。
-// IK7GRP：completeJob / failJob / settleReservation 加 lease_owner + fencing_token
-// 守卫（镜像视频 publishVideoResult / failVideoJob 的 updateMany CAS + 同事务后写模式），
-// stale worker 的迟到写入被拒且不产生任何副作用（槽位、事件、素材、预留、汇总回写）。
 import type {Prisma, PrismaClient} from "@prisma/client";
 
 import {appendProjectEvent} from "./product-event-repo.js";
 import {syncRecordSummary, syncStoryboardPreviewSummary} from "./generation-worker-internals.js";
 import type {WorkerRepo} from "./generation-worker-types.js";
 
-/** 守卫条件：job 必须仍由当前 worker 持有 processing 态且 fencing_token 一致。 */
 function fenceWhere(input: {jobId: string; workerId: string; fencingToken: number}) {
   return {
     id: BigInt(input.jobId),
@@ -19,8 +13,6 @@ function fenceWhere(input: {jobId: string; workerId: string; fencingToken: numbe
   };
 }
 
-/** IK7G9X：事务内释放预留（reserved → released，实扣 0）。仅调处于终态失败/取消的 job。
- *  IK9VZ0：releaseNote 记录退款校验结果（refund_confirmed / refund_unverified），缺省不写。 */
 async function releaseReservationInTx(
   tx: Prisma.TransactionClient,
   jobId: string,
@@ -36,7 +28,6 @@ async function releaseReservationInTx(
   });
 }
 
-/** IK7G9X：事务内结算预留（reserved → settled，写实扣金额）。 */
 async function settleReservationInTx(
   tx: Prisma.TransactionClient,
   jobId: string,
@@ -48,8 +39,6 @@ async function settleReservationInTx(
   });
 }
 
-/** completeJob 事务体（IK7GRP 守卫 CAS → 槽位 → 事件 → 汇总回写）。
- *  供 completeJob 与 completeJobAndSettle 复用（IK9VZ0：图片结算原子化）。 */
 async function completeJobInTx(
   tx: Prisma.TransactionClient,
   input: {
@@ -59,8 +48,6 @@ async function completeJobInTx(
     fencingToken: number;
   },
 ): Promise<boolean> {
-  // IK7GRP：守卫更新——CAS 把 processing → finalStatus（先占位 succeeded，按槽位聚合后修正）。
-  // 守卫不通过（count≠1）立即返回，后续槽位/事件/汇总回写均不执行。
   const {jobId, assetIds, workerId, fencingToken} = input;
   const guarded = await tx.generation_jobs.updateMany({
     where: fenceWhere({jobId, workerId, fencingToken}),
@@ -75,7 +62,6 @@ async function completeJobInTx(
     },
   });
   if (guarded.count !== 1) return false;
-  // IK67HE/T14：同步输出槽状态——成功 asset 绑定对应 slot_index；缺失槽标 failed。
   const slots = await tx.generation_output_slots.findMany({
     where: { generation_job_id: BigInt(jobId) },
     orderBy: { slot_index: "asc" },
@@ -91,7 +77,6 @@ async function completeJobInTx(
         });
       }
     }
-    // 未匹配到成功 asset 的剩余槽标 failed。
     for (let i = assetIds.length; i < slots.length; i += 1) {
       const slot = slots[i];
       if (!slot) continue;
@@ -100,7 +85,6 @@ async function completeJobInTx(
         data: { status: "failed" },
       });
     }
-    // 聚合 job 状态（全部成功→succeeded；部分→partially_succeeded；全失败→failed）。
     const statuses = slots.map((s, i) =>
       i < assetIds.length ? "succeeded" : "failed",
     );
@@ -112,7 +96,6 @@ async function completeJobInTx(
       finalStatus = "failed";
     }
   }
-  // 聚合态与守卫占位不同时再修正（partially_succeeded / failed）。
   if (finalStatus !== "succeeded") {
     await tx.generation_jobs.update({
       where: { id: BigInt(jobId) },
@@ -122,8 +105,6 @@ async function completeJobInTx(
   const job = await tx.generation_jobs.findUnique({
     where: { id: BigInt(jobId) },
   });
-  // 守卫 CAS 刚成功，同事务内该行必存在；不存在即数据损坏——抛错回滚整个事务，
-  // 不得返回 false（状态与槽位写入已发生，false 会被调用方误读为「守卫拒绝」）。
   if (!job) {
     throw new Error(`completeJob 守卫通过后任务 ${jobId} 不存在，数据损坏`);
   }
@@ -192,7 +173,6 @@ async function completeJobInTx(
       },
     });
   }
-  // 回写关联的 SceneCardGenerationRecord.summary_status（视频路径）。
   const firstSlot = slots[0];
   if (firstSlot?.scene_card_generation_record_id) {
     await syncRecordSummary(
@@ -200,7 +180,6 @@ async function completeJobInTx(
       firstSlot.scene_card_generation_record_id,
     );
   }
-  // 回写 StoryboardPreview.summary_status（图片路径，IK67HF/T15）。
   await syncStoryboardPreviewSummary(tx, job.id);
   return true;
 }
@@ -211,9 +190,6 @@ export function createWorkerSettleOps(prisma: PrismaClient): Pick<WorkerRepo, "c
       return prisma.$transaction(async (tx) => completeJobInTx(tx, input));
     },
 
-    /** IK9VZ0：图片结算原子化——completeJob 与 settleReservation 合并单事务。
-     *  中间任何一步抛错整事务回滚：job 不会出现「已 succeeded 但预留仍 reserved」的账不平。
-     *  视频 publishVideoResult 本就是同事务，无需此入口；此处为图片/音频 finishJob 使用。 */
     async completeJobAndSettle(input: {
       jobId: string;
       assetIds: string[];
@@ -224,7 +200,6 @@ export function createWorkerSettleOps(prisma: PrismaClient): Pick<WorkerRepo, "c
       return prisma.$transaction(async (tx) => {
         const completed = await completeJobInTx(tx, input);
         if (!completed) return false;
-        // 结算预留（reserved → settled + 实扣金额；缺省 0 = 旧行为）。
         await settleReservationInTx(tx, input.jobId, input.actualAmountFen ?? 0n);
         return true;
       });
@@ -232,8 +207,6 @@ export function createWorkerSettleOps(prisma: PrismaClient): Pick<WorkerRepo, "c
 
     async failJob(input) {
       return prisma.$transaction(async (tx) => {
-        // IK7GRP：守卫更新——CAS 把 processing → failed。守卫不通过（count≠1）立即返回，
-        // succeeded 任务不会被迟到的 failJob 翻为 failed，后续槽位/事件/汇总回写均不执行。
         const {jobId, errorCode, errorMessage, workerId, fencingToken} = input;
         const guarded = await tx.generation_jobs.updateMany({
           where: fenceWhere({jobId, workerId, fencingToken}),
@@ -251,7 +224,6 @@ export function createWorkerSettleOps(prisma: PrismaClient): Pick<WorkerRepo, "c
           },
         });
         if (guarded.count !== 1) return false;
-        // IK67HE/T14：失败时把该 job 的全部 pending 槽标 failed。
         const slots = await tx.generation_output_slots.findMany({
           where: { generation_job_id: BigInt(jobId), status: "pending" },
         });
@@ -264,8 +236,6 @@ export function createWorkerSettleOps(prisma: PrismaClient): Pick<WorkerRepo, "c
         const job = await tx.generation_jobs.findUnique({
           where: { id: BigInt(jobId) },
         });
-        // 与 completeJob 同理：守卫 CAS 刚成功，同事务内该行必存在；不存在即数据损坏——
-        // 抛错回滚整个事务，不得返回 false（副作用已写入，false 会被误读为「守卫拒绝」）。
         if (!job) {
           throw new Error(`failJob 守卫通过后任务 ${jobId} 不存在，数据损坏`);
         }
@@ -318,7 +288,6 @@ export function createWorkerSettleOps(prisma: PrismaClient): Pick<WorkerRepo, "c
             });
           }
         }
-        // 回写关联的 SceneCardGenerationRecord.summary_status（视频路径）。
         const firstSlot = slots[0];
         if (firstSlot?.scene_card_generation_record_id) {
           await syncRecordSummary(
@@ -326,21 +295,13 @@ export function createWorkerSettleOps(prisma: PrismaClient): Pick<WorkerRepo, "c
             firstSlot.scene_card_generation_record_id,
           );
         }
-        // 回写 StoryboardPreview.summary_status（图片路径，IK67HF/T15）。
         await syncStoryboardPreviewSummary(tx, job.id);
-        // IK7G9X：失败即释放预留（reserved → released，实扣 0）。
-        // IK9VZ0：releaseNote 记录退款校验结果（refund_confirmed / refund_unverified）。
         await releaseReservationInTx(tx, jobId, input.releaseNote);
         return true;
       });
     },
 
     async settleReservation(input) {
-      // IK7GRP：只在守卫通过的事务内结算。settleReservation 紧跟 completeJob，
-      // job 已是终态（completeJob 已清 lease、置 succeeded/partially_succeeded/failed），
-      // 故守卫条件校验「本次完成发放的 fencing_token 仍匹配」+ 终态，而非 processing+lease。
-      // 用 CAS（version 自增）做原子占位，与 completeJob/failJob 同构，消除 read-check-then-write 竞态。
-      // IK7G9X：actualAmountFen 缺省 0（旧行为）；传入真实扣费时写真实值。
       return prisma.$transaction(async (tx) => {
         const owned = await tx.generation_jobs.updateMany({
           where: {

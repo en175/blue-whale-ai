@@ -1,73 +1,112 @@
-import { NewApiError } from "@lib/core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { Request, Response } from "express";
 
+import { FAILURE_CODE } from "@lib/contracts";
+import {
+  CodeExpiredError,
+  CodeWrongError,
+  InvalidCredentialsError,
+  NicknameInvalidError,
+  PasswordPolicyError,
+  PhoneAlreadyBoundError,
+  PhoneNotBoundError,
+  PhoneTakenError,
+  RebindSamePhoneError,
+} from "@lib/shared/identity/index.js";
 import { MeController } from "./me.controller.js";
 
-// IKBRCK：PUT /me/password 改密端点的入口校验 + 透传 + 上游失败映射单测。
-// 关键回归：AuthGuard 回注 sk- 令牌后，控制器必须自解析请求头 Bearer 并原样转给
-// AccountService；原密码错误/账号未设密码这类网关业务失败要原样把 message 透出。
-// 改密成功后应吊销该用户全部会话（best-effort，失败不阻断改密）。
 
 function createController(overrides: {
   changePassword?: ReturnType<typeof vi.fn>;
   revokeAllForUser?: ReturnType<typeof vi.fn>;
   revoke?: ReturnType<typeof vi.fn>;
+  resolveTier?: ReturnType<typeof vi.fn>;
+  listRoleCodes?: ReturnType<typeof vi.fn>;
+  isAdmin?: ReturnType<typeof vi.fn>;
+  resolveAccountFlags?: ReturnType<typeof vi.fn>;
+  bindPhone?: ReturnType<typeof vi.fn>;
+  rebindVerifyCurrent?: ReturnType<typeof vi.fn>;
+  commitRebind?: ReturnType<typeof vi.fn>;
+  updateNickname?: ReturnType<typeof vi.fn>;
 } = {}) {
-  const account = {
-    changePassword:
-      overrides.changePassword ?? vi.fn().mockResolvedValue(undefined),
-  };
   const sessions = {
     revokeAllForUser: overrides.revokeAllForUser ?? vi.fn().mockResolvedValue(0),
     revoke: overrides.revoke ?? vi.fn().mockResolvedValue(undefined),
   };
-  const controller = new MeController(account as never, sessions as never);
-  return { controller, account, sessions };
+  const identity = {
+    changePassword: overrides.changePassword ?? vi.fn().mockResolvedValue(undefined),
+    resolveTier: overrides.resolveTier ?? vi.fn().mockResolvedValue("free"),
+    listRoleCodes: overrides.listRoleCodes ?? vi.fn().mockResolvedValue([]),
+    isAdmin: overrides.isAdmin ?? vi.fn().mockResolvedValue(false),
+    resolveAccountFlags:
+      overrides.resolveAccountFlags ??
+      vi.fn().mockResolvedValue({
+        phone: null,
+        hasPassword: true,
+      }),
+    bindPhone: overrides.bindPhone ?? vi.fn().mockResolvedValue(undefined),
+    rebindVerifyCurrent:
+      overrides.rebindVerifyCurrent ??
+      vi.fn().mockResolvedValue({ oldPhone: "13800001234" }),
+    commitRebind:
+      overrides.commitRebind ??
+      vi.fn().mockResolvedValue({ phone: "13900001234" }),
+    updateNickname:
+      overrides.updateNickname ??
+      vi.fn().mockResolvedValue({ nickname: "新昵称", changed: true }),
+  };
+  const phoneActions = {
+    issue: vi.fn(async () => "pa_token"),
+    resolve: vi.fn(async () => null),
+    revoke: vi.fn(async () => undefined),
+  };
+  const controller = new MeController(
+    sessions as never,
+    identity as never,
+    identity as never,
+    identity as never,
+    phoneActions as never,
+  );
+  return { controller, sessions, identity, phoneActions };
 }
 
 const USER = { userId: "42", username: "alice" } as never;
-const BEARER = "Bearer sk-user-token";
-/** 模拟 res：记录 clearCookie 调用（passthrough 响应，控制器不发送）。 */
-const RES = {
-  clearCookie: vi.fn(),
-} as never;
+const REQ = { loginToken: "sess_current" } as unknown as Request;
+const RES = { clearCookie: vi.fn() } as unknown as Response;
+
+const BODY = { original_password: "OldPass123", password: "NewPass456" };
 
 beforeEach(() => {
-  vi.clearAllMocks();
+  RES.clearCookie.mockClear();
 });
 
 describe("MeController（IKBRCK 改密）", () => {
-  it("没有 Bearer 令牌就 401，不调上游", async () => {
-    const { controller, account } = createController();
+  it("解析不到本地登录身份就 401，不改密", async () => {
+    const { controller, identity } = createController();
     await expect(
-      controller.changePassword(
-        { original_password: "OldPass123", password: "NewPass456" },
-        undefined,
-        USER,
-      ),
+      controller.changePassword(BODY, undefined, REQ, RES),
     ).rejects.toMatchObject({ status: 401 });
-    expect(account.changePassword).not.toHaveBeenCalled();
+    expect(identity.changePassword).not.toHaveBeenCalled();
   });
 
-  it("原密码或新密码缺失/为空就 400，不调上游", async () => {
-    const { controller, account } = createController();
+  it("新密码缺失/为空就 400，不改密（原密码可缺——无口令账号走的是「设置密码」）", async () => {
+    const { controller, identity } = createController();
     for (const body of [
       { original_password: "", password: "NewPass456" },
       { original_password: "  ", password: "NewPass456" },
       { original_password: "OldPass123", password: "" },
       {},
       { original_password: "OldPass123" },
-      { password: "NewPass456" },
     ]) {
       await expect(
-        controller.changePassword(body, BEARER, USER),
+        controller.changePassword(body, USER, REQ, RES),
       ).rejects.toMatchObject({ status: 400 });
     }
-    expect(account.changePassword).not.toHaveBeenCalled();
+    expect(identity.changePassword).not.toHaveBeenCalled();
   });
 
   it("未知字段被契约 .strict() 拒绝（400），防止网关多用途接口被意外带参", async () => {
-    const { controller, account } = createController();
+    const { controller, identity } = createController();
     await expect(
       controller.changePassword(
         {
@@ -75,76 +114,59 @@ describe("MeController（IKBRCK 改密）", () => {
           password: "NewPass456",
           username: "hacked",
         },
-        BEARER,
         USER,
+        REQ,
+        RES,
       ),
     ).rejects.toMatchObject({ status: 400 });
-    expect(account.changePassword).not.toHaveBeenCalled();
+    expect(identity.changePassword).not.toHaveBeenCalled();
   });
 
-  it("合法入参：解析 Bearer 令牌并把 original_password/password 原样转给 AccountService，改密成功吊销全部会话", async () => {
-    const { controller, account, sessions } = createController({
-      revokeAllForUser: vi.fn().mockResolvedValue(3),
-    });
+  it("★ 无口令账号「设置密码」：不带原密码也能改（IKJA4R）", async () => {
+    const { controller, identity } = createController();
     const result = await controller.changePassword(
-      { original_password: "OldPass123", password: "NewPass456" },
-      BEARER,
+      { password: "BrandNew456" },
       USER,
+      REQ,
       RES,
     );
+    expect(result).toMatchObject({ code: 200 });
+    expect(identity.changePassword).toHaveBeenCalledWith("42", {
+      oldPassword: undefined,
+      newPassword: "BrandNew456",
+    });
+  });
+
+  it("合法入参：按本地 userId 改密（原密码 + 新密码），成功后吊销全部会话", async () => {
+    const { controller, identity, sessions } = createController({
+      revokeAllForUser: vi.fn().mockResolvedValue(3),
+    });
+    const result = await controller.changePassword(BODY, USER, REQ, RES);
     expect(result).toMatchObject({ code: 200, data: { revokedSessions: 3 } });
-    expect(account.changePassword).toHaveBeenCalledWith(
-      { originalPassword: "OldPass123", newPassword: "NewPass456" },
-      "sk-user-token",
-    );
+    expect(identity.changePassword).toHaveBeenCalledWith("42", {
+      oldPassword: "OldPass123",
+      newPassword: "NewPass456",
+    });
     expect(sessions.revokeAllForUser).toHaveBeenCalledWith(42);
-    // 枚举吊销成功路径：不触发兜底单删
     expect(sessions.revoke).not.toHaveBeenCalled();
   });
 
-  it("改密成功后会话吊销失败为 best-effort：仍返回 success，revokedSessions=0，并兜底吊销当前会话+清 cookie", async () => {
+  it("改密成功后会话吊销失败为 best-effort：仍返回 success，并兜底吊销当前会话+清 cookie", async () => {
     const { controller, sessions } = createController({
       revokeAllForUser: vi.fn().mockRejectedValue(new Error("redis timeout")),
     });
-    const result = await controller.changePassword(
-      { original_password: "OldPass123", password: "NewPass456" },
-      BEARER,
-      USER,
-      RES,
-      RES,
-    );
+    const result = await controller.changePassword(BODY, USER, REQ, RES);
     expect(result).toMatchObject({ code: 200, data: { revokedSessions: 0 } });
     expect(sessions.revokeAllForUser).toHaveBeenCalledWith(42);
-    // 兜底：直接吊销当前会话 + 清 cookie，保证当前浏览器改密后立即要求重新登录
-    expect(sessions.revoke).toHaveBeenCalledWith("sk-user-token");
+    expect(sessions.revoke).toHaveBeenCalledWith("sess_current");
     expect(RES.clearCookie).toHaveBeenCalled();
   });
 
-  it("没有 CurrentUser 时不吊销会话（仅改密），不抛错", async () => {
-    const { controller, sessions } = createController();
-    const result = await controller.changePassword(
-      { original_password: "OldPass123", password: "NewPass456" },
-      BEARER,
-      undefined,
-      RES,
-    );
-    expect(result).toMatchObject({ code: 200, data: { revokedSessions: 0 } });
-    expect(sessions.revokeAllForUser).not.toHaveBeenCalled();
-  });
-
-  it("网关原密码错误（英文）→ 账号域数值码 1101 + 中文，且不吊销会话", async () => {
+  it("原密码错误（本地 InvalidCredentialsError）→ 账号域数值码 1101 + 中文，且不吊销会话", async () => {
     const { controller, sessions } = createController({
-      changePassword: vi.fn().mockRejectedValue(
-        new NewApiError("Original password is incorrect", 400),
-      ),
+      changePassword: vi.fn().mockRejectedValue(new InvalidCredentialsError()),
     });
-    const result = await controller.changePassword(
-      { original_password: "wrong", password: "NewPass456" },
-      BEARER,
-      USER,
-      RES,
-    );
-    // IKBQEE / ADR-0078：账号域错误统一投影——不再透传英文，返回 {code:1101, msg:中文}
+    const result = await controller.changePassword(BODY, USER, REQ, RES);
     expect(result).toMatchObject({
       code: 1101,
       msg: "原密码错误，请重试",
@@ -153,61 +175,300 @@ describe("MeController（IKBRCK 改密）", () => {
     expect(sessions.revokeAllForUser).not.toHaveBeenCalled();
   });
 
-  it("网关密码格式错误（英文 Invalid input）→ 账号域数值码 1102 + 中文", async () => {
+  it("新口令超长（本地口令策略）→ 账号域数值码 1102，文案说我们自己的口径", async () => {
     const { controller } = createController({
       changePassword: vi.fn().mockRejectedValue(
-        new NewApiError("Invalid input", 200),
+        new PasswordPolicyError("密码过长（72 字节上限，一个汉字算 3 字节）"),
       ),
     });
-    const result = await controller.changePassword(
-      { original_password: "OldPass123", password: "123" },
-      BEARER,
-      USER,
-      RES,
-    );
+    const result = await controller.changePassword(BODY, USER, REQ, RES);
     expect(result).toMatchObject({
       code: 1102,
-      msg: "新密码需为 8-20 位",
+      msg: "密码过长（72 字节上限，一个汉字算 3 字节）",
       data: null,
     });
   });
 
-  it("网关账号未设密码 → 账号域数值码 1103 + 中文", async () => {
-    const { controller } = createController({
-      changePassword: vi.fn().mockRejectedValue(
-        new NewApiError("当前账号未设置密码", 200),
-      ),
-    });
-    const result = await controller.changePassword(
-      { original_password: "OldPass123", password: "NewPass456" },
-      BEARER,
-      USER,
-      RES,
-    );
-    expect(result).toMatchObject({
-      code: 1103,
-      msg: "当前账号未设置密码",
-      data: null,
-    });
-  });
-
-  it("无法归类的网关错误 → 兜底 1100 + 通用中文，不吊销会话", async () => {
+  it("无法归类的错误 → 兜底 1100 + 通用中文，不吊销会话", async () => {
     const { controller, sessions } = createController({
-      changePassword: vi.fn().mockRejectedValue(
-        new NewApiError("upstream exploded", 500),
-      ),
+      changePassword: vi.fn().mockRejectedValue(new Error("db exploded")),
     });
-    const result = await controller.changePassword(
-      { original_password: "OldPass123", password: "NewPass456" },
-      BEARER,
-      USER,
-      RES,
-    );
+    const result = await controller.changePassword(BODY, USER, REQ, RES);
     expect(result).toMatchObject({
       code: 1100,
       msg: "修改密码失败",
       data: null,
     });
     expect(sessions.revokeAllForUser).not.toHaveBeenCalled();
+  });
+});
+
+describe("MeController（GET /me 会员等级）", () => {
+  it("返回会员等级，且每次都现查", async () => {
+    const resolveTier = vi.fn().mockResolvedValue("pro");
+    const { controller } = createController({ resolveTier });
+
+    const result = await controller.me(USER);
+
+    expect(result).toMatchObject({ data: { tier: "pro" } });
+    expect(resolveTier).toHaveBeenCalledWith("42");
+  });
+
+  it("无会员时是 free", async () => {
+    const { controller } = createController();
+    const result = await controller.me(USER);
+    expect(result).toMatchObject({ data: { tier: "free" } });
+  });
+
+  it("等级来自 identity 而不是会话快照", async () => {
+    const resolveTier = vi.fn().mockResolvedValue("max");
+    const { controller } = createController({ resolveTier });
+
+    await controller.me({ userId: "42", username: "alice", tier: "free" } as never);
+
+    expect(resolveTier).toHaveBeenCalled();
+    const result = await controller.me({ userId: "42", username: "alice" } as never);
+    expect(result).toMatchObject({ data: { tier: "max" } });
+  });
+
+  it("★ is_admin 来自 identity，不看会话里那个", async () => {
+    const isAdmin = vi.fn().mockResolvedValue(true);
+    const { controller } = createController({ isAdmin });
+
+    const result = await controller.me({
+      userId: "42",
+      username: "alice",
+      isAdmin: false,
+    } as never);
+
+    expect(result).toMatchObject({ data: { is_admin: true } });
+    expect(isAdmin).toHaveBeenCalledWith("42");
+  });
+
+  it("角色表说不是管理员，会话说是也不算", async () => {
+    const isAdmin = vi.fn().mockResolvedValue(false);
+    const { controller } = createController({ isAdmin });
+
+    const result = await controller.me({
+      userId: "42",
+      username: "alice",
+      isAdmin: true,
+    } as never);
+
+    expect(result).toMatchObject({ data: { is_admin: false } });
+  });
+});
+
+describe("MeController（IKJA4Q 手机号与口令标识）", () => {
+  it("phone / has_password 来自 identity 现查，不吃会话快照", async () => {
+    const resolveAccountFlags = vi
+      .fn()
+      .mockResolvedValue({ phone: "13800001234", hasPassword: false });
+    const { controller } = createController({ resolveAccountFlags });
+
+    const result = await controller.me({
+      userId: "42",
+      username: "alice",
+      phone: "19900000000",
+    } as never);
+
+    expect(result).toMatchObject({
+      data: { phone: "13800001234", has_password: false, nickname: "alice" },
+    });
+    expect(resolveAccountFlags).toHaveBeenCalledWith("42");
+  });
+
+  it("有昵称时返回昵称，不再回退 username", async () => {
+    const resolveAccountFlags = vi.fn().mockResolvedValue({
+      phone: null,
+      nickname: "蓝鲸用户_Ab12Cd",
+      hasPassword: true,
+    });
+    const { controller } = createController({ resolveAccountFlags });
+
+    const result = await controller.me({ userId: "42", username: "alice" } as never);
+
+    expect(result).toMatchObject({ data: { nickname: "蓝鲸用户_Ab12Cd" } });
+  });
+
+  it("查不到人时回空串 + false——不替用户宣称他有口令", async () => {
+    const { controller } = createController({
+      resolveAccountFlags: vi.fn().mockResolvedValue(null),
+    });
+
+    const result = await controller.me({ userId: "42", username: "alice" } as never);
+
+    expect(result).toMatchObject({ data: { phone: "", has_password: false } });
+  });
+
+  it("绑定手机号：合法入参转交 identity，返回成功信封", async () => {
+    const bindPhone = vi.fn().mockResolvedValue(undefined);
+    const { controller } = createController({ bindPhone });
+
+    const result = await controller.bindPhone(
+      { phone: "13800001234", code: "123456" },
+      USER,
+    );
+
+    expect(result).toMatchObject({ code: 200 });
+    expect(bindPhone).toHaveBeenCalledWith("42", {
+      phone: "13800001234",
+      code: "123456",
+    });
+  });
+
+  it("绑定手机号：格式不对 / 验证码为空 → 失败信封，不碰 identity", async () => {
+    const bindPhone = vi.fn();
+    const { controller } = createController({ bindPhone });
+
+    for (const body of [
+      { phone: "12345", code: "123456" },
+      { phone: "13800001234", code: "" },
+      { phone: "", code: "123456" },
+      {},
+      { phone: 13800001234, code: "123456" },
+    ]) {
+      const result = await controller.bindPhone(body, USER);
+      expect(result).toMatchObject({ code: FAILURE_CODE });
+    }
+    expect(bindPhone).not.toHaveBeenCalled();
+  });
+
+  it("绑定手机号：码错 / 被别人占用 / 自己已绑过 → 三句不同的话", async () => {
+    const cases = [
+      [new CodeWrongError(4), "验证码错误，请重新输入（还可尝试4次）"],
+      [new CodeExpiredError(), "验证码已失效，请重新获取"],
+      [new PhoneTakenError(), "该手机号已被绑定"],
+      [new PhoneAlreadyBoundError(), "当前账号已绑定手机号，暂不支持换绑"],
+    ] as const;
+
+    for (const [error, msg] of cases) {
+      const { controller } = createController({
+        bindPhone: vi.fn().mockRejectedValue(error),
+      });
+      const result = await controller.bindPhone(
+        { phone: "13800001234", code: "123456" },
+        USER,
+      );
+      expect(result).toMatchObject({ code: FAILURE_CODE, msg, data: null });
+    }
+  });
+
+  it("绑定手机号：没有登录身份就 401，不碰 identity", async () => {
+    const bindPhone = vi.fn();
+    const { controller } = createController({ bindPhone });
+
+    await expect(
+      controller.bindPhone({ phone: "13800001234", code: "123456" }, undefined),
+    ).rejects.toMatchObject({ status: 401 });
+    expect(bindPhone).not.toHaveBeenCalled();
+  });
+});
+
+describe("MeController 换绑手机号（IKPC9E）", () => {
+  it("验证原号成功 → 签发 10 分钟换绑凭证", async () => {
+    const { controller, phoneActions } = createController();
+    const out = await controller.verifyCurrentPhone({ code: "123456" }, USER);
+    expect(out).toMatchObject({
+      code: 200,
+      data: { rebind_token: "pa_token", expires_in: 600 },
+    });
+    expect(phoneActions.issue).toHaveBeenCalledWith({
+      kind: "rebind",
+      userId: 42,
+      phone: "13800001234",
+    });
+  });
+
+  it("未绑号 → phone_not_bound", async () => {
+    const { controller } = createController({
+      rebindVerifyCurrent: vi.fn().mockRejectedValue(new PhoneNotBoundError()),
+    });
+    const out = await controller.verifyCurrentPhone({ code: "123456" }, USER);
+    expect(out).toMatchObject({ error_code: "phone_not_bound" });
+  });
+
+  it("换绑凭证不属于当前用户 → rebind_token_invalid，不提交", async () => {
+    const { controller, identity, phoneActions } = createController();
+    phoneActions.resolve.mockResolvedValue({
+      kind: "rebind",
+      userId: 99,
+      phone: "13800001234",
+    });
+
+    const out = await controller.rebindPhone(
+      { rebind_token: "pa_x", phone: "13700000000", code: "123456" },
+      USER,
+      RES,
+    );
+
+    expect(out).toMatchObject({ error_code: "rebind_token_invalid" });
+    expect(identity.commitRebind).not.toHaveBeenCalled();
+  });
+
+  it("换绑成功 → 撤销全部会话并要求用新号重登", async () => {
+    const { controller, identity, phoneActions, sessions } = createController();
+    phoneActions.resolve.mockResolvedValue({
+      kind: "rebind",
+      userId: 42,
+      phone: "13800001234",
+    });
+    const out = await controller.rebindPhone(
+      { rebind_token: "pa_ok", phone: "13700000000", code: "123456" },
+      USER,
+      RES,
+    );
+
+    expect(identity.commitRebind).toHaveBeenCalledWith("42", {
+      oldPhone: "13800001234",
+      phone: "13700000000",
+      code: "123456",
+    });
+    expect(sessions.revokeAllForUser).toHaveBeenCalledWith(42);
+    expect(RES.clearCookie).toHaveBeenCalled();
+    expect(out).toMatchObject({
+      code: 200,
+      data: { phone: "13900001234", relogin_required: true },
+    });
+  });
+
+  it("新旧同号 → rebind_same_phone", async () => {
+    const { controller, identity, phoneActions } = createController({
+      commitRebind: vi.fn().mockRejectedValue(new RebindSamePhoneError()),
+    });
+    phoneActions.resolve.mockResolvedValue({
+      kind: "rebind",
+      userId: 42,
+      phone: "13800001234",
+    });
+
+    const out = await controller.rebindPhone(
+      { rebind_token: "pa_ok", phone: "13800001234", code: "123456" },
+      USER,
+      RES,
+    );
+
+    expect(out).toMatchObject({ error_code: "rebind_same_phone" });
+    expect(identity.commitRebind).toHaveBeenCalled();
+  });
+});
+
+describe("MeController 昵称（IKPC9E）", () => {
+  it("保存成功返回新昵称", async () => {
+    const { controller } = createController();
+    const out = await controller.updateNickname({ nickname: "新昵称" }, USER);
+    expect(out).toMatchObject({
+      code: 200,
+      data: { nickname: "新昵称", changed: true },
+    });
+  });
+
+  it("非法昵称 → nickname_invalid，不落库", async () => {
+    const { controller, identity } = createController({
+      updateNickname: vi.fn().mockRejectedValue(new NicknameInvalidError()),
+    });
+    const out = await controller.updateNickname({ nickname: "小 明" }, USER);
+    expect(out).toMatchObject({ error_code: "nickname_invalid" });
+    expect(identity.updateNickname).toHaveBeenCalled();
   });
 });

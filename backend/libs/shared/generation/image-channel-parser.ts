@@ -1,9 +1,80 @@
-/** 图片生成渠道解析器：从能力行目录映射 GPT / banana 请求字段。
- *  Seedream 不走本模块查表——尺寸由能力行 `request_mapping.matrix` 承载（IK629：原代码表
- *  seedream-image-size.ts 已删，见 worker ImageChannelMapper.resolveSeedreamSize）。 */
 
 export const IMAGE_CHANNEL_PARSERS = ["seedream", "gpt", "banana"] as const;
 export type ImageChannelParserId = (typeof IMAGE_CHANNEL_PARSERS)[number];
+
+export const IMAGE_PROTOCOLS = ["inline-image", "openai-images"] as const;
+export type ImageProtocol = (typeof IMAGE_PROTOCOLS)[number];
+
+export const CHANNEL_MEDIA = ["image", "video", "audio", "text"] as const;
+export type ChannelMedia = (typeof CHANNEL_MEDIA)[number];
+
+export interface ChannelSpec {
+  readonly id: string;
+  readonly media: ChannelMedia;
+  readonly parser: ImageChannelParserId | null;
+  readonly protocol: ImageProtocol | null;
+}
+
+export const CHANNELS = [
+  { id: "seedream-image", media: "image", parser: "seedream", protocol: "inline-image" },
+  { id: "gpt-image", media: "image", parser: "gpt", protocol: "inline-image" },
+  { id: "gpt-image-openai", media: "image", parser: "gpt", protocol: "openai-images" },
+  { id: "banana-image", media: "image", parser: "banana", protocol: "inline-image" },
+  { id: "seedream-video", media: "video", parser: null, protocol: null },
+  { id: "seedream-audio", media: "audio", parser: null, protocol: null },
+  { id: "seedream-text", media: "text", parser: null, protocol: null },
+] as const satisfies readonly ChannelSpec[];
+
+export type ChannelId = (typeof CHANNELS)[number]["id"];
+
+export const CHANNEL_IDS = CHANNELS.map((channel) => channel.id);
+
+export function isChannelId(value: unknown): value is ChannelId {
+  return typeof value === "string" && CHANNELS.some((channel) => channel.id === value);
+}
+
+export function channelOf(id: ChannelId): ChannelSpec {
+  return CHANNELS.find((channel) => channel.id === id) ?? CHANNELS[0];
+}
+
+export function defaultChannelFor(capabilityType: unknown): ChannelId {
+  switch (capabilityType) {
+    case "video":
+      return "seedream-video";
+    case "audio":
+      return "seedream-audio";
+    case "text":
+      return "seedream-text";
+    default:
+      return "seedream-image";
+  }
+}
+
+export function parseStoredChannel(raw: unknown, capabilityType: unknown): ChannelId {
+  if (typeof raw === "string") {
+    const normalized = raw.trim().toLowerCase();
+    if (isChannelId(normalized)) return normalized;
+  }
+  return defaultChannelFor(capabilityType);
+}
+
+export function validateChannel(channel: unknown, capabilityType: unknown): string | null {
+  if (!isChannelId(channel)) {
+    return `渠道(channel)只支持 ${CHANNEL_IDS.join(" / ")}`;
+  }
+  if (!isChannelMedia(capabilityType)) {
+    return `渠道(channel)无法校验：行的类型(capability_type)缺失或不认识（${String(capabilityType)}）`;
+  }
+  const spec = channelOf(channel);
+  if (spec.media !== capabilityType) {
+    return `渠道「${channel}」是 ${spec.media} 的，不能配在 ${capabilityType} 类型的行上`;
+  }
+  return null;
+}
+
+export function isChannelMedia(value: unknown): value is ChannelMedia {
+  return typeof value === "string" && (CHANNEL_MEDIA as readonly string[]).includes(value);
+}
 
 export const GPT_PROVIDER_SIZES = [
   "1024x1024",
@@ -129,30 +200,71 @@ export function mapImageChannelRequest(
   return { ok: true, size, quality };
 }
 
+function seedreamMappingErr(mapping: unknown, sizes: unknown): string | null {
+  if (mapping === null || mapping === undefined) return null;
+  if (typeof mapping !== "object" || Array.isArray(mapping)) {
+    return "seedream request_mapping 须为 JSON 对象";
+  }
+  const matrix = (mapping as { matrix?: unknown }).matrix;
+  if (matrix === null || matrix === undefined) return null;
+  if (typeof matrix !== "object" || Array.isArray(matrix)) {
+    return "seedream request_mapping.matrix 须为对象";
+  }
+  const allowed = seedreamSizeKeys(sizes);
+  if (allowed === null || allowed.size === 0) return null;
+  for (const [key, row] of Object.entries(matrix as Record<string, unknown>)) {
+    if (row === null || typeof row !== "object" || Array.isArray(row)) {
+      return `seedream 交叉格每一行须为对象：${key}`;
+    }
+    if (allowed.has(key.trim().toLowerCase())) continue;
+    return `seedream 矩阵的键必须是该档位的 api_value（或 id）：${key} 不在 [${[...allowed].join(" / ")}] 里`;
+  }
+  return null;
+}
+
+function seedreamSizeKeys(sizes: unknown): Set<string> | null {
+  if (!Array.isArray(sizes)) return null;
+  const keys = new Set<string>();
+  for (const item of sizes) {
+    if (item === null || typeof item !== "object" || Array.isArray(item)) continue;
+    const o = item as Record<string, unknown>;
+    for (const raw of [o.api_value, o.apiValue, o.id]) {
+      if (typeof raw === "string" && raw.trim()) keys.add(raw.trim().toLowerCase());
+    }
+  }
+  return keys.size ? keys : null;
+}
+
+export interface RatioOption {
+  id: string;
+  label: string;
+}
+
 export function availableAspectRatiosForSize(
   mapping: ImageRequestMapping,
   sizeOptionId: string,
-  configuredRatios: readonly string[],
-): string[] {
+  configuredRatios: readonly RatioOption[],
+): RatioOption[] {
   if (mapping.parser === "banana") {
     if (!filled(lookupIgnoreCase(mapping.quality, sizeOptionId))) return [];
     return configuredRatios.filter((ratio) =>
-      filled(lookupIgnoreCase(mapping.size, ratio)),
+      filled(lookupIgnoreCase(mapping.size, ratio.id)),
     );
   }
   if (mapping.parser !== "gpt") {
     return [...configuredRatios];
   }
   return configuredRatios.filter((ratio) =>
-    filled(lookupMatrixCell(mapping.matrix, sizeOptionId, ratio)),
+    filled(lookupMatrixCell(mapping.matrix, sizeOptionId, ratio.id)),
   );
 }
 
 export function validateRequestMapping(
   parser: ImageChannelParserId,
   mapping: unknown,
+  sizes?: unknown,
 ): string | null {
-  if (parser === "seedream") return null;
+  if (parser === "seedream") return seedreamMappingErr(mapping, sizes);
   if (mapping == null) return "request_mapping 不能为空";
   if (typeof mapping !== "object" || Array.isArray(mapping)) {
     return "request_mapping 须为 JSON 对象";
@@ -181,8 +293,6 @@ export function validateRequestMapping(
         filledCells += 1;
       }
     }
-    // 全空的矩阵落库后，mapImageChannelRequest 恒返回 empty_mapping，
-    // 该模型此后每一次请求都 400 —— 与其让线上炸，不如在写入时拦住。
     if (filledCells === 0) {
       return "gpt 交叉格不能全为空：至少填一格，否则该模型的所有请求都会失败";
     }
@@ -211,14 +321,11 @@ export function validateRequestMapping(
     for (const value of Object.values(map)) {
       if (value == null || value === "") continue;
       if (typeof value !== "string") return "banana 映射值须为字符串";
-      // 运行期用 filled()（trim 判定）认空，这里必须同口径——
-      // 否则 {"1k": "  "} 能过闸门，请求期却恒 empty_mapping。
       if (!filled(value)) continue;
       if (name === "quality") qualityFilled = true;
       else sizeFilled = true;
     }
   }
-  // 同 gpt：quality / size 任一全空 ⇒ 每次请求都 empty_mapping。
   if (!qualityFilled || !sizeFilled) {
     return "banana 映射表 quality / size 至少各填一项，否则该模型的所有请求都会失败";
   }

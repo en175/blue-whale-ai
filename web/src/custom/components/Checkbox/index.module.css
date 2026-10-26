@@ -1,0 +1,13 @@
+.mark {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  visibility: hidden;
+}
+
+.mark[data-selected='true'] {
+  visibility: visible;
+}

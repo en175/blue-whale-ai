@@ -4,9 +4,9 @@ import socket
 import subprocess
 import unittest
 
-try:  # 作为 scripts.tests.* 命名空间包导入
+try:
     from .bash_helper import BASH
-except ImportError:  # 经 discover -s scripts/tests 顶层导入
+except ImportError:
     from bash_helper import BASH
 
 

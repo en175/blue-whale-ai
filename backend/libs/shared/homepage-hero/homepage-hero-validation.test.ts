@@ -3,10 +3,11 @@ import { describe, expect, it } from "vitest";
 import {
   parseBigId,
   parseHomepageHeroForm,
+  parseHomepageHeroScene,
   parseMoveDirection,
 } from "./homepage-hero-validation.js";
 
-describe("parseHomepageHeroForm — 首页背景配置入参校验（IKCH05）", () => {
+describe("parseHomepageHeroForm — 首页/登录弹窗背景配置入参校验（IKCH05）", () => {
   it("合法视频：media_type=video + media_url + poster_url", () => {
     const r = parseHomepageHeroForm({
       media_type: "video",
@@ -18,6 +19,7 @@ describe("parseHomepageHeroForm — 首页背景配置入参校验（IKCH05）",
     expect(r).toEqual({
       ok: true,
       input: {
+        scene: "homepage",
         media_type: "video",
         media_url: "https://tos.example.com/v.mp4",
         poster_url: "https://tos.example.com/p.jpg",
@@ -25,6 +27,30 @@ describe("parseHomepageHeroForm — 首页背景配置入参校验（IKCH05）",
         enabled: 1,
       },
     });
+  });
+
+  it("scene 缺省为 homepage；auth 合法；其他拒绝", () => {
+    const auth = parseHomepageHeroForm({
+      scene: "auth",
+      media_type: "image",
+      media_url: "https://tos.example.com/bg.png",
+    });
+    expect(auth.ok).toBe(true);
+    if (auth.ok) expect(auth.input.scene).toBe("auth");
+
+    expect(
+      parseHomepageHeroForm({
+        scene: "login",
+        media_type: "image",
+        media_url: "https://tos.example.com/bg.png",
+      }),
+    ).toEqual({ ok: false, error: "scene 仅支持 homepage/auth" });
+
+    expect(parseHomepageHeroScene(undefined)).toBe("homepage");
+    expect(parseHomepageHeroScene("")).toBe("homepage");
+    expect(parseHomepageHeroScene("auth")).toBe("auth");
+    expect(parseHomepageHeroScene("homepage")).toBe("homepage");
+    expect(parseHomepageHeroScene("other")).toBeNull();
   });
 
   it("视频没有 poster_url → 拒绝（视频没封面不能保存）", () => {

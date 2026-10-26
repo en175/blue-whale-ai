@@ -1,14 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-// IKHEXG：参考上限键**族**的单一形态守卫。
-//
-// 病根不是某一处写错，而是「两套命名方案在不同时间点各自生长、没有任何机制强制统一」：
-// `max_reference_images`（max_<东西>）与 `image_reference_max`（<媒介>_reference_max）撞在一起，
-// 字面几乎一样、语义却不同，已实际造成误判与错配。
-//
-// 本测试把「族」钉死：凡形如 `<媒介>_reference_max` 的键，必须落在白名单内；且**跨进程的三处
-// 枚举必须彼此相等**——后端写闸门、前端可编辑键白名单、前端表单标签表。任一处冒出新名字就红。
 
 const EXPECTED = new Set([
   "image_reference_max",
@@ -16,9 +8,6 @@ const EXPECTED = new Set([
   "audio_reference_max",
 ]);
 
-/** 形如 `<任意>_reference_max` 的键——正是本族该有的命名形态。
- *  裸 token 匹配：三处枚举里它既可能是带引号的字符串（写闸门的数组、白名单 Set），
- *  也可能是不带引号的对象属性名（表单标签表）。 */
 const FAMILY_SHAPE = /\b([a-z0-9_]+_reference_max)\b/g;
 
 function read(relFromThisFile: string): string {
@@ -31,8 +20,6 @@ function familyKeysIn(source: string): Set<string> {
   return found;
 }
 
-/** 去掉块注释与行注释——守卫要抓的是**键被使用**，不是键被解释。
- *  这三处文件里都有注释在讲「旧键为什么退役」，那些提及是应当留下的史料。 */
 function stripComments(source: string): string {
   return source
     .replace(/\/\*[\s\S]*?\*\//g, "")
@@ -43,14 +30,12 @@ function stripComments(source: string): string {
 
 const backendGate = read("./constants.ts");
 const webFormKeys = read("../../../../web/src/admin/pages/ModelList/model-form.ts");
-const webFormLabels = read(
-  "../../../../web/src/admin/pages/ModelList/ModelFormModal.tsx",
-);
+const webFormLabels = read("../../../../web/src/admin/enums/model.ts");
 
 const SOURCES = {
   "backend 写闸门 constants.ts": backendGate,
   "web 可编辑键白名单 model-form.ts": webFormKeys,
-  "web 表单标签表 ModelFormModal.tsx": webFormLabels,
+  "web 表单标签表 admin/enums/model.ts": webFormLabels,
 };
 
 describe("IKHEXG 参考上限键族守卫", () => {
@@ -61,8 +46,6 @@ describe("IKHEXG 参考上限键族守卫", () => {
   });
 
   it.each(Object.entries(SOURCES))("%s 不含白名单外的参考上限键", (label, source) => {
-    // 新键必须叫 `<媒介>_reference_max`；混进 `max_reference_images` 这类
-    // 老方案的键名，或自造第四个名字，都视为命名方案再次分叉。
     const unexpected = [...familyKeysIn(source)].filter((k) => !EXPECTED.has(k));
     expect(unexpected, `${label} 出现白名单外的参考上限键`).toEqual([]);
   });
@@ -81,9 +64,6 @@ describe("IKHEXG 参考上限键族守卫", () => {
   });
 
   it.each(Object.entries(SOURCES))("%s 不含已退役的旧键名（注释除外）", (label, source) => {
-    // ⚠️ 上面那条白名单断言**抓不到**旧键：`max_reference_images` 的后缀是 `_reference_images`，
-    // 不匹配 `*_reference_max` 形态。少了这一条，把旧键加回来测试照样绿——正是本测试要防的事。
-    // 只看非注释行：这三个文件里有注释在讲旧键为什么退役，那些提及是应当留下的史料。
     expect(stripComments(source), `${label} 出现已退役的 max_reference_images`).not.toMatch(
       /max_reference_images|maxReferenceImages/,
     );

@@ -1,0 +1,12 @@
+{
+  "name": "blue-whale-ponytail",
+  "description": "Blue-Whale 的 Ponytail 上下文适配",
+  "plugins": [
+    {
+      "name": "blue-whale-ponytail",
+      "source": "./ponytail",
+      "version": "1.0.0",
+      "description": "从显式启用的当前工作树加载 Ponytail 共享规则"
+    }
+  ]
+}

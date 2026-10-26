@@ -13,7 +13,6 @@ import { OperationLogService } from "@lib/shared/operation-log/operation-log.ser
 import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js";
 import { logger } from "@lib/infra/logging/blue-whale-logger.js";
 
-/** IKBMDM：管理后台资产物理删除（引用核对 + 审计，支持单删/批量）。 */
 @Controller("admin/assets")
 @UseGuards(AdminGuard)
 export class AdminAssetsController {
@@ -49,10 +48,6 @@ export class AdminAssetsController {
         operatorId: user.userId,
       });
     } catch (error) {
-      // 强删属安全关键写操作：审计失败不静默吞掉，至少上报日志。
-      // 【有意偏离 ADR-0018 §7 fail-closed】与全库 admin 端点一致（models/topup-tiers/orders
-      // 均为 best-effort 审计），审计写失败仅告警不阻断业务——资产删除不在 ADR §7 强制清单，
-      // 且硬删链路本身在 DB 事务内，审计表单独不可用的概率极低（2026-08-28 IKBMDM 评审确认）。
       logger.error(
         `asset hard-delete audit write failed: ${
           error instanceof Error ? error.message : String(error)

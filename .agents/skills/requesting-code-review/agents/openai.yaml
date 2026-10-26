@@ -1,0 +1,5 @@
+interface:
+  display_name: "Requesting Code Review"
+  short_description: "Dispatch a code reviewer subagent"
+policy:
+  allow_implicit_invocation: false

@@ -1,20 +1,18 @@
-import { Controller, Get } from "@nestjs/common";
+import { BadRequestException, Controller, Get, Query } from "@nestjs/common";
 import { ok } from "@lib/contracts";
 import { Public } from "@lib/infra/decorators/public.decorator.js";
 import { HomepageHeroService } from "@lib/shared/homepage-hero/homepage-hero.service.js";
+import { parseHomepageHeroScene } from "@lib/shared/homepage-hero/homepage-hero-validation.js";
 
-/**
- * 首页背景图/视频公开读取（IKCH05，接口对齐母工单 IKCH01 草稿）。
- * 无鉴权；只暴露 { id, media_type, media_url, poster_url, sort_order }（不带 enabled）。
- * 空列表返回 []（200）。
- */
 @Controller("site/homepage-heroes")
 export class SiteHomepageHeroesController {
   constructor(private readonly hero: HomepageHeroService) {}
 
   @Public()
   @Get()
-  async list() {
-    return ok(await this.hero.listEnabled());
+  async list(@Query("scene") sceneRaw?: string) {
+    const scene = parseHomepageHeroScene(sceneRaw);
+    if (!scene) throw new BadRequestException("scene 仅支持 homepage/auth");
+    return ok(await this.hero.listEnabled(scene));
   }
 }

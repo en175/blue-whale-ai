@@ -1,14 +1,7 @@
-// IK74V8：从 skill-repo.test.ts 拆出（≤800 行硬线）。用例逐块搬运，断言不变。
 import type {PrismaClient} from "@prisma/client";
 import {describe, expect, it, vi} from "vitest";
 import {createSkillRepo, SkillAddConflictError} from "./skill-repo.js";
 
-// SkillRepo 资产边界（契约 docs/specs/2026-08-03-creative-skill-asset-contract.md §2/§3/§6/§11）：
-// wire 主键一律 creative_skill_id；自增 id/skill_id、content/body/prompt 永不出库；
-// mine = 官方引用（official）∪ 名下个人技能（personal）；个人技能跨用户按不存在处理；
-// library v2（IK60WT）：分类过滤、featured/most_used/newest 排序、zh/en 语言解析、
-// keyword 命中解析语言 name/description + search_keywords（绝不匹配 content）、
-// usage_count = creative_skill_activation COUNT(DISTINCT user_id)。
 
 describe("SkillRepo — 引用注册与 auto 开关", () => {
   function createAddPrisma(opts: {
@@ -162,6 +155,4 @@ describe("SkillRepo — 引用注册与 auto 开关", () => {
     expect(updateMany).not.toHaveBeenCalled();
   });
 
-  // listMine 并集夹具：1 条官方引用 + 1 条名下个人技能。
-  // IK60WU §12.5：统一按最近添加/创建时间倒序；官方引用 gmt_create 更晚 → 排在前。
 });

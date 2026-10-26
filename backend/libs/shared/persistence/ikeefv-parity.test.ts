@@ -24,8 +24,6 @@ const schemaPrisma = readFileSync(
   "utf8",
 );
 
-// IKEEFV：删除 IKCKOW/IKD806 收尾遗留的 3 张悬空表（删除时全库 0 行、写路径已零调用）；
-// agent_runs 仅瘦身存量实测全 NULL 的 3 个死列。镜像 ikckow-parity 的双轨核对结构。
 const DROPPED_TABLES = [
   "conversation_message_mentions",
   "skill_summarize_session",
@@ -57,7 +55,6 @@ describe("IKEEFV 双轨迁移（删 3 悬空表 + agent_runs 瘦身 3 死列）"
       const dropCount = sql.match(/DROP COLUMN/g)?.length ?? 0;
       expect(dropCount).toBe(DROPPED_COLUMNS.length);
     }
-    // InUse 禁删保护 + run_pin scrub 的硬依赖列必须在保留侧。
     expect(baselineSql).toContain("`status` VARCHAR(32) NOT NULL");
     expect(baselineSql).toContain("`run_pin` JSON NULL");
   });

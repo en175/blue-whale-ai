@@ -1,0 +1,349 @@
+
+.dialogWrap {
+  position: absolute;
+  bottom: var(--spacing-lg);
+  left: 50%;
+  transform: translateX(-50%);
+  width: 740px;
+  max-width: 90%;
+  z-index: 20;
+  animation: dialogFadeIn 0.2s ease;
+}
+
+.dialogWrapFollow {
+  bottom: auto;
+  left: 0;
+  transform: none;
+  animation: dialogFadeInFollow 0.2s ease;
+}
+
+.dialog {
+  position: relative;
+  height: auto;
+  min-height: 0;
+  max-height: calc(100vh - 2 * var(--spacing-lg));
+  overflow-y: auto;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  background-color: var(--color-bg-overlay);
+  border: 1px solid var(--color-border-overlay);
+  border-radius: var(--radius-xl);
+  padding: var(--spacing-lg);
+  box-shadow: var(--shadow-overlay);
+}
+
+@keyframes dialogFadeIn {
+  from { opacity: 0; transform: translateX(-50%) translateY(8px); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+@keyframes dialogFadeInFollow {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.dialogExpanded {
+  height: 66.66vh;
+}
+
+.inputBox {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+  position: relative;
+  flex: 1;
+  min-height: auto;
+}
+
+.hiddenInput {
+  display: none;
+}
+
+
+.previewRow {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: var(--spacing-sm);
+}
+
+
+.iconBtn {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-tertiary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.iconBtn:hover {
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-hover);
+}
+
+
+.mentionAnchor {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.textarea {
+  width: 100%;
+  resize: none;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-md);
+  line-height: 1.6;
+  outline: none;
+  font-family: inherit;
+  display: block;
+  flex: 0 0 auto;
+  height: auto;
+  field-sizing: content;
+  min-height: 4.8em;
+  max-height: 6.4em;
+  overflow-y: auto;
+}
+
+.dialogExpanded .textarea {
+  flex: 1;
+  max-height: none;
+}
+
+.textarea::placeholder {
+  color: var(--color-text-tertiary);
+}
+
+.charCount {
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+  line-height: 1;
+}
+
+.charCountWarn {
+  color: #e5484d;
+  font-weight: 500;
+}
+
+.readOnlyHint {
+  font-size: 12px;
+  color: var(--color-text-tertiary);
+  line-height: 1.4;
+}
+
+.bottomBar {
+  margin-top: auto;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-sm);
+}
+
+.barLeft {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  flex: 1;
+  min-width: 0;
+}
+
+.addBtn {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #ddd;
+  background-color: #2a2a2a;
+  border: none;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  flex-shrink: 0;
+}
+
+.addBtn:hover {
+  background-color: #3a3a3a;
+  color: #fff;
+}
+
+.configBtn {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: #eee;
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  padding: 0;
+  transition: color var(--transition-fast);
+}
+
+.configBtn:hover {
+  color: #fff;
+}
+
+.barDivider {
+  width: 1px;
+  height: 12px;
+  background-color: #444;
+}
+
+.barRight {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+}
+
+.sendBtn {
+  width: 28.8px;
+  height: 28.8px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: #2a2a2a;
+  color: #777;
+  border: none;
+  cursor: not-allowed;
+  transition: all var(--transition-fast);
+}
+
+.sendBtnActive {
+  background-color: #4a4a4a;
+  color: #fff;
+  cursor: pointer;
+}
+
+.sendBtnActive:hover {
+  background-color: #555;
+}
+
+.configPanel {
+  position: absolute;
+  bottom: 54px;
+  left: 0;
+  right: 0;
+  margin: 0 auto;
+  width: 480px;
+  max-width: calc(100% - 24px);
+  background-color: #232323;
+  border: 1px solid var(--color-border-primary);
+  border-radius: 12px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
+  z-index: 5;
+  animation: popupFadeIn 0.15s ease;
+  box-sizing: border-box;
+  padding: var(--spacing-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-lg);
+}
+
+@keyframes popupFadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.configCloseBtn {
+  position: absolute;
+  top: var(--spacing-sm);
+  right: var(--spacing-sm);
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-tertiary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  z-index: 1;
+}
+
+.configCloseBtn:hover {
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-hover);
+}
+
+.configSection {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.configLabel {
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  color: var(--color-text-secondary);
+}
+
+.configRow {
+  display: flex;
+  gap: var(--spacing-md);
+}
+
+.ratioGroup {
+  display: flex;
+  gap: 4px;
+  background-color: #262626;
+  border-radius: 12px;
+  padding: 4px;
+}
+
+.ratioBtn {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 10px 0;
+  border-radius: 10px;
+  font-size: var(--font-size-md);
+  color: #999;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.ratioBtn:hover {
+  color: #ddd;
+}
+
+.ratioBtnActive {
+  background-color: #3a3a3a;
+  color: #fff;
+  font-weight: 700;
+}
+
+.inputArea {
+  position: relative;
+  width: 100%;
+}
+
+.mentionDock {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  z-index: 40;
+}

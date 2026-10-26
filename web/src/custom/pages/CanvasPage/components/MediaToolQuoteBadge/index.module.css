@@ -1,0 +1,37 @@
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  background-color: var(--color-bg-hover);
+  border-radius: var(--radius-sm);
+  padding: 4px 7px;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+  white-space: nowrap;
+  user-select: none;
+}
+
+.pill strong,
+.hint strong {
+  color: var(--color-text-primary);
+  font-weight: 600;
+}
+
+.loading {
+  opacity: 0.55;
+}
+
+.danger,
+.danger strong {
+  color: var(--color-error);
+}

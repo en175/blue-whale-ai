@@ -96,7 +96,6 @@ const OTHER_BODY = "# 海报专家\n\n海报设计正文";
 const TARGET_RESOURCE = resourceOf(TARGET_ID, "故事板助手", TARGET_BODY);
 const OTHER_RESOURCE = resourceOf(OTHER_ID, "海报专家", OTHER_BODY);
 
-// schema 约束 activated_creative_skill_versions 至多 1 个（确定性 auto 激活），fixture 对齐。
 const TARGET_PIN = signRunPin({
   ...runPinSource,
   auto_creative_skill_candidates: [
@@ -107,7 +106,6 @@ const TARGET_PIN = signRunPin({
   creative_skill_resources: [TARGET_RESOURCE, OTHER_RESOURCE],
 });
 
-// 仅含 OTHER 技能的 pin（用于幂等/无目标断言）。
 const OTHER_ONLY_PIN = signRunPin({
   ...runPinSource,
   auto_creative_skill_candidates: [candidateOf(OTHER_RESOURCE)],

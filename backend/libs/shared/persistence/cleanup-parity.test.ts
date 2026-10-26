@@ -16,15 +16,11 @@ const standaloneSql = readFileSync(
   new URL("../../../prisma/schema/010_cleanup_dead_tables_and_columns.sql", import.meta.url),
   "utf8",
 );
-// 007(ik764f) 是 010 D4 改名链的上游：必须保持 create_time/update_time 历史形态，
-// 否则升级链上 CHANGE COLUMN 会因列不存在而失败。
 const legacy007Sql = readFileSync(
   new URL("../../../prisma/schema/007_ik764f_template_tag.sql", import.meta.url),
   "utf8",
 );
 
-// 007(ik764f) 的历史契约：它以 create_time/update_time 建表，010 的 D4 再改名。
-// 故 007 保持历史原样、不可改为 gmt_* —— 否则升级链上 010 的 CHANGE 会因列不存在而失败。
 describe("CLEANUP 双轨迁移（死表/残留列/漂移/模板冗余）", () => {
   const A_COLUMNS = [
     "`display_name`",
@@ -60,7 +56,6 @@ describe("CLEANUP 双轨迁移（死表/残留列/漂移/模板冗余）", () =>
     );
     expect(migrationSql).toContain("WHERE `status` IN ('0', '1')");
     expect(standaloneSql).toContain("WHERE `status` IN ('0', '1')");
-    // 兜底：绝不允许无条件的全表覆盖
     expect(standaloneSql).not.toContain("SET `status` = 'NORMAL';");
   });
 
@@ -80,18 +75,15 @@ describe("CLEANUP 双轨迁移（死表/残留列/漂移/模板冗余）", () =>
   });
 
   it("D 层：template 冗余列删除 + template_tag 时间列改名，双轨一致", () => {
-    // D2/D3：三张模板表共用同一组 DROP
     for (const sql of [migrationSql, standaloneSql]) {
       expect(sql).toContain("DROP COLUMN `deleted`,");
       expect(sql).toContain("DROP COLUMN `create_time`,");
       expect(sql).toContain("DROP COLUMN `update_time`,");
     }
-    // D4：与 007 的历史 create_time/update_time 对齐
     expect(migrationSql).toContain("CHANGE COLUMN `create_time` `gmt_create`");
     expect(standaloneSql).toContain("CHANGE COLUMN `create_time` `gmt_create`");
     expect(migrationSql).toContain("CHANGE COLUMN `update_time` `gmt_modified`");
     expect(standaloneSql).toContain("CHANGE COLUMN `update_time` `gmt_modified`");
-    // 007 保持历史 create_time/update_time（010 的改名链上游），不可误改为 gmt_*
     expect(legacy007Sql).toContain("`create_time` DATETIME(0)");
     expect(legacy007Sql).toContain("`update_time` DATETIME(0)");
     expect(legacy007Sql).not.toContain("gmt_create");

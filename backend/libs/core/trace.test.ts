@@ -32,8 +32,6 @@ describe("resolveTraceId —— 透传优先、缺省生成、被拒留痕（D6�
   });
 
   it("旧规则放行的脏值现在一律拒收，但原值留在 client_trace_id", () => {
-    // 旧规则是「长度 ≤256 的可见 ASCII」——空格、引号、路径全都进得来，而这是每一条
-    // 跨服务查询的键。拒收不等于丢线索。
     for (const dirty of [
       "链路a",
       "a\nb",
@@ -58,8 +56,6 @@ describe("resolveTraceId —— 透传优先、缺省生成、被拒留痕（D6�
   });
 
   it("X-Trace-Id 发了但不合规，不落到 traceparent", () => {
-    // 两个头都发、第一个写错的调用方，应该看到一个明确是新生成的 id，
-    // 而不是被悄悄换到另一条链上。
     const resolved = resolveTraceId(
       "bad id",
       "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
@@ -69,7 +65,6 @@ describe("resolveTraceId —— 透传优先、缺省生成、被拒留痕（D6�
   });
 
   it("生成的值满足自己强制的规则", () => {
-    // 自己生成的值过不了自己的校验，是这类改动最容易犯又最难发现的错。
     expect(generateTraceId()).toMatch(TRACE_ID_PATTERN);
     expect(generateTraceId()).not.toBe(generateTraceId());
   });
@@ -103,7 +98,6 @@ describe("调用方地址（IKB29O 验收：错误场景能看到是哪个 IP）
   });
 
   it("不是地址就丢掉，而不是当作事实写进去", () => {
-    // 有人读到 client_address 时会当它是事实；X-Forwarded-For 是客户端可控输入。
     expect(sanitizeAddress("not an ip; DROP TABLE")).toBe("");
     expect(sanitizeAddress("x".repeat(200))).toBe("");
     expect(sanitizeAddress(undefined)).toBe("");

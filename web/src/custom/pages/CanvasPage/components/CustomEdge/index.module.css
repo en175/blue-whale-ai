@@ -1,0 +1,46 @@
+.edgeGroup {
+  cursor: default;
+}
+
+.hitPath {
+  pointer-events: stroke;
+  cursor: default;
+}
+
+.basePath {
+  stroke: rgba(200, 200, 210, 0.45);
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-dasharray: none;
+  pointer-events: none;
+  transition: stroke 0.15s ease;
+}
+
+.edgeGroup:hover .basePath,
+.edgeGroup.selectedConnected .basePath {
+  stroke: rgba(220, 220, 230, 0.7);
+  stroke-dasharray: 10 10;
+  animation: dashFlow 1.8s linear infinite;
+}
+
+@keyframes dashFlow {
+  from { stroke-dashoffset: 0; }
+  to   { stroke-dashoffset: -40; }
+}
+
+.deleteBtn {
+  opacity: 0;
+  cursor: pointer;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+}
+
+.deleteBtnVisible {
+  opacity: 1;
+  pointer-events: all;
+}
+
+.deleteBtn:hover circle {
+  fill: #3a3a3a;
+  stroke: #777;
+}

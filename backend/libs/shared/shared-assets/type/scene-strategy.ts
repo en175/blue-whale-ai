@@ -13,10 +13,6 @@ import {
   type SharedAssetTypeStrategy,
 } from "./shared-asset-type.strategy.js";
 
-/** 场景卡策略：从源 scene_cards + generation_presets 抓取自包含快照。
- *  - 归属校验：源场景卡须属于当前用户项目（project.owner_id）；
- *  - 去重：按内容 sha256（同内容视为已存在）；
- *  - 快照含 markdown + 生成预设，供「添加回画布」在目标项目原样重建实体。 */
 export class SceneStrategy implements SharedAssetTypeStrategy {
   readonly assetType = "scene" as const;
   readonly kind = null;

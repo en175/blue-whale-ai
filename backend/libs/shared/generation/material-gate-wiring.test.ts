@@ -6,9 +6,6 @@ import {
   MATERIAL_STATUS_UNAVAILABLE_MESSAGE,
 } from "./material-compliance-gate.js";
 
-// IKF YHJ：这一组钉的是**生产实际跑的那段接线**（信封解析 + 终局/可重试分类 + 失败处置
-// 的触发 + 把上游异常咽成 null）。抽取前它是控制器里的私有方法，零测试覆盖——
-// 内核、仓库层、worker 都有测试，唯独真正跑在线上的这层没有。
 
 function makeDeps(callResult: unknown) {
   const callAction = vi.fn().mockResolvedValue(callResult);
@@ -26,7 +23,6 @@ const gateInput = (materialId: string) => ({
   jobInput: { reference_materials: [{ id: materialId, type: "image" }] },
 });
 
-/** 上游 2xx + Result.Status 的成功信封。 */
 const okEnvelope = (status: string, error?: Record<string, unknown>) => ({
   status: 200,
   body: {

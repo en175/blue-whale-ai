@@ -1,0 +1,11 @@
+{
+  "request": {
+    "parent_id": 34679913,
+    "category": "task",
+    "issue_type_id": 1292680
+  },
+  "response": {
+    "status": 400,
+    "message": "子工作项的任务属性必须与父工作项一致"
+  }
+}

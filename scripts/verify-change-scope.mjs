@@ -5,14 +5,45 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { arch, tmpdir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   buildVerificationPlan,
   classifyChanges,
+  requiresFrontendBuild,
   validateReceipt,
 } from "./verification-policy.mjs";
 
 function git(...args) {
   return execFileSync("git", args, { encoding: "utf8" }).trim();
+}
+
+function gitSucceeds(...args) {
+  return spawnSync("git", args, { stdio: "ignore" }).status === 0;
+}
+
+function taskBaseline() {
+  const script = join(dirname(fileURLToPath(import.meta.url)), "lib", "task_metadata.py");
+  const candidates = process.platform === "win32"
+    ? [["py", "-3"], ["python3"], ["python"]]
+    : [["python3"], ["python"]];
+  for (const [command, ...prefix] of candidates) {
+    try {
+      return JSON.parse(execFileSync(command, [...prefix, script, "read", "--json"], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      }));
+    } catch (error) {
+      if (error.code === "ENOENT") continue;
+      throw new Error(error.stderr?.toString().trim() || error.message);
+    }
+  }
+  throw new Error("读取任务起点需要可用的 Python 3");
+}
+
+function remoteTargetSha(targetBranch) {
+  const line = git("ls-remote", "--heads", "origin", `refs/heads/${targetBranch}`);
+  if (!line) throw new Error(`远端目标 origin/${targetBranch} 不存在`);
+  return line.split(/\s/)[0];
 }
 
 function valueAfter(args, option, fallback) {
@@ -42,9 +73,34 @@ function documentationOnlyFiles(files, base, head) {
   });
 }
 
-function currentScope({ baseRef, risk, stage }) {
+function pythonForVerification() {
+  const candidates = process.platform === "win32"
+    ? [["py", "-3.12"], ["py", "-3.11"], ["python3"], ["python"]]
+    : [["python3.12"], ["python3.11"], ["python3"], ["python"]];
+  for (const command of candidates) {
+    const result = spawnSync(command[0], [
+      ...command.slice(1), "-c", "import sys, tomllib; print(sys.version.split()[0])",
+    ], { encoding: "utf8" });
+    if (result.status === 0) return { command, version: result.stdout.trim() };
+  }
+  throw new Error("脚本验证需要 Python 3.11+；请安装后重试。");
+}
+
+function currentScope({ baseRef, risk, stage, requireTargetSync = false, frontendPushOnly = false }) {
   const head = git("rev-parse", "HEAD");
-  const base = git("merge-base", baseRef, head);
+  const metadata = taskBaseline();
+  const startSha = metadata.start_sha;
+  const ownBaseSha = metadata.inherited_sha ?? startSha;
+  if (baseRef && git("rev-parse", "--verify", `${baseRef}^{commit}`) !== ownBaseSha) {
+    const label = metadata.inherited_sha ? "任务继承提交" : "任务起点";
+    throw new Error(`显式基线 ${baseRef} 与${label} ${ownBaseSha} 不一致`);
+  }
+  const targetBranch = metadata.target_branch;
+  const targetSha = remoteTargetSha(targetBranch);
+  const base = metadata.inherited_sha ?? (gitSucceeds("merge-base", "--is-ancestor", startSha, targetSha) &&
+    gitSucceeds("merge-base", "--is-ancestor", targetSha, head)
+    ? targetSha
+    : startSha);
   const changedFiles = git("diff", "--name-only", "-z", `${base}...${head}`)
     .split("\0")
     .filter(Boolean)
@@ -52,33 +108,71 @@ function currentScope({ baseRef, risk, stage }) {
   const changedFilesHash = createHash("sha256")
     .update(changedFiles.join("\0"))
     .digest("hex");
+  const documentation = documentationOnlyFiles(changedFiles, base, head);
+  if (frontendPushOnly && !requiresFrontendBuild(changedFiles, documentation)) {
+    return { head, base, changedFiles, frontendBuildRequired: false };
+  }
+  if (requireTargetSync && stage === "pr" &&
+      !gitSucceeds("merge-base", "--is-ancestor", targetSha, head)) {
+    throw new Error(`PR_TARGET_NOT_SYNCED: HEAD 尚未包含 origin/${targetBranch} 的 ${targetSha}；先运行 scripts/sync-task-from-origin.sh sync --target-branch ${targetBranch} --json`);
+  }
   const classification = classifyChanges(changedFiles, {
     risk,
     stage,
-    documentationOnlyFiles: documentationOnlyFiles(changedFiles, base, head),
+    documentationOnlyFiles: documentation,
   });
-  const commands = buildVerificationPlan(classification, { base });
-  const environment = verificationEnvironment();
+  const plannedCommands = buildVerificationPlan(classification, { base });
+  const python = plannedCommands.some((command) => command[0] === "python3")
+    ? pythonForVerification()
+    : null;
+  const commands = buildVerificationPlan(classification, {
+    base,
+    pythonCommand: python?.command,
+  });
+  const environment = verificationEnvironment(python, classification.areas?.includes("web"));
   const inputHash = createHash("sha256")
     .update(JSON.stringify(environment))
     .digest("hex");
   return {
     head,
     base,
+    startSha,
+    targetBranch,
+    targetSha,
     changedFiles,
     changedFilesHash,
     classification,
     commands,
+    pythonCommand: python?.command,
     environment,
     inputHash,
   };
 }
 
-function verificationEnvironment() {
+function frontendBuildInputs() {
+  const files = [
+    "web/.env", "web/.env.local", "web/.env.test", "web/.env.test.local",
+    "web/.env.release", "web/.env.release.local",
+    "web/node_modules/.package-lock.json", "node_modules/.pnpm/lock.yaml",
+    "web/node_modules/typescript/package.json", "web/node_modules/vite/package.json",
+    "backend/node_modules/zod/package.json", "node_modules/zod/package.json",
+  ];
+  return createHash("sha256").update(JSON.stringify({
+    files: files.map((file) => [file, existsSync(file)
+      ? createHash("sha256").update(readFileSync(file)).digest("hex") : null]),
+    variables: Object.entries(process.env)
+      .filter(([name]) => name.startsWith("VITE_") || name === "NODE_ENV" || name === "NODE_OPTIONS")
+      .sort(([left], [right]) => left.localeCompare(right)),
+  })).digest("hex");
+}
+
+function verificationEnvironment(python, frontend = false) {
   return {
     node: process.version,
     platform: process.platform,
     arch: arch(),
+    ...(python ? { python: python.version } : {}),
+    ...(frontend ? { frontendBuildInputs: frontendBuildInputs() } : {}),
   };
 }
 
@@ -128,12 +222,12 @@ function execute(command, { asJson }) {
     ? mkdtempSync(join(tmpdir(), "blue-whale-verification-stages-"))
     : null;
   const stageLog = stageDirectory ? join(stageDirectory, "stages.jsonl") : null;
-  const result = spawnSync(command[0], command.slice(1), {
-    // Windows 上 spawnSync 无法直接执行 .cmd/.bat（pnpm 是 pnpm.cmd），走 cmd.exe 才可解析
-    shell: process.platform === "win32",
+  const webBuild = command[0] === "node" && command[1] === "web/node_modules/vite/bin/vite.js";
+  const arguments_ = webBuild ? [resolve(command[1]), ...command.slice(2)] : command.slice(1);
+  const result = spawnSync(command[0], arguments_, {
+    cwd: webBuild ? resolve("web") : undefined,
+    shell: process.platform === "win32" && command[0] !== "node",
     encoding: "utf8",
-    // IKD1T2：vitest 结构化日志输出约 1MB，spawnSync 默认 maxBuffer=1MB 会把子进程
-    // 以 ENOBUFS/SIGTERM 杀掉（result.status=null → 误记 exit 1，测试全绿却门禁失败）。
     maxBuffer: 64 * 1024 * 1024,
     env: stageLog
       ? { ...process.env, BW_VERIFICATION_STAGE_LOG: stageLog }
@@ -171,22 +265,30 @@ function writeReceipt(path, receipt) {
   writeFileSync(path, `${JSON.stringify(receipt, null, 2)}\n`, { mode: 0o600 });
 }
 
+function matchesReceiptInputs(receipt, scope) {
+  return receipt?.version === 1 &&
+    receipt.head === scope.head &&
+    receipt.base === scope.base &&
+    receipt.startSha === scope.startSha &&
+    receipt.targetBranch === scope.targetBranch &&
+    receipt.targetSha === scope.targetSha &&
+    receipt.changedFilesHash === scope.changedFilesHash &&
+    receipt.inputHash === scope.inputHash;
+}
+
+function matchesReceiptScope(receipt, scope) {
+  return matchesReceiptInputs(receipt, scope) &&
+    JSON.stringify(receipt.classification) === JSON.stringify(scope.classification) &&
+    JSON.stringify(receipt.commands) === JSON.stringify(scope.commands);
+}
+
 function loadRetryableReceipt(scope) {
   const path = receiptPath(scope.head);
   if (!existsSync(path)) {
     throw new Error("retry requires a failed receipt for the current scope");
   }
   const receipt = JSON.parse(readFileSync(path, "utf8"));
-  const sameScope =
-    receipt.version === 1 &&
-    receipt.status === "failed" &&
-    receipt.head === scope.head &&
-    receipt.base === scope.base &&
-    receipt.changedFilesHash === scope.changedFilesHash &&
-    receipt.inputHash === scope.inputHash &&
-    JSON.stringify(receipt.classification) === JSON.stringify(scope.classification) &&
-    JSON.stringify(receipt.commands) === JSON.stringify(scope.commands);
-  if (!sameScope) {
+  if (receipt.status !== "failed" || !matchesReceiptScope(receipt, scope)) {
     throw new Error("retry requires a failed receipt for the current scope");
   }
   if (receipt.retry) {
@@ -209,14 +311,15 @@ function loadRetryableReceipt(scope) {
 }
 
 function main() {
+  process.chdir(git("rev-parse", "--show-toplevel"));
   const args = process.argv.slice(2);
   const command = args[0];
-  if (!["plan", "run", "check", "summary"].includes(command)) {
-    throw new Error("usage: verify-change-scope.mjs <plan|run|check|summary> [--base REF] [--stage completion|pr] [--risk high] [--retry-kind KIND --retry-reason REASON] [--json]");
+  if (!["plan", "run", "ensure", "check", "check-push", "summary"].includes(command)) {
+    throw new Error("usage: verify-change-scope.mjs <plan|run|ensure|check|check-push|summary> [--head SHA] [--base REF] [--stage completion|pr] [--risk high] [--retry-kind KIND --retry-reason REASON] [--json]");
   }
-  const baseRef = valueAfter(args, "--base", "origin/master");
+  const baseRef = valueAfter(args, "--base", null);
   const risk = valueAfter(args, "--risk", "auto");
-  const stage = valueAfter(args, "--stage", "completion");
+  const stage = command === "check-push" ? "pr" : valueAfter(args, "--stage", "completion");
   const retryKind = valueAfter(args, "--retry-kind", null);
   const retryReason = valueAfter(args, "--retry-reason", null);
   if (retryKind && retryKind !== "infrastructure" && retryKind !== "known-flaky") {
@@ -226,7 +329,31 @@ function main() {
     throw new Error("--retry-kind and --retry-reason must be provided together");
   }
   const retry = retryKind ? { kind: retryKind, reason: retryReason } : null;
+  if (command === "ensure" && retry) {
+    throw new Error("explicit verification retries must use run");
+  }
   const asJson = args.includes("--json");
+  if (command === "check-push") {
+    const pushedHead = valueAfter(args, "--head", null);
+    if (!pushedHead || pushedHead !== git("rev-parse", "HEAD")) {
+      emit({ status: "PUSH_HEAD_MISMATCH", reason: "请在待推送分支的工作树中验证并推送，不能复用其他提交的凭证。" }, asJson);
+      process.exitCode = 4;
+      return;
+    }
+    const treeFiles = git("ls-tree", "-r", "--name-only", pushedHead).split("\n");
+    if (!requiresFrontendBuild(treeFiles) &&
+        !requiresFrontendBuild(git("log", "--format=", "--name-only", pushedHead).split("\n"))) {
+      emit({ status: "BUILD_NOT_REQUIRED", reason: "仓库历史中不含前端构建输入。" }, asJson);
+      return;
+    }
+  }
+  const scope = currentScope({ baseRef, risk, stage,
+    requireTargetSync: ["plan", "run", "ensure", "check-push"].includes(command),
+    frontendPushOnly: command === "check-push" });
+  if (command === "check-push" && scope.frontendBuildRequired === false) {
+    emit({ status: "BUILD_NOT_REQUIRED", reason: "本次推送不影响前端构建。" }, asJson);
+    return;
+  }
   if (git("status", "--porcelain")) {
     emit(
       { status: "DIRTY_WORKTREE", reason: "verification requires a clean worktree" },
@@ -235,7 +362,6 @@ function main() {
     process.exitCode = 3;
     return;
   }
-  const scope = currentScope({ baseRef, risk, stage });
   if (command === "plan") {
     if (asJson) {
       process.stdout.write(`${JSON.stringify(scope)}\n`);
@@ -245,7 +371,21 @@ function main() {
     return;
   }
 
-  if (command === "run") {
+  if (command === "ensure") {
+    const path = receiptPath(scope.head);
+    const receipt = existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : null;
+    if (validateReceipt(receipt, scope).valid) {
+      emit({ status: "VERIFIED", tier: receipt.classification.tier, receipt: path, reused: true }, asJson);
+      return;
+    }
+    if (receipt?.status === "failed" && matchesReceiptInputs(receipt, scope)) {
+      emit({ status: "VERIFICATION_FAILED", reason: "当前提交已有失败结果；修复后重新验证，或按测试策略显式重试。" }, asJson);
+      process.exitCode = 5;
+      return;
+    }
+  }
+
+  if (command === "run" || command === "ensure") {
     const retryState = retry ? loadRetryableReceipt(scope) : null;
     const startedAt = retryState?.receipt.startedAt ?? new Date().toISOString();
     const results = retryState

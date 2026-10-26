@@ -13,8 +13,6 @@ import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js"
 import { SharedAssetError } from "@lib/shared/shared-assets/shared-asset-error.js";
 import { SharedAssetService } from "@lib/shared/shared-assets/shared-assets.service.js";
 
-/** 画布共享资产 API（IK9QKP）：保存 / 面板列表（type 过滤）/ 详情 / 场景卡添加 / 移除。
- *  边界层用契约判别联合做形状校验；领域错误转契约错误码。 */
 @Controller("shared-assets")
 export class SharedAssetsController {
   constructor(private readonly sharedAssets: SharedAssetService) {}

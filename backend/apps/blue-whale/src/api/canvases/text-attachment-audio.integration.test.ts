@@ -1,6 +1,6 @@
 import "reflect-metadata";
 import { Module } from "@nestjs/common";
-import { NestFactory } from "@nestjs/core";
+import { APP_FILTER, NestFactory } from "@nestjs/core";
 import { json } from "express";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { CanvasesController } from "./canvases.controller.js";
@@ -13,7 +13,12 @@ import { ProjectService } from "@lib/shared/project/project.service.js";
 import { SnapshotService } from "@lib/shared/snapshot/snapshot.service.js";
 import { GenerationCommandService } from "@lib/shared/generation/generation-command.service.js";
 import { ModelCapabilityReadService } from "@lib/shared/generation/model-capability.service.js";
-import { GenerationCostEstimatorService } from "@lib/shared/generation/cost-estimator.service.js";
+import { MaterialService } from "@lib/shared/material/material.service.js";
+import { SystemSettingsService } from "@lib/shared/system-settings/index.js";
+import { AssetService } from "@lib/shared/assets/assets.service.js";
+import { AssetStorageService } from "@lib/shared/assets/storage.service.js";
+import { AccountDirectoryService } from "@lib/shared/identity/account-directory.service.js";
+import { AllExceptionsFilter } from "@lib/infra/filters/all-exceptions.filter.js";
 
 vi.mock("@lib/shared/generation/generation-queue.js", () => ({
   enqueueVideoGenerationJob: vi.fn(async () => {}),
@@ -25,13 +30,28 @@ vi.mock("@lib/shared/generation/generation-queue.js", () => ({
   closeGenerationQueue: vi.fn(async () => {}),
 }));
 
-// IKFCXE「音频文本上下文生成闭环」公开接口集成（接纳段）：
-// 真 NestFactory 挂载生产 Canvas/Generation 控制器与服务 + 隔离 MySQL（IKFCXE_DATABASE_URL 门控）。
-// 音频与图片/视频同构——画布文本连线在接纳当下推导并冻结 text_attachments 快照；
-// 差异契约：主提示词为空仍拒绝（音频不引入「仅附件生成」）。
-// 本切片不产生上游 HTTP 调用（供应商组合消费由 generation-worker 单测与 Java AudioJobProcessor 测试覆盖）；
-// 生成入队（RocketMQ）未配置时由控制器捕获记日志，不影响断言。
-// 浏览器段（IKFCXE_BROWSER=1：连线 → 面板见附件 → 发送 → 刷新恢复）在同 describe 尾部。
+
+
+vi.mock("@lib/shared/billing/billing-client.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@lib/shared/billing/billing-client.js")>();
+  return {
+    ...actual,
+    sharedBillingClient: () => ({
+      charge: async () => ({ chargedCredits: 1, catalogVersion: 1, duplicated: false }),
+      quote: async () => ({ credits: BigInt(1), catalogVersion: 1 }),
+      queryBalance: async () => ({ availableCredits: 0, expiring: [] }),
+      listTransactions: async () => ({ items: [], total: 0 }),
+    }),
+  };
+});
+
+
+
+
+
+
+
+
 describe.skipIf(!process.env.IKFCXE_DATABASE_URL)("Text attachment audio public API (IKFCXE)", () => {
   const prisma = new PrismaService();
   const projects = new ProjectService(prisma);
@@ -54,25 +74,37 @@ describe.skipIf(!process.env.IKFCXE_DATABASE_URL)("Text attachment audio public 
         default_size: "",
         default_aspect_ratio: "",
         features: {},
+
+        channel: "seedream-audio",
       },
       update: { features: {} },
     });
     const canvasService = new CanvasService(prisma, projects);
     Reflect.defineMetadata("design:paramtypes", [CanvasService], CanvasesController);
-    Reflect.defineMetadata("design:paramtypes", [ProjectService, GenerationCommandService, ModelCapabilityReadService, GenerationCostEstimatorService, CanvasService], GenerationJobsController);
+    Reflect.defineMetadata("design:paramtypes", [ProjectService, GenerationCommandService, ModelCapabilityReadService, CanvasService, MaterialService, AssetService, AssetStorageService, AccountDirectoryService], GenerationJobsController);
     Reflect.defineMetadata("design:paramtypes", [ModelCapabilityReadService], GenerationModelsController);
     Reflect.defineMetadata("design:paramtypes", [ProjectService, CanvasService, SnapshotService, PrismaService], ProjectsController);
     class HarnessModule {}
     Module({ controllers: [CanvasesController, GenerationJobsController, GenerationModelsController, ProjectsController], providers: [
+
+
+      { provide: APP_FILTER, useClass: AllExceptionsFilter },
+      { provide: MaterialService, useValue: new MaterialService(prisma, new SystemSettingsService(prisma)) },
+      { provide: AssetService, useValue: new AssetService(prisma, new AssetStorageService()) },
+      { provide: AssetStorageService, useValue: new AssetStorageService() },
       { provide: CanvasService, useValue: canvasService },
       { provide: ProjectService, useValue: projects },
       { provide: PrismaService, useValue: prisma },
       { provide: SnapshotService, useValue: new SnapshotService(prisma) },
       { provide: GenerationCommandService, useValue: new GenerationCommandService(prisma) },
       { provide: ModelCapabilityReadService, useValue: new ModelCapabilityReadService(prisma) },
-      { provide: GenerationCostEstimatorService, useValue: new GenerationCostEstimatorService() },
+
+      { provide: MaterialService, useValue: new MaterialService(prisma, new SystemSettingsService(prisma)) },
+      { provide: AssetService, useValue: new AssetService(prisma, new AssetStorageService()) },
+      { provide: AccountDirectoryService, useValue: new AccountDirectoryService(prisma) },
     ] })(HarnessModule);
     app = await NestFactory.create(HarnessModule, { logger: false, bodyParser: false });
+    app.useGlobalFilters(new AllExceptionsFilter());
     app.use(json({ limit: "16mb" }));
     app.setGlobalPrefix("api");
     app.use((req: { user: unknown }, _res: unknown, next: () => void) => {
@@ -150,13 +182,13 @@ describe.skipIf(!process.env.IKFCXE_DATABASE_URL)("Text attachment audio public 
     expect(job).not.toBeNull();
     expect(job!.input.target_node_id).toBe("media-1");
     expect(job!.input.prompt).toBe("生成环境音");
-    // 与当时画布一致：仅 target=media-1 且 source 为 textNode 的边，按 edges 数组顺序；title 缺省 ""
+
     expect(job!.input.text_attachments).toEqual([
       { node_id: "text-b", title: "", text: "雨夜街道，两个人争吵" },
       { node_id: "text-a", title: "风格", text: "赛博朋克城市" },
     ]);
     expect(job!.input.model_id).toBe(MODEL_ID);
-    // 音频无 aspect_ratio（validateCommon 跳过）
+
     expect(job!.input.aspect_ratio).toBeUndefined();
   });
 
@@ -167,11 +199,11 @@ describe.skipIf(!process.env.IKFCXE_DATABASE_URL)("Text attachment audio public 
     expect((await saveCanvas(projectId, nodes, edges, "missing")).status).toBe(200);
 
     const missing = await createJob(projectId, audioJobBody("ghost", "哼一段旋律"));
-    expect(missing.code).toBe(400);
+    expect(missing.code).toBe(1002);
     expect(missing.msg).toBe("目标节点不存在或不是音频媒体节点");
 
     const videoTarget = await createJob(projectId, audioJobBody("media-v", "哼一段旋律"));
-    expect(videoTarget.code).toBe(400);
+    expect(videoTarget.code).toBe(1002);
     expect(videoTarget.msg).toBe("目标节点不存在或不是音频媒体节点");
 
     expect(await jobCount(projectId)).toBe(0);
@@ -184,7 +216,7 @@ describe.skipIf(!process.env.IKFCXE_DATABASE_URL)("Text attachment audio public 
     expect((await saveCanvas(projectId, nodes, edges, "missing")).status).toBe(200);
 
     const created = await createJob(projectId, audioJobBody("media-1", ""));
-    expect(created.code).toBe(400);
+    expect(created.code).toBe(1002);
     expect(created.msg).toBe("prompt 无效");
     expect(await jobCount(projectId)).toBe(0);
   });
@@ -199,7 +231,7 @@ describe.skipIf(!process.env.IKFCXE_DATABASE_URL)("Text attachment audio public 
     expect(job!.input.prompt).toBe("纯音乐，节奏轻快");
   });
 
-  // IKH8AU：附件正文不再计入长度（ADR-0088 起正文由提交方给全，服务端不再组合）。
+
   it("长附件不额外计数：正文短、附件 31000 字 → 创建成功", async () => {
     const projectId = (await projects.create("987654", "IKFCXE attachments not counted")).id;
     const nodes = [mediaNode("media-1", "audio"), textNode("text-1", "文".repeat(31_000))];
@@ -227,7 +259,7 @@ describe.skipIf(!process.env.IKFCXE_DATABASE_URL)("Text attachment audio public 
     const first = await createJob(projectId, audioJobBody("media-1", "环境音"));
     expect(first.code).toBe(200);
 
-    // 断开 text-1 → media-1（保留 text-1 → media-2）
+
     const canvas = await getCanvas(projectId);
     const detached = await saveCanvas(projectId, nodes, [{ id: "e2", source: "text-1", target: "media-2" }], canvas.version);
     expect(detached.status).toBe(200);
@@ -237,13 +269,13 @@ describe.skipIf(!process.env.IKFCXE_DATABASE_URL)("Text attachment audio public 
     const secondJob = await readJob(second.data.generation_job_id);
     expect(secondJob!.input.text_attachments).toEqual([]);
 
-    // 其他目标关系保留：media-2 仍消费附件
+
     const otherTarget = await createJob(projectId, audioJobBody("media-2", "配音"));
     expect(otherTarget.code).toBe(200);
     const otherJob = await readJob(otherTarget.data.generation_job_id);
     expect(otherJob!.input.text_attachments).toEqual([{ node_id: "text-1", title: "风格", text: "雨夜街道" }]);
 
-    // 历史任务快照不改写
+
     const firstJob = await readJob(first.data.generation_job_id);
     expect(firstJob!.input.text_attachments).toEqual([{ node_id: "text-1", title: "风格", text: "雨夜街道" }]);
   });
@@ -257,7 +289,7 @@ describe.skipIf(!process.env.IKFCXE_DATABASE_URL)("Text attachment audio public 
     expect(first.code).toBe(200);
     const originalJobId = first.data.generation_job_id as string;
 
-    // 接纳后改写正文并断开连线：重试不得回读这些变更
+
     const canvas = await getCanvas(projectId);
     const edited = await saveCanvas(projectId, [mediaNode("media-1", "audio"), textNode("text-1", "改写后正文", "风格")], [], canvas.version);
     expect(edited.status).toBe(200);
@@ -299,7 +331,7 @@ describe.skipIf(!process.env.IKFCXE_DATABASE_URL)("Text attachment audio public 
     const created = await createJob(projectId, audioJobBody("media-1", "生成环境音"));
     expect(created.code).toBe(200);
     const job = await readJob(created.data.generation_job_id);
-    // 同名（title 相同）不串用：node_id 身份各自冻结自己的正文
+
     expect(job!.input.text_attachments).toEqual([
       { node_id: "text-a", title: "场景", text: "雨夜的争吵" },
       { node_id: "text-b", title: "场景", text: "清晨的鸟鸣" },
@@ -327,21 +359,21 @@ describe.skipIf(!process.env.IKFCXE_DATABASE_URL)("Text attachment audio public 
     const secondJob = await readJob(second.data.generation_job_id);
     expect(secondJob!.input.text_attachments).toEqual([{ node_id: "text-1", title: "场景", text: "改写后的正文" }]);
 
-    // 历史任务快照不被改写
+
     const firstJob = await readJob(first.data.generation_job_id);
     expect(firstJob!.input.text_attachments).toEqual([{ node_id: "text-1", title: "场景", text: "原始正文" }]);
   });
 
-  // 浏览器段（工单「验收证据」节）：真实浏览器 + 真实业务 API + 隔离 MySQL 走完整音频提交路径。
-  // 覆盖：从画布选择建线（到节点选择）、重复来源去重、同名卡不串用（完整正文预览）、长文浮层滚动至末尾、
-  // 移入浮层保持/移出关闭、切换目标后返回恢复、× 移除断线（仅断当前目标）、发送冻结（附件正文 + 主提示词共同入库）、刷新恢复关系。
+
+
+
   it.runIf(process.env.IKFCXE_BROWSER)("browser: pick → dedupe → same-title preview → long-text scroll/hover-into → target switch → remove → send freezes → reload restores", async () => {
     const { chromium } = await import("playwright");
     const { createServer: createVite } = await import("../../../../../../web/node_modules/vite/dist/node/index.js");
     const projectId = (await projects.create("987654", "IKFCXE browser")).id;
-    // 播种：t1 已连线两目标（正文A）、t2 未连线同标题长正文（同名卡身份靠 node_id 区分；
-    // 多段落 + 末尾标记用于浮层滚动到底验收）；media-2 承载切换目标验收。
-    // 生成目标为成品卡身份（jobId），点击卡自动打开音频草稿面板。
+
+
+
     const longBody = Array.from({ length: 24 }, (_, i) => `第${i + 1}段落：雷声滚过屋顶，雨点砸在窗台上。`).join("\n");
     const LONG_TAIL_MARK = "末尾标记-QZ3";
     const seeded = await saveCanvas(projectId, [
@@ -383,7 +415,7 @@ describe.skipIf(!process.env.IKFCXE_DATABASE_URL)("Text attachment audio public 
       });
       expect(generationRequests).toEqual([]);
 
-      // 点击音频成品卡打开草稿面板：连线文本卡以 FileText 缩略图进参考栏
+
       await media.locator('[data-testid="media-content"]').click();
       await vi.waitFor(async () => expect(await page.locator('[data-testid="dock-text-ref"]').count()).toBe(1));
       await page.locator('[data-testid="dock-text-ref"]').first().hover();
@@ -391,32 +423,32 @@ describe.skipIf(!process.env.IKFCXE_DATABASE_URL)("Text attachment audio public 
       await overlay.waitFor();
       expect(await overlay.innerText()).toContain("雨夜街道，两个人争吵");
 
-      // 从画布选择文本卡：+ → 从画布选择 → 点击画布 text-2 → 附件 +1（选择交互建线）
+
       async function pickFromCanvas() {
         const add = page.locator('button[title="从资产中选择 / 从节点添加素材"]');
         await add.click({ timeout: 5000 });
         await page.getByRole("button", { name: "从节点添加素材", exact: true }).click({ timeout: 5000 });
       }
       await pickFromCanvas();
-      // pickMode 激活标志：画布顶部出现「到节点选择」提示条
+
       await vi.waitFor(async () => {
         expect(await page.locator("text=到节点选择").count()).toBeGreaterThan(0);
       }, { timeout: 5000 });
       await text2.click();
       await vi.waitFor(async () => expect(await page.locator('[data-testid="dock-text-ref"]').count()).toBe(2));
 
-      // 切换目标后返回：media-2 面板只有自己的关系（text-1），返回 media-1 恢复两枚附件
+
       await media2.locator('[data-testid="media-content"]').click();
       await vi.waitFor(async () => expect(await page.locator('[data-testid="dock-text-ref"]').count()).toBe(1));
       await media.locator('[data-testid="media-content"]').click();
       await vi.waitFor(async () => expect(await page.locator('[data-testid="dock-text-ref"]').count()).toBe(2));
 
-      // 同名卡不串用：第二个缩略图预览的是 text-2 自己的正文；浮层不带来源标题
+
       await page.locator('[data-testid="dock-text-ref"]').nth(1).hover();
       await vi.waitFor(async () => expect(await overlay.innerText()).toContain("远处有雷声"));
       expect(await overlay.innerText(), "浮层无标题（来源名称不进浮层）").not.toContain("雨夜");
 
-      // 长文滚动至末尾（IKFCVS 测试决策：长文可读至末尾而非截断摘要）
+
       const scrollable = await overlay.evaluate((el) => {
         const inner = el.firstElementChild as HTMLElement | null;
         return inner ? { scrollHeight: inner.scrollHeight, clientHeight: inner.clientHeight } : null;
@@ -434,7 +466,7 @@ describe.skipIf(!process.env.IKFCXE_DATABASE_URL)("Text attachment audio public 
       });
       expect(tailVisible, "长文本可滚动至末尾").toBe(true);
 
-      // 移入浮层保持打开 / 移出图标与浮层后关闭（IKFCVS 用户故事 14/15）
+
       const overlayBox = (await overlay.boundingBox())!;
       await page.mouse.move(overlayBox.x + overlayBox.width / 2, overlayBox.y + overlayBox.height / 2);
       await page.waitForTimeout(400);
@@ -443,13 +475,13 @@ describe.skipIf(!process.env.IKFCXE_DATABASE_URL)("Text attachment audio public 
       await page.waitForTimeout(400);
       expect(await overlay.count(), "移出图标与浮层后关闭").toBe(0);
 
-      // 重复选择同一来源去重：再选 text-2，数量不变
+
       await pickFromCanvas();
       await text2.click();
       await page.waitForTimeout(300);
       expect(await page.locator('[data-testid="dock-text-ref"]').count()).toBe(2);
 
-      // 移除 text-2（× 仅断当前目标连线）：附件归 1、画布连线归 1
+
       await page.locator('[data-testid="dock-text-ref"]').nth(1).hover();
       await page.locator('[data-testid="dock-text-ref"]').nth(1).locator('button[title="移除"]').click();
       await vi.waitFor(async () => expect(await page.locator('[data-testid="dock-text-ref"]').count()).toBe(1));
@@ -457,8 +489,8 @@ describe.skipIf(!process.env.IKFCXE_DATABASE_URL)("Text attachment audio public 
         expect(await page.locator(".react-flow__edge").count(), "断线后画布连线归 2（text-1 仍连两目标）").toBe(2);
       });
 
-      // 发送：主提示词非空（音频不允许仅附件发送，前端禁用与后端拒绝一致）；
-      // 请求体携带 target_node_id 且 type=audio
+
+
       await page.locator('[data-testid="audio-input"] [contenteditable]').fill('生成环境音，参考');
       await page.getByRole('button', { name: '插入引用 雨夜', exact: true }).click();
       await vi.waitFor(async () => expect(await page.locator('[data-testid="asset-ref-valid"]').innerText()).toBe('文本1'));
@@ -468,7 +500,7 @@ describe.skipIf(!process.env.IKFCXE_DATABASE_URL)("Text attachment audio public 
       expect(generationRequests[0].body.target_node_id).toBe("media-1");
       expect((generationRequests[0].body.parameters as Record<string, unknown>).prompt).toBe("生成环境音，参考文本1");
 
-      // 库内冻结：附件完整正文与主提示词共同进入任务快照
+
       await vi.waitFor(async () => expect(await jobCount(projectId)).toBe(1), { timeout: 10_000 });
       const rows = await prisma.client.generation_jobs.findMany({
         where: { project_id: BigInt(projectId) }, orderBy: { id: "asc" },
@@ -476,15 +508,15 @@ describe.skipIf(!process.env.IKFCXE_DATABASE_URL)("Text attachment audio public 
       const input = rows[0].input as Record<string, unknown>;
       expect(input.target_node_id).toBe("media-1");
       expect(input.prompt).toBe("生成环境音，参考文本1");
-      // IKG6EK / ADR-0088：composed_prompt 与 prompt_doc 均已退役——前者是编号清单组合，
-      // 后者整体惰性化（不读、不冻结）。正文一律取 parameters.prompt。
+
+
       expect(input).not.toHaveProperty("composed_prompt");
       expect(input).not.toHaveProperty("prompt_doc");
       expect(input.text_attachments).toEqual([
         { node_id: "text-1", title: "雨夜", text: "雨夜街道，两个人争吵" },
       ]);
 
-      // 刷新：连线恢复渲染；重新打开面板附件回归（关系持久恢复）
+
       await page.reload();
       await text2.waitFor();
       await media.waitFor();

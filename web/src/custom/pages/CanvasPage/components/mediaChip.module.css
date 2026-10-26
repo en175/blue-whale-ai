@@ -1,0 +1,108 @@
+
+.mediaChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0 2px;
+  padding: 1px 6px 1px 5px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: #e8e8ec;
+  font-size: 12px;
+  line-height: 20px;
+  vertical-align: middle;
+  user-select: none;
+}
+
+.mediaChip:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.mediaChipInvalid {
+  background: rgba(248, 113, 113, 0.14);
+  border-color: rgba(248, 113, 113, 0.45);
+  color: #fca5a5;
+}
+
+.mediaChipInvalid[role='button'] {
+  cursor: pointer;
+}
+
+.mediaChipInvalid[role='button']:hover {
+  background: rgba(248, 113, 113, 0.24);
+}
+
+.mediaChipThumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  object-fit: cover;
+  pointer-events: none;
+}
+
+.mediaChipIcon {
+  flex: none;
+}
+
+.mediaChipLabel {
+  white-space: nowrap;
+}
+
+.mediaChipThumbWrap {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+}
+
+.mediaChipAudioIcon {
+  width: 18px;
+  text-align: center;
+}
+
+
+.chipPreview {
+  position: fixed;
+  transform: translateY(calc(-100% - 8px));
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 280px;
+  padding: 8px;
+  background-color: #242424;
+  border: 1px solid #3a3a3a;
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  z-index: 10001;
+  pointer-events: none;
+}
+
+.chipPreviewBelow {
+  transform: none;
+}
+
+.chipPreview img,
+.chipPreview video {
+  max-width: 264px;
+  max-height: 200px;
+  border-radius: 6px;
+  object-fit: contain;
+}
+
+.chipPreviewAudio {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 18px 12px;
+  color: #bbb;
+  font-size: 13px;
+}
+
+.chipPreviewName {
+  max-width: 264px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #aaa;
+  font-size: 12px;
+}

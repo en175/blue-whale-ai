@@ -1,0 +1,468 @@
+syntax = "proto3";
+
+// billing-svc 的**同步 RPC 面**。
+//
+// ⚠️ 金额单位：int64 **整数积分**（账本单位，见《计费逻辑详细设计》§1）。
+//    管线内部用 mc（1 积分 = 1000 mc）保精度，出口一次性四舍五入成积分——
+//    所以**线上的金额字段一律是积分**，不是 mc。看到 mc 只可能是在讲单价/中间量。
+package billing.v1;
+
+import "common/v1/types.proto";
+
+option java_package = "com.bluewhale.contracts.billing.v1";
+option java_multiple_files = true;
+
+service BillingService {
+
+  // 失败语义（调用方须 fail closed，见《架构设计》§11）：
+  //   - 余额不足        → FAILED_PRECONDITION / INSUFFICIENT_CREDITS
+  //   - 该组合算不出价  → INVALID_ARGUMENT / UNPRICEABLE（说明**定价漏配**）
+  //   - billing 不可用  → UNAVAILABLE
+  rpc Charge(ChargeRequest) returns (ChargeResponse);
+
+  // 余额与持有批次（用户可见）。允许短缓存（Redis，写时失效）。
+  rpc QueryBalance(QueryBalanceRequest) returns (QueryBalanceResponse);
+
+  // 用户可见流水（**一个业务动作一行**，见《计费逻辑详细设计》§2.3）。
+  rpc ListTransactions(ListTransactionsRequest) returns (ListTransactionsResponse);
+
+  // 该用户的**批次台账**（积分明细「已获取」页签）。
+  //
+  // ⚠️ **与 ListTransactions 是两个维度，不是重复**：流水是「一个业务动作一行」，
+  //    批次是「一笔发放一行」。**到期明细只有批次给得出** —— 流水行没有 `expires_at`，
+  //    而 PRD §9.5 要求「用户侧可在积分记录中查看到期明细」。
+  //
+  // ⚠️ 加这条使**用户面 RPC 从 3 条变 4 条**，与 `contracts/README.md`「RPC 面很小」
+  //    的约定有出入：这一条是需求本身要求出来的（同一处需求见 PRD §9.5 与原型「已获取」页签），
+  //    该破就破。不要再顺手往这个面加第五条。
+  rpc ListLots(ListLotsRequest) returns (ListLotsResponse);
+
+  // 计价 —— **只算不扣**。切换前的影子模式与前端价格预览用。
+  rpc Quote(QuoteRequest) returns (QuoteResponse);
+}
+
+message ChargeRequest {
+  int64  user_id           = 1;
+  string command_id        = 2;
+  int64  job_id            = 3;
+  string model_id          = 4;
+  string task_type         = 5;
+  common.v1.SpecAttrs specs = 6; // 原始规格，billing 内部 normalize
+  string title             = 7;  // 展示文案快照，写进用户流水
+
+  // ★ 用户等级：free | basic | pro | max（空 = free）。
+  //
+  // 为什么由调用方传、而不是 billing 反查 identity：
+  //   调用方在校验会话时**已经拿到** tier（identity.VerifySession 的返回值里就有），
+  //   多传一个字段是零成本；让 billing 再发一次 RPC 则是在最热的路径上加一跳。
+  //
+  // ⚠️ 这是**由调用方断言**的输入：传错档位就能拿到不该有的折扣。
+  string tier              = 8;
+
+  // ⚠️ **必填**。留空 = billing 算不出价，直接拒单（INVALID_ARGUMENT / UNPRICEABLE）。
+  //    这里**没有**「回落去查目录」那条路：目录里的模型规则已经退场，它现在只装
+  //    `creditsPerYuan` 与 `discountPolicy` 两项全局配置。
+  //    （曾经有过一个过渡期的回落到目录的分支，随目录规则一起删了——那套从未上线，
+  //     留兼容分支没有保护对象。）
+  //
+  // ⚠️ billing 收到后会用 `CatalogCompiler` 编译它——**编译不过就拒单**（UNPRICEABLE）。
+  //    写侧闸门（backend 的 `constants.ts`）是第一道，这里编译是最后一道：
+  //    两者拦的不是同一件事——前者拦「脏配置存不进去」，后者拦「脏配置已经在库里了」。
+  string rule_snapshot     = 9;
+}
+
+message ChargeResponse {
+  int64 charged_credits  = 1; // 整数积分
+  int32 catalog_version  = 2;
+  bool  duplicated       = 3; // 幂等命中
+}
+
+message QuoteRequest {
+  int64  user_id           = 1;
+  string model_id          = 2;
+  string task_type         = 3;
+  common.v1.SpecAttrs specs = 4;
+  // 用户等级：free | basic | pro | max（空 = free）。折扣解析用。
+  string tier              = 5;
+  reserved 6;
+  reserved "usage";
+  // 预览必须与实扣取到**同一份**规则——否则「预览一个价、实扣另一个价」。
+  string rule_snapshot     = 7;
+}
+
+message QuoteResponse {
+  int64 credits          = 1; // **整数积分** —— 用户看到的与账本记的是同一个数
+  int32 catalog_version  = 2; // 报了哪个版本；影子对账时按它复现
+  // 命中的折扣系数（万分比，10000 = 原价）与明细，供「为什么这个价」追溯
+  int32 discount_bp                = 3;
+  repeated AppliedDiscount applied = 4;
+}
+
+message AppliedDiscount {
+  string source    = 1; // member | promotion | frozen
+  string code      = 2; // 营销活动的业务码；会员折扣为空
+  int32  factor_bp = 3; // 该条规则自身的系数
+}
+
+message QueryBalanceRequest {
+  int64 user_id = 1;
+}
+
+message QueryBalanceResponse {
+  reserved 2;
+  reserved "frozen_credits";
+  int64 available_credits = 1;
+  repeated ExpiringLot expiring = 3; // 临期批次，前端展示「X 积分将于 Y 日过期」
+
+  // 按来源拆分的**可用**积分（充值 / 充值赠送 / 每日赠送…）。
+  //
+  // ⚠️ **这不是第二个金额**，是同一个金额的分量：`Σ by_source` 必须**逐字等于**
+  //    `available_credits`（同一条 WHERE：该用户的、未过期的批次；只多一个 GROUP BY）。
+  //    这是本字段能存在的唯一理由 —— 「任何用户可见界面永远只出现一个金额」
+  //    （《计费逻辑详细设计》§2.3.1）讲的是**不许出现两个互相独立的数**，
+  //    不是「不许知道钱由什么构成」。拆出来的分量加起来必须就是那一个数，
+  //    对不上就是 bug，不是口径差异。
+  //
+  // 列出仍持有**未过期**批次的来源（某来源可用为 0 时仍会出现 —— 它确实存在，
+  // 只是都被冻结了）。顺序不约定，消费端自己按文案表排。
+  repeated SourceCredits by_source = 4;
+}
+
+// 一个来源的可用积分。`source` 取自批次的 `CreditSource.key()` ——
+// **注意与流水侧的取名不同**：批次写 `purchased`，而 `UserTransaction.type` 显示 `recharge`
+// （`TransactionType` 是另一套字面量）。要展示文案时按本字段的批次口径映射。
+message SourceCredits {
+  string source  = 1; // compensation | bonus | gift | daily | invite
+                      // | register | redeem | subscription | purchased
+  int64  credits = 2; // 该类可用积分 Σ(remaining − frozen)
+}
+
+message ExpiringLot {
+  int64  credits    = 1; // 整数积分
+  string expires_at = 2; // RFC3339
+  string source     = 3; // register | daily | invite | redeem | purchased | bonus
+}
+
+message ListTransactionsRequest {
+  int64  user_id     = 1;
+  reserved 2;
+  reserved "type_filter";
+  common.v1.PageRequest page = 3;
+  // 多值类型过滤。空 = 全部。用户的「已消耗」页签要一次取 `consume` 与 `expire`
+  // （原型口径②「已过期并入已消耗」）。
+  repeated string type_filters = 4;
+  string created_from = 5;
+  string created_to   = 6;
+  repeated int64 generation_job_ids = 7;
+}
+
+message ListTransactionsResponse {
+  repeated UserTransaction items = 1;
+  common.v1.PageResponse page = 2;
+}
+
+// ★ 用户可见流水。
+//
+// ⚠️ **刻意不含 reserved_amount** —— 落实「任何用户可见界面永远只出现一个金额」这条硬规则
+//    （《计费逻辑详细设计》§2.3.1）。预扣值只对客服/运营后台可见。
+message UserTransaction {
+  string id         = 1;
+  string type       = 2; // consume | recharge | bonus | daily | invite | redeem
+                         // | subscription | gift | compensation | expire | refund
+                         //
+                         // ⚠️ **退回不单独成一个类型** —— 它就是那条 consume 行的
+                         //    「结算到 0」，与「多退少补」同一条口径：行里永远取终态
+                         //    实际值（失败单 = 0），预扣额另走运营面的 reserved_credits。
+                         //    方向恒为 out，id 与当初那条 pending 行相同 ——
+                         //    既不会出现「消费一行 + 退回一行」，也不会出现「退款 +N」
+                         //    那种无对应支出的进账（流水要能自己加出余额变化）。
+                         //
+                         // ⚠️ refund 目前**没有产生者**（预留表不再产它）。保留这个词是为了
+                         //    充值退款一类的反向资金动作（账本侧 biz_type 已在用）；运营端的
+                         //    类型筛选不再列它，免得筛出一张永远空的页。
+  string direction  = 3; // in | out
+  string title      = 4; // 「视频生成 · seedance-2.5 1080p 5s」
+  int64  amount     = 5; // 整数积分，**最终值，唯一金额**
+  string status     = 6; // pending | done
+  string created_at = 7; // RFC3339
+  string settled_at = 8; // RFC3339，仅 done 时非空
+
+  // 产生这条流水的生成任务 id（十进制字符串）；批次行、过期行等无任务的流水**未设置**。
+  //
+  // ⚠️ billing 只存 id、**查不到任务的语义字段**：`type` / `model_id` / `model_label` / `prompt`
+  //    都在 backend 自己的库里（ADR-0114 不共享库）。由 backend 收了 id 再走
+  //    `JobsService.loadTaskSummaries` 批量补——与运营面 `AdminTransactionItem.generation_job_id`
+  //    同一条链路，别在 billing 侧另起一套。
+  //
+  // ⚠️ 这里是 **id**，不是把四个字段投影进账本契约：账本不该长成一个任务表。
+  optional int64 generation_job_id = 9;
+  string lot_source     = 10;
+  string lot_created_at = 11;
+  string charge_state = 12;
+}
+
+message ListLotsRequest {
+  // ⚠️ **必填，且没有「不限用户」这个模式**。这条是用户面取数：调用方（backend）**只能**
+  //    填会话解析出来的那个 id。与 `AdminListTransactionsRequest.user_id = 0 表示全站`
+  //    是**两回事** —— 那个口子只开在运营面，这里一个都不开。
+  //    billing 侧的适配器会对 `<= 0` 直接返回 INVALID_ARGUMENT，而不是「返回空页」：
+  //    传 0 要么是调用方写错了，要么是在试探越权，两种都该吵得响。
+  int64 user_id = 1;
+  common.v1.PageRequest page = 2;
+  string created_from = 3;
+  string created_to   = 4;
+}
+
+message ListLotsResponse {
+  repeated UserCreditLot items = 1;
+  common.v1.PageResponse page = 2;
+}
+
+// ★ 用户可见批次。
+//
+// ⚠️ **不含预扣 / 冻结明细**：`remaining` 是该批次尚未消耗的**可用量**（冻结已从可用里减掉），
+//    冻结额只对运营面可见 —— 与 `UserTransaction` 不收 `reserved_amount` 是同一条硬规则
+//    （《计费逻辑详细设计》§2.3.1「任何用户可见界面永远只出现一个金额」）。
+//
+// ⚠️ 「获取时间」与「积分生效时间」**是同一个值**：批次一写入即生效，本项目不存在延时生效。
+//    原型画了两列，前端渲染同一个 `created_at` 即可 —— 这里**不给第二个字段**，
+//    真出现延时生效需求时再加，现在加就是一个恒等于 `created_at` 的空壳。
+message UserCreditLot {
+  string lot_id     = 1; // 批次 id（十进制字符串）。前端只拿它做列表 key，不解析成数字
+  string source     = 2; // **批次口径**：purchased | bonus | gift | daily | invite
+                         // | register | redeem | subscription | compensation
+                         //
+                         // ⚠️ 与流水口径**用词不同**：批次写 `purchased`，`UserTransaction.type`
+                         //    写 `recharge`。同一件事两个词，前端不要混用同一张文案表。
+  int64  amount     = 3; // 发放时的原始积分
+  int64  remaining  = 4; // 该批尚未消耗的可用量（≤ amount）
+  string created_at = 5; // RFC3339，发放时刻
+  string expires_at = 6; // RFC3339；**空串 = 永久有效**（proto3 无 null，空串是唯一的「没有」）
+  string biz_type   = 7; // 来源语义：recharge / …；无关联业务时为空串
+  string biz_id     = 8; // 关联单号（充值批次 = 订单号）；无关联时为空串
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// 运营面（客服 / 运营后台）
+//
+// ⚠️ **与用户面刻意分开**，不是重复：用户面只出现一个金额（上面那条硬规则），
+//    运营面要能回答「这笔钱为什么先冻了 12、最后只扣了 1」—— 所以它看得见预扣额。
+//
+// ── 迁移说明（2026-09-26）──────────────────────────────────────────────────
+// 这组能力此前**只有 HTTP**（`/admin/**`，内网、无鉴权），与产品面的 gRPC 分裂成
+// 两套协议、两套客户端、两份同一读模型的实现 —— 加一个字段要判断「该进哪个面」，
+// 而那个判断没有任何文档，只能靠 proto 注释和代码惯例猜。
+//
+// ⚠️ **当初为什么是 HTTP，以及为什么现在可以改**（这段是给下一个读代码的人写的，
+//    它很重要——不然会照着旧注释把迁移回滚掉）：
+//
+//   旧注释（`consumption-records.controller.ts`）写的是「没有复用用户面那条 gRPC
+//   `ListTransactions`：它的契约里 `user_id` 必填，语义是『把我的账给我』；管理端要的是
+//   『某个人的 / 所有人一起看』——给**用户面契约**加『userId 可不填』等于给每个持 token
+//   的调用者开了拉全站流水的口子」。
+//
+//   ⚠️ 那个顾虑反驳的是「**复用用户面那条 rpc / 给它的 message 加字段**」，
+//      **不是**「用 gRPC」。而本服务是一条**独立**的契约：
+//      `AdminListTransactionsRequest.user_id` 不填 = 全站，**用户面那条一个字没动** ——
+//      口子没有开。这一点是本迁移成立的前提，改动这里之前先确认它仍然成立。
+//
+//   所以这次迁移**满足**了旧注释的要求（用户面契约不受影响），同时消掉了它当时
+//   不得不接受的代价（一个内网无鉴权的 HTTP 端口 + 两套协议）。独立服务还让鉴权与
+//   网络策略**可以**按服务配，而不是按「这个端口上恰好都是运营接口」——
+//
+//   ⚠️ **但这个收益目前没有兑现**：`GrpcServerConfig` 把两个 service 挂在**同一个端口**，
+//      写在这里，是因为 2026-09-26 的架构评审正是拿这条理由反驳了那次实现 ——
+//      契约里承诺、代码里没做到，比压根不承诺更坏。要兑现就分端口；不打算分，就删掉上面那句。
+//
+// 本次先把**读**迁过来（下面四条）；写的（发放 / 结算 / 返还 / 目录发布 / 促销 /
+// 会员折扣）随后按同一形状迁。分两步是刻意的：每一步都能独立编译、独立验证，
+// 中途停下也不会留下「端口切了一半」的状态。
+// ══════════════════════════════════════════════════════════════════════════════
+service BillingAdminService {
+
+  // 运营面流水（**一个业务动作一行**）。与 ListTransactions **同源同模型**，
+  // 唯一差别是每行多带一个 `reserved_credits` —— 那个字段是这组接口存在的全部理由。
+  //
+  // 失败语义：UNAVAILABLE（billing 不可用）。查询本身不该失败。
+  rpc AdminListTransactions(AdminListTransactionsRequest) returns (AdminListTransactionsResponse);
+
+  // 某用户的余额与临期批次。
+  //
+  // ⚠️ **这条不是从 HTTP 迁过来的**（HTTP 面从来没有查余额的接口），它是**新增**的。
+  //    加在这里是因为它已有一处明确、写在仓里的需求：
+  //    `backend/libs/shared/persistence/admin-user-query.ts` 的管理端用户列表
+  //    `balance` / `totalRecharge` / `totalSpend` 三列**当前硬编码为 0**，注释写着
+  //    「属于计费域，而计费侧还没按用户维度接过来……**等计费接上再回填**」。
+  //    这条 rpc 就是「接上」的那一半。
+  //
+  // ⚠️ **但它只够回填「详情页」，不够回填「列表页」**：列表一页最多 100 个用户，
+  //    逐个调这条就是 N+1（100 次跨进程往返，每次还要各自算一遍批次）。
+  //    回填列表需要一个**批量**形态（`repeated user_id` → map），那还要在 billing 侧
+  //    加一条按 user_id IN (...) 分组的 SQL —— 是独立的一件事，**故意没塞进这次迁移**。
+  //    写在这里是为了让它是一个**已知缺口**，而不是被后来的人当成漏掉。
+  //    ★ 该缺口已由下面的 AdminQueryUserStats 补上（IKJ5M7）。
+  //
+  // 失败语义：UNAVAILABLE（billing 不可用）。用户不存在**不是**错误 —— 余额为 0
+  // 与「查无此人」在账本上无从区分（没有批次即没有余额），返回零值即可。
+  rpc AdminQueryBalance(AdminQueryBalanceRequest) returns (AdminQueryBalanceResponse);
+
+  // ★ **批量**形态：一次问一页用户的「可用 / 累计充值 / 累计消费」。管理端用户列表用。
+  //
+  // ⚠️ 与上面那条的分工：`AdminQueryBalance` 是**单人**的，且带临期批次与欠费额 ——
+  //    那几项够回填**详情页**；**列表页**一页 100 个用户，逐个调它就是 100 次跨进程
+  //    往返、每次还要各算一遍批次。所以这里另开一条批量的（就是上面那段说的缺口）。
+  //
+  // ⚠️ 两条的**「可用」口径必须逐字相同**（同一条 WHERE 谓词，只多一个 `user_id IN`）。
+  //    它俩算出来的余额不一样就是 bug，不是「列表和详情本来就可能不一致」。
+  //
+  // ⚠️ **刻意不返回冻结**：列表页那一列展示的是**可用**（不含冻结），没人读冻结；
+  //    详情页要冻结走 AdminQueryBalance。加一个没有读方的字段进契约，迟早会被
+  //    当成「已实现」而误导下一个人。
+  //
+  // 失败语义：UNAVAILABLE（billing 不可用）。用户不存在**不是**错误，见响应注释。
+  rpc AdminQueryUserStats(AdminQueryUserStatsRequest) returns (AdminQueryUserStatsResponse);
+
+  // 区间内**已结算的实际消耗**合计（运营对账用）。
+  rpc AdminConsumedCredits(AdminConsumedCreditsRequest) returns (AdminConsumedCreditsResponse);
+
+  // 当前生效的定价目录原文（运营页展示 + 排查「这个模型为什么算不出价」）。
+  rpc AdminGetActiveCatalog(AdminGetActiveCatalogRequest) returns (AdminGetActiveCatalogResponse);
+}
+
+message AdminListTransactionsRequest {
+  int64  user_id    = 1; // 0 = 全部用户
+  string type       = 2; // consume | grant | ledger；空 = 全部
+                         // ⚠️ 运营面这个字面量与用户面 `UserTransaction.type` **不是一套**
+                         //    （`grant`/`ledger` 是分区名，不是流水类型），所以它是单值、也不跟着改多值
+  int32  page_size  = 3; // 0 = 默认页大小
+  reserved 4;
+  reserved "page_token";
+  // 页码，从 1 起。**offset 分页**：翻页期间新增的行会把后面的行整体下移，
+  // 运营可能看到重复行 —— 这是与用户面一起换掉的代价，见 `common/v1/types.proto`。
+  int32  page       = 5;
+}
+
+message AdminListTransactionsResponse {
+  repeated AdminTransactionItem items = 1;
+  common.v1.PageResponse page = 2;
+}
+
+// 运营面的一行流水 —— 与 UserTransaction 同一个读模型，多 `user_id` / `reserved_credits`
+// 与 `generation_job_id` 三个管理面独有的列。
+message AdminTransactionItem {
+  string id         = 1;
+  // 归属用户。**管理面独有的列** —— UserTransaction 里没有它（用户只看自己那份，带了是冗余）。
+  //
+  // ⚠️ 这一列不是装饰：管理面的全部理由就是「某个人的 / **所有人一起看**」。后者
+  //    （请求里 user_id = 0）若响应不带它，页面上就是一列**没有主人的流水**，
+  //    运营拿着它回答不了「这笔是谁的」——而「所有人一起看」正是这条接口存在的理由之一。
+  //    HTTP 面的 Item 一直在投影这一列，迁移时**不能丢**。
+  int64  user_id    = 2;
+  string type       = 3; // 同 UserTransaction.type
+  string direction  = 4; // in | out
+  string title      = 5; // 「视频生成 · seedance-2.5 1080p 5s」
+  // 整数积分，该行**唯一的金额**（语义随 status：pending = 预计消耗，done = 实际消耗）
+  int64  amount     = 6;
+  // ★ 该行预留当初冻了多少（整数积分）。**只有消费行有值。**
+  //
+  // ⚠️ 用显式 presence 而不是「0 = 没有」：0 是「冻了 0」，缺值是「这个概念不适用于
+  //    这一行」（发放 / 账本行压根没有预扣）。前端靠这个区别决定显不显示 ——
+  //    混成一个数就会出现「发放行显示预扣 0」。本文件第一次用 proto3 的 optional。
+  optional int64 reserved_credits = 7;
+  string status     = 8;
+  string created_at = 9; // RFC3339
+  string settled_at = 10; // RFC3339，未结算为空串
+  // ★ 该行关联的生成任务（`billing_cost_reservations.generation_job_id`）。**只有消费行有值。**
+  //
+  // ⚠️ 与 `reserved_credits` 同一个 presence 口径：缺值不是「任务 0」，是「这一行压根
+  //    没有任务」（发放行 / 账本行）。消费行侧该列 NOT NULL，所以有就是有。
+  //
+  // ⚠️ **它不是给用户看的，是给 backend 用的 join key。** billing 只存 id、不存任务的
+  //    语义：任务类型在 `generation_jobs.type`，模型与提示词在 `input` 里，而那两个都在
+  //    backend 自己的库（ADR-0114 决策 4：不共享库，billing 读不到 `blue_whale`）。
+  optional int64 generation_job_id = 11;
+}
+
+message AdminQueryBalanceRequest {
+  int64 user_id = 1;
+}
+
+message AdminQueryBalanceResponse {
+  reserved 2, 4;
+  reserved "frozen_credits", "receivable_credits";
+  int64 available_credits = 1;
+  repeated AdminExpiringLot expiring = 3;
+}
+
+message AdminExpiringLot {
+  int64  credits    = 1;
+  string expires_at = 2; // RFC3339
+  string source     = 3; // 批次来源（recharge | bonus | …）
+}
+
+message AdminQueryUserStatsRequest {
+  // 一批用户 id（列表页当前页的那些）。空 = 返回空 map，**不是**错误。
+  repeated int64 user_ids = 1;
+}
+
+message AdminQueryUserStatsResponse {
+  // user_id → 该用户的三列。
+  //
+  // ⚠️ **缺键 = 全 0，不是错误**：余额为 0 与「没有任何批次」在账本上无从区分
+  //    （见 AdminQueryBalance 的失败语义）。调用方按 0 渲染，别当成「查无此人」。
+  //
+  // 用 `map` 而不是 `repeated` 就是为了把这条语义钉死：repeated 之下
+  // 「没回这一项」与「回了 0」在调用方是两种写法，很容易写成静默漏。
+  map<int64, AdminUserStats> stats = 1;
+}
+
+message AdminUserStats {
+  // 可用（整数积分）= Σ(remaining − frozen)，只算未过期批次。
+  // 与 AdminQueryBalanceResponse.available_credits **同口径**（同一条 WHERE）。
+  int64 available_credits = 1;
+
+  // 累计充值：**purchased 批次的 `amount` 合计**（整数积分）。
+  //
+  // ⚠️ 只算充值**本金**，不含充值赠送（赠送是 bonus 批次）。「累计充值」问的是
+  //    用户自己充了多少 —— 把赠送折进去，运营拿这个数去对营收就对不上了。
+  int64 total_recharged = 2;
+
+  // 累计消费：**已结算**的实际消耗（整数积分），与 AdminConsumedCredits 同口径 ——
+  // 不含冻结中的预扣（那是「可能消耗」，算进去会让数字随在途任务浮动）。
+  int64 total_consumed = 3;
+}
+
+message AdminConsumedCreditsRequest {
+  string from = 1; // RFC3339；空 = 不限
+  string to   = 2; // RFC3339；空 = 不限
+}
+
+message AdminConsumedCreditsResponse {
+  // **已结算**的实际消耗（整数积分，与用户账本同单位）——
+  // 不含冻结中的预扣：那是「可能消耗」，把它算进消耗额会让对账数字随在途任务浮动
+  int64 consumed_credits = 1;
+}
+
+message AdminGetActiveCatalogRequest {}
+
+message AdminGetActiveCatalogResponse {
+  // 目录原文（逐字，不重新序列化）。
+  //
+  // ⚠️ 它是 MySQL JSON 列的**规范化形态**（键序与空白由 MySQL 决定），与发布时提交的
+  //    那串字节**不同** —— 判断「内容改没改」要解析成对象比，比文本会让一次没改过的
+  //    保存凭空多出版本。管理端「读当前 → 改 → 整份发布」正是靠它起步。
+  //
+  // ⚠️ 回原文而不是让调用方自己拼：让「只改一个单价」的保存顺手把服务端不认识的字段
+  //    （向前兼容空间）抹掉，是更坏的默认值。
+  string document_json = 1;
+  // ★ **-1 = 当前没有生效目录**（不是 0）。与 {@link credits_per_yuan} 同口径：
+  //   没有生效目录时两者都是 -1、且没有内容可给，**不编造**。管理端要在这种情况下
+  //   显示「还没发布过任何目录」并让运营从零建一份 —— 所以它不能是个错误。
+  int64  version       = 2;
+  // 发布时对**提交文本**取的 SHA-256。⚠️ 与上面 document_json 的 hash **不相等**（见其注释）。
+  string document_hash = 3;
+  // 1 元 = 多少积分。★ **充值路径的换算率就是从这里读的**
+  // （`billing-admin-client.ts` 的 `fetchCreditsPerYuan` → 取不到即停，不回落默认值）：
+  // 少了这个字段，「用户看到的积分」就没了核对基准。没有生效目录时 -1。
+  int64  credits_per_yuan = 4;
+}

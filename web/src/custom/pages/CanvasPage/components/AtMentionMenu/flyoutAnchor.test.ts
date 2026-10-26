@@ -1,0 +1,44 @@
+import { describe, expect, it } from 'vitest';
+import { computeFlyoutOffset } from './flyoutAnchor';
+
+const panel = { panelTop: 300, panelHeight: 242 };
+const textRow = { ...panel, rowTop: 486 };
+
+describe('computeFlyoutOffset', () => {
+  it('子菜单顶部对齐触发它的分类行顶部', () => {
+    expect(computeFlyoutOffset({ ...textRow, flyoutHeight: 56 })).toBe(186);
+  });
+
+  it('对齐后子菜单的垂直范围覆盖触发它的那一行', () => {
+    const offset = computeFlyoutOffset({ ...textRow, flyoutHeight: 56 });
+    const rowTopInPanel = textRow.rowTop - panel.panelTop;
+    expect(offset).toBeLessThanOrEqual(rowTopInPanel);
+    expect(offset + 56).toBeGreaterThanOrEqual(rowTopInPanel + 38);
+  });
+
+  it('上方的分类行对应更小的偏移', () => {
+    const image = computeFlyoutOffset({ ...panel, rowTop: 372, flyoutHeight: 56 });
+    expect(image).toBe(72);
+    expect(image).toBeLessThan(computeFlyoutOffset({ ...textRow, flyoutHeight: 56 }));
+  });
+
+  it('下方放不下时整体上移，子菜单不越出面板底部', () => {
+    const offset = computeFlyoutOffset({ ...textRow, flyoutHeight: 232 });
+    expect(offset).toBe(10);
+    expect(offset + 232).toBe(panel.panelHeight);
+  });
+
+  it('子菜单比面板还高时底部贴住面板、向上伸出', () => {
+    expect(computeFlyoutOffset({ ...textRow, flyoutHeight: 300 })).toBe(242 - 300);
+  });
+
+  it('触发行就在面板顶部时不需要偏移', () => {
+    expect(computeFlyoutOffset({ ...panel, rowTop: 300, flyoutHeight: 56 })).toBe(0);
+  });
+
+  it('素材过多时子菜单贴住面板底部，不随分类行上下跳动', () => {
+    const tall = { ...panel, flyoutHeight: 300 };
+    expect(computeFlyoutOffset({ ...tall, rowTop: 372 })).toBe(242 - 300);
+    expect(computeFlyoutOffset({ ...tall, rowTop: 486 })).toBe(242 - 300);
+  });
+});

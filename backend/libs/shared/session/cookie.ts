@@ -1,11 +1,9 @@
-import type { CookieOptions } from "express";
+import type { CookieOptions, Response } from "express";
 
-/** 登录会话 cookie（HttpOnly，浏览器 JS 不可读，防 XSS 窃取会话）。 */
 export const SESSION_COOKIE_NAME = "bw_session";
 
 const SESSION_TTL_SECONDS = 7 * 24 * 60 * 60;
 
-/** cookie 选项：HttpOnly + SameSite=Lax（挡跨站 CSRF POST）+ 生产环境 Secure。 */
 export function sessionCookieOptions(
   env: Readonly<Record<string, string | undefined>> = process.env,
 ): CookieOptions {
@@ -16,4 +14,20 @@ export function sessionCookieOptions(
     path: "/",
     maxAge: SESSION_TTL_SECONDS * 1000,
   };
+}
+
+export function applySessionCookie(
+  res: Pick<Response, "cookie">,
+  token: string,
+): void {
+  res.cookie(SESSION_COOKIE_NAME, token, sessionCookieOptions());
+}
+
+export function clearSessionCookie(
+  res: Pick<Response, "clearCookie">,
+): void {
+  res.clearCookie(SESSION_COOKIE_NAME, {
+    ...sessionCookieOptions(),
+    maxAge: undefined,
+  });
 }

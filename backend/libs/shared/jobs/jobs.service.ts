@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, Logger } from "@nestjs/common";
 import {
   RESOURCE_NOT_FOUND_CODE,
   VIDEO_SCENE_SPLIT_RESULT_KEYS,
@@ -6,10 +6,19 @@ import {
   fail,
   ok,
   videoSceneSplitResultSchema,
+  type PublicGenerationError,
 } from "@lib/contracts";
-import { createJobRepo } from "@lib/shared/persistence/index.js";
+import {
+  createJobRepo,
+  type AdminJobListItem,
+  type AdminJobListFilter,
+  type ChargeTaskSummary,
+  type UserJobIdFilter,
+  type UserJobIdResult,
+} from "@lib/shared/persistence/index.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";
+import { sharedBillingClient } from "@lib/shared/billing/billing-client.js";
 import { fallbackErrorCode, messageFor, projectPublicError } from "./generation-job-error-projection.js";
 
 const MAX_BATCH_IDS = 100;
@@ -24,8 +33,20 @@ export interface ListJobsQuery {
   size: number;
 }
 
+export type AdminJobRecord = Omit<AdminJobListItem, "stored_error"> & {
+  error: PublicGenerationError | null;
+};
+
+export interface AdminJobListResult {
+  records: AdminJobRecord[];
+  total: number;
+  size: number;
+  current: number;
+}
+
 @Injectable()
 export class JobsService {
+  private readonly logger = new Logger(JobsService.name);
   private repoInstance?: ReturnType<typeof createJobRepo>;
 
   private get repo(): ReturnType<typeof createJobRepo> {
@@ -68,6 +89,7 @@ export class JobsService {
     if (query.projectId !== undefined) filter.projectId = query.projectId;
     if (query.ids !== undefined) filter.ids = [...new Set(query.ids)];
     const page = await this.repo.listByUser(userId, filter);
+    await this.resolveCancelledChargeStates(userId, page.records);
     return ok({
       ...page,
       records: page.records.map(({ stored_error: storedError, ...record }) => ({
@@ -77,26 +99,53 @@ export class JobsService {
     });
   }
 
+  async listForAdmin(filter: AdminJobListFilter): Promise<AdminJobListResult> {
+    const page = await this.repo.listForAdmin(filter);
+    return {
+      ...page,
+      records: page.records.map(({ stored_error: storedError, ...record }) => ({
+        ...record,
+        error: projectPublicError(storedError ?? null, record.type),
+      })),
+    };
+  }
+
+  async loadTaskSummaries(
+    jobIds: readonly string[],
+  ): Promise<Map<string, ChargeTaskSummary>> {
+    const ids = [...new Set(jobIds)].filter((id) => VALID_ID.test(id));
+    if (ids.length === 0) return new Map();
+    return this.repo.loadChargeTaskSummaries(ids);
+  }
+
+  async listJobIds(filter: UserJobIdFilter): Promise<UserJobIdResult> {
+    return this.repo.listUserJobIds(filter);
+  }
+
   async getStatus(userId: string, jobId: string) {
     const job = await this.repo.findByIdForUser(jobId, userId);
     if (!job) return fail(RESOURCE_NOT_FOUND_CODE, "资源不存在");
     const owned = await this.project.findOwnedById(job.project_id, userId);
     if (!owned) return fail(RESOURCE_NOT_FOUND_CODE, "资源不存在");
+    await this.resolveCancelledChargeStates(userId, [job]);
 
-    // ADR-0078 二期：失败响应结构 —— { code: 数值码, msg: 中文, data: 纯任务字段 }。
-    // 成功保持 code=200；失败不再用 data.error 子对象，错误码提升到顶层。
     if (job.status === "failed") {
       const projected = projectPublicError(job.stored_error, job.type);
-      // stored_error 为 null（历史数据/非对象 error）时 code 与 msg 同步走类型兜底，
-      // 避免 code=1000 与 msg 类型文案脱节。
       const fallback = fallbackErrorCode(job.type);
       const code = projected?.code ?? errorCodeToNumeric(fallback);
       const msg = projected?.message ?? messageFor(fallback, job.type);
       return fail(code, msg, {
+        code: projected?.reason ?? fallback,
         job_id: job.job_id,
         status: job.status,
         progress: job.progress,
         asset: job.asset,
+        video_stage: job.video_stage,
+        source_sample_job_id: job.source_sample_job_id,
+        final_job_id: job.final_job_id,
+        finalize_deadline_at: job.finalize_deadline_at,
+        charge_state: job.charge_state,
+        actual_credits: job.actual_credits,
       });
     }
 
@@ -105,9 +154,6 @@ export class JobsService {
       status: job.status,
       progress: job.progress,
       asset: job.asset,
-      // 一对多产物（IKH8C1 场景切分扇出）：全部产出资源 + 契约 result。result 从终态日志
-      // payload 按契约键挑子集再过 strict schema（payload 另带 asset_ids 等入库字段，不外发），
-      // 校验不过即 null，不向下游投影畸形日志。
       output_assets: job.output_assets,
       result: (() => {
         if (job.result === null) return null;
@@ -116,12 +162,37 @@ export class JobsService {
         const parsed = videoSceneSplitResultSchema.safeParse({ duration, segments });
         return parsed.success ? parsed.data : null;
       })(),
-      // IKFM3S §4：签名投影随详情返回（仅成功路径消费；input 其余字段不下发）。
       text_input_signature: job.text_input_signature,
-      // IKHA2J：vocal_split 多轨结果（契约 VocalSplitTrackResult：track_type / asset_id /
-      // url / duration，轨序 = 契约 SCENE_TRACKS[scene]）；其他任务类型恒 null，asset 单对象
-      // 投影不动（既有单 asset 消费者不受影响）。
       tracks: job.tracks,
+      video_stage: job.video_stage,
+      source_sample_job_id: job.source_sample_job_id,
+      final_job_id: job.final_job_id,
+      finalize_deadline_at: job.finalize_deadline_at,
+      charge_state: job.charge_state,
+      actual_credits: job.actual_credits,
     });
+  }
+
+  private async resolveCancelledChargeStates(userId: string, records: {
+    job_id: string; type: string; status: string; video_stage: string; charge_state: string | null;
+  }[]): Promise<void> {
+    const jobs = records.filter((job) => job.type === "video" && job.status === "cancelled" &&
+      (job.video_stage === "sample" || job.video_stage === "final"));
+    for (const job of jobs) job.charge_state = null;
+    for (let offset = 0; offset < jobs.length; offset += MAX_BATCH_IDS) {
+      const batch = jobs.slice(offset, offset + MAX_BATCH_IDS);
+      try {
+        const page = await sharedBillingClient().listTransactions({
+          userId: Number(userId), typeFilters: ["consume"],
+          generationJobIds: batch.map((job) => job.job_id), page: 1, pageSize: batch.length,
+        }, { timeoutMs: 1_000 });
+        for (const job of batch) {
+          const state = page.items.find((item) => item.type === "consume" && item.generationJobId === job.job_id)?.chargeState;
+          if (state === "charged" || state === "refunded") job.charge_state = state;
+        }
+      } catch {
+        this.logger.warn("取消任务计费状态查询失败，本次返回未确认状态");
+      }
+    }
   }
 }

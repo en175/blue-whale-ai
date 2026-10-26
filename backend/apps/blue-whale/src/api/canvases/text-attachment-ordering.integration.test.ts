@@ -13,14 +13,26 @@ import { ProjectService } from "@lib/shared/project/project.service.js";
 import { SnapshotService } from "@lib/shared/snapshot/snapshot.service.js";
 import { GenerationCommandService } from "@lib/shared/generation/generation-command.service.js";
 import { ModelCapabilityReadService } from "@lib/shared/generation/model-capability.service.js";
-import { GenerationCostEstimatorService } from "@lib/shared/generation/cost-estimator.service.js";
+import { MaterialService } from "@lib/shared/material/material.service.js";
+import { SystemSettingsService } from "@lib/shared/system-settings/index.js";
+import { AssetService } from "@lib/shared/assets/assets.service.js";
+import { AssetStorageService } from "@lib/shared/assets/storage.service.js";
+import { AccountDirectoryService } from "@lib/shared/identity/account-directory.service.js";
+import { AllExceptionsFilter } from "@lib/infra/filters/all-exceptions.filter.js";
 
-// IKDLQH「多个文本附件的组合与排序」公开接口集成（契约「验证」节服务端项）：
-// 真 NestFactory 挂载生产 Canvas/Generation 控制器与服务 + 隔离 MySQL（IKDLQH_DATABASE_URL 门控）。
-// 本切片的 API 链路不产生任何上游 HTTP 调用（供应商调用在 worker 切片，由 worker/runner 单测的记录式替身覆盖），
-// 故不挂内存 HTTP 替身；生成入队（RocketMQ）未配置时由控制器捕获记日志，不影响断言。
-// 浏览器段（IKDLQH_BROWSER=1：双文本连线 → 面板重排 → 生成 → 刷新恢复顺序）在同 describe 尾部，
-// 另挂 ProjectsController（快照水合）与 GenerationModelsController（面板模型目录）。
+vi.mock("@lib/shared/billing/billing-client.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@lib/shared/billing/billing-client.js")>();
+  return {
+    ...actual,
+    sharedBillingClient: () => ({
+      charge: async () => ({ chargedCredits: 1, catalogVersion: 1, duplicated: false }),
+      quote: async () => ({ credits: BigInt(1), catalogVersion: 1 }),
+      queryBalance: async () => ({ availableCredits: 0, expiring: [] }),
+      listTransactions: async () => ({ items: [], total: 0 }),
+    }),
+  };
+});
+
 describe.skipIf(!process.env.IKDLQH_DATABASE_URL)("Text attachment ordering public API (IKDLQH)", () => {
   const prisma = new PrismaService();
   const projects = new ProjectService(prisma);
@@ -31,8 +43,6 @@ describe.skipIf(!process.env.IKDLQH_DATABASE_URL)("Text attachment ordering publ
   const previousDatabase = process.env.DATABASE_URL;
   beforeAll(async () => {
     process.env.DATABASE_URL = process.env.IKDLQH_DATABASE_URL;
-    // supported_sizes 用前端原生 {id,label} / {id,label,api_value} 形态：浏览器段两个面板按此渲染选项
-    //（API 段不读模型目录；创建链路不校验 size 取值，只透传）
     await prisma.client.generation_model_capability.upsert({
       where: { provider_id_model_id: { provider_id: "ikdlqh-test", model_id: IMAGE_MODEL_ID } },
       create: {
@@ -46,6 +56,7 @@ describe.skipIf(!process.env.IKDLQH_DATABASE_URL)("Text attachment ordering publ
         default_size: "1024x1024",
         default_aspect_ratio: "1:1",
         features: {},
+        channel: "seedream-image",
       },
       update: { supported_sizes: [{ id: "1024x1024", label: "1024x1024" }], default_size: "1024x1024" },
     });
@@ -64,12 +75,13 @@ describe.skipIf(!process.env.IKDLQH_DATABASE_URL)("Text attachment ordering publ
         default_aspect_ratio: "16:9",
         default_duration: 5,
         features: {},
+        channel: "seedream-video",
       },
       update: { supported_sizes: [{ id: "720p", label: "720P", api_value: "720p" }], default_size: "720p" },
     });
     const canvasService = new CanvasService(prisma, projects);
     Reflect.defineMetadata("design:paramtypes", [CanvasService], CanvasesController);
-    Reflect.defineMetadata("design:paramtypes", [ProjectService, GenerationCommandService, ModelCapabilityReadService, GenerationCostEstimatorService, CanvasService], GenerationJobsController);
+    Reflect.defineMetadata("design:paramtypes", [ProjectService, GenerationCommandService, ModelCapabilityReadService, CanvasService, MaterialService, AssetService, AssetStorageService, AccountDirectoryService], GenerationJobsController);
     Reflect.defineMetadata("design:paramtypes", [ModelCapabilityReadService], GenerationModelsController);
     Reflect.defineMetadata("design:paramtypes", [ProjectService, CanvasService, SnapshotService, PrismaService], ProjectsController);
     class HarnessModule {}
@@ -80,9 +92,13 @@ describe.skipIf(!process.env.IKDLQH_DATABASE_URL)("Text attachment ordering publ
       { provide: SnapshotService, useValue: new SnapshotService(prisma) },
       { provide: GenerationCommandService, useValue: new GenerationCommandService(prisma) },
       { provide: ModelCapabilityReadService, useValue: new ModelCapabilityReadService(prisma) },
-      { provide: GenerationCostEstimatorService, useValue: new GenerationCostEstimatorService() },
+      { provide: MaterialService, useValue: new MaterialService(prisma, new SystemSettingsService(prisma)) },
+      { provide: AssetService, useValue: new AssetService(prisma, new AssetStorageService()) },
+      { provide: AssetStorageService, useValue: new AssetStorageService() },
+      { provide: AccountDirectoryService, useValue: new AccountDirectoryService(prisma) },
     ] })(HarnessModule);
     app = await NestFactory.create(HarnessModule, { logger: false, bodyParser: false });
+    app.useGlobalFilters(new AllExceptionsFilter());
     app.use(json({ limit: "16mb" }));
     app.setGlobalPrefix("api");
     app.use((req: { user: unknown }, _res: unknown, next: () => void) => {
@@ -153,7 +169,6 @@ describe.skipIf(!process.env.IKDLQH_DATABASE_URL)("Text attachment ordering publ
     const projectId = (await projects.create("987654", "IKDLQH image ordering")).id;
     const nodes = [
       mediaNode("media-1", "image"),
-      // 同名同正文的两个不同来源节点：按来源身份保留，不合并
       textNode("text-a", "相同正文", "设定"),
       textNode("text-b", "相同正文", "设定"),
       textNode("text-c", "镜头要求", "镜头"),
@@ -175,7 +190,6 @@ describe.skipIf(!process.env.IKDLQH_DATABASE_URL)("Text attachment ordering publ
       { node_id: "text-c", title: "镜头", text: "镜头要求" },
     ]);
 
-    // 用户重排（等价前端 edges 原地重排后保存）：text-c 提前
     const canvas = await getCanvas(projectId);
     const reordered = [
       { id: "e3", source: "text-c", target: "media-1" },
@@ -183,14 +197,12 @@ describe.skipIf(!process.env.IKDLQH_DATABASE_URL)("Text attachment ordering publ
       { id: "e2", source: "text-b", target: "media-1" },
     ];
     expect((await saveCanvas(projectId, nodes, reordered, canvas.version)).status).toBe(200);
-    // 重排随保存持久化：GET 读回（等价刷新/重开）即新顺序
     expect(JSON.parse((await getCanvas(projectId)).edges)).toEqual(reordered);
 
     const second = await createJob(projectId, imageJobBody("media-1", "暮色"));
     expect(second.code).toBe(200);
     const secondJob = await readJob(second.data.generation_job_id);
     expect(attachmentIds(secondJob!.input)).toEqual(["text-c", "text-a", "text-b"]);
-    // 历史任务快照不被排序改写
     expect(attachmentIds((await readJob(first.data.generation_job_id))!.input)).toEqual(["text-a", "text-b", "text-c"]);
   });
 
@@ -210,7 +222,6 @@ describe.skipIf(!process.env.IKDLQH_DATABASE_URL)("Text attachment ordering publ
     ];
     expect((await saveCanvas(projectId, nodes, edges, "missing")).status).toBe(200);
 
-    // 重排 media-1 的入边（text-c 提前），media-2 入边相对顺序保持
     const canvas = await getCanvas(projectId);
     const reordered = [
       { id: "e2", source: "text-c", target: "media-1" },
@@ -264,7 +275,6 @@ describe.skipIf(!process.env.IKDLQH_DATABASE_URL)("Text attachment ordering publ
     expect(attachmentIds((await readJob(first.data.generation_job_id))!.input)).toEqual(["text-a", "text-b"]);
   });
 
-  // IKH8AU：附件正文不再计入长度（ADR-0088 起正文由提交方给全，服务端不再组合）。
   it("图片多附件不额外计数：正文短、附件合计 40000 字 → 创建成功，连线与附件不被删改", async () => {
     const projectId = (await projects.create("987654", "IKDLQH image attachments not counted")).id;
     const nodes = [
@@ -281,11 +291,9 @@ describe.skipIf(!process.env.IKDLQH_DATABASE_URL)("Text attachment ordering publ
     const created = await createJob(projectId, imageJobBody("media-1", "暮色"));
     expect(created.code).toBe(200);
     expect(await jobCount(projectId)).toBe(1);
-    // 连线与附件不因超限被静默删除
     expect(JSON.parse((await getCanvas(projectId)).edges)).toEqual(edges);
   });
 
-  // IKH8AU：附件正文不再计入长度（ADR-0088 起正文由提交方给全，服务端不再组合）。
   it("视频多附件不额外计数：正文短、附件合计 40000 字 → 创建成功，连线与附件不被删改", async () => {
     const projectId = (await projects.create("987654", "IKDLQH video attachments not counted")).id;
     const nodes = [
@@ -302,16 +310,11 @@ describe.skipIf(!process.env.IKDLQH_DATABASE_URL)("Text attachment ordering publ
     const created = await createJob(projectId, videoJobBody("media-v", "暮色"));
     expect(created.code).toBe(200);
     expect(await jobCount(projectId)).toBe(1);
-    // 连线与附件不因超限被静默删除
     expect(JSON.parse((await getCanvas(projectId)).edges)).toEqual(edges);
   });
 
-  // 浏览器段（契约「验证」节）：真实浏览器 + 真实业务 API + 隔离 MySQL 走「双文本连线 → 面板重排 → 生成 →
-  // 刷新恢复顺序」完整路径。模式仿 IKDLQF/IKDLQG 浏览器段；断言以「库内冻结快照 + GET 读回」为准——
-  // harness 未挂 jobs 查询控制器，创建后前端轮询 GET /api/jobs/:id 得 404，页面 toast 报错属预期。
   async function seedBrowserProject(name: string, mediaType: "image" | "video") {
     const projectId = (await projects.create("987654", name)).id;
-    // 播种素材：快照资产字典是前端还原 mediaNode src 的唯一来源（无 assetId 会渲染「素材已被删除」）
     const asset = await prisma.client.assets.create({
       data: {
         user_id: BigInt(987654),
@@ -323,8 +326,6 @@ describe.skipIf(!process.env.IKDLQH_DATABASE_URL)("Text attachment ordering publ
         size: BigInt(2048),
       },
     });
-    // 先建节点不带边（连线由浏览器拖线产生）；viewport 须为合法 {x,y,zoom}，"{}" 会让前端视口 NaN。
-    // media-1 置于右侧：选中态工具条在节点上方（须避开视口上沿），且避开出生点（视口中心 ±80）的生成占位节点。
     const seeded = await saveCanvas(projectId, [
       { id: "text-1", type: "textNode", position: { x: 140, y: 120 }, data: { title: "设定A", text: "第一正文" } },
       { id: "text-2", type: "textNode", position: { x: 140, y: 460 }, data: { title: "设定B", text: "第二正文" } },
@@ -334,7 +335,6 @@ describe.skipIf(!process.env.IKDLQH_DATABASE_URL)("Text attachment ordering publ
     return projectId;
   }
 
-  /** 拖线连接：文本节点 source handle（右）→ 媒体节点 target handle（左），落点须被 RF 标记为有效 */
   async function dragConnect(page: import("playwright").Page, sourceId: string) {
     const source = page.locator(`.react-flow__node-textNode[data-id="${sourceId}"]`);
     const media = page.locator('.react-flow__node-mediaNode[data-id="media-1"]');
@@ -356,7 +356,6 @@ describe.skipIf(!process.env.IKDLQH_DATABASE_URL)("Text attachment ordering publ
     expect((await saved).status(), "连线增删参与自动保存").toBe(200);
   }
 
-  /** 浏览器段公共流程：双连线 → 面板重排 → 生成冻结新顺序 → 刷新恢复。返回冻结的附件 node_id 序列。 */
   async function runBrowserFlow(mediaType: "image" | "video", genButtonName: "生成图片" | "生成视频") {
     const { chromium } = await import("playwright");
     const { createServer: createVite } = await import("../../../../../../web/node_modules/vite/dist/node/index.js");
@@ -369,7 +368,6 @@ describe.skipIf(!process.env.IKDLQH_DATABASE_URL)("Text attachment ordering publ
     const browser = await chromium.launch({ headless: true });
     try {
       const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
-      // 只捕获创建调用（不含 retry/cancel 子路径），用于断言「连接/重排不自动执行」与请求体
       const generationRequests: Array<{ url: string; body: Record<string, unknown> }> = [];
       page.on("request", (request) => {
         if (request.method() === "POST" && /\/api\/projects\/\d+\/generation-jobs$/.test(request.url())) {
@@ -385,7 +383,6 @@ describe.skipIf(!process.env.IKDLQH_DATABASE_URL)("Text attachment ordering publ
       await page.locator('.react-flow__node-textNode[data-id="text-2"]').waitFor();
       await media.waitFor();
 
-      // 两次拖线：text-1 先、text-2 后（连入顺序 = edges 数组顺序）
       await dragConnect(page, "text-1");
       await dragConnect(page, "text-2");
       await vi.waitFor(async () => {
@@ -393,10 +390,8 @@ describe.skipIf(!process.env.IKDLQH_DATABASE_URL)("Text attachment ordering publ
       });
       const connectedEdges = JSON.parse((await getCanvas(projectId)).edges) as Array<{ source: string; target: string }>;
       expect(connectedEdges.map((e) => `${e.source}->${e.target}`)).toEqual(["text-1->media-1", "text-2->media-1"]);
-      // 连线不触发任何生成
       expect(generationRequests).toEqual([]);
 
-      // 打开目标面板：附件按连入顺序展示（设定A 在前）
       await media.locator('[data-testid="media-content"]').click();
       await media.getByRole("button", { name: genButtonName }).click();
       await page.getByText("文本附件（2）").waitFor();
@@ -404,7 +399,6 @@ describe.skipIf(!process.env.IKDLQH_DATABASE_URL)("Text attachment ordering publ
       const regionText = await attachmentsRegion.innerText();
       expect(regionText.indexOf("设定A"), "默认按连入顺序").toBeLessThan(regionText.indexOf("设定B"));
 
-      // 面板内把首项「下移」：顺序变为 设定B → 设定A，并随自动保存落盘
       const reorderSaved = page.waitForResponse((response) =>
         response.request().method() === "PUT" && response.url().includes("/api/canvases/"));
       await attachmentsRegion.getByRole("button", { name: "下移" }).first().click();
@@ -413,10 +407,8 @@ describe.skipIf(!process.env.IKDLQH_DATABASE_URL)("Text attachment ordering publ
       expect((await reorderSaved).status(), "重排随自动保存持久化").toBe(200);
       const savedEdges = JSON.parse((await getCanvas(projectId)).edges) as Array<{ source: string; target: string }>;
       expect(savedEdges.map((e) => `${e.source}->${e.target}`)).toEqual(["text-2->media-1", "text-1->media-1"]);
-      // 重排本身不触发任何生成
       expect(generationRequests).toEqual([]);
 
-      // 点击生成：库内冻结快照 = 重排后顺序
       await page.locator('button[title="发送"]').click();
       await vi.waitFor(() => expect(generationRequests).toHaveLength(1), { timeout: 10_000 });
       expect(generationRequests[0].body.type).toBe(mediaType);
@@ -427,7 +419,6 @@ describe.skipIf(!process.env.IKDLQH_DATABASE_URL)("Text attachment ordering publ
       });
       expect(attachmentIds(rows[0].input as Record<string, unknown>)).toEqual(["text-2", "text-1"]);
 
-      // 刷新：连线与顺序恢复；重开面板顺序仍为重排后
       await page.reload();
       await media.waitFor();
       await vi.waitFor(async () => {

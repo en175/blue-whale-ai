@@ -19,7 +19,6 @@ export class ProjectAssetsController {
     private readonly storage: AssetStorageService,
   ) {}
 
-  /** IKCNLP（方案C）：素材-项目关联。画布使用素材时前端调用，幂等。 */
   @Post(":assetId/link")
   async link(
     @CurrentUser() user: AuthenticatedUser,

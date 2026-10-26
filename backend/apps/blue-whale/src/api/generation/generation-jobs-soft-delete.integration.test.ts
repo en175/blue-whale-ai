@@ -3,26 +3,33 @@ import { Module } from "@nestjs/common";
 import { APP_FILTER } from "@nestjs/core";
 import { NestFactory } from "@nestjs/core";
 import { json } from "express";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { GenerationJobsController } from "./generation-jobs.controller.js";
 import { AllExceptionsFilter } from "@lib/infra/filters/all-exceptions.filter.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";
 import { GenerationCommandService } from "@lib/shared/generation/generation-command.service.js";
 import { ModelCapabilityReadService } from "@lib/shared/generation/model-capability.service.js";
-import { GenerationCostEstimatorService } from "@lib/shared/generation/cost-estimator.service.js";
 import { CanvasService } from "@lib/shared/canvas/canvas.service.js";
 import { MaterialService } from "@lib/shared/material/material.service.js";
+import { SystemSettingsService } from "@lib/shared/system-settings/index.js";
 import { AssetService } from "@lib/shared/assets/assets.service.js";
 import { AssetStorageService } from "@lib/shared/assets/storage.service.js";
+import { AccountDirectoryService } from "@lib/shared/identity/account-directory.service.js";
 
-// IKG57P「素材软删后提交生成未拦截、HTTP 201 与信封 400 分裂」公开接口集成：
-// 真 NestFactory 挂载生产 GenerationJobsController + AllExceptionsFilter（与 app.module 的
-// APP_FILTER 同款，保证「code、msg、HTTP 状态同出一张码表」的生产投影被测到）+ 隔离 MySQL
-// （IKG57P_DATABASE_URL 门控）。断言口径 = IKE5G8 实现决定 7.1/7.2/7.4：提交被拒、不创建
-// 任务、状态行与信封一致。
-// IKG6EK / ADR-0088：prompt_doc 退役后，缺失素材不再按 doc 声明细化「索引 #N」文案，
-// 统一走通用信封「参考素材不存在或无权访问」。
+vi.mock("@lib/shared/billing/billing-client.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@lib/shared/billing/billing-client.js")>();
+  return {
+    ...actual,
+    sharedBillingClient: () => ({
+      charge: async () => ({ chargedCredits: 1, catalogVersion: 1, duplicated: false }),
+      quote: async () => ({ credits: BigInt(1), catalogVersion: 1 }),
+      queryBalance: async () => ({ availableCredits: 0, expiring: [] }),
+      listTransactions: async () => ({ items: [], total: 0 }),
+    }),
+  };
+});
+
 describe.skipIf(!process.env.IKG57P_DATABASE_URL)(
   "Generation job soft-deleted asset rejection (IKG57P)",
   () => {
@@ -54,6 +61,7 @@ describe.skipIf(!process.env.IKG57P_DATABASE_URL)(
           default_size: "1024x1024",
           default_aspect_ratio: "1:1",
           features: { reference_image: true },
+          channel: "seedream-image",
         },
         update: {
           supported_sizes: sizes,
@@ -62,17 +70,18 @@ describe.skipIf(!process.env.IKG57P_DATABASE_URL)(
         },
       });
       class HarnessModule {}
-      // vitest（esbuild）不 emit design:paramtypes，Nest DI 需要手工补构造参数元数据
       Reflect.defineMetadata(
         "design:paramtypes",
         [
           ProjectService,
           GenerationCommandService,
           ModelCapabilityReadService,
-          GenerationCostEstimatorService,
           CanvasService,
           MaterialService,
           AssetService,
+          AssetStorageService,
+          AccountDirectoryService,
+          PrismaService,
         ],
         GenerationJobsController,
       );
@@ -91,17 +100,17 @@ describe.skipIf(!process.env.IKG57P_DATABASE_URL)(
             useValue: new ModelCapabilityReadService(prisma),
           },
           {
-            provide: GenerationCostEstimatorService,
-            useValue: new GenerationCostEstimatorService(),
-          },
-          {
             provide: CanvasService,
             useValue: new CanvasService(prisma, projects),
           },
-          { provide: MaterialService, useValue: new MaterialService(prisma) },
+          { provide: MaterialService, useValue: new MaterialService(prisma, new SystemSettingsService(prisma)) },
           {
             provide: AssetService,
             useValue: new AssetService(prisma, new AssetStorageService()),
+          },
+          {
+            provide: AccountDirectoryService,
+            useValue: new AccountDirectoryService(prisma),
           },
         ],
       })(HarnessModule);
@@ -183,8 +192,7 @@ describe.skipIf(!process.env.IKG57P_DATABASE_URL)(
         msg: string;
         data: unknown;
       };
-      expect(body.code).toBe(400);
-      // IKG6EK / ADR-0088：prompt_doc 退役后不再按 doc 声明细化索引文案，统一走通用信封
+      expect(body.code).toBe(1034);
       expect(body.msg).toBe("参考素材不存在或无权访问");
       expect(await jobCount(projectId)).toBe(0);
     });
@@ -209,7 +217,7 @@ describe.skipIf(!process.env.IKG57P_DATABASE_URL)(
         msg: string;
         data: unknown;
       };
-      expect(body.code).toBe(400);
+      expect(body.code).toBe(1034);
       expect(body.msg).toBe("参考素材不存在或无权访问");
       expect(await jobCount(projectId)).toBe(0);
     });
@@ -238,7 +246,6 @@ describe.skipIf(!process.env.IKG57P_DATABASE_URL)(
       const rejected = await submit(projectId, body);
       expect(rejected.status).toBe(400);
 
-      // 补齐素材（恢复软删）后，同一提交路径重新校验放行
       await prisma.client.assets.update({
         where: { id: BigInt(assetId) },
         data: { is_delete: false },

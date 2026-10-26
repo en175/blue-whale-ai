@@ -7,6 +7,7 @@ import {
   Patch,
   Post,
   Put,
+  Query,
   UseGuards,
 } from "@nestjs/common";
 import {
@@ -27,14 +28,11 @@ import {
 import {
   parseBigId,
   parseHomepageHeroForm,
+  parseHomepageHeroScene,
   parseMoveDirection,
   type HomepageHeroForm,
 } from "@lib/shared/homepage-hero/homepage-hero-validation.js";
 
-/**
- * 首页背景图/视频后台动态配置管理端（IKCH05，接口对齐母工单 IKCH01 草稿）。
- * 路径前缀 api/admin/site-config/homepage-heroes。
- */
 
 @Controller("admin/site-config/homepage-heroes")
 @UseGuards(AdminGuard)
@@ -46,9 +44,11 @@ export class AdminHomepageHeroesController {
   ) {}
 
   @Get()
-  async list() {
+  async list(@Query("scene") sceneRaw?: string) {
+    const scene = parseHomepageHeroScene(sceneRaw);
+    if (!scene) throw new AdminException(400, "scene 仅支持 homepage/auth");
     try {
-      const items = await this.hero.listAll();
+      const items = await this.hero.listAll(scene);
       return { success: true, data: items };
     } catch (error) {
       throw toAdminError(error);
@@ -61,7 +61,11 @@ export class AdminHomepageHeroesController {
     if (!parsed.ok) throw new AdminException(400, parsed.error);
     try {
       const id = await this.hero.create(parsed.input);
-      await this.heroAudit.logCreate(`#${id}`, parsed.input.media_type);
+      await this.heroAudit.logCreate(
+        `#${id}`,
+        parsed.input.media_type,
+        parsed.input.scene,
+      );
       return { success: true, data: { id } };
     } catch (error) {
       if (error instanceof HomepageHeroLimitError) {
@@ -81,8 +85,11 @@ export class AdminHomepageHeroesController {
     try {
       const before = await this.hero.getById(id);
       if (!before) throw new AdminException(404, "配置不存在");
-      // 合并补丁字段到现存条目形成完整表单：跨字段规则（视频必须有封面）在合并后仍成立
+      if (body.scene !== undefined && body.scene !== before.scene) {
+        throw new AdminException(400, "scene 不可修改");
+      }
       const merged: HomepageHeroForm = {
+        scene: before.scene,
         media_type: body.media_type ?? before.media_type,
         media_url: body.media_url ?? before.media_url,
         poster_url:
@@ -117,7 +124,7 @@ export class AdminHomepageHeroesController {
       if (!before) throw new AdminException(404, "配置不存在");
       const deleted = await this.hero.softDelete(id);
       if (!deleted) throw new AdminException(404, "配置不存在");
-      await this.heroAudit.logDelete(`#${idRaw}`);
+      await this.heroAudit.logDelete(`#${idRaw}`, before.scene);
       return { success: true, data: { id: idRaw } };
     } catch (error) {
       if (error instanceof AdminException) throw error;
@@ -180,7 +187,6 @@ export class AdminHomepageHeroesController {
   }
 }
 
-/** 编辑审计：对比 before/after 输出变更字段名（与模板 diffFields 同款）。 */
 function diffFields(
   before: { media_type: string; media_url: string; poster_url: string | null; sort_order: number; enabled: number },
   after: CreateHomepageHeroInput,

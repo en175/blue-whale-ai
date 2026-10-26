@@ -1,0 +1,53 @@
+
+.zoomControl {
+  position: absolute;
+  bottom: var(--spacing-lg);
+  right: var(--spacing-lg);
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  background-color: rgba(26, 26, 26, 0.9);
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-md);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  z-index: 10;
+  isolation: isolate;
+  transform: translateZ(0);
+}
+
+.zoomBtn {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.zoomBtn:hover {
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-hover);
+}
+
+.zoomDivider {
+  width: 1px;
+  height: 16px;
+  background-color: var(--color-border-primary);
+  margin: 0 2px;
+}
+
+.zoomValue {
+  min-width: 44px;
+  text-align: center;
+  font-size: var(--font-size-xs);
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
+}

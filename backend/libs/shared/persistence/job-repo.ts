@@ -1,3 +1,4 @@
+import { wallClockRfc3339 } from "@lib/core";
 import type { PrismaClient } from "@prisma/client";
 
 import {
@@ -6,11 +7,20 @@ import {
   VOCAL_SPLIT_SCENE_TRACKS,
 } from "@lib/contracts";
 
-import { publicGenerationInput } from "./generation-input.js";
+import { extractSpecs } from "@lib/shared/billing/billing-specs.js";
 
-/** GenerationJob 读路径的 db port（Prisma-backed），复用部署的 generation_jobs / assets 表。
- *  对齐 Java GenerationJobService：只读（列表分页 + 状态单查），写入仍由 Java 队列路径负责。
- *  字段 snake_case 对齐 Jackson SNAKE_CASE wire 格式。 */
+import { publicGenerationInput } from "./generation-input.js";
+import {
+  extraNumber,
+  extraString,
+  loadJobExtras,
+  loadJobExtrasOne,
+  type JobExtras,
+} from "./generation-jobs-extra-repo.js";
+
+
+
+
 
 export interface JobListItem {
   job_id: string;
@@ -20,8 +30,17 @@ export interface JobListItem {
   input: unknown;
   created_at: string;
   output_assets: JobOutputAsset[];
-  /** Node handler projects this internal field into a public error envelope. */
+  canvas_card_state?: string;
+
   stored_error?: Record<string, unknown> | null;
+
+
+  video_stage: string;
+  source_sample_job_id: string | null;
+  final_job_id: string | null;
+  finalize_deadline_at: string | null;
+  charge_state: string | null;
+  actual_credits: number | null;
 }
 
 export interface JobOutputAsset {
@@ -38,25 +57,63 @@ export interface JobStatusView {
   type: string;
   status: string;
   progress: number;
-  /** 成功时的首个产出资源；无则 null。 */
-  asset: { id: string; url: string; type: string } | null;
-  /** 成功时的全部产出资源（按 output_asset_ids 顺序）；一对一工具与 asset 首元素等价，
-   *  一对多工具（场景切分扇出）按序消费（IKH8C1）。 */
+
+  asset: { id: string; url: string; type: string; duration?: number } | null;
+
+
   output_assets: JobOutputAsset[];
-  /** 一对多任务的契约 result（当前仅 video_scene_split：duration + segments[] 起止秒与段资产引用），
-   *  取自终态日志 payload；非该形态任务或无日志时为 null。 */
+
+
   result: Record<string, unknown> | null;
-  /** 失败时 DB 存的原始 error map；无则 null。投影成公开信封是 handler 层职责。 */
+
   stored_error: Record<string, unknown> | null;
-  /** IKFM3S §4：快照里的文本输入签名投影（前端轮询成功后回写目标 usedInputSignature）；无则 null。 */
+
   text_input_signature: string | null;
-  /** IKHA2J：vocal_split 成功时的逐轨结果（契约 VocalSplitTrackResult 结构，轨序 = 契约
-   *  SCENE_TRACKS[scene]，与 output_asset_ids 写入顺序一致）；非 vocal_split / 未成功为 null。
-   *  asset（首个产出）保持不动——既有单 asset 消费者不受影响。 */
+
+
+
   tracks: JobVocalSplitTrack[] | null;
+
+  video_stage: string;
+  source_sample_job_id: string | null;
+  final_job_id: string | null;
+  finalize_deadline_at: string | null;
+  charge_state: string | null;
+  actual_credits: number | null;
 }
 
-/** vocal_split 单轨投影（契约 VocalSplitTrackResult 逐字段：轨类型 + 资产 id + url + 时长秒）。 */
+
+
+
+
+
+
+function videoStageProjection(
+  row: { source_sample_job_id: bigint | null },
+  extras: JobExtras | undefined,
+): {
+  video_stage: string;
+  source_sample_job_id: string | null;
+  final_job_id: string | null;
+  finalize_deadline_at: string | null;
+  charge_state: string | null;
+  actual_credits: number | null;
+} {
+  const deadlineMs = extraNumber(extras, "finalize_deadline_ms");
+  const finalJobId = extraNumber(extras, "final_job_id");
+  return {
+    video_stage: extraString(extras, "video_stage") ?? "video",
+    source_sample_job_id:
+      row.source_sample_job_id != null ? row.source_sample_job_id.toString() : null,
+    final_job_id: finalJobId != null ? String(finalJobId) : null,
+
+    finalize_deadline_at: deadlineMs != null ? wallClockRfc3339(new Date(deadlineMs)) : null,
+    charge_state: extraString(extras, "charge_state"),
+    actual_credits: extraNumber(extras, "actual_credits"),
+  };
+}
+
+
 export interface JobVocalSplitTrack {
   track_type: string;
   asset_id: string;
@@ -80,9 +137,115 @@ export interface JobListFilter {
   size: number;
 }
 
+export interface UserJobIdFilter {
+  userId: string;
+  type?: string;
+  modelId?: string;
+  createdFrom?: Date;
+  createdTo?: Date;
+  limit: number;
+}
+
+export interface UserJobIdResult {
+  ids: string[];
+  truncated: boolean;
+}
+
 export interface JobRepo {
   listByUser(userId: string, filter: JobListFilter): Promise<JobPage>;
   findByIdForUser(jobId: string, userId: string): Promise<JobStatusView | null>;
+
+  listForAdmin(filter: AdminJobListFilter): Promise<AdminJobPage>;
+
+  listUserJobIds(filter: UserJobIdFilter): Promise<UserJobIdResult>;
+
+
+
+
+
+
+
+
+
+  loadChargeTaskSummaries(ids: readonly string[]): Promise<Map<string, ChargeTaskSummary>>;
+}
+
+
+export interface ChargeTaskSummary {
+
+  type: string;
+
+  modelId: string | null;
+
+  modelLabel: string | null;
+
+  prompt: string | null;
+  specs: Record<string, string> | null;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+export interface AdminJobListItem {
+  job_id: string;
+  user_id: string;
+  project_id: string;
+  type: string;
+  status: string;
+  progress: number;
+  provider: string | null;
+
+
+
+
+
+
+
+
+  model_id: string | null;
+
+
+
+
+
+
+  model_label: string | null;
+  retry_count: number;
+  created_at: string;
+  updated_at: string;
+
+
+
+
+
+  stored_error: Record<string, unknown> | null;
+}
+
+export interface AdminJobPage {
+  records: AdminJobListItem[];
+  total: number;
+  size: number;
+  current: number;
+}
+
+
+export interface AdminJobListFilter {
+
+  userId?: string;
+  projectId?: string;
+  type?: string;
+  status?: string;
+  page: number;
+  size: number;
 }
 
 type AssetRow = {
@@ -91,7 +254,7 @@ type AssetRow = {
   type: string;
   width: number | null;
   height: number | null;
-  /** IKHA2J：vocal_split 轨投影的时长秒换算源（findMany 全列天然带上，其余消费方不读）。 */
+
   duration_ms: number | null;
 };
 
@@ -100,6 +263,68 @@ function parseAssetIds(json: unknown): bigint[] {
   return json
     .map((v) => (typeof v === "number" || typeof v === "string" ? BigInt(v) : null))
     .filter((v): v is bigint => v !== null);
+}
+
+
+
+
+
+
+
+
+function modelIdOf(input: unknown): string | null {
+  if (input === null || typeof input !== "object" || Array.isArray(input)) return null;
+  const raw = (input as { model_id?: unknown }).model_id;
+  return typeof raw === "string" && raw.trim() ? raw : null;
+}
+
+
+
+
+
+
+
+
+
+
+
+function promptOf(input: unknown): string | null {
+  if (input === null || typeof input !== "object" || Array.isArray(input)) return null;
+  const raw = (input as { prompt?: unknown }).prompt;
+  return typeof raw === "string" && raw.trim() ? raw : null;
+}
+
+function specsOf(input: unknown, taskType: string): Record<string, string> | null {
+  if (input === null || typeof input !== "object" || Array.isArray(input)) return null;
+  return extractSpecs(input as Record<string, unknown>, taskType);
+}
+
+
+
+
+
+
+
+
+
+
+
+
+async function loadModelLabels(
+  prisma: PrismaClient,
+  modelIds: readonly string[],
+): Promise<Map<string, string>> {
+  if (modelIds.length === 0) return new Map();
+  const caps = await prisma.generation_model_capability.findMany({
+    where: { model_id: { in: [...modelIds] } },
+    select: { model_id: true, model_label: true },
+    orderBy: { id: "asc" },
+  });
+  const labelByModel = new Map<string, string>();
+  for (const cap of caps) {
+    if (!labelByModel.has(cap.model_id)) labelByModel.set(cap.model_id, cap.model_label);
+  }
+  return labelByModel;
 }
 
 export function createJobRepo(prisma: PrismaClient): JobRepo {
@@ -125,40 +350,183 @@ export function createJobRepo(prisma: PrismaClient): JobRepo {
         prisma.generation_jobs.count({ where }),
         prisma.generation_jobs.findMany({
           where,
-          orderBy: { gmt_create: "desc" },
+          orderBy: [{ gmt_create: "desc" }, { id: "desc" }],
           skip: (filter.page - 1) * filter.size,
           take: filter.size,
         }),
       ]);
 
-      // 一次性批量查产出 assets，避免 N+1（对齐 Java selectBatchIds）。
+
       const allIds = rows.flatMap((r) => parseAssetIds(r.output_asset_ids));
       const assetMap = await loadAssets([...new Set(allIds)]);
 
-      const records: JobListItem[] = rows.map((r) => ({
-        job_id: r.id.toString(),
-        type: r.type,
-        status: r.status,
-        progress: r.progress,
-        input: publicGenerationInput(r.input ?? null),
-        created_at: r.gmt_create.toISOString(),
-        output_assets: parseAssetIds(r.output_asset_ids)
-          .map((id) => assetMap.get(id.toString()))
-          .filter((a): a is AssetRow => a !== undefined)
-          .map((a) => ({
-            id: a.id.toString(),
-            url: a.url,
-            type: a.type,
-            width: a.width,
-            height: a.height,
-          })),
-        stored_error:
-          r.error && typeof r.error === "object" && !Array.isArray(r.error)
-            ? (r.error as Record<string, unknown>)
-            : null,
-      }));
+      const extrasByJob = await loadJobExtras(
+        prisma,
+        rows.map((r) => r.id.toString()),
+      );
+
+      const records: JobListItem[] = rows.map((r) => {
+        const extras = extrasByJob.get(r.id.toString());
+        return {
+          job_id: r.id.toString(),
+          type: r.type,
+          status: r.status,
+          progress: r.progress,
+          input: publicGenerationInput(r.input ?? null),
+
+          ...(r.type === "audio_mix"
+            ? { canvas_card_state: extraString(extras, "canvas_card_state") ?? "pending" }
+            : {}),
+          created_at: wallClockRfc3339(r.gmt_create),
+          output_assets: parseAssetIds(r.output_asset_ids)
+            .map((id) => assetMap.get(id.toString()))
+            .filter((a): a is AssetRow => a !== undefined)
+            .map((a) => ({
+              id: a.id.toString(),
+              url: a.url,
+              type: a.type,
+              width: a.width,
+              height: a.height,
+            })),
+          stored_error:
+            r.error && typeof r.error === "object" && !Array.isArray(r.error)
+              ? (r.error as Record<string, unknown>)
+              : null,
+          ...videoStageProjection(r, extras),
+        };
+      });
 
       return { records, total, size: filter.size, current: filter.page };
+    },
+
+    async listForAdmin(filter) {
+      const where = {
+        is_delete: false,
+        ...(filter.userId !== undefined ? { user_id: BigInt(filter.userId) } : {}),
+        ...(filter.projectId !== undefined ? { project_id: BigInt(filter.projectId) } : {}),
+        ...(filter.type !== undefined ? { type: filter.type } : {}),
+        ...(filter.status !== undefined ? { status: filter.status } : {}),
+      };
+      const [total, rows] = await Promise.all([
+        prisma.generation_jobs.count({ where }),
+        prisma.generation_jobs.findMany({
+          where,
+
+
+          orderBy: [{ gmt_create: "desc" }, { id: "desc" }],
+          skip: (filter.page - 1) * filter.size,
+          take: filter.size,
+        }),
+      ]);
+
+
+      const modelIds = new Set<string>();
+      for (const r of rows) {
+        const modelId = modelIdOf(r.input);
+        if (modelId !== null) modelIds.add(modelId);
+      }
+      const labelByModel = await loadModelLabels(prisma, [...modelIds]);
+
+      return {
+        records: rows.map((r) => {
+          const modelId = modelIdOf(r.input);
+          return {
+            job_id: r.id.toString(),
+            user_id: r.user_id.toString(),
+            project_id: r.project_id?.toString() ?? "",
+            type: r.type,
+            status: r.status,
+            progress: r.progress,
+            provider: r.provider,
+            model_id: modelId,
+
+
+            model_label: modelId === null ? null : (labelByModel.get(modelId) ?? null),
+            retry_count: r.retry_count,
+            created_at: wallClockRfc3339(r.gmt_create),
+            updated_at: wallClockRfc3339(r.gmt_modified),
+            stored_error:
+              r.error && typeof r.error === "object" && !Array.isArray(r.error)
+                ? (r.error as Record<string, unknown>)
+                : null,
+          };
+        }),
+        total,
+        size: filter.size,
+        current: filter.page,
+      };
+    },
+
+    async loadChargeTaskSummaries(ids) {
+      const unique = [...new Set(ids)];
+      if (unique.length === 0) return new Map();
+
+      const rows = await prisma.generation_jobs.findMany({
+
+
+
+
+
+        where: { id: { in: unique.map((id) => BigInt(id)) } },
+        select: { id: true, type: true, input: true },
+      });
+
+
+      const modelIds = new Set<string>();
+      const parsed = rows.map((r) => {
+        const modelId = modelIdOf(r.input);
+        if (modelId !== null) modelIds.add(modelId);
+        return {
+          id: r.id.toString(),
+          type: r.type,
+          modelId,
+          prompt: promptOf(r.input),
+          specs: specsOf(r.input, r.type),
+        };
+      });
+      const labelByModel = await loadModelLabels(prisma, [...modelIds]);
+
+
+      return new Map(
+        parsed.map((p) => [
+          p.id,
+          {
+            type: p.type,
+            modelId: p.modelId,
+            modelLabel: p.modelId === null ? null : (labelByModel.get(p.modelId) ?? null),
+            prompt: p.prompt,
+            specs: p.specs,
+          },
+        ]),
+      );
+    },
+
+    async listUserJobIds(filter) {
+      const where = {
+        user_id: BigInt(filter.userId),
+        ...(filter.type ? { type: filter.type } : {}),
+        ...(filter.modelId
+          ? { input: { path: "$.model_id", equals: filter.modelId } }
+          : {}),
+        ...(filter.createdFrom || filter.createdTo
+          ? {
+              gmt_create: {
+                ...(filter.createdFrom ? { gte: filter.createdFrom } : {}),
+                ...(filter.createdTo ? { lte: filter.createdTo } : {}),
+              },
+            }
+          : {}),
+      };
+      const rows = await prisma.generation_jobs.findMany({
+        where,
+        select: { id: true },
+        orderBy: [{ gmt_create: "desc" }, { id: "desc" }],
+        take: filter.limit + 1,
+      });
+      return {
+        ids: rows.slice(0, filter.limit).map((r) => r.id.toString()),
+        truncated: rows.length > filter.limit,
+      };
     },
 
     async findByIdForUser(jobId, userId) {
@@ -167,10 +535,16 @@ export function createJobRepo(prisma: PrismaClient): JobRepo {
       });
       if (!row) return null;
 
+      const extras = await loadJobExtrasOne(prisma, row.id.toString());
+
       let outputAssets: JobOutputAsset[] = [];
+      let audioMixDurationMs: number | null = null;
       if (row.status === "succeeded") {
         const ids = parseAssetIds(row.output_asset_ids);
         const assetMap = await loadAssets(ids);
+        if (row.type === "audio_mix" && ids[0] !== undefined) {
+          audioMixDurationMs = assetMap.get(ids[0].toString())?.duration_ms ?? null;
+        }
         outputAssets = ids
           .map((id) => assetMap.get(id.toString()))
           .filter((a): a is AssetRow => a !== undefined)
@@ -184,11 +558,16 @@ export function createJobRepo(prisma: PrismaClient): JobRepo {
       }
       const firstAsset = outputAssets[0];
       const asset = firstAsset
-        ? { id: firstAsset.id, url: firstAsset.url, type: firstAsset.type }
+        ? {
+            id: firstAsset.id,
+            url: firstAsset.url,
+            type: firstAsset.type,
+            ...(audioMixDurationMs != null ? { duration: audioMixDurationMs / 1000 } : {}),
+          }
         : null;
 
-      // 一对多 result（IKH8C1 场景切分扇出）：终态日志 payload 承载 duration + segments，
-      // 仅该形态任务查询，其余任务不多付一次 log 查询。
+
+
       let result: JobStatusView["result"] = null;
       if (row.status === "succeeded" && row.type === VIDEO_SCENE_SPLIT_JOB_TYPE) {
         const logRow = await prisma.generation_job_logs.findFirst({
@@ -205,10 +584,10 @@ export function createJobRepo(prisma: PrismaClient): JobRepo {
         }
       }
 
-      // IKHA2J：vocal_split 多轨投影（契约 VocalSplitTrackResult）。轨类型不落库（assets 无
-      // 轨类型列）——按 output_asset_ids 写入顺序（= worker 终态按契约 SCENE_TRACKS 轨序拼的
-      // 数组）与 input.scene 的契约轨序逐下标 zip 组装；脏数据（长度不齐 / scene 非法）按短侧
-      // 截断安全降级，不影响 asset 单对象投影。
+
+
+
+
       let tracks: JobStatusView["tracks"] = null;
       if (row.status === "succeeded" && row.type === VOCAL_SPLIT_JOB_TYPE) {
         const ids = parseAssetIds(row.output_asset_ids);
@@ -260,6 +639,7 @@ export function createJobRepo(prisma: PrismaClient): JobRepo {
                 return typeof signature === "string" ? signature : null;
               })()
             : null,
+        ...videoStageProjection(row, extras),
       };
     },
   };

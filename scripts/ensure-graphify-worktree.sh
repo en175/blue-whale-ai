@@ -1,11 +1,8 @@
 #!/usr/bin/env bash
-# Build or refresh Graphify output for the current task worktree.
 
 set -euo pipefail
 
 ROOT="$(git rev-parse --show-toplevel)"
-# Git Bash on Windows：git rev-parse 返回 `D:/...`（大写盘符），pwd 返回 `/d/...`（小写 posix）。
-# case 比较大小写敏感会误判，统一走 pwd 风格。
 ROOT="$(cd "$ROOT" && pwd)"
 # shellcheck source=lib/worktree-paths.sh
 source "$ROOT/scripts/lib/worktree-paths.sh"

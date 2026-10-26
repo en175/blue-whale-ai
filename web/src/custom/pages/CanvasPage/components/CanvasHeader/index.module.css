@@ -1,0 +1,112 @@
+
+.header {
+  position: absolute;
+  top: var(--spacing-lg);
+  left: var(--spacing-lg);
+  right: var(--spacing-lg);
+  height: auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+  z-index: 20;
+  background: transparent;
+  border: none;
+  pointer-events: none;
+}
+
+.header > * {
+  pointer-events: auto;
+}
+
+.left {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+}
+
+.logoBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: transform var(--transition-fast);
+  flex-shrink: 0;
+}
+
+.logoBtn:hover {
+  transform: scale(1.08);
+}
+
+.logoBtn:active {
+  transform: scale(0.96);
+}
+
+.logo {
+  width: 56px;
+  height: 56px;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+
+.right {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+}
+
+.balance {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  height: 32px;
+  padding: 0 var(--spacing-md);
+  border-radius: var(--radius-md);
+  background-color: rgba(26, 26, 26, 0.9);
+  border: 1px solid var(--color-border-primary);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.balanceValue {
+  font-size: var(--font-size-md);
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.balanceIcon {
+  color: var(--color-text-secondary);
+}
+
+.agentBtn {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  height: 32px;
+  padding: 0 var(--spacing-md);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-md);
+  font-weight: 500;
+  color: var(--color-text-primary);
+  background-color: rgba(26, 26, 26, 0.9);
+  border: 1px solid var(--color-border-secondary);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.agentBtn:hover {
+  background-color: rgba(40, 40, 40, 0.95);
+  border-color: var(--color-border-hover);
+}
+
+.agentBtnHidden {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}

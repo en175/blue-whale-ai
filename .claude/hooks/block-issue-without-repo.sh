@@ -1,28 +1,4 @@
 #!/usr/bin/env bash
-# Claude Code PreToolUse hook — 拦截 issue 不关联仓库，或子 issue 未继承父项归属
-# 零依赖（grep/sed 解析 JSON，同 block-squash-merge.sh）。
-#
-# 拦截：
-#   - create_enterprise_issue 根 issue 的 project_id 或 program_id 缺失 / 为空 / = 0
-#   - create_enterprise_issue 的 description 缺失 / 为空（防错名参数被静默忽略建成空工单）
-#   - create_enterprise_issue / update_enterprise_issue 带 parent_id，
-#     但 project_id 或 program_id 缺失 / 为空 / = 0
-#   - update_enterprise_issue 显式 project_id=0 或 program_id=0
-# 放行：
-#   - 根 issue 创建时 project_id 与 program_id 均非空且非 0
-#   - 普通 update 不要求重复传 project_id/program_id
-#   - 不校验 project_id/program_id 是否等于具体仓库/项目 ID（见 ADR-0007 D3、ADR-0014）
-#
-# 为什么：project_id / program_id 在 MCP schema 里是 number；Gitee 用 0 表示「无关联」。
-# 不关联仓库的 issue（project_id=0）只出现在企业工作项列表，仓库 Issues 页看不到（见 ADR-0007）。
-# 不归属项目的根 issue（program_id=0）游离于企业「项目管理」之外（见 ADR-0014）。
-# 子工作项如果只传 parent_id 而不继承 project_id/program_id，也会出现在企业工作台
-# 的父项下，但仓库 Issues/MCP 仓库过滤查不到（见 ADR-0008）。
-#
-# 配套：settings.json PreToolUse matcher = mcp__gitee-ent__create_enterprise_issue /
-#      mcp__gitee-ent__update_enterprise_issue。
-# 退出码 2 = 阻断 Claude 执行该工具调用。
-# 同步：.qoder/hooks/ 有本文件的手动同步副本，任何改动必须双份同改。
 
 INPUT=$(cat)
 HOOK_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -42,6 +18,7 @@ TOOL_NAME=$(extract_json_value "tool_name")
 PROJECT_ID=$(extract_json_value "project_id")
 PROGRAM_ID=$(extract_json_value "program_id")
 PARENT_ID=$(extract_json_value "parent_id")
+ASSIGNEE_ID=$(extract_json_value "assignee_id")
 
 IS_UPDATE=0
 [ "$TOOL_NAME" = "mcp__gitee-ent__update_enterprise_issue" ] && IS_UPDATE=1
@@ -83,17 +60,14 @@ EOF
   exit 2
 }
 
-# 任何显式 project_id=0 都是无仓库关联，create/update 都拦。
 if [ "$PROJECT_ID" = "0" ]; then
   block "issue 的 project_id 为 0（未关联仓库）。"
 fi
 
-# 任何显式 program_id=0 都是无项目归属，create/update 都拦（对称 project_id=0）。
 if [ "$PROGRAM_ID" = "0" ]; then
   block "issue 的 program_id 为 0（未归属项目）。"
 fi
 
-# 子 issue：只要传 parent_id，就必须同时带有效 project_id/program_id。
 if [ "$HAS_PARENT" -eq 1 ]; then
   if [ -z "$PROJECT_ID" ]; then
     block "子 issue 缺少 project_id，无法保证仓库 Issues 可见。"
@@ -125,23 +99,44 @@ EOF
   exit 2
 }
 
-# create 根 issue：project_id 缺失 / 空字符串 / = 0 → 拦截。
-# update 普通字段不要求重复传 project_id，避免拦状态/标签/标题更新。
 if [ "$IS_UPDATE" -eq 0 ] && [ -z "$PROJECT_ID" ]; then
   block "创建根 issue 未关联仓库（project_id 缺失或为空）。"
 fi
 
-# create 根 issue：program_id 缺失 / 为空 / = 0 → 拦截（子 issue 在 parent 继承块已校验）。
-# update 普通字段不要求重复传 program_id，避免拦状态/标签/标题更新。
 if [ "$IS_UPDATE" -eq 0 ] && [ "$HAS_PARENT" -eq 0 ]; then
   if [ -z "$PROGRAM_ID" ] || [ "$PROGRAM_ID" = "0" ]; then
     block "创建根 issue 未归属项目（program_id 缺失或为 0）。"
   fi
 fi
 
-# create：description 缺失 / 为空 → 拦截。错名参数（如把描述传到 body）被 MCP 静默忽略，
-# 会建成空描述工单（历史事件 IK5THP）。update 常只改状态/标签，不要求 description。
-# 放在归属校验之后，让 project_id/program_id 的具体报错优先暴露。
+block_missing_assignee() {
+  printf '%s' "$INPUT" | python3 "$AUDIT" \
+    --project-dir "$PROJECT_DIR" \
+    --hook "$HOOK_NAME" \
+    --operation "$AUDIT_OPERATION" \
+    --exit-code 2 \
+    --reason "blocked-no-assignee" >/dev/null || true
+  cat >&2 <<'EOF'
+BLOCKED: create_enterprise_issue 缺少 assignee_id（负责人）。
+
+本项目所有工单创建时必须标注负责人（2026-10-03 定规，IKJKWK）：
+- 未点名负责人 → 创建人即负责人：get_user_info 取当前 token 用户 id 作 assignee_id，
+  collaborator_ids 可空
+- 点名了负责人 → list_enterprise_members(search=<名字>) 解析 id 作 assignee_id，
+  创建人并入 collaborator_ids；解析不到或多人同名时停下问发单人，不静默兜底
+- 点名负责人且另有协作者 → 创建人也必须并入 collaborator_ids
+
+详见 docs/agents/issue-tracker.md「创建归属标注」。
+EOF
+  exit 2
+}
+
+if [ "$IS_UPDATE" -eq 0 ]; then
+  if [ -z "$ASSIGNEE_ID" ] || [ "$ASSIGNEE_ID" = "0" ]; then
+    block_missing_assignee
+  fi
+fi
+
 if [ "$IS_UPDATE" -eq 0 ]; then
   DESCRIPTION=$(extract_json_value "description")
   if [ -z "$DESCRIPTION" ]; then

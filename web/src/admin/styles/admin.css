@@ -1,0 +1,64 @@
+
+:root,
+.adminRoot {
+
+  --admin-bg: #f6f7f9;
+  --admin-surface: #ffffff;
+  --admin-surface-sunken: #f9fafb;
+
+  --admin-border: #e3e6ea;
+  --admin-border-strong: #ced3d9;
+  --admin-divider: #edeff2;
+
+  --admin-text: #14181f;
+  --admin-text-muted: #666e7a;
+  --admin-text-faint: #7d8694;
+  --admin-text-disabled: #aab3be;
+
+  --admin-accent: #409eff;
+  --admin-accent-hover: #337ecc;
+  --admin-accent-soft: #ecf5ff;
+  --admin-accent-border: #d9ecff;
+  --admin-accent-ring: rgb(64 158 255 / 0.12);
+
+  --admin-success: #047857;
+  --admin-success-soft: #ecfdf5;
+  --admin-warning: #a15c07;
+  --admin-warning-soft: #fffbeb;
+  --admin-danger: #c62828;
+  --admin-danger-soft: #fef2f2;
+
+  --admin-row-hover: #f6f7f9;
+
+  --admin-space-1: 4px;
+  --admin-space-2: 8px;
+  --admin-space-3: 12px;
+  --admin-space-4: 16px;
+  --admin-space-5: 24px;
+  --admin-space-6: 32px;
+
+  --admin-radius-control: 6px;
+  --admin-radius-surface: 8px;
+  --admin-radius-pop: 12px;
+  --admin-radius-pill: 999px;
+
+  --admin-font-xs: 12px;
+  --admin-font-sm: 13px;
+  --admin-font-md: 15px;
+  --admin-font-lg: 20px;
+  --admin-font-xl: 24px;
+
+  --admin-leading-tight: 1.35;
+  --admin-leading: 1.6;
+
+  --admin-shadow-card: 0 1px 2px rgb(16 24 40 / 0.04);
+  --admin-shadow-pop: 0 6px 16px rgb(16 24 40 / 0.1);
+
+  --admin-focus: 0 0 0 3px var(--admin-accent-ring);
+}
+
+.adminRoot {
+  color-scheme: light;
+
+  color: var(--admin-text);
+}

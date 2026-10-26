@@ -4,9 +4,9 @@ import subprocess
 import tempfile
 import unittest
 
-try:  # 作为 scripts.tests.* 命名空间包导入
+try:
     from .bash_helper import BASH
-except ImportError:  # 经 discover -s scripts/tests 顶层导入
+except ImportError:
     from bash_helper import BASH
 
 
@@ -117,7 +117,6 @@ class TestCheckTargetEnvironmentRetirement(unittest.TestCase):
         )
 
     def assert_no_fail_items(self, output):
-        # 逐项判定行以 "FAIL " 开头；总结行的计数器（FAIL 0）不算判定行
         fail_lines = [line for line in output.splitlines() if line.startswith("FAIL ")]
         self.assertEqual(fail_lines, [])
 
@@ -139,7 +138,6 @@ class TestCheckTargetEnvironmentRetirement(unittest.TestCase):
             self.assertIn("FAIL 旧产品进程: 发现 1 项", result.stdout)
             self.assertIn("4242", result.stdout)
             self.assertIn("blue_whale_server", result.stdout)
-            # 其余项不受影响
             self.assertIn("PASS 旧docker镜像: 无残留", result.stdout)
             self.assertIn("PASS 旧端口监听: 无残留", result.stdout)
 
@@ -150,7 +148,6 @@ class TestCheckTargetEnvironmentRetirement(unittest.TestCase):
             self.assertEqual(result.returncode, 1)
             self.assertIn("FAIL 旧docker镜像: 发现 1 项", result.stdout)
             self.assertIn("blue-whale-gateway:local", result.stdout)
-            # 现行基线镜像不得被判为旧镜像
             self.assertNotIn("blue-whale-typescript-baseline", result.stdout)
             self.assertIn("PASS 旧docker容器: 无残留", result.stdout)
 
@@ -170,7 +167,6 @@ class TestCheckTargetEnvironmentRetirement(unittest.TestCase):
             self.assertEqual(result.returncode, 1)
             self.assertIn("FAIL 旧端口监听: 发现 1 项", result.stdout)
             self.assertIn("8686", result.stdout)
-            # 现行端口 3000 不得计入
             self.assertNotIn("3000", result.stdout.split("FAIL 旧端口监听")[1].splitlines()[0])
 
     def test_old_env_var_fails_without_leaking_value(self):

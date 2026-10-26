@@ -1,40 +1,58 @@
-/* ============================================
- * UserManage 用户管理：积分调整/冻结解冻/审计日志
- * 数据源 GET /api/admin/users + POST /:userId/manage + GET /api/admin/operation-logs
- * ============================================ */
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { createPortal } from 'react-dom';
-import { Search, X, Coins, Lock, LockOpen } from 'lucide-react';
+import { useState, useSyncExternalStore } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Coins, Lock, LockOpen, Search, ShieldCheck } from 'lucide-react';
 import {
-  fetchAdminUsers,
+  adminUserKeys,
+  adminUsersOptions,
+  BUILTIN_ROLES,
+  grantUserRole,
   manageAdminUser,
-  fetchOperationLogs,
+  revokeUserRole,
+  userRolesOptions,
   type AdminUserRow,
-  type OperationLog,
-  type UserManageAction,
-} from '@/api/admin';
-import { isApiError } from '@/api/http';
+} from '@/admin/api/adminUsers';
+import { type UserManageAction } from '@/admin/enums';
+import { operationLogsOptions, type OperationLog } from '@/admin/api/adminOperationLogs';
+import { isApiError } from '@/shared/api/http';
+import { isSuperAdmin, subscribe } from '@/shared/utils/auth';
+import { newIdempotencyKey } from '@/shared/api/idempotencyKey';
 import { formatLogIp } from '@/admin/formatLogIp';
-import { matchesAdminUserKeyword } from './userSearch';
-import styles from './index.module.css';
+import { normalizeAdminUserKeyword } from './userSearch';
+import AdminQueryTable, {
+  type Column,
+  type OffsetPaginationState,
+} from '../../components/AdminQueryTable';
+import { useAppliedFilters, usePagedQuery } from '../../components/AdminQueryTable/useQueryFilters';
+import {
+  Alert,
+  Badge,
+  Button,
+  Empty,
+  Hint,
+  Input,
+  Modal,
+  Select,
+  Stat,
+  MetaRow,
+  Table,
+  Tabs,
+} from '../../ui';
+
+const PAGE_SIZE = 20;
 
 const fmt = (n: number) => n.toLocaleString('en-US');
 
-/** ISO 时间 → 本地展示 */
 const fmtTime = (iso: string) => new Date(iso).toLocaleString('zh-CN', { hour12: false });
 
-/** 角色：1 普通用户 / 10 管理员 / 100 root */
 const ROLE_LABELS: Record<number, string> = { 1: '普通用户', 10: '管理员', 100: 'Root' };
 const roleName = (r: number) => ROLE_LABELS[r] ?? `角色 ${r}`;
 
-/** 审计日志 action → 展示名 */
 const ACTION_LABELS: Record<string, string> = {
   'user.freeze': '冻结',
   'user.unfreeze': '解冻',
   'user.adjust_balance': '调整积分',
 };
 
-/** 解析日志 detail JSON 字符串（含 reason 与 value），失败返回空对象 */
 const parseDetail = (raw: string): { reason?: string; value?: number } => {
   try {
     return JSON.parse(raw);
@@ -43,209 +61,239 @@ const parseDetail = (raw: string): { reason?: string; value?: number } => {
   }
 };
 
-/** 余额区间选项（本地筛选，单位：积分——管理端展示口径 quota/50000，IK9VZ0 已按积分重标定） */
-const RANGE_OPTIONS = [
-  { key: 'all', label: '全部余额', min: -Infinity, max: Infinity },
-  { key: '0-100', label: '0 — 100', min: 0, max: 100 },
-  { key: '100-500', label: '100 — 500', min: 100, max: 500 },
-  { key: '500-2000', label: '500 — 2,000', min: 500, max: 2000 },
-  { key: '2000-10000', label: '2,000 — 10,000', min: 2000, max: 10000 },
-  { key: 'gt10000', label: '> 10,000', min: 10000, max: Infinity },
-  { key: 'custom', label: '自定义区间', min: 0, max: 0 },
+const STATUS_OPTIONS = [
+  { value: '', label: '全部状态' },
+  { value: 'active', label: '正常' },
+  { value: 'disabled', label: '已冻结' },
 ];
 
+type Filters = { keyword: string; status: string };
+
+const EMPTY_FILTERS: Filters = { keyword: '', status: '' };
+
+const RECHARGE_CALIBER = (
+  <Hint label="累计充值的口径" title="累计充值怎么算">
+    <div>
+      单位是<b>积分</b>，不是元 —— 两者按定价目录里的「1 元 = N 积分」换算。
+      拿这一列直接对营收会差一个换算率。
+    </div>
+    <div>
+      <b>只算充值本金</b> —— 用户自己付钱买到的那部分积分。
+    </div>
+    <div>
+      <b>不含充值赠送。</b>赠送是平台另行发放的一批积分（另有来源与有效期）；
+      把它折进来，运营拿这个数去核营收就对不上了。
+    </div>
+    <div>
+      它记的是<b>历史上充了多少</b>，不是现在还剩多少 —— 充完又消费掉的照样算在里面。
+    </div>
+  </Hint>
+);
+
 export default function UserManage() {
-  const [users, setUsers] = useState<AdminUserRow[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState('');
-  const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState('all');
-  const [rangeKey, setRangeKey] = useState('all');
-  const [minVal, setMinVal] = useState('');
-  const [maxVal, setMaxVal] = useState('');
-  const [detailId, setDetailId] = useState<number | null>(null);
-  const [adjustId, setAdjustId] = useState<number | null>(null);
-  const [freezeId, setFreezeId] = useState<number | null>(null);
+  const filters = useAppliedFilters(EMPTY_FILTERS);
+  const paging = usePagedQuery(filters.epoch);
+  const { applied, draft, setDraft, apply, reset } = filters;
 
-  /** 页面加载拉取前 100 条；搜索/状态/余额筛选均在本地进行 */
-  const load = useCallback(() => {
-    setLoading(true);
-    setLoadError('');
-    fetchAdminUsers({ page: 1, pageSize: 100 })
-      .then((d) => setUsers(d.list))
-      .catch((e) => setLoadError(isApiError(e) ? e.message : '获取用户列表失败'))
-      .finally(() => setLoading(false));
-  }, []);
+  const [detailUser, setDetailUser] = useState<AdminUserRow | null>(null);
+  const [adjustUser, setAdjustUser] = useState<AdminUserRow | null>(null);
+  const [freezeUser, setFreezeUser] = useState<AdminUserRow | null>(null);
+  const [roleUser, setRoleUser] = useState<AdminUserRow | null>(null);
+  const superAdmin = useSyncExternalStore(subscribe, isSuperAdmin);
 
-  useEffect(() => load(), [load]);
+  const query = {
+    page: paging.page,
+    pageSize: PAGE_SIZE,
+    ...(applied.keyword ? { keyword: normalizeAdminUserKeyword(applied.keyword) } : {}),
+    ...(applied.status ? { status: applied.status } : {}),
+  };
+  const list = useQuery(adminUsersOptions(query));
 
-  const filtered = useMemo(() => {
-    const range = RANGE_OPTIONS.find((r) => r.key === rangeKey)!;
-    const min = rangeKey === 'custom' ? (minVal.trim() === '' ? -Infinity : parseFloat(minVal)) : range.min;
-    const max = rangeKey === 'custom' ? (maxVal.trim() === '' ? Infinity : parseFloat(maxVal)) : range.max;
-    return users.filter((u) => {
-      if (!matchesAdminUserKeyword(u, search)) return false;
-      if (statusFilter !== 'all' && u.status !== statusFilter) return false;
-      if (u.balance < min || u.balance > max) return false;
-      return true;
-    });
-  }, [users, search, statusFilter, rangeKey, minVal, maxVal]);
-
-  const findUser = (id: number | null) => users.find((u) => u.userId === id);
-
-  /** 用户管理操作：冻结/解冻/调整积分（POST /:userId/manage），成功后关弹窗并刷新列表 */
-  const doManage = async (userId: number, params: { action: UserManageAction; reason: string; value?: number }) => {
+  const doManage = async (
+    userId: number,
+    params: { action: UserManageAction; reason: string; value?: number; idempotencyKey?: string }
+  ) => {
     await manageAdminUser(userId, params);
-    setAdjustId(null);
-    setFreezeId(null);
-    load();
+    setAdjustUser(null);
+    setFreezeUser(null);
+    void list.refetch();
+  };
+
+  const columns: Column<AdminUserRow>[] = [
+    { key: 'userId', header: '用户ID', render: (u) => u.userId },
+    {
+      key: 'nickname',
+      header: '昵称',
+      render: (u) => (
+        <Button variant="ghost" size="sm" onClick={() => setDetailUser(u)}>
+          {u.nickname}
+        </Button>
+      ),
+    },
+    { key: 'phone', header: '手机号', render: (u) => u.phone || '—' },
+    { key: 'balance', header: '余额', render: (u) => fmt(u.balance) },
+    {
+      key: 'totalRecharge',
+      header: (
+        <>
+          累计充值 {RECHARGE_CALIBER}
+        </>
+      ),
+      render: (u) => fmt(u.totalRecharge),
+    },
+    { key: 'totalSpend', header: '累计消费', render: (u) => fmt(u.totalSpend) },
+    {
+      key: 'role',
+      header: '角色',
+      render: (u) => <Badge tone="neutral">{roleName(u.role)}</Badge>,
+    },
+    {
+      key: 'status',
+      header: '状态',
+      render: (u) => (
+        <Badge tone={u.status === 'active' ? 'success' : 'danger'}>
+          {u.status === 'active' ? '正常' : '已冻结'}
+        </Badge>
+      ),
+    },
+    { key: 'createdAt', header: '注册时间', render: (u) => fmtTime(u.createdAt) },
+    {
+      key: 'actions',
+      header: '操作',
+      render: (u) => (
+        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+          <Button
+            size="sm"
+            variant="ghost"
+            title="发放积分"
+            aria-label={`发放积分 ${u.nickname}`}
+            icon={<Coins size={15} strokeWidth={2} />}
+            onClick={() => setAdjustUser(u)}
+          />
+          <Button
+            size="sm"
+            variant="ghost"
+            title={u.status === 'active' ? '冻结账户' : '解冻账户'}
+            aria-label={`${u.status === 'active' ? '冻结' : '解冻'}账户 ${u.nickname}`}
+            icon={
+              u.status === 'active' ? (
+                <Lock size={15} strokeWidth={2} />
+              ) : (
+                <LockOpen size={15} strokeWidth={2} />
+              )
+            }
+            onClick={() => setFreezeUser(u)}
+          />
+          {superAdmin && (
+            <Button
+              size="sm"
+              variant="ghost"
+              title="设置角色"
+              aria-label={`设置角色 ${u.nickname}`}
+              icon={<ShieldCheck size={15} strokeWidth={2} />}
+              onClick={() => setRoleUser(u)}
+            />
+          )}
+        </div>
+      ),
+    },
+  ];
+
+  const pagination: OffsetPaginationState = {
+    kind: 'offset',
+    page: paging.page,
+    pageSize: PAGE_SIZE,
+    total: list.data?.total ?? 0,
+    prev: paging.prev,
+    next: paging.next,
   };
 
   return (
-    <div className={styles.page}>
-      {/* 页头 */}
-      <div className={styles.header}>
-        <div>
-          <h1 className={styles.title}>用户管理</h1>
-          <p className={styles.subtitle}>管理用户积分、查看调整记录与操作日志、冻结/解冻账户</p>
-        </div>
-      </div>
+    <>
+      <AdminQueryTable
+        title="用户管理"
+        subtitle={
+          superAdmin
+            ? '管理用户积分、查看调整记录与操作日志、冻结/解冻账户、设置角色'
+            : '管理用户积分、查看调整记录与操作日志、冻结/解冻账户'
+        }
+        hasFilters={filters.hasApplied}
+        filteredEmptyMessage="没有匹配的用户"
+        emptyMessage="暂无用户"
+        errorMessage="获取用户列表失败"
+        tableErrorMessage="用户列表加载失败"
+        columns={columns}
+        rows={list.data?.list ?? []}
+        rowKey={(u) => u.userId}
+        status={list}
+        pagination={pagination}
+        filters={
+          <>
+            {}
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              <Search size={16} strokeWidth={2} aria-hidden />
+              <Input
+                style={{ width: 240 }}
+                placeholder="搜索昵称/手机号/用户ID..."
+                value={draft.keyword}
+                onChange={(e) => setDraft((d) => ({ ...d, keyword: e.target.value }))}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') apply();
+                }}
+              />
+            </div>
+            <Select
+              aria-label="账户状态"
+              options={STATUS_OPTIONS}
+              value={draft.status}
+              onChange={(status) => setDraft((d) => ({ ...d, status }))}
+            />
+          </>
+        }
+        actions={
+          <>
+            <Button size="sm" onClick={reset} disabled={list.isFetching}>
+              重置
+            </Button>
+            <Button
+              size="sm"
+              variant="primary"
+              icon={<Search size={15} strokeWidth={2} />}
+              onClick={apply}
+              disabled={list.isFetching}
+            >
+              查询
+            </Button>
+          </>
+        }
+      />
 
-      {/* 筛选行（本地筛选） */}
-      <div className={styles.filterRow}>
-        <div className={styles.searchWrap}>
-          <Search size={16} strokeWidth={2} className={styles.searchIcon} />
-          <input
-            className={styles.searchInput}
-            placeholder="搜索昵称/手机号/用户ID..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-        </div>
-        <select className={styles.select} value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
-          <option value="all">全部状态</option>
-          <option value="active">正常</option>
-          <option value="disabled">已冻结</option>
-        </select>
-        <select className={styles.select} value={rangeKey} onChange={(e) => setRangeKey(e.target.value)}>
-          {RANGE_OPTIONS.map((r) => (
-            <option key={r.key} value={r.key}>
-              {r.label}
-            </option>
-          ))}
-        </select>
-      </div>
+      {}
+      {detailUser && <UserDetailModal user={detailUser} onClose={() => setDetailUser(null)} />}
 
-      {/* 自定义区间 */}
-      {rangeKey === 'custom' && (
-        <div className={styles.rangeBlock}>
-          <input className={styles.input} placeholder="最小值" value={minVal} onChange={(e) => setMinVal(e.target.value)} />
-          <span className={styles.rangeDash}>—</span>
-          <input className={styles.input} placeholder="最大值" value={maxVal} onChange={(e) => setMaxVal(e.target.value)} />
-        </div>
-      )}
-
-      {/* 用户表格 */}
-      <div className={styles.tableWrap}>
-        <table className={styles.table}>
-          <thead>
-            <tr>
-              <th>用户ID</th>
-              <th>昵称</th>
-              <th>手机号</th>
-              <th>余额</th>
-              <th>累计充值</th>
-              <th>累计消费</th>
-              <th>角色</th>
-              <th>状态</th>
-              <th>注册时间</th>
-              <th className={styles.thRight}>操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading && (
-              <tr>
-                <td colSpan={10} className={styles.tableState}>加载中…</td>
-              </tr>
-            )}
-            {!loading && loadError && (
-              <tr>
-                <td colSpan={10} className={styles.tableState}>{loadError}</td>
-              </tr>
-            )}
-            {!loading && !loadError && filtered.length === 0 && (
-              <tr>
-                <td colSpan={10} className={styles.tableState}>暂无用户</td>
-              </tr>
-            )}
-            {filtered.map((u) => (
-              <tr key={u.userId}>
-                <td className={styles.cellId}>{u.userId}</td>
-                <td>
-                  <button className={styles.nickLink} onClick={() => setDetailId(u.userId)}>
-                    {u.nickname}
-                  </button>
-                </td>
-                <td>{u.phone || <span className={styles.dash}>—</span>}</td>
-                <td className={styles.cellNum}>{fmt(u.balance)}</td>
-                <td>{fmt(u.totalRecharge)}</td>
-                <td>{fmt(u.totalSpend)}</td>
-                <td>
-                  <span className={styles.badgeRole}>{roleName(u.role)}</span>
-                </td>
-                <td>
-                  <span className={u.status === 'active' ? styles.badgeOn : styles.badgeOff}>
-                    {u.status === 'active' ? '正常' : '已冻结'}
-                  </span>
-                </td>
-                <td className={styles.cellTime}>{fmtTime(u.createdAt)}</td>
-                <td>
-                  <div className={styles.actionGroup}>
-                    <button className={styles.iconBtn} title="调整积分" onClick={() => setAdjustId(u.userId)}>
-                      <Coins size={15} strokeWidth={2} />
-                    </button>
-                    <button
-                      className={styles.iconBtn}
-                      title={u.status === 'active' ? '冻结账户' : '解冻账户'}
-                      onClick={() => setFreezeId(u.userId)}
-                    >
-                      {u.status === 'active' ? <Lock size={15} strokeWidth={2} /> : <LockOpen size={15} strokeWidth={2} />}
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      {/* 用户详情（审计日志：调整记录 + 操作日志） */}
-      {detailId !== null && findUser(detailId) && (
-        <UserDetailModal user={findUser(detailId)!} onClose={() => setDetailId(null)} />
-      )}
-
-      {/* 调整积分 */}
-      {adjustId !== null && findUser(adjustId) && (
+      {}
+      {adjustUser && (
         <AdjustModal
-          user={findUser(adjustId)!}
-          onClose={() => setAdjustId(null)}
-          onConfirm={(params) => doManage(adjustId, params)}
+          user={adjustUser}
+          onClose={() => setAdjustUser(null)}
+          onConfirm={(params) => doManage(adjustUser.userId, params)}
         />
       )}
 
-      {/* 冻结/解冻 */}
-      {freezeId !== null && findUser(freezeId) && (
+      {}
+      {freezeUser && (
         <FreezeModal
-          user={findUser(freezeId)!}
-          onClose={() => setFreezeId(null)}
-          onConfirm={(params) => doManage(freezeId, params)}
+          user={freezeUser}
+          onClose={() => setFreezeUser(null)}
+          onConfirm={(params) => doManage(freezeUser.userId, params)}
         />
       )}
-    </div>
+
+      {roleUser && <RoleModal user={roleUser} onClose={() => setRoleUser(null)} />}
+    </>
   );
 }
 
-/* ============ 用户详情弹窗 ============ */
 const DETAIL_TABS = [
   { key: 'base', label: '基本信息' },
   { key: 'adjust', label: '调整记录' },
@@ -256,195 +304,157 @@ type DetailTab = (typeof DETAIL_TABS)[number]['key'];
 
 function UserDetailModal({ user, onClose }: { user: AdminUserRow; onClose: () => void }) {
   const [tab, setTab] = useState<DetailTab>('base');
-  const [logs, setLogs] = useState<OperationLog[]>([]);
-  const [logsLoading, setLogsLoading] = useState(true);
-  const [logsError, setLogsError] = useState('');
+  const logsQuery = useQuery(
+    operationLogsOptions({ category: 'user', searchText: `user:${user.userId}` }),
+  );
+  const logs: OperationLog[] = logsQuery.data ?? [];
+  const logsLoading = logsQuery.isPending;
+  const logsError = logsQuery.isError
+    ? isApiError(logsQuery.error)
+      ? logsQuery.error.message
+      : '获取日志失败'
+    : '';
 
-  // 打开时按类别 + 用户ID 拉取审计日志
-  useEffect(() => {
-    setLogsLoading(true);
-    setLogsError('');
-    fetchOperationLogs({ category: 'user', searchText: `user:${user.userId}` })
-      .then(setLogs)
-      .catch((e) => setLogsError(isApiError(e) ? e.message : '获取日志失败'))
-      .finally(() => setLogsLoading(false));
-  }, [user.userId]);
-
-  /** 调整记录 tab：仅 adjust_balance */
   const adjusts = logs.filter((l) => l.action === 'user.adjust_balance');
 
-  return createPortal(
-    <div className={styles.overlay} onClick={onClose}>
-      <div className={styles.modalWide} onClick={(e) => e.stopPropagation()}>
-        <div className={styles.modalHead}>
-          <h2 className={styles.modalTitle}>用户详情</h2>
-          <button className={styles.closeBtn} onClick={onClose} title="关闭">
-            <X size={16} strokeWidth={2} />
-          </button>
-        </div>
+  const logRows = (isEmpty: boolean, emptyMessage: string) => (
+    <>
+      {logsLoading && (
+        <tr>
+          <td colSpan={5}>
+            <Empty message="加载中…" />
+          </td>
+        </tr>
+      )}
+      {!logsLoading && logsError && (
+        <tr>
+          <td colSpan={5}>
+            <Empty
+              message={logsError}
+              extra={
+                <Button size="sm" onClick={() => void logsQuery.refetch()}>
+                  重试
+                </Button>
+              }
+            />
+          </td>
+        </tr>
+      )}
+      {!logsLoading && !logsError && isEmpty && (
+        <tr>
+          <td colSpan={5}>
+            <Empty message={emptyMessage} />
+          </td>
+        </tr>
+      )}
+    </>
+  );
 
-        <div className={styles.modalBody}>
-          <div className={styles.tabs}>
-            {DETAIL_TABS.map((t) => (
-              <button
-                key={t.key}
-                className={`${styles.tab} ${tab === t.key ? styles.tabActive : ''}`}
-                onClick={() => setTab(t.key)}
-              >
-                {t.label}
-              </button>
-            ))}
-          </div>
+  return (
+    <Modal open title="用户详情" width={960} onClose={onClose}>
+      <Tabs items={DETAIL_TABS} value={tab} onChange={(k) => setTab(k as DetailTab)} />
 
-          {tab === 'base' && (
-            <div className={styles.infoGrid}>
-              <div>
-                <div className={styles.infoLabel}>用户ID</div>
-                <div className={styles.infoValue}>{user.userId}</div>
-              </div>
-              <div>
-                <div className={styles.infoLabel}>昵称</div>
-                <div className={styles.infoValue}>{user.nickname}</div>
-              </div>
-              <div>
-                <div className={styles.infoLabel}>手机号</div>
-                <div className={styles.infoValue}>{user.phone || '—'}</div>
-              </div>
-              <div>
-                <div className={styles.infoLabel}>角色</div>
-                <div className={styles.infoValue}>{roleName(user.role)}</div>
-              </div>
-              <div>
-                <div className={styles.infoLabel}>余额</div>
-                <div className={styles.infoValue}>{fmt(user.balance)} 积分</div>
-              </div>
-              <div>
-                <div className={styles.infoLabel}>状态</div>
-                <span className={user.status === 'active' ? styles.badgeOn : styles.badgeOff}>
+      {}
+      <div style={{ marginTop: 20 }}>
+        {tab === 'base' && (
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
+              gap: 12,
+            }}
+          >
+            <Stat label="用户ID" value={user.userId} />
+            <Stat label="昵称" value={user.nickname} />
+            <Stat label="手机号" value={user.phone || '—'} />
+            <Stat label="角色" value={roleName(user.role)} />
+            <Stat label="余额" value={`${fmt(user.balance)} 积分`} />
+            <Stat
+              label="状态"
+              value={
+                <Badge tone={user.status === 'active' ? 'success' : 'danger'}>
                   {user.status === 'active' ? '正常' : '已冻结'}
-                </span>
-              </div>
-              <div>
-                <div className={styles.infoLabel}>注册时间</div>
-                <div className={styles.infoValue}>{fmtTime(user.createdAt)}</div>
-              </div>
-              <div>
-                <div className={styles.infoLabel}>累计充值 / 消费</div>
-                <div className={styles.infoValue}>
-                  {fmt(user.totalRecharge)} / {fmt(user.totalSpend)}
-                </div>
-              </div>
-              <div>
-                <div className={styles.infoLabel}>最后更新时间</div>
-                <div className={styles.infoValue}>{fmtTime(user.updatedAt)}</div>
-              </div>
-            </div>
-          )}
+                </Badge>
+              }
+            />
+            <Stat label="注册时间" value={fmtTime(user.createdAt)} />
+            <Stat label="累计充值 / 消费" value={`${fmt(user.totalRecharge)} / ${fmt(user.totalSpend)}`} />
+            <Stat label="最后更新时间" value={fmtTime(user.updatedAt)} />
+          </div>
+        )}
 
-          {tab === 'adjust' && (
-            <div className={styles.tabBody}>
-              <div className={styles.subTableWrap}>
-                <table className={styles.subTable}>
-                  <thead>
-                    <tr>
-                      <th>时间</th>
-                      <th>金额</th>
-                      <th>原因</th>
-                      <th>操作人</th>
-                      <th>IP</th>
+        {tab === 'adjust' && (
+          <Table>
+            <thead>
+              <tr>
+                <th>时间</th>
+                <th>金额</th>
+                <th>原因</th>
+                <th>操作人</th>
+                <th>IP</th>
+              </tr>
+            </thead>
+            <tbody>
+              {logRows(adjusts.length === 0, '暂无调整记录')}
+              {!logsLoading &&
+                !logsError &&
+                adjusts.map((l) => {
+                  const d = parseDetail(l.detail);
+                  const v = d.value ?? 0;
+                  return (
+                    <tr key={l.id}>
+                      <td>{fmtTime(l.createdAt)}</td>
+                      <td>
+                        {}
+                        <Badge tone={v >= 0 ? 'success' : 'danger'}>
+                          {v >= 0 ? `+${fmt(v)}` : fmt(v)}
+                        </Badge>
+                      </td>
+                      <td>{d.reason ?? '—'}</td>
+                      <td>{l.operator}</td>
+                      <td>{formatLogIp(l.ipAddress)}</td>
                     </tr>
-                  </thead>
-                  <tbody>
-                    {logsLoading && (
-                      <tr>
-                        <td colSpan={5} className={styles.emptyCell}>加载中…</td>
-                      </tr>
-                    )}
-                    {!logsLoading && logsError && (
-                      <tr>
-                        <td colSpan={5} className={styles.emptyCell}>{logsError}</td>
-                      </tr>
-                    )}
-                    {!logsLoading && !logsError && adjusts.length === 0 && (
-                      <tr>
-                        <td colSpan={5} className={styles.emptyCell}>暂无调整记录</td>
-                      </tr>
-                    )}
-                    {adjusts.map((l) => {
-                      const d = parseDetail(l.detail);
-                      const v = d.value ?? 0;
-                      return (
-                        <tr key={l.id}>
-                          <td className={styles.cellTime}>{fmtTime(l.createdAt)}</td>
-                          <td className={v >= 0 ? styles.cellPos : styles.cellNeg}>
-                            {v >= 0 ? `+${fmt(v)}` : fmt(v)}
-                          </td>
-                          <td>{d.reason ?? '—'}</td>
-                          <td>{l.operator}</td>
-                          <td className={styles.mono}>{formatLogIp(l.ipAddress)}</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
+                  );
+                })}
+            </tbody>
+          </Table>
+        )}
 
-          {tab === 'log' && (
-            <div className={styles.tabBody}>
-              <div className={styles.subTableWrap}>
-                <table className={styles.subTable}>
-                  <thead>
-                    <tr>
-                      <th>时间</th>
-                      <th>操作</th>
-                      <th>原因</th>
-                      <th>操作人</th>
-                      <th>IP</th>
+        {tab === 'log' && (
+          <Table>
+            <thead>
+              <tr>
+                <th>时间</th>
+                <th>操作</th>
+                <th>原因</th>
+                <th>操作人</th>
+                <th>IP</th>
+              </tr>
+            </thead>
+            <tbody>
+              {logRows(logs.length === 0, '暂无操作日志')}
+              {!logsLoading &&
+                !logsError &&
+                logs.map((l) => {
+                  const d = parseDetail(l.detail);
+                  return (
+                    <tr key={l.id}>
+                      <td>{fmtTime(l.createdAt)}</td>
+                      <td>{ACTION_LABELS[l.action] ?? l.action}</td>
+                      <td>{d.reason ?? '—'}</td>
+                      <td>{l.operator}</td>
+                      <td>{formatLogIp(l.ipAddress)}</td>
                     </tr>
-                  </thead>
-                  <tbody>
-                    {logsLoading && (
-                      <tr>
-                        <td colSpan={5} className={styles.emptyCell}>加载中…</td>
-                      </tr>
-                    )}
-                    {!logsLoading && logsError && (
-                      <tr>
-                        <td colSpan={5} className={styles.emptyCell}>{logsError}</td>
-                      </tr>
-                    )}
-                    {!logsLoading && !logsError && logs.length === 0 && (
-                      <tr>
-                        <td colSpan={5} className={styles.emptyCell}>暂无操作日志</td>
-                      </tr>
-                    )}
-                    {logs.map((l) => {
-                      const d = parseDetail(l.detail);
-                      return (
-                        <tr key={l.id}>
-                          <td className={styles.cellTime}>{fmtTime(l.createdAt)}</td>
-                          <td>{ACTION_LABELS[l.action] ?? l.action}</td>
-                          <td>{d.reason ?? '—'}</td>
-                          <td>{l.operator}</td>
-                          <td className={styles.mono}>{formatLogIp(l.ipAddress)}</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-        </div>
+                  );
+                })}
+            </tbody>
+          </Table>
+        )}
       </div>
-    </div>,
-    document.body
+    </Modal>
   );
 }
 
-/* ============ 调整积分弹窗 ============ */
 function AdjustModal({
   user,
   onClose,
@@ -452,74 +462,91 @@ function AdjustModal({
 }: {
   user: AdminUserRow;
   onClose: () => void;
-  onConfirm: (params: { action: UserManageAction; reason: string; value?: number }) => Promise<void>;
+  onConfirm: (params: {
+    action: UserManageAction;
+    reason: string;
+    value?: number;
+    idempotencyKey?: string;
+  }) => Promise<void>;
 }) {
-  const [amount, setAmount] = useState('0');
+  const [amount, setAmount] = useState('');
   const [reason, setReason] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-  const amountNum = parseFloat(amount);
-  const valid = !Number.isNaN(amountNum) && amountNum !== 0 && reason.trim().length > 0;
+  const [idempotencyKey] = useState(() => newIdempotencyKey());
+  const amountNum = Number(amount);
+  const valid =
+    Number.isSafeInteger(amountNum) && amountNum > 0 && reason.trim().length > 0;
 
   const submit = async () => {
     if (!valid || saving) return;
     setSaving(true);
     setError('');
     try {
-      await onConfirm({ action: 'adjustBalance', reason: reason.trim(), value: amountNum });
+      await onConfirm({
+        action: 'adjustBalance',
+        reason: reason.trim(),
+        value: amountNum,
+        idempotencyKey,
+      });
     } catch (e) {
-      setError(isApiError(e) ? e.message : '调整失败，请稍后重试');
+      setError(isApiError(e) ? e.message : '发放失败，请稍后重试');
     } finally {
       setSaving(false);
     }
   };
 
-  return createPortal(
-    <div className={styles.overlay} onClick={onClose}>
-      <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
-        <div className={styles.modalHead}>
-          <h2 className={styles.modalTitle}>调整积分</h2>
-          <button className={styles.closeBtn} onClick={onClose} title="关闭">
-            <X size={16} strokeWidth={2} />
-          </button>
+  return (
+    <Modal
+      open
+      title="发放积分"
+      width={560}
+      onClose={onClose}
+      footer={
+        <>
+          <Button onClick={onClose}>取消</Button>
+          <Button disabled={!valid || saving} onClick={submit}>
+            {saving ? '提交中…' : '确认发放'}
+          </Button>
+        </>
+      }
+    >
+      {}
+      <MetaRow
+        items={[
+          { label: '用户', value: user.nickname },
+          { label: '当前余额', value: `${fmt(user.balance)} 积分` },
+        ]}
+        tone="sunken"
+      />
+
+      {}
+      <div style={{ margin: '16px 0 6px' }}>发放积分（正整数）</div>
+      <Input
+        style={{ width: '100%' }}
+        type="number"
+        min={1}
+        step={1}
+        placeholder="请输入积分数量"
+        value={amount}
+        onChange={(e) => setAmount(e.target.value)}
+      />
+      <div style={{ margin: '16px 0 6px' }}>发放原因 *</div>
+      <Input
+        style={{ width: '100%' }}
+        placeholder="请输入原因（必填）"
+        value={reason}
+        onChange={(e) => setReason(e.target.value)}
+      />
+      {error && (
+        <div style={{ marginTop: 12 }}>
+          <Alert tone="danger">{error}</Alert>
         </div>
-        <div className={styles.modalBody}>
-          <div className={styles.summaryBox}>
-            <span className={styles.summaryText}>
-              用户：<b>{user.nickname}</b>
-            </span>
-            <span className={styles.summarySub}>
-              当前余额：<b className={styles.mono}>{fmt(user.balance)}</b> 积分
-            </span>
-          </div>
-          <div className={styles.label}>调整金额（正数增加，负数扣减）</div>
-          <input className={styles.input} type="number" value={amount} onChange={(e) => setAmount(e.target.value)} />
-          <div className={styles.label}>
-            调整原因 <span className={styles.required}>*</span>
-          </div>
-          <input
-            className={styles.input}
-            placeholder="请输入原因（必填）"
-            value={reason}
-            onChange={(e) => setReason(e.target.value)}
-          />
-          {error && <div className={styles.formError}>{error}</div>}
-        </div>
-        <div className={styles.modalFoot}>
-          <button className={styles.cancelBtn} onClick={onClose}>
-            取消
-          </button>
-          <button className={styles.confirmRed} disabled={!valid || saving} onClick={submit}>
-            {saving ? '提交中…' : '确认调整'}
-          </button>
-        </div>
-      </div>
-    </div>,
-    document.body
+      )}
+    </Modal>
   );
 }
 
-/* ============ 冻结/解冻弹窗 ============ */
 function FreezeModal({
   user,
   onClose,
@@ -548,50 +575,160 @@ function FreezeModal({
     }
   };
 
-  return createPortal(
-    <div className={styles.overlay} onClick={onClose}>
-      <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
-        <div className={styles.modalHead}>
-          <h2 className={styles.modalTitle}>{freezing ? '冻结用户账户' : '解冻用户账户'}</h2>
-          <button className={styles.closeBtn} onClick={onClose} title="关闭">
-            <X size={16} strokeWidth={2} />
-          </button>
-        </div>
-        <div className={styles.modalBody}>
-          <div className={freezing ? styles.warnBox : styles.okBox}>
-            {freezing ? (
-              <>
-                即将冻结 <b>{user.nickname}</b>（{user.userId}）的积分账户。冻结后该用户将无法充值和消费。
-              </>
-            ) : (
-              <>
-                即将解冻 <b>{user.nickname}</b>（{user.userId}）的积分账户。解冻后该用户将恢复充值和消费能力。
-              </>
-            )}
-          </div>
-          <div className={styles.label}>{freezing ? '冻结' : '解冻'}原因 *</div>
-          <input
-            className={styles.input}
-            placeholder={`请输入${freezing ? '冻结' : '解冻'}原因（必填）`}
-            value={reason}
-            onChange={(e) => setReason(e.target.value)}
-          />
-          {error && <div className={styles.formError}>{error}</div>}
-        </div>
-        <div className={styles.modalFoot}>
-          <button className={styles.cancelBtn} onClick={onClose}>
-            取消
-          </button>
-          <button
-            className={freezing ? styles.confirmAmber : styles.confirmGreen}
+  return (
+    <Modal
+      open
+      title={freezing ? '冻结用户账户' : '解冻用户账户'}
+      width={560}
+      onClose={onClose}
+      footer={
+        <>
+          <Button onClick={onClose}>取消</Button>
+          <Button
+            variant={freezing ? 'danger' : 'primary'}
             disabled={!valid || saving}
             onClick={submit}
           >
             {saving ? '提交中…' : `确认${freezing ? '冻结' : '解冻'}`}
-          </button>
+          </Button>
+        </>
+      }
+    >
+      {}
+      <Alert tone={freezing ? 'warning' : 'success'}>
+        {freezing ? (
+          <>
+            即将冻结 <b>{user.nickname}</b>（{user.userId}）的积分账户。冻结后该用户将无法充值和消费。
+          </>
+        ) : (
+          <>
+            即将解冻 <b>{user.nickname}</b>（{user.userId}）的积分账户。解冻后该用户将恢复充值和消费能力。
+          </>
+        )}
+      </Alert>
+
+      <div style={{ margin: '16px 0 6px' }}>{freezing ? '冻结' : '解冻'}原因 *</div>
+      <Input
+        style={{ width: '100%' }}
+        placeholder={`请输入${freezing ? '冻结' : '解冻'}原因（必填）`}
+        value={reason}
+        onChange={(e) => setReason(e.target.value)}
+      />
+      {error && (
+        <div style={{ marginTop: 12 }}>
+          <Alert tone="danger">{error}</Alert>
         </div>
-      </div>
-    </div>,
-    document.body
+      )}
+    </Modal>
+  );
+}
+
+function RoleModal({ user, onClose }: { user: AdminUserRow; onClose: () => void }) {
+  const queryClient = useQueryClient();
+  const rolesQuery = useQuery(userRolesOptions(user.userId));
+  const current = rolesQuery.data?.roles ?? [];
+
+  const toggle = useMutation({
+    mutationFn: ({ code, grant }: { code: string; grant: boolean }) =>
+      grant ? grantUserRole(user.userId, code) : revokeUserRole(user.userId, code),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: adminUserKeys.all });
+    },
+  });
+
+  const rolesErrorText = rolesQuery.isError
+    ? isApiError(rolesQuery.error)
+      ? rolesQuery.error.message
+      : '获取角色失败'
+    : '';
+
+  const errorText = toggle.isError
+    ? isApiError(toggle.error)
+      ? toggle.error.message
+      : '操作失败，请稍后重试'
+    : '';
+
+  return (
+    <Modal
+      open
+      title="设置角色"
+      width={560}
+      onClose={onClose}
+      footer={<Button onClick={onClose}>关闭</Button>}
+    >
+      <MetaRow
+        items={[{ label: '用户', value: `${user.nickname}（${user.userId}）` }]}
+        tone="sunken"
+      />
+
+      <Table>
+        <thead>
+          <tr>
+            <th>
+              角色{' '}
+              <Hint label="角色说明" title="角色决定什么">
+                <div>
+                  决定该用户能否进入管理端。<b>超级管理员</b>可管理他人角色，授予前请确认。
+                </div>
+              </Hint>
+            </th>
+            <th>说明</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rolesQuery.isPending && (
+            <tr>
+              <td colSpan={3}>
+                <Empty message="加载中…" />
+              </td>
+            </tr>
+          )}
+          {rolesQuery.isError && (
+            <tr>
+              <td colSpan={3}>
+                <Empty
+                  message={rolesErrorText}
+                  extra={
+                    <Button size="sm" onClick={() => void rolesQuery.refetch()}>
+                      重试
+                    </Button>
+                  }
+                />
+              </td>
+            </tr>
+          )}
+          {!rolesQuery.isPending &&
+            !rolesQuery.isError &&
+            BUILTIN_ROLES.map((r) => {
+              const held = current.includes(r.code);
+              return (
+                <tr key={r.code}>
+                  <td>
+                    <Badge tone={held ? 'success' : 'neutral'}>{r.label}</Badge>
+                  </td>
+                  <td>{r.hint}</td>
+                  <td>
+                    <Button
+                      size="sm"
+                      variant={held ? 'danger' : 'primary'}
+                      disabled={toggle.isPending}
+                      onClick={() => toggle.mutate({ code: r.code, grant: !held })}
+                    >
+                      {held ? '撤销' : '授予'}
+                    </Button>
+                  </td>
+                </tr>
+              );
+            })}
+        </tbody>
+      </Table>
+
+      {errorText && (
+        <div style={{ marginTop: 12 }}>
+          <Alert tone="danger">{errorText}</Alert>
+        </div>
+      )}
+    </Modal>
   );
 }

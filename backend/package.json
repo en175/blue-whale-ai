@@ -5,11 +5,14 @@
   "type": "module",
   "scripts": {
     "build": "prisma generate && tsc -b && tsc-alias",
-    "prestart": "node -e 'const fs=require(\"fs\");const p=\"dist/apps/blue-whale/src/main.js\";if(!fs.existsSync(p)){console.error(\"dist 不存在：先 npm run build\");process.exit(1)}if(fs.readFileSync(p,\"utf8\").includes(\"@lib/\")){console.error(\"dist 残留 @lib/ 别名（tsc-alias 未跑完的半成品）：重新 npm run build\");process.exit(1)}'",
+    "prestart": "node scripts/check-dist-aliases.mjs",
     "start": "node dist/apps/blue-whale/src/main.js",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@bufbuild/protobuf": "^2.15.0",
+    "@connectrpc/connect": "^2.2.0",
+    "@connectrpc/connect-node": "^2.2.0",
     "@nestjs/common": "^11.0.0",
     "@nestjs/core": "^11.0.0",
     "@nestjs/platform-express": "^11.0.0",
@@ -18,19 +21,20 @@
     "@prisma/client": "^7.9.0",
     "@volcengine/openapi": "^1.36.2",
     "@volcengine/tos-sdk": "^2.9.1",
-    "jose": "^6.2.4",
+    "bcryptjs": "^3.0.3",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.2",
     "cookie-parser": "^1.4.7",
+    "exceljs": "^4.4.0",
     "express": "^5.2.1",
     "ioredis": "^5.11.1",
+    "jose": "^6.2.4",
     "mariadb": "^3.5.3",
     "mysql2": "3.23.1",
     "reflect-metadata": "^0.2.2",
     "rocketmq-client-nodejs": "^1.0.7",
     "rxjs": "^7.8.1",
     "sharp": "0.34.5",
-    "ffmpeg-static": "^5.2.0",
     "zod": "4.4.3"
   },
   "devDependencies": {

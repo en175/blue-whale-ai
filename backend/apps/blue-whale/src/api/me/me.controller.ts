@@ -1,105 +1,299 @@
-import { Body, Controller, Get, Headers, Put, Res } from "@nestjs/common";
-import type { Response } from "express";
-import { NewApiError } from "@lib/core";
+import { Body, Controller, Get, Patch, Post, Put, Req, Res } from "@nestjs/common";
+import type { Request, Response } from "express";
+import { ApiError } from "@lib/core";
 import { createLogger } from "@lib/core/logging";
 import {
+  ACCOUNT_ERROR_REBIND_TOKEN_EXPIRED,
+  ACCOUNT_ERROR_REBIND_TOKEN_INVALID,
   ACCOUNT_ERROR_UNKNOWN_NUMERIC_CODE,
   changePasswordRequestSchema,
+  FAILURE_CODE,
   fail,
   ok,
 } from "@lib/contracts";
-import { AccountService } from "@lib/shared/account/account.service.js";
-import { projectAccountError } from "@lib/shared/account/change-password-error.js";
-import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
-import { SessionService } from "@lib/shared/session/session.service.js";
 import {
-  SESSION_COOKIE_NAME,
-  sessionCookieOptions,
-} from "@lib/shared/session/cookie.js";
-import { parseBearerToken } from "@lib/shared/errors/bearer-token.js";
+  projectAuthFailure,
+  projectPasswordChangeFailure,
+} from "@lib/shared/errors/auth-error.js";
+import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
+import { requirePhoneAndCode } from "@lib/shared/auth/phone-verification.service.js";
+import {
+  AccountDirectoryService,
+  IdentityService,
+  InvalidCredentialsError,
+  PhoneActionService,
+  PhoneBindingService,
+} from "@lib/shared/identity/index.js";
+import { SessionService } from "@lib/shared/session/session.service.js";
+import { clearSessionCookie } from "@lib/shared/session/cookie.js";
 import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js";
+import type { BindPhoneDto } from "./dto/bind-phone.dto.js";
+import type { NicknameDto } from "./dto/nickname.dto.js";
+import type { RebindDto } from "./dto/rebind.dto.js";
+import type { RebindVerifyCurrentDto } from "./dto/rebind-verify-current.dto.js";
 
-/** 会话身份快照（AuthGuard 从本地会话解析，不再每次调 new-api /token/identity）。 */
+function verificationInputFailure(error: unknown) {
+  const failure = projectAuthFailure(error);
+  return failure
+    ? fail(FAILURE_CODE, failure.message, null, failure.errorCode)
+    : null;
+}
+
 @Controller()
 export class MeController {
   private readonly logger = createLogger("me");
 
   constructor(
-    private readonly account: AccountService,
     private readonly sessions: SessionService,
+    private readonly identity: IdentityService,
+    private readonly phoneBinding: PhoneBindingService,
+    private readonly directory: AccountDirectoryService,
+    private readonly phoneActions: PhoneActionService,
   ) {}
 
   @Get("me")
   async me(@CurrentUser() user: AuthenticatedUser) {
+    const flags = await this.identity.resolveAccountFlags(user.userId);
     return ok({
       id: Number(user.userId),
       user_id: Number(user.userId),
       username: user.username,
+      nickname: flags?.nickname ?? user.username,
       email: user.email,
-      phone: "",
-      has_password: true,
-      is_admin: user.isAdmin,
+      phone: flags?.phone ?? "",
+      has_password: flags?.hasPassword ?? false,
+      is_admin: await this.directory.isAdmin(user.userId),
+      tier: await this.directory.resolveTier(user.userId),
+      roles: await this.directory.listRoleCodes(user.userId),
     });
   }
 
-  /** 修改密码（IKBRCK）：AuthGuard 已回注真实 sk-，原样透传网关 PUT /api/user/self。
-   *  新密码长度口径 8–20（网关为事实源），此处只做非空契约校验，不二次限长。
-   *  改密成功后吊销该用户全部会话（含当前窗口）；若枚举吊销失败，兜底至少清掉当前窗口。 */
+  @Post("me/phone")
+  async bindPhone(
+    @Body() body: BindPhoneDto,
+    @CurrentUser() user: AuthenticatedUser | undefined,
+  ) {
+    const userId = user?.userId;
+    if (userId == null) {
+      throw new ApiError("缺少登录凭证", 401, "unauthorized");
+    }
+    let credentials;
+    try {
+      credentials = requirePhoneAndCode({
+        phone: body.phone,
+        code: body.code,
+      });
+    } catch (error) {
+      const failure = verificationInputFailure(error);
+      if (failure) return failure;
+      throw error;
+    }
+    const { phone, code } = credentials;
+    try {
+      await this.phoneBinding.bindPhone(userId, { phone, code });
+    } catch (error) {
+      if (error instanceof InvalidCredentialsError) {
+        throw new ApiError("登录已过期，请重新验证", 401, "unauthorized");
+      }
+      const failure = projectAuthFailure(error);
+      if (failure) {
+        return fail(FAILURE_CODE, failure.message, null, failure.errorCode);
+      }
+      throw error;
+    }
+    return ok();
+  }
+
+  @Post("me/phone/rebind/verify-current")
+  async verifyCurrentPhone(
+    @Body() body: RebindVerifyCurrentDto,
+    @CurrentUser() user: AuthenticatedUser | undefined,
+  ) {
+    const userId = user?.userId;
+    if (userId == null) {
+      throw new ApiError("缺少登录凭证", 401, "unauthorized");
+    }
+    const code = typeof body.code === "string" ? body.code.trim() : "";
+    if (!code) {
+      return fail(FAILURE_CODE, "验证码已失效，请重新获取");
+    }
+    try {
+      const { oldPhone } = await this.phoneBinding.rebindVerifyCurrent(userId, code);
+      const rebindToken = await this.phoneActions.issue({
+        kind: "rebind",
+        userId: Number(userId),
+        phone: oldPhone,
+      });
+      return ok({ rebind_token: rebindToken, expires_in: 600 });
+    } catch (error) {
+      if (error instanceof InvalidCredentialsError) {
+        throw new ApiError("登录已过期，请重新验证", 401, "unauthorized");
+      }
+      const failure = projectAuthFailure(error);
+      if (failure) {
+        return fail(FAILURE_CODE, failure.message, null, failure.errorCode);
+      }
+      throw error;
+    }
+  }
+
+  @Post("me/phone/rebind")
+  async rebindPhone(
+    @Body() body: RebindDto,
+    @CurrentUser() user: AuthenticatedUser | undefined,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const userId = user?.userId;
+    if (userId == null) {
+      throw new ApiError("缺少登录凭证", 401, "unauthorized");
+    }
+    const token = typeof body.rebind_token === "string" ? body.rebind_token.trim() : "";
+    let credentials;
+    try {
+      credentials = requirePhoneAndCode({
+        phone: body.phone,
+        code: body.code,
+      });
+    } catch (error) {
+      const failure = verificationInputFailure(error);
+      if (failure) return failure;
+      throw error;
+    }
+    const { phone, code } = credentials;
+
+    if (!token) {
+      return fail(
+        FAILURE_CODE,
+        "原手机号验证已过期，请重新验证",
+        null,
+        ACCOUNT_ERROR_REBIND_TOKEN_EXPIRED,
+      );
+    }
+    const action = await this.phoneActions.resolve("rebind", token);
+    if (!action || action.userId !== Number(userId) || !action.phone) {
+      return fail(
+        FAILURE_CODE,
+        "换绑凭证无效，请重新验证原手机号",
+        null,
+        ACCOUNT_ERROR_REBIND_TOKEN_INVALID,
+      );
+    }
+
+    let newPhone: string;
+    try {
+      ({ phone: newPhone } = await this.phoneBinding.commitRebind(userId, {
+        oldPhone: action.phone,
+        phone,
+        code,
+      }));
+    } catch (error) {
+      if (error instanceof InvalidCredentialsError) {
+        throw new ApiError("登录已过期，请重新验证", 401, "unauthorized");
+      }
+      const failure = projectAuthFailure(error);
+      if (failure) {
+        return fail(FAILURE_CODE, failure.message, null, failure.errorCode);
+      }
+      throw error;
+    }
+
+    let revokedSessions = 0;
+    try {
+      await this.phoneActions.revoke(token);
+    } catch (error) {
+      this.logger.error(
+        `换绑成功但记录收尾失败（userId=${userId}）：${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+    try {
+      revokedSessions = await this.sessions.revokeAllForUser(Number(userId));
+    } catch (error) {
+      this.logger.error(
+        `换绑成功但撤销会话失败（userId=${userId}）：${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+    clearSessionCookie(res);
+    return ok({
+      phone: newPhone,
+      revoked_sessions: revokedSessions,
+      relogin_required: true,
+    });
+  }
+
+  @Patch("me/nickname")
+  async updateNickname(
+    @Body() body: NicknameDto,
+    @CurrentUser() user: AuthenticatedUser | undefined,
+  ) {
+    const userId = user?.userId;
+    if (userId == null) {
+      throw new ApiError("缺少登录凭证", 401, "unauthorized");
+    }
+    try {
+      const result = await this.identity.updateNickname(userId, body.nickname);
+      return ok(result);
+    } catch (error) {
+      if (error instanceof InvalidCredentialsError) {
+        throw new ApiError("登录已过期，请重新验证", 401, "unauthorized");
+      }
+      const failure = projectAuthFailure(error);
+      if (failure) {
+        return fail(FAILURE_CODE, failure.message, null, failure.errorCode);
+      }
+      throw error;
+    }
+  }
+
+
+
   @Put("me/password")
   async changePassword(
     @Body() body: unknown,
-    @Headers("authorization") authorization?: string,
-    @CurrentUser() user?: AuthenticatedUser,
-    @Res({ passthrough: true }) res?: Response,
+    @CurrentUser() user: AuthenticatedUser | undefined,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
   ) {
     const parsed = changePasswordRequestSchema.safeParse(body);
     if (!parsed.success) {
-      throw new NewApiError("原密码和新密码不能为空", 400, "invalid_params");
+      throw new ApiError("新密码不能为空", 400, "invalid_params");
     }
-    const token = parseBearerToken(authorization);
-    if (!token) {
-      throw new NewApiError("未提供有效令牌", 401, "unauthorized");
+    const userId = user?.userId;
+    if (userId == null) {
+      throw new ApiError("缺少登录凭证", 401, "unauthorized");
     }
+    const currentToken = (req as Request & { loginToken?: string }).loginToken;
     try {
-      await this.account.changePassword(
-        {
-          originalPassword: parsed.data.original_password,
-          newPassword: parsed.data.password,
-        },
-        token,
-      );
+      await this.identity.changePassword(userId, {
+        oldPassword: parsed.data.original_password,
+        newPassword: parsed.data.password,
+      });
     } catch (error) {
-      // IKBQEE / ADR-0078：账号域错误统一投影——网关英文 message 归一为
-      // 账号域数值码（1101 原密码错误/1102 密码格式/1103 未设密码）+ 中文，杜绝英文透传。
-      const projected = projectAccountError(error, "修改密码失败");
-      // 未归类错误（1100 兜底）现在走 HTTP200 信封，不再有 4xx/5xx 可观测——主动留痕。
+      const projected = projectPasswordChangeFailure(error, "修改密码失败");
       if (projected.code === ACCOUNT_ERROR_UNKNOWN_NUMERIC_CODE) {
         this.logger.error(
-          `changePassword 未归类上游错误: ${
+          `changePassword 未归类错误: ${
             error instanceof Error ? error.message : String(error)
           }`,
         );
       }
       return fail(projected.code, projected.message);
     }
-    // 改密成功后再踢会话（best-effort）：上游改密成功已保证新密码生效，
-    // 会话吊销失败不阻断改密，避免旧会话残留。
     let revokedSessions = 0;
     try {
-      if (user?.userId != null) {
-        revokedSessions = await this.sessions.revokeAllForUser(Number(user.userId));
-      }
+      revokedSessions = await this.sessions.revokeAllForUser(Number(userId));
     } catch (error) {
       this.logger.error(
-        `changePassword user=${user?.userId} session revoke failed: ${
+        `changePassword user=${userId} session revoke failed: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );
-      // 兜底：枚举吊销失败（SCAN+pipeline）时，至少直接吊销当前会话并清 cookie——
-      // 保证当前浏览器改密后立即要求重新登录（其他设备会话靠 ≤5min 复核或后续枚举）。
       try {
-        if (token) await this.sessions.revoke(token);
-        if (res) res.clearCookie(SESSION_COOKIE_NAME, sessionCookieOptions());
+        if (currentToken) await this.sessions.revoke(currentToken);
+        clearSessionCookie(res);
       } catch (fallbackError) {
         this.logger.error(
           `changePassword fallback revoke failed: ${

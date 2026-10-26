@@ -1,0 +1,183 @@
+import { Body, Controller, Get, Put, UseGuards } from "@nestjs/common";
+import { AdminGuard } from "@lib/infra/guard/admin.guard.js";
+import { AdminException, toAdminError } from "@lib/shared/errors/admin-error.js";
+import {
+  SystemSettingsService,
+  type SystemCredentials,
+  type SystemPolicy,
+  type SystemRateLimit,
+  type SystemUpstream,
+  type SystemWatermark,
+} from "@lib/shared/system-settings/index.js";
+
+@Controller("admin/settings")
+@UseGuards(AdminGuard)
+export class AdminSettingsController {
+  constructor(private readonly settings: SystemSettingsService) {}
+
+  @Get()
+  async read() {
+    try {
+      return { success: true, data: await this.settings.read() };
+    } catch (error) {
+      throw toAdminError(error);
+    }
+  }
+
+  @Put()
+  async update(@Body() body: Record<string, unknown>) {
+    const patch = parsePatch(body ?? {});
+    try {
+      await this.settings.update(patch);
+      return { success: true, data: null };
+    } catch (error) {
+      throw toAdminError(error);
+    }
+  }
+}
+
+
+interface SettingsPatch {
+  credentials?: Partial<SystemCredentials>;
+  upstream?: Partial<SystemUpstream>;
+  policy?: Partial<SystemPolicy>;
+  rateLimit?: Partial<SystemRateLimit>;
+  watermark?: Partial<SystemWatermark>;
+}
+
+function parsePatch(body: Record<string, unknown>): SettingsPatch {
+  const patch: SettingsPatch = {};
+
+  rejectUnknownKeys(body, MODULE_KEYS, "settings");
+
+  const credentials = body.credentials;
+  if (credentials !== undefined) {
+    const source = requireObject(credentials, "credentials");
+    rejectUnknownKeys(source, CREDENTIAL_KEYS, "credentials");
+    const next: Partial<SystemCredentials> = {};
+    for (const key of CREDENTIAL_KEYS) {
+      const value = source[key];
+      if (value === undefined) continue;
+      if (typeof value !== "string") {
+        throw new AdminException(400, `credentials.${key} 须为字符串`);
+      }
+      next[key] = value;
+    }
+    patch.credentials = next;
+  }
+
+  const upstream = body.upstream;
+  if (upstream !== undefined) {
+    const source = requireObject(upstream, "upstream");
+    rejectUnknownKeys(source, UPSTREAM_KEYS, "upstream");
+    const next: Partial<SystemUpstream> = {};
+    for (const key of UPSTREAM_KEYS) {
+      const value = source[key];
+      if (value === undefined) continue;
+      if (typeof value !== "string") {
+        throw new AdminException(400, `upstream.${key} 须为字符串`);
+      }
+      next[key] = value;
+    }
+    patch.upstream = next;
+  }
+
+  const policy = body.policy;
+  if (policy !== undefined) {
+    const source = requireObject(policy, "policy");
+    rejectUnknownKeys(source, POLICY_KEYS, "policy");
+    patch.policy = {
+      ...readOptionalString(source, "refund_text"),
+      ...readOptionalString(source, "invoice_text"),
+    };
+  }
+
+  const rateLimit = body.rateLimit;
+  if (rateLimit !== undefined) {
+    const source = requireObject(rateLimit, "rateLimit");
+    rejectUnknownKeys(source, RATE_LIMIT_KEYS, "rateLimit");
+    patch.rateLimit = {
+      ...readOptionalPositive(source, "rate_per_min"),
+      ...readOptionalPositive(source, "rate_per_hour"),
+      ...readOptionalPositive(source, "concurrent"),
+      ...readOptionalPositive(source, "burst"),
+    };
+  }
+
+  const watermark = body.watermark;
+  if (watermark !== undefined) {
+    const source = requireObject(watermark, "watermark");
+    rejectUnknownKeys(source, WATERMARK_KEYS, "watermark");
+    patch.watermark = readOptionalBoolean(source, "enabled");
+  }
+
+  return patch;
+}
+
+const CREDENTIAL_KEYS = [
+  "hccb_mch_no",
+  "hccb_app_id",
+  "hccb_app_secret",
+  "hccb_notify_url",
+] as const satisfies readonly (keyof SystemCredentials)[];
+const UPSTREAM_KEYS = ["new_api_key"] as const satisfies readonly (keyof SystemUpstream)[];
+const MODULE_KEYS = ["credentials", "upstream", "policy", "rateLimit", "watermark"] as const;
+const POLICY_KEYS = ["refund_text", "invoice_text"] as const satisfies readonly (keyof SystemPolicy)[];
+const RATE_LIMIT_KEYS = [
+  "rate_per_min",
+  "rate_per_hour",
+  "concurrent",
+  "burst",
+] as const satisfies readonly (keyof SystemRateLimit)[];
+const WATERMARK_KEYS = ["enabled"] as const satisfies readonly (keyof SystemWatermark)[];
+
+function requireObject(value: unknown, module: string): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new AdminException(400, `${module} 须为对象`);
+  }
+  return value as Record<string, unknown>;
+}
+
+function rejectUnknownKeys(
+  source: Record<string, unknown>,
+  known: readonly string[],
+  module: string,
+): void {
+  for (const key of Object.keys(source)) {
+    if (!known.includes(key)) {
+      throw new AdminException(400, `${module} 不认识的字段：${key}`);
+    }
+  }
+}
+
+function readOptionalString(
+  source: Record<string, unknown>,
+  key: keyof SystemPolicy,
+): Partial<SystemPolicy> {
+  const value = source[key];
+  if (value === undefined) return {};
+  if (typeof value !== "string") throw new AdminException(400, `${key} 须为字符串`);
+  return { [key]: value };
+}
+
+function readOptionalPositive(
+  source: Record<string, unknown>,
+  key: keyof SystemRateLimit,
+): Partial<SystemRateLimit> {
+  const value = source[key];
+  if (value === undefined) return {};
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    throw new AdminException(400, `${key} 须为大于 0 的数值`);
+  }
+  return { [key]: value };
+}
+
+function readOptionalBoolean(
+  source: Record<string, unknown>,
+  key: keyof SystemWatermark,
+): Partial<SystemWatermark> {
+  const value = source[key];
+  if (value === undefined) return {};
+  if (typeof value !== "boolean") throw new AdminException(400, `${key} 须为布尔值`);
+  return { [key]: value };
+}

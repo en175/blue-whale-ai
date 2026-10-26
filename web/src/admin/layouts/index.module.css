@@ -1,136 +1,210 @@
-/* ============================================
- * AdminLayout 后台布局样式
- * ============================================ */
+
 .guardLoading {
   display: flex;
   align-items: center;
   justify-content: center;
   height: 100vh;
-  color: #888;
-  font-size: var(--font-size-md);
+  background: #f7f8fa;
+  color: #6b7280;
+  font-size: var(--admin-font-sm);
 }
+
 .layout {
   display: flex;
   width: 100%;
   height: 100vh;
-  background-color: #0a0a0a;
+  background-color: var(--admin-bg);
 }
 
-/* ---- 侧边栏 ---- */
 .sidebar {
-  width: 260px;
+  width: 224px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  background-color: #151515;
-  border-right: 1px solid #232323;
+  background-color: var(--admin-surface);
+  border-right: 1px solid var(--admin-border);
 }
 
 .brand {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 20px;
-  border-bottom: 1px solid #232323;
+  gap: var(--spacing-md);
+  padding: var(--spacing-xl) var(--spacing-lg);
+  border-bottom: 1px solid var(--admin-border);
 }
 
 .brandIcon {
-  width: 40px;
-  height: 40px;
+  width: 30px;
+  height: 30px;
   flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  background-color: #3e8efc;
-  border-radius: 10px;
-  color: #fff;
+  background: var(--admin-accent-soft);
+  border: 1px solid var(--admin-accent-border);
+  border-radius: var(--admin-radius-surface);
+  color: var(--admin-accent);
 }
 
 .brandName {
-  color: #fff;
-  font-size: var(--font-size-md);
+  color: var(--admin-text);
+  font-size: var(--admin-font-sm);
   font-weight: 600;
+  letter-spacing: -0.01em;
 }
 
 .brandSub {
-  color: #888;
-  font-size: var(--font-size-xs);
-  margin-top: 2px;
+  color: var(--admin-text-faint);
+  font-size: var(--admin-font-xs);
+  margin-top: 1px;
 }
 
-/* ---- 菜单 ---- */
 .nav {
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 16px 12px;
+  gap: 1px;
+  padding: var(--spacing-md) var(--spacing-sm);
   overflow-y: auto;
 }
 
 .navItem {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 12px 14px;
-  border-radius: 10px;
-  color: #bbb;
-  font-size: var(--font-size-md);
+  gap: var(--spacing-md);
+  padding: var(--spacing-sm) var(--spacing-sm);
+  border-radius: var(--admin-radius-surface);
+  color: var(--admin-text-muted);
+  font-size: var(--admin-font-sm);
   text-decoration: none;
-  transition: background-color 0.15s ease, color 0.15s ease;
+  transition:
+    background-color var(--transition-fast),
+    color var(--transition-fast);
 }
 
 .navItem:hover {
-  background-color: #1f1f1f;
-  color: #eee;
+  background: #f3f4f6;
+  color: var(--admin-text);
 }
 
-.navActive {
-  color: #3e8efc;
+.navItem:focus-visible {
+  outline: none;
+  box-shadow: var(--admin-focus);
+}
+
+.navActive,
+.navActive:hover {
+  background: var(--admin-accent-soft);
+  color: var(--admin-accent);
   font-weight: 500;
 }
 
-.navActive:hover {
-  background-color: rgba(62, 139, 252, 0.08);
-  color: #3e8efc;
-}
-
-/* ---- 底部管理员 ---- */
 .footer {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 16px 20px;
-  border-top: 1px solid #232323;
+  gap: var(--spacing-md);
+  padding: var(--spacing-md) var(--spacing-lg);
+  border-top: 1px solid var(--admin-border);
 }
 
 .avatar {
-  width: 36px;
-  height: 36px;
+  width: 30px;
+  height: 30px;
   flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  background-color: #2a2a2a;
-  border-radius: 50%;
-  color: #ccc;
-  font-size: var(--font-size-sm);
+  background: var(--admin-accent-soft);
+  border-radius: var(--admin-radius-pill);
+  color: var(--admin-accent);
+  font-size: var(--admin-font-xs);
+  font-weight: 600;
+}
+
+.footerText {
+  min-width: 0;
 }
 
 .footerName {
-  color: #eee;
-  font-size: var(--font-size-sm);
+  color: var(--admin-text);
+  font-size: var(--admin-font-xs);
 }
 
 .footerMail {
-  color: #777;
-  font-size: var(--font-size-xs);
-  margin-top: 2px;
+  color: var(--admin-text-faint);
+  font-size: var(--admin-font-xs);
+  margin-top: 1px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-/* ---- 内容区 ---- */
 .content {
   flex: 1;
   overflow-y: auto;
-  padding: 40px;
+  padding: var(--spacing-xl) var(--spacing-xl) var(--spacing-2xl);
+}
+
+.sidebar {
+  transition: width 0.18s ease;
+}
+
+.collapsed {
+  width: 60px;
+}
+
+.collapsed .brand {
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px 8px;
+}
+
+.collapsed .nav {
+  padding: 8px;
+  align-items: center;
+}
+
+.collapsed .navItem {
+  justify-content: center;
+  width: 40px;
+  padding: 8px 0;
+}
+
+.collapsed .footer {
+  justify-content: center;
+  padding: 12px 8px;
+}
+
+.collapseBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  margin-left: auto;
+  border: none;
+  border-radius: var(--admin-radius-control);
+  background: transparent;
+  color: var(--admin-text-faint);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.collapseBtn:hover {
+  background: var(--admin-row-hover);
+  color: var(--admin-text);
+}
+
+.collapseBtn:focus-visible {
+  outline: none;
+  box-shadow: var(--admin-focus);
+}
+
+.collapsed .collapseBtn {
+  margin-left: 0;
+}
+
+.collapsed .brandText {
+  display: none;
 }

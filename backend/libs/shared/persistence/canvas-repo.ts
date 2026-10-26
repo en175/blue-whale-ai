@@ -2,10 +2,8 @@ import { createHash } from "node:crypto";
 import type { PromptPreviewSource, PromptPreviewContent, PromptMaterial } from "@lib/contracts";
 import type { Prisma, PrismaClient } from "@prisma/client";
 
-/** Canvas db port（Prisma-backed），复用部署的 canvas 表（project_id 唯一 / viewport_json / nodes_json / edges_json）。
- *  对齐 Java CanvasDto：{id, project_id, viewport, nodes}——viewport/nodes 是 JSON 字符串（前端 JSON.parse）。
- *  edges（IKDLQF）同构：JSON 字符串，缺省 null 由调用侧视为空数组。
- *  repo 负责 Json 列 ↔ 字符串转换。 */
+import { extraString, loadJobExtras, setJobExtras } from "./generation-jobs-extra-repo.js";
+
 
 export interface CanvasView {
   id: string | null;
@@ -26,8 +24,6 @@ export interface CanvasRepo {
     viewport: string | null,
     nodes: string | null,
   ): Promise<CanvasView>;
-  /** 仅当 Canvas 仍是调用方读取的版本时保存；冲突返回 null，由调用方重读并重算。
-   *  edges 与 nodes 同一次条件写入（IKDLQF）；调用方须显式传入（保留旧值或新值）。 */
   saveIfVersion(
     projectId: string,
     expectedVersion: number | null,
@@ -42,7 +38,7 @@ export class PromptMaterialUnavailableError extends Error {
   constructor(readonly assetId: string) { super("Prompt material unavailable"); }
 }
 
-async function linkPromptMaterials(tx: Prisma.TransactionClient, projectId: bigint, context?: { ownerId: string; items: PromptMaterial[] }) {
+export async function linkPromptMaterials(tx: Prisma.TransactionClient, projectId: bigint, context?: { ownerId: string; items: PromptMaterial[] }) {
   if (!context) return;
   for (const material of [...context.items].sort((a, b) => a.assetId.localeCompare(b.assetId))) {
     const rows = await tx.$queryRaw<Array<{ id: bigint }>>`SELECT id FROM assets WHERE id = ${BigInt(material.assetId)} AND user_id = ${BigInt(context.ownerId)} AND is_delete = false AND status = 'normal' AND type = ${material.mediaType} FOR UPDATE`;
@@ -89,7 +85,6 @@ function outputSlotIds(nodes: unknown): bigint[] {
     if (!node || typeof node !== "object" || Array.isArray(node)) continue;
     const id = (node as Record<string, unknown>).id;
     if (typeof id !== "string") continue;
-    // 普通生成输出与分镜画格都映射回 output_slot，复用 initial_placement_status 标 placed。
     const match =
       /^(?:generation-output|storyboard-frame):([1-9][0-9]*)$/.exec(id);
     if (match?.[1]) ids.add(BigInt(match[1]));
@@ -97,7 +92,54 @@ function outputSlotIds(nodes: unknown): bigint[] {
   return [...ids];
 }
 
-async function markOutputSlotsPlaced(
+function audioMixCardIds(nodes: unknown): bigint[] {
+  if (!Array.isArray(nodes)) return [];
+  const ids = new Set<bigint>();
+  for (const node of nodes) {
+    if (!node || typeof node !== "object" || Array.isArray(node) || node.type !== "mediaNode") continue;
+    const match = typeof node.id === "string" ? /^audio-mix-([1-9][0-9]*)$/.exec(node.id) : null;
+    if (!match || String(node.data?.jobId) !== match[1]) continue;
+    ids.add(BigInt(match[1]));
+  }
+  return [...ids];
+}
+
+export async function markAudioMixCards(
+  tx: Prisma.TransactionClient,
+  projectId: bigint,
+  nodes: unknown,
+  ownerId?: string,
+): Promise<void> {
+  if (!ownerId || !/^[1-9][0-9]*$/.test(ownerId)) return;
+  const ids = audioMixCardIds(nodes);
+  const scope = { project_id: projectId, user_id: BigInt(ownerId), type: "audio_mix", is_delete: false };
+  if (ids.length > 0) {
+    const owned = await tx.generation_jobs.findMany({
+      where: { ...scope, id: { in: ids } },
+      select: { id: true },
+    });
+    for (const row of owned) {
+      await setJobExtras(tx, row.id, { canvas_card_state: "present" });
+    }
+  }
+  const candidates = await tx.generation_jobs.findMany({
+    where: ids.length > 0 ? { ...scope, id: { notIn: ids } } : scope,
+    select: { id: true },
+  });
+  if (candidates.length === 0) return;
+  const extrasByJob = await loadJobExtras(
+    tx,
+    candidates.map((c) => c.id.toString()),
+  );
+  for (const candidate of candidates) {
+    const state = extraString(extrasByJob.get(candidate.id.toString()), "canvas_card_state");
+    if (state === "present") {
+      await setJobExtras(tx, candidate.id, { canvas_card_state: "removed" });
+    }
+  }
+}
+
+export async function markOutputSlotsPlaced(
   tx: Prisma.TransactionClient,
   projectId: bigint,
   nodes: unknown,
@@ -175,6 +217,7 @@ export function createCanvasRepo(prisma: PrismaClient): CanvasRepo {
             });
             await linkPromptMaterials(tx, pid, materials);
             await markOutputSlotsPlaced(tx, pid, data.nodes_json);
+            await markAudioMixCards(tx, pid, data.nodes_json, materials?.ownerId);
             return toView(row);
           });
         } catch (error) {
@@ -197,6 +240,7 @@ export function createCanvasRepo(prisma: PrismaClient): CanvasRepo {
         if (result.count !== 1) return null;
         await linkPromptMaterials(tx, pid, materials);
         await markOutputSlotsPlaced(tx, pid, data.nodes_json);
+        await markAudioMixCards(tx, pid, data.nodes_json, materials?.ownerId);
         const row = await tx.canvas.findFirst({ where: { project_id: pid } });
         return row ? toView(row) : null;
       });

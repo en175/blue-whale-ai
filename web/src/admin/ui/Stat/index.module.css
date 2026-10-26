@@ -1,0 +1,69 @@
+.stat {
+  padding: 16px;
+  border: 1px solid var(--admin-border);
+  border-radius: var(--admin-radius-surface);
+  background: var(--admin-surface);
+  box-shadow: var(--admin-shadow-card);
+}
+
+.top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.label {
+  font-size: var(--admin-font-xs);
+  color: var(--admin-text-muted);
+}
+
+.iconBox {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--admin-radius-surface);
+  flex-shrink: 0;
+}
+
+.value {
+  margin-top: 8px;
+  font-size: var(--admin-font-xl);
+  font-weight: 600;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+  color: var(--admin-text);
+}
+
+.hint {
+  margin-top: 4px;
+  font-size: var(--admin-font-xs);
+  color: var(--admin-text-faint);
+}
+
+.accent {
+  background: var(--admin-accent-soft);
+  color: var(--admin-accent);
+}
+
+.success {
+  background: var(--admin-success-soft);
+  color: var(--admin-success);
+}
+
+.warning {
+  background: var(--admin-warning-soft);
+  color: var(--admin-warning);
+}
+
+.danger {
+  background: var(--admin-danger-soft);
+  color: var(--admin-danger);
+}
+
+.neutral {
+  background: #f3f4f6;
+  color: var(--admin-text-muted);
+}

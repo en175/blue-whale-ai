@@ -53,6 +53,9 @@ ADR-0077 当时明确否决过「创建生成任务时同步调 `GetAsset` 预�
      （`auth.controller.ts` 的 `establishSession` 处，`result.userId` + `result.token` 已经拿在手上）。
      `user_info` 与遗留的 `users` **无任何关系**——它只存网关侧执行凭证，不存任何用户资料。
      **明文存储**，对齐既有先例 `backend/libs/shared/generation/credential.ts`（「修正四：去密封，明文存 `job.input.provider_credential`」）。
+     ⚠️ **本节已被推翻（2026-09-29）**：`user_info` 整表退役，`createUserInfoRepo` 与 `model user_info` 一并删除，
+     DROP 落在迁移 `20260929000000_drop_user_info`。定时兜底不再按 `userId` 取用户 `sk-`，改读 `system_settings`
+     的 upstream 行（ADR-0114 决策 7）。依据见 ADR-0115 决策 1 与 ADR-0117 决策 4。
      **为什么是新表而不是给 `users` 加列**：`users` 是遗留表——其唯一写入点 `auth-repo.upsertUser` 只被 `loginWithCode` 调用，
      而 `loginWithCode` 在 0915 上**无任何调用方**（`backend/libs/shared/auth/` 只有 `handle-send-code.ts`，无 login-with-code 路由），
      `user-repo.findInfoById` 同样零调用方。且 `users.id` 与 `AuthenticatedUser.userId`（`establishSession` 取的是 `NewApiLoginResult.userId`）

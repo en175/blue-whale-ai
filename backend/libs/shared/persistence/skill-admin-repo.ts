@@ -5,8 +5,6 @@ import {
   normalizeNameKey,
 } from "./skill-repo-internals.js";
 
-/** 技能管理 admin repo（IKA64P 后续校准）：官方技能分类维护。
- *  category 列为自由文本（VarChar(32)），'' 表示未分类；不建新表、不迁移。 */
 
 export interface AdminSkillView {
   id: string;
@@ -25,9 +23,7 @@ export interface SkillAdminRepo {
   listOfficialSkills(): Promise<AdminSkillView[]>;
   listCategories(): Promise<AdminSkillCategoryView[]>;
   setCategory(id: bigint, category: string): Promise<boolean>;
-  /** IKA64P 效率优化：批量归类，返回命中数 */
   assignCategory(ids: bigint[], category: string): Promise<number>;
-  /** IKA64P：为缺失身份映射的官方技能补录 creative_skill + version 行，返回创建数 */
   backfillOfficialAssets(): Promise<number>;
   renameCategory(from: string, to: string): Promise<number>;
   clearCategory(name: string): Promise<number>;
@@ -82,8 +78,6 @@ export function createSkillAdminRepo(prisma: PrismaClient): SkillAdminRepo {
       return result.count;
     },
 
-    /** IKA64P：官方技能缺 creative 身份映射时补录（幂等，跳过已有映射/无正文行）。
-     *  与 createPersonalSkill 同契约：digest=sha256(body)，display_version=1.0.0。 */
     async backfillOfficialAssets() {
       const rows = await prisma.skill.findMany({
         where: { source: "official", is_delete: 0 },

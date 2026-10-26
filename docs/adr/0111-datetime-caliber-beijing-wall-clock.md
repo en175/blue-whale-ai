@@ -1,6 +1,6 @@
 # 全链路时间口径统一为北京时间（+08:00 墙钟字面量）
 
-**状态**：accepted（2026-09-21，IKHJ0Q）
+**状态**：accepted（2026-09-21，IKHJ0Q；含**修正一**：取消 Java 侧时区概念，见文末）
 
 规则一句话：**库里 `DATETIME` 列存的是北京时间墙钟字面量；保证它的三处机制必须同批次上线；上线必须停机切换，不能滚动发布。**
 
@@ -14,13 +14,14 @@
 
 ## 决定
 
-口径由三处**互不相干**的机制共同保证，**缺一不可**：
+口径由下列**互不相干**的机制共同保证，**缺一不可**：
 
 | 机制 | 位置 | 管什么 |
 | --- | --- | --- |
-| `@prisma/adapter-mariadb` 补丁 | `patches/@prisma__adapter-mariadb@7.9.0.patch` | Node 侧 `DATETIME` 字面量的**读写偏移** |
+| `@prisma/adapter-mariadb` 补丁 | `backend/patches/@prisma__adapter-mariadb@7.9.0.patch` | Node 侧 `DATETIME` 字面量的**读写偏移** |
 | `timezone: "+08:00"` | `backend/libs/shared/persistence/db.ts` `buildPoolConfig` | Node 侧连接**会话时区**（`NOW()` / `DEFAULT CURRENT_TIMESTAMP`） |
-| `WorkerClock` + `connectionInitSql` | `worker-java/.../WorkerClock`、`DataSourceConfig` | Java 侧写库时刻 + 会话时区 |
+| 容器 `TZ=Asia/Shanghai` | `server/blue-whale-worker/Dockerfile`、`server/blue-whale-billing/Dockerfile` | Java 侧写库时刻（`LocalDateTime.now()` 取 JVM 默认时区） |
+| `connectionTimeZone=Asia/Shanghai&forceConnectionTimeZoneToSession=true` | worker 的 `DATABASE_URL` 查询串、billing 的 `BILLING_DB_URL` | Java 侧连接**会话时区**（`NOW()` / `DEFAULT CURRENT_TIMESTAMP`） |
 
 **只做一半会造成同一行内 8 小时撕裂**：`gmt_create` 走 DDL 默认值（会话时区生效）写北京，而 `gmt_modified` 走应用侧 `new Date()`（补丁生效）写 UTC。已实测复现。
 
@@ -92,7 +93,7 @@ T+10m  MATERIAL_STATUS_POLL_MAX_AGE_MINUTES 回原值
 
 - **历史数据不迁移**：切换前写入的行读回**整体偏早 8 小时**（实测 `2026-09-21 06:30:34` → `2026-09-20T22:30:34Z`）。这是既定口径，不按 bug 报；判据是看行的时间是否接近「现在」。
 - **接口响应仍是 UTC**，日志对齐的是库不是接口。Node 侧 `.toISOString()` 与 `JSON.stringify` 恒产 `Z` 结尾，改动面 20+ 处，本次不动。取舍与理由写在 `backend/libs/core/logger.ts` 的文档块里。
-- **Java 容器日志仍是 UTC**：JVM 默认时区，容器未设 `TZ`。与 `WorkerClock` 无关，排查时注意差 8 小时。
+- **Java 容器日志曾是 UTC**（JVM 默认时区、容器未设 `TZ`）。**修正一后已改**：两个 Java 镜像都带 `ENV TZ=Asia/Shanghai`，容器日志与库同口径。
 - **跨服务日志的字符串排序性质，本次不保证。** 2026-09-03 把日志改成 UTC 的另一半理由是「跨服务日志按字符串排序」——`+08:00` 与 `Z` 混排时字典序不等于时间序（`+` < `Z`），所有新行会排在所有旧行之前。本次只把本仓日志改成 `+08:00`；另外两仓（agent 侧等）若未同批改，这条性质即失效。**本次的取舍**：日志对齐**库**（排查时先看库、再对接口）优先于对齐其它服务的日志。若跨服务排序仍被依赖，需另立工单把另外两仓同批改掉——不要只改本仓就宣布该性质还在。
 - `assets.deleted_at` 的 GC 在本批次线上**不存在**（`asset-gc.service.ts` 随 node generation-worker 在 `1312c474` 一并退役，只在 master 上有）。**因此 `ASSET_GC_DELAY_DAYS` 不需要在发布时调整**——工单正文与 PR 正文里「唯一不可逆点，必须提前调该变量」的说法是照着 master 代码写的，已作废。若将来恢复 GC，其 `deleted_at` 比较需要同样的窗口处理。
 
@@ -100,10 +101,59 @@ T+10m  MATERIAL_STATUS_POLL_MAX_AGE_MINUTES 回原值
 
 - `backend/libs/shared/persistence/tz-caliber.test.ts` —— 不连库，守两处机制的**存在性**（配置取值正确、补丁确实落在安装副本上）。默认门禁就能拦住。
 - `backend/libs/shared/persistence/tz-caliber.integration.test.ts` —— DB 门控（`IKHJ0Q_DATABASE_URL`），守核心不变量「**DB 默认值与显式写入落在同一个钟**」。变异验证：删会话时区 → 报 28801 秒差；删补丁 → 报 28799 秒差。
-- `worker-java` `WorkerClockTest` + 既有集成测试。变异 `WorkerClock` 回 UTC → `ClaimCasTests` 3 例失败（任务被提前认领）。
+- `worker-java` 既有集成测试（原 `WorkerClockTest` 随修正一删除）。测试 JVM 时区由两个 pom 的 surefire `-Duser.timezone=Asia/Shanghai` 对齐容器 `TZ`；会话时区由连接串参数而非 `connectionInitSql` 提供。
 - 镜像构建必须实测：补丁文件此前不在 `.dockerignore` 白名单里，`pnpm install` 会 ENOENT（已修）。
 
+## 修正一（2026-10-09，IKKBZW）：取消 Java 侧时区概念
+
+**决定**：Java 源码不再持有任何时区字面量。上表里由 `WorkerClock`（`ZoneOffset.ofHours(8)`）+ `DataSourceConfig` 的 `connectionInitSql` 承担的那一侧，拆成两处**部署配置**（见上表后两行）。
+
+连带改动：`WorkerClock` 与 `DbTime` 两个类删除；`Instant` 从 `server/` 全部撤出（一律 `LocalDateTime`）；促销的 `tz` 列/字段/校验从 Java、NestJS、web 三层删除（判定改按北京时间）；`gmt_create` / `gmt_modified` 改为只由列默认值写。
+
+**为什么不需要按上面的「发布程序」停机切换**：本节不改**口径**（库里仍是北京墙钟字面量），只换**由谁产生**这个字面量；切换前后写入结果逐字相同。因此 `T-0` 那套停投递 / 停 writer / 放大窗口不适用。
+
+**新引入的部署约束**：`TZ` 与连接串参数必须同时正确，否则 Java 写出的墙钟与 DB 会话时区错开 8 小时——这是原 `WorkerClock` 用代码钉死时不存在的新失败模式。代价换来「Java 源码零时区」。
+
+**保住的 wire 格式**：billing gRPC 的时间串改用 `ZoneId.systemDefault()` 还原 `+08:00` 偏移，字符串形态不变（NestJS 侧 `billing-client.ts` 原样透传给前端的假设继续成立）。
+
+**新增的两条装配期守卫**（把「配错了会尖叫」补上，见 worker 的 `DataSourceConfig.requireClockAgreement` 与 billing 的 `ClockAgreementCheck`）：两侧各在启动时查 `TIMESTAMPDIFF(SECOND, UTC_TIMESTAMP(), NOW())`，与 JVM 默认时区偏移比对，不一致直接终止启动。覆盖两种现实错配——漏了连接串参数（会话回落到库的全局时区）、漏了容器 `TZ`。
+
+**仍未闭合的残余**：守卫断言的是「Java 的钟 == 库的钟」，不是「== `+08:00`」。若容器 `TZ` 与连接串参数**同时**缺省、且库的全局时区也是 UTC（测试站即如此），两者仍自洽，守卫不会拦——此时 Java 与库一起偏离 Node（Node 侧 `db.ts` 与适配器补丁钉死北京）与历史数据。钉死 `+08:00` 本身需要重新在源码里放一个时区常量，与本节目标冲突，故登记为已知残余；防线是部署清单与上表。
+
+**另一处随本修正改动的行为**：`LedgerSelfCheck` 的 `@Scheduled` 去掉了 `zone = "Asia/Shanghai"`（账本自检，默认 03:00），改取 JVM 默认时区。容器 `TZ` 缺失时它会在 03:00 UTC（北京 11:00）跑——与上一条同源，靠容器 `TZ` 保证。
 ## 相关
 
 - [ADR-0074](0074-frontend-backend-separation-nestjs-product-api.md)（NestJS 产品 API）
 - `docs/specs/2026-09-10-ikel4a-worker-java-migration-contract.md` §10 / §13.3（跨进程契约，已同步修订）
+
+## 修正二（2026-10-10，IKKL9Z）：接口响应口径也改成北京墙钟
+
+**决定**：HTTP 响应体里的时间串从 UTC（`Z` 结尾）改成**北京时间墙钟字面量**（`+08:00`），并顺手取消 TS 侧所有硬编码偏移。本节推翻「后果」节第二条（「接口响应仍是 UTC……改动面 20+ 处，本次不动」）。
+
+**为什么推翻**：那次不动的前提是「页面显示本身是正常的，前端按浏览器时区渲染」。但仓里已经有一批消费方**按字面量渲染**——`web/src/pages/AccountCredits/format.ts` 的 `formatBeijingDateTime`、`web/src/admin/discountRules.ts` 的 `shortTime`/`shortDateTime`、`Promotions` / `MemberDiscounts` / `SharedAssetsModal` 各自的 `slice`。它们拿到 `Z` 就整体早 8 小时；而同一页里来自 billing 的字段又是 `+08:00`（修正一保住的 wire 格式），于是**同一页两种口径**。导出更直接：xlsx 单元格没有浏览器替它换算。
+
+**改成什么**（与修正一的 Java 做法同构：时区只在部署配置里出现一次，源码零时区）：
+
+| 机制 | 位置 | 管什么 |
+| --- | --- | --- |
+| `wallClock*` 一组序列化函数 | `backend/libs/core/wall-clock.ts` | 唯一那处格式化：读**进程本地时区**（`getFullYear()` / `getTimezoneOffset()`），产出 `...+08:00` |
+| 容器 `TZ=Asia/Shanghai` | `backend/Dockerfile`（alpine 另装 `tzdata`） | 进程时区。此前 backend 容器**没有任何 TZ 注入**，跑在 UTC |
+| 会话时区走连接串 | `DATABASE_URL` 的 `timezone` 查询参数 → `backend/libs/shared/persistence/db.ts` | 库会话时区。与 Java 的 `connectionTimeZone=…` 同构；代码里不再写 `"+08:00"` |
+| prisma 适配器补丁 | `backend/patches/@prisma__adapter-mariadb@7.9.0.patch` | 读侧按 `BLUE_WHALE_DB_OFFSET`、写侧按 `BLUE_WHALE_DB_OFFSET_MS` 解释与生成 `DATETIME` 字面量。**这一层刻意不跟进程时区走**：库里存什么**是数据契约**，自洽比「跟部署一致」重要；偏移收敛到补丁顶部两个相邻的具名常量，不再是散落的魔数 |
+| 装配期守卫 | `backend/libs/shared/persistence/clock-agreement.ts`，`main.ts` 启动时调用 | 比「进程偏移」与「库会话偏移」（`TIMESTAMPDIFF(SECOND, UTC_TIMESTAMP(), NOW())`），不一致**拒绝启动** |
+
+**为什么库读写层仍然钉死 `+08:00`**：它与展示层是**两个不同的问题**。展示口径（接口给人看什么）跟部署时区走、有守卫兜底；存储契约（库里存什么）必须自洽 —— 让它跟着 `TZ` 走，等于把「库里的字面量含义」交给环境变量，配错就静默改写了历史数据的含义。所以补丁用一处具名常量钉住 `+08:00`，会话时区仍由连接串给（这样守卫才有两个独立输入）。
+
+**为什么会话时区不能从进程推**：守卫比的正是这两个值。若会话时区也从进程偏移派生，两者恒等，守卫等于没做。所以会话时区必须来自**另一个部署输入**（连接串），与 Java 侧一致。
+
+**新引入的部署约束**：每个环境的 `DATABASE_URL` 都必须带 `timezone`（如 `?timezone=%2B08:00`），容器必须有 `TZ`。缺任一个 → 服务起不来并打出是哪一侧不对。这是 Java 侧早就有的要求，Node 侧补上而已。**本地开发同样适用**（本地 `bw-mysql` 全局时区是 UTC）。
+
+**保留精度的例外**：`RechargeOrderView.paidPendingAt` 用 `wallClockMillis`（带毫秒）—— 它是有效期起算时刻，会被 `Date.parse` 回读再参与运算，**回程无损**优先于「形态统一」。（列本身是 `@db.DateTime(0)`，生产值不会有亚秒；这里的毫秒只在回环路径上有意义。其余展示字段一律秒精度 `wallClockRfc3339`，与 billing 的 wire 形态对齐。）
+
+**源码里仍有一处 `+08:00` 字面量，且是有意的**：`backend/libs/shared/dashboard/dashboard-range.ts:25` 的 `new Date(`${y}-${mo}-${d}T00:00:00+08:00`)` —— 它是**查询区间的边界时刻**，与上面 prisma 补丁同一类：边界/存储的语义必须自洽，不能跟着进程时区漂。上面那句「源码零时区」指的是**展示层**，边界与存储这两处是刻意的例外。
+
+**仍未改的**：wire 上的「时刻」类字段保持 `Z` —— TOS 签名 URL 的 `expires_at`（`assets/agent-asset-resolver.ts`、`project-assets.ts`）与发给 billing 的 `expiresAt`（`billing-admin-client.ts`）。它们参与比较、没有人读字面量，改成墙钟没有收益。
+
+**残余（与修正一同款）**：守卫断言的是「进程的钟 == 库的钟」，不是「== `+08:00`」。若容器 `TZ` 与连接串参数**同时**缺省、且库全局时区也是 UTC，三者自洽、守卫不拦。防线仍是部署清单。
+
+**测试侧**：`tests/vitest.setup.ts` 把测试进程的 `TZ` 钉成 `Asia/Shanghai`，让断言确定；`backend/libs/shared/persistence/tz-caliber.test.ts` 的两条机制守卫改为断言「会话时区来自连接串」与「补丁按自洽的具名偏移（**不**跟进程时区走）」，并在 `backend/libs/core/wall-clock.test.ts` 覆盖「同一瞬时换个进程时区就换个墙钟」。

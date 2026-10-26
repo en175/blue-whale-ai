@@ -1,65 +1,7 @@
-/* ============================================
- * ConfirmModal 样式：二次确认弹窗
- * ============================================ */
-.overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 150;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(0, 0, 0, 0.6);
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
-}
-
-.modal {
-  width: 420px;
-  max-width: calc(100vw - 48px);
-  border: 1px solid #2e2e2e;
-  border-radius: 14px;
-  background: #1c1c1c;
-  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.6);
-}
-
-.head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 18px 22px;
-  border-bottom: 1px solid #2a2a2a;
-}
-
-.title {
-  margin: 0;
-  font-size: 16px;
-  font-weight: 700;
-  color: #f5f5f5;
-}
-
-.closeBtn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border: none;
-  border-radius: 6px;
-  background: transparent;
-  color: #9a9a9a;
-  cursor: pointer;
-}
-
-.closeBtn:hover {
-  background: #2a2a2a;
-  color: #f5f5f5;
-}
-
 .body {
   display: flex;
   align-items: flex-start;
   gap: 14px;
-  padding: 24px 22px;
 }
 
 .icon {
@@ -69,51 +11,15 @@
   flex-shrink: 0;
   width: 40px;
   height: 40px;
-  border-radius: 50%;
-  background: rgba(239, 68, 68, 0.15);
-  color: #ef4444;
+  border-radius: var(--admin-radius-pill);
+  background: var(--admin-danger-soft);
+  color: var(--admin-danger);
 }
 
 .content {
   margin: 0;
   padding-top: 9px;
-  font-size: var(--font-size-md, 14px);
+  font-size: var(--admin-font-sm);
   line-height: 1.7;
-  color: #c9c9c9;
-}
-
-.foot {
-  display: flex;
-  justify-content: flex-end;
-  gap: 12px;
-  padding: 0 22px 22px;
-}
-
-.cancelBtn {
-  padding: 10px 20px;
-  border: 1px solid #333;
-  border-radius: 8px;
-  background: #232323;
-  color: #d6d6d6;
-  font-size: var(--font-size-md, 14px);
-  cursor: pointer;
-}
-
-.cancelBtn:hover {
-  background: #2c2c2c;
-}
-
-.confirmBtn {
-  padding: 10px 22px;
-  border: none;
-  border-radius: 8px;
-  background: #ef4444;
-  color: #fff;
-  font-size: var(--font-size-md, 14px);
-  font-weight: 500;
-  cursor: pointer;
-}
-
-.confirmBtn:hover {
-  background: #f26363;
+  color: var(--admin-text-muted);
 }

@@ -13,6 +13,7 @@ model assets {
   project_id        BigInt   @default(0)
   generation_job_id BigInt?
   type              String   @db.VarChar(16)
+  name              String?  @db.VarChar(255)
   storage_key       String?  @db.VarChar(512)
   content_sha256    String?  @db.VarChar(64)
   md5               String?  @db.VarChar(32)
@@ -24,10 +25,7 @@ model assets {
   duration_ms       Int?
   source            String   @default("generated") @db.VarChar(32)
   status            String   @default("normal") @db.VarChar(32)
-  // IKDJNZ：原始素材与素材库（真人/虚拟人像库）素材关联。素材库零本地表，
-  // 仅存上游素材/组 ID 字符串；material_id 唯一索引兜底「一张素材只能关联一张」。
   material_id       String?  @db.VarChar(128)
-  material_group_id String?  @db.VarChar(128)
   gmt_create        DateTime @default(now()) @db.DateTime(0)
   gmt_modified      DateTime @default(now()) @db.DateTime(0)
   version           Int      @default(0)
@@ -39,14 +37,10 @@ model assets {
   @@index([generation_job_id], map: "idx_asset_generation_job")
   @@index([type], map: "idx_type")
   @@index([user_id], map: "idx_user_id")
-  // IKBMDM：findLiveRefs 按 storage_key IN + is_delete=false 做引用核对，需要 storage_key 前缀索引。
   @@index([storage_key, is_delete], map: "idx_asset_storage_live")
   @@index([is_delete, deleted_at], map: "idx_asset_gc_candidates")
-  // IKCNLS：上传 md5 去重按 (user_id, md5) 查未删资产，is_delete 条件支撑查询。
   @@index([user_id, md5, is_delete], map: "idx_asset_user_md5")
-  // IKDJNZ：素材库素材/组删除旁路按 ID 清关联；material_id 唯一索引兜底一对一。
   @@unique([material_id], map: "uq_asset_material_id")
-  @@index([material_group_id], map: "idx_asset_material_group")
 }
 
 /// IKDE6X：素材库组（虚拟人像库 + 真人像库）落地。本地为组主、上游备份、双向维护。
@@ -56,11 +50,11 @@ model assets {
 model material_groups {
   id                BigInt    @id @default(autoincrement())
   user_id           BigInt
-  material_group_id String    @db.VarChar(128) // 上游组 id（group-...）
-  kind              String    @db.VarChar(16) // virtual | real
+  material_group_id String    @db.VarChar(128)
+  kind              String    @db.VarChar(16)
   name              String    @db.VarChar(128)
-  cover_url         String?   @db.VarChar(512) // 封面图（真人组用，virtual 可空）
-  is_default        Boolean   @default(false) // 每用户虚拟默认组标记
+  cover_url         String?   @db.VarChar(512)
+  is_default        Boolean   @default(false)
   status            String    @default("normal") @db.VarChar(32)
   gmt_create        DateTime  @default(now()) @db.DateTime(0)
   gmt_modified      DateTime  @default(now()) @db.DateTime(0)
@@ -79,12 +73,12 @@ model material_groups {
 /// 无 is_delete/deleted_at：本表行是素材的附属状态，没有独立价值，删除时硬删（ADR-0087 决策 5）。
 model material_assets {
   id                BigInt    @id @default(autoincrement())
-  material_id       String    @unique(map: "uk_material_assets_material") @db.VarChar(128) // 上游素材 id（asset-...）
-  user_id           BigInt // 归属用户（new-api 用户 id）
-  material_group_id String    @db.VarChar(128) // 上游组 id（group-...）
-  status            String    @db.VarChar(16) // Processing | Active | Failed
-  error_code        String?   @db.VarChar(128) // 上游 Error.Code 原文
-  error_message     String?   @db.VarChar(512) // 上游 Error.Message 原文
+  material_id       String    @unique(map: "uk_material_assets_material") @db.VarChar(128)
+  user_id           BigInt
+  material_group_id String    @db.VarChar(128)
+  status            String    @db.VarChar(16)
+  error_code        String?   @db.VarChar(128)
+  error_message     String?   @db.VarChar(512)
   status_checked_at DateTime? @db.DateTime(0)
   gmt_create        DateTime  @default(now()) @db.DateTime(0)
   gmt_modified      DateTime  @default(now()) @db.DateTime(0)
@@ -92,18 +86,6 @@ model material_assets {
 
   @@index([status, gmt_create], map: "idx_material_assets_poll")
   @@index([material_group_id], map: "idx_material_assets_group")
-}
-
-/// 网关侧执行凭证（IKFYHJ）：定时兜底需以「素材归属用户」身份代打网关（网关无服务级查询入口）。
-/// provider_credential 明文存储，对齐 generation/credential.ts「修正四：去密封」。
-/// 登录成功时写入；管理员轮换后旧值失效，下次登录自愈。
-model user_info {
-  id                  BigInt   @id @default(autoincrement())
-  user_id             BigInt   @unique(map: "uk_user_info_user") // new-api 用户 id（AuthenticatedUser.userId）
-  provider_credential String   @db.VarChar(128) // 上游执行凭证（sk-），明文
-  gmt_create          DateTime @default(now()) @db.DateTime(0)
-  gmt_modified        DateTime @default(now()) @db.DateTime(0)
-  version             Int      @default(0)
 }
 
 /// 画布共享资产（IK9QKP）：用户主动保存、跨项目可复用的自包含快照库。
@@ -149,10 +131,6 @@ model generation_jobs {
   id                       BigInt    @id @default(autoincrement())
   project_id               BigInt?
   user_id                  BigInt
-  agent_run_id             BigInt?
-  action_identity          String?   @db.VarChar(128)
-  project_action_identity  String?   @db.VarChar(128)
-  expected_output_count    Int       @default(1)
   retry_of_job_id          BigInt?
   type                     String    @db.VarChar(32)
   source                   String    @default("dock") @db.VarChar(32)
@@ -162,17 +140,13 @@ model generation_jobs {
   provider                 String?   @db.VarChar(64)
   provider_task_id         String?   @db.VarChar(128)
   poll_count               Int       @default(0)
-  next_poll_at             DateTime? @db.DateTime(0)
   retry_count              Int       @default(0)
   last_polled_at           DateTime? @db.DateTime(0)
   error                    Json?
-  stage_id                 String?   @db.VarChar(64)
   lease_owner              String?   @db.VarChar(128)
   lease_expires_at         DateTime? @db.DateTime(0)
   fencing_token            BigInt    @default(0)
-  strategy_version         String?   @db.VarChar(64)
   execution_deadline_at    DateTime? @db.DateTime(0)
-  evidence_reconcile_until DateTime? @db.DateTime(0)
   next_action_at           DateTime? @db.DateTime(0)
   cancel_requested_at      DateTime? @db.DateTime(0)
   gmt_create               DateTime  @default(now()) @db.DateTime(0)
@@ -181,11 +155,66 @@ model generation_jobs {
   is_delete                Boolean   @default(false)
   input                    Json?
 
+  /// IKIZQC：成片来源唯一约束（契约 FINALIZE_SOURCE_UNIQUE_KEY）——同一来源样片
+  /// 至多一条成片任务行；MySQL 唯一索引不去重 NULL，普通视频/样片行不受影响。
+  /// 成片任务指向来源样片任务（仅 final 阶段非 null）。
+  /// ⚠️ 本列**留在主表**：它扛着下面这条唯一索引，是并发裁决点。扩展表
+  /// generation_job_extras 的唯一索引只能是 (generation_job_id, extra_key)，
+  /// 改成按值唯一会让所有同 extra_key 的行互相撞（IKJCOE）。
+  source_sample_job_id     BigInt?
+
   @@index([project_id], map: "idx_project_id")
   @@index([provider_task_id], map: "idx_provider_task_id")
-  @@index([status, next_poll_at], map: "idx_status_next_poll")
   @@index([user_id], map: "idx_user_id")
   @@index([next_action_at], map: "idx_generation_next_action")
+  @@unique([source_sample_job_id], map: "uk_generation_jobs__source_sample_job_id")
+  /// 仪表盘区间统计：WHERE is_delete = 0 AND gmt_create ∈ [from, to)。
+  /// `is_delete` 在前做等值前缀、`gmt_create` 走区间 —— 反过来放会让等值条件退化成过滤。
+  @@index([is_delete, gmt_create], map: "idx_generation_jobs__is_delete_gmt_create")
+}
+
+/// IKJCOE：generation_jobs 的任务特有扩展位（键值形态）。
+///
+/// 为什么是键值而不是继续加列：任务类型各异（image/video/audio/抠图/混音/…），每种只用
+/// 到少数几个扩展位。按列加会长成稀疏并集——每加一个类型的主表就多几列，而读路径
+/// （job-repo.ts）是 findMany 无 select，列表页为此多传一次。按行存则「多一种类型」
+/// 是加数据不是加列。
+///
+/// extra_key **沿用被迁移列的原字段名**（video_stage / charge_state / …），读方不用
+/// 维护一层新旧名字映射。value_type ∈ string/number/boolean/json；number 用十进制
+/// 字符串存 value_text（JS Number() / Java Long.parseLong 对称）。上限：超过 2^53 的
+/// 数值必须用 string。
+///
+/// 刻意不建 generation_job_id 单列索引（唯一索引最左前缀已覆盖）；不建 is_delete /
+/// version（追加型子表，跟随 generation_job_logs / generation_output_slots）；
+/// 不建外键关系（全仓 0 个 @relation，子表一律父表先查 + 子表二次查询 + 内存聚合）。
+model generation_job_extras {
+  id                BigInt   @id @default(autoincrement())
+  generation_job_id BigInt
+  extra_key         String   @db.VarChar(64)
+  value_type        String   @db.VarChar(16)
+  value_text        String   @db.Text
+  gmt_create        DateTime @default(now()) @db.DateTime(0)
+  gmt_modified      DateTime @default(now()) @db.DateTime(0)
+
+  /// 一个任务的一个扩展位只有一行；upsert 靠它判重，不靠应用层。
+  @@unique([generation_job_id, extra_key], map: "uk_generation_job_extras__job_key")
+}
+
+model generation_outbox {
+  id              BigInt    @id @default(autoincrement())
+  job_id          BigInt
+  user_id         BigInt
+  terminal_status String    @db.VarChar(32)
+  reason          String    @default("") @db.VarChar(512)
+  send_state      String    @default("pending") @db.VarChar(16)
+  attempts        Int       @default(0)
+  gmt_create      DateTime  @default(now()) @db.DateTime(0)
+  gmt_modified    DateTime  @default(now()) @db.DateTime(0)
+  sent_at         DateTime? @db.DateTime(0)
+
+  @@index([send_state, id], map: "idx_generation_outbox__pending")
+  @@index([job_id], map: "idx_generation_outbox__job")
 }
 
 /// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
@@ -205,8 +234,19 @@ model generation_model_capability {
   default_aspect_ratio    String   @db.VarChar(16)
   default_duration        Int?
   features                Json
-  channel_parser          String   @default("seedream") @db.VarChar(32)
+  /// 渠道（`<家族>-<媒介>[-<协议>]`，**封闭枚举**）：这个模型走哪个渠道 ——
+  /// 决定请求怎么解析、出站用哪种线协议。**本行解析与出站行为的唯一来源**。
+  /// 取代了 `channel_parser`（列）与 `features.image_protocol`（JSON 键）—— 那两个已被
+  /// 040 迁移删掉/清空，代码里也没有读方了。
+  channel                 String   @db.VarChar(32)
   request_mapping         Json?
+  /// 该模型该能力的计价规则，JSON 形态与定价目录 `document.models.<model_id>.<capability_type>`
+  /// 那条逐字相同（baseUnit / basePrice{kind,value?,by?,table?} / unitDenominator / minCredits /
+  /// maxCredits? / rounding? / dims? / multipliers? / tokenEstimate?）。
+  /// 原住 billing 的 `billing_pricing_catalogs.document`，因「它本质上是模型的属性」而搬来；
+  /// billing 生成任务时随 Hold 请求带走并存进自己的预留行，结算用预留行快照，故不反查本库。
+  /// 过渡期可为 NULL = 尚未搬迁，billing 侧回落定价目录。
+  pricing                 Json?
   enabled                 Boolean  @default(true)
   sort_order              Int      @default(0)
   is_default              Boolean  @default(false)
@@ -217,6 +257,21 @@ model generation_model_capability {
 
   @@unique([provider_id, model_id], map: "uk_provider_model")
   @@index([capability_type, enabled], map: "idx_capability_type_enabled")
+}
+
+model media_tool_pricing {
+  id             BigInt   @id @default(autoincrement())
+  tool_type      String   @db.VarChar(64)
+  label          String   @db.VarChar(64)
+  pricing        Json
+  version        Int      @default(0)
+  enabled        Boolean  @default(true)
+  charge_enabled Boolean  @default(true)
+  gmt_create     DateTime @default(now()) @db.DateTime(0)
+  gmt_modified   DateTime @default(now()) @db.DateTime(0)
+  is_delete      Boolean  @default(false)
+
+  @@unique([tool_type], map: "uk_media_tool_pricing__tool_type")
 }
 
 /// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
@@ -333,37 +388,6 @@ model agent_runs {
   @@index([status, engine, is_delete, id], map: "idx_agent_run_claim")
 }
 
-/// 计划卡冻结态（IK67H6，契约 §9）：与 conversation_messages(content_type=plan_message) 1:1，
-/// 存不可变权威 Markdown、按首次出现去重的素材引用、完整生成参数、能力快照版本、ProviderPromptProjection 与序列标签。
-/// 手动应用（创建 SceneCard / GenerationJob）由 T10/T11 交付，本票只冻结不应用。
-model plan_messages {
-  id                           BigInt   @id @default(autoincrement())
-  message_id                   BigInt   @unique(map: "uk_plan_message_message")
-  conversation_id              BigInt
-  project_id                   BigInt
-  agent_run_id                 BigInt
-  ordinal                      Int
-  total_in_batch               Int
-  sequence_label               String?  @db.VarChar(255)
-  application_kind             String   @db.VarChar(32)
-  target_scene_card_mention_id BigInt?
-  base_scene_card_version      Int?
-  content_markdown             String   @db.LongText
-  derived_references           Json
-  frozen_generation_parameters Json
-  capability_snapshot_version  Json
-  provider_prompt_projection   Json
-  base_plan_message_id         BigInt?
-  source_plan_message_id       BigInt?
-  applied_at                   DateTime? @db.DateTime(0)
-  first_generation_job_id      BigInt?
-  gmt_create                   DateTime @default(now()) @db.DateTime(0)
-
-  @@index([project_id], map: "idx_plan_message_project")
-  @@index([agent_run_id], map: "idx_plan_message_agent_run")
-  @@index([application_kind], map: "idx_plan_message_application_kind")
-}
-
 model command_idempotency {
   id                BigInt   @id @default(autoincrement())
   project_id        BigInt
@@ -375,12 +399,86 @@ model command_idempotency {
   generation_job_id BigInt?
   resource_id       BigInt?
   accepted_cursor   BigInt
+  /// IKJJQU：新协议紧凑保存成功回执（SAVE_CANVAS_RECOVERY_V1）。可空——既有操作不写；
+  /// 只存紧凑回执，不存画布全文。
+  result_payload    Json?
   gmt_create        DateTime @default(now()) @db.DateTime(0)
   gmt_modified      DateTime @default(now()) @db.DateTime(0)
   version           Int      @default(0)
   is_delete         Int      @default(0) @db.TinyInt
 
   @@unique([project_id, operation, idempotency_key], map: "uk_command_idempotency")
+}
+
+/// IKJJQU（IKIXK9-SPEC-20261002 B.2）：生成任务恢复契约 v1 —— 提交意图关联表。
+/// 一次用户提交或失败卡重试是一行；同次网络重放复用身份（uk uk_...__submission 幂等回读），
+/// 用户再次发起重试用新身份。当前承接以 generation_canvas_node_owners 为准，
+/// 历史提交不可用较晚时间戳夺回归属。
+model generation_canvas_submissions {
+  id                       BigInt   @id @default(autoincrement())
+  project_id               BigInt
+  user_id                  BigInt
+  protocol_version         Int
+  /// 提交意图身份：小写标准 UUID。
+  submission_id            String   @db.VarChar(36)
+  /// 原业务操作命名空间（generation.create / generation.retry）。
+  operation                String   @db.VarChar(64)
+  /// 规范化请求摘要（覆盖原业务参数与完整 canvas_binding）。
+  request_hash             String   @db.VarChar(64)
+  generation_job_id        BigInt
+  task_type                String   @db.VarChar(32)
+  target_node_id           String   @db.VarChar(128)
+  binding_revision         Int
+  /// 白名单恢复种子（target + sources），发送时快照。
+  recovery_seed            Json?
+  /// 服务端从已保存画布捕获的原目标快照，可空（result-placeholder 无原作品）。
+  previous_target_snapshot Json?
+  /// pending / present / replaced / removed / transferred（目标项状态）。
+  target_state             String   @db.VarChar(16)
+  /// 目标项状态版本；持久目标项从 1 开始。
+  target_revision          Int
+  gmt_create               DateTime @default(now()) @db.DateTime(0)
+  gmt_modified             DateTime @default(now()) @db.DateTime(0)
+
+  @@unique([project_id, submission_id], map: "uk_generation_canvas_submissions__submission")
+  @@unique([project_id, target_node_id, binding_revision], map: "uk_generation_canvas_submissions__binding")
+  @@index([project_id, id], map: "idx_generation_canvas_submissions__project")
+  @@index([generation_job_id], map: "idx_generation_canvas_submissions__job")
+}
+
+/// IKJJQU（B.2）：逐输出记录表。$target 项不建行（状态在 submissions 行上）；
+/// 无行代表 pending、revision=0。首次成功保存 apply/remove 时才插入输出记录。
+model generation_canvas_outputs {
+  id                             BigInt   @id @default(autoincrement())
+  generation_canvas_submission_id BigInt
+  /// 稳定输出键（primary / slot:<slot_id> / segment:<n> / track:<type>）。
+  output_key                     String   @db.VarChar(128)
+  node_id                        String   @db.VarChar(128)
+  asset_id                       BigInt?
+  slot_id                        BigInt?
+  /// present / removed / transferred。
+  state                          String   @db.VarChar(16)
+  revision                       Int
+  gmt_create                     DateTime @default(now()) @db.DateTime(0)
+  gmt_modified                   DateTime @default(now()) @db.DateTime(0)
+
+  @@unique([generation_canvas_submission_id, output_key], map: "uk_generation_canvas_outputs__key")
+  @@unique([generation_canvas_submission_id, node_id], map: "uk_generation_canvas_outputs__node")
+}
+
+/// IKJJQU（B.2）：节点唯一归属表。同项目同节点唯一有效承接者，独立于原始占位卡是哪一张。
+/// 新提交接管节点时在受理事务中核对并推进版本；删除保留归属行和版本。
+model generation_canvas_node_owners {
+  id                             BigInt   @id @default(autoincrement())
+  project_id                     BigInt
+  node_id                        String   @db.VarChar(128)
+  generation_canvas_submission_id BigInt
+  output_key                     String   @db.VarChar(128)
+  binding_revision               Int
+  gmt_create                     DateTime @default(now()) @db.DateTime(0)
+  gmt_modified                   DateTime @default(now()) @db.DateTime(0)
+
+  @@unique([project_id, node_id], map: "uk_generation_canvas_node_owners__node")
 }
 
 model project_event_stream {
@@ -501,11 +599,12 @@ model user_skill {
 /// enabled=1 进首页轮播（按 sort_order 升序）；上限 8 条（应用层校验，不设 DB 唯一约束）。
 model homepage_hero {
   id           BigInt   @id @default(autoincrement())
-  media_type   String   @default("video") @db.VarChar(16) // image | video
-  media_url    String   @db.VarChar(512) // 视频/图片 URL（TOS 迁移中可暂空）
-  poster_url   String?  @db.VarChar(512) // 视频封面；media_type=video 必填
+  scene        String   @default("homepage") @db.VarChar(20)
+  media_type   String   @default("video") @db.VarChar(16)
+  media_url    String   @db.VarChar(512)
+  poster_url   String?  @db.VarChar(512)
   sort_order   Int      @default(0)
-  enabled      Int      @default(1) @db.TinyInt // 1 进轮播 / 0 停用
+  enabled      Int      @default(1) @db.TinyInt
   gmt_create   DateTime @default(now()) @db.DateTime(0)
   gmt_modified DateTime @default(now()) @db.DateTime(0)
   version      Int      @default(0)
@@ -513,6 +612,7 @@ model homepage_hero {
 
   @@index([enabled, is_delete, sort_order], map: "idx_hero_enabled_sort")
   @@index([sort_order, is_delete], map: "idx_hero_sort")
+  @@index([scene, enabled, is_delete, sort_order], map: "idx_hero_scene_enabled_sort")
 }
 
 /// Creative Skill 稳定身份（IK60WS，资产契约 §1）：官方与个人共用一表；
@@ -553,34 +653,52 @@ model creative_skill_version {
 }
 
 /// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
-model users {
+/// 账号主体（自建用户体系）。username 唯一、phone 可空，理由与 pre-flight 见
+/// migration 20260924180000；表名与索引名的 `identity_` 前缀收敛到 `bw_` 见 migration 20260928100000。
+/// ⚠️ `map:` 名必须与库内索引的实际名字**逐字一致**，否则 `prisma migrate` 会反复改 schema。
+/// ⚠️ `username` 是**登录凭据**；`phone` 只是「多一种登录方式」，存量用户没有它。
+model bw_users {
   id           BigInt   @id @default(autoincrement())
-  phone        String   @unique(map: "idx_phone") @db.VarChar(20)
+  phone        String?  @unique(map: "idx_phone") @db.VarChar(20)
+  /// 邮箱。设计 §6.2 要求；与 username 一样是登录方式之一（email + password）。
+  /// ⚠️ 唯一：登录按 `username = ? OR email = ?` 一次查出主体，邮箱不唯一时会命中
+  /// **任意一行**——等于能用别人的邮箱登进来。NULL 可多行，空串不可
+  /// （MySQL 唯一索引对 NULL 互不相等，对空串不是）。见 migration 20260925120000。
+  email        String?  @unique(map: "uk_bw_users__email") @db.VarChar(50)
   username     String   @db.VarChar(50)
+  nickname     String?  @db.VarChar(50)
   status       String   @default("NORMAL") @db.VarChar(30)
   gmt_create   DateTime @default(now()) @db.DateTime(0)
   gmt_modified DateTime @default(now()) @db.DateTime(0)
   version      Int      @default(1)
   is_delete    Boolean  @default(false)
   avatar       String?  @default("0") @db.VarChar(255)
+  /// bcrypt 哈希（cost 10，与 new-api 一致）。**可空**：手机号注册、以及刚从
+  /// new-api 迁来还没设过我们侧口令的行没有它。校验路径必须把 NULL 当作
+  /// 「不能用口令登录」，而不是「任意口令都能登」——见 `libs/shared/identity/password.ts`。
   password     String?  @db.VarChar(63)
+
+  @@unique([username], map: "uk_bw_users__username")
 }
 
-model verification_codes {
+/// 短信验证码。手机号登录是**后续**能力（发码已通、登录未接，`loginWithCode` 零调用者）。
+model bw_verification_codes {
   id         BigInt   @id @default(autoincrement())
   phone      String   @db.VarChar(20)
+  purpose    String   @default("login") @db.VarChar(20)
   code       String   @db.VarChar(6)
   ip         String   @db.VarChar(50)
   gmt_expire DateTime @db.DateTime(0)
   is_used    Boolean  @default(false)
+  attempts   Int      @default(0)
   gmt_create DateTime @default(now()) @db.DateTime(0)
 
   @@index([ip, gmt_create], map: "idx_ip_created")
   @@index([phone, gmt_create], map: "idx_phone_created")
   @@index([phone, is_used, gmt_expire], map: "idx_phone_unused")
+  @@index([phone, purpose, is_used, gmt_expire], map: "idx_phone_purpose_unused")
 }
 
-// ===== 充值档位（blue_whale 侧 CRUD，支付执行走 Go new-api） =====
 
 model topup_tiers {
   id             BigInt    @id @default(autoincrement())
@@ -590,7 +708,10 @@ model topup_tiers {
   discount       Decimal   @default(1) @db.Decimal(5, 4)
   price          Decimal   @db.Decimal(10, 2)
   is_recommended Boolean   @default(false)
-  status         String    @default("active") @db.VarChar(16)
+  /// 三态（PRD §10.5）：draft 草稿 | active 上架 | inactive 下架。
+  /// ⚠️ **默认 draft** —— 新建卡片默认草稿，不展示给用户，运营配齐再上架。
+  /// 存量行不动（它们已经是上架/下架，没有理由回退成草稿）。
+  status         String    @default("draft") @db.VarChar(16)
   start_time     DateTime? @db.DateTime(0)
   end_time       DateTime? @db.DateTime(0)
   sort_order     Int       @default(0)
@@ -599,10 +720,100 @@ model topup_tiers {
   version        Int       @default(0)
   is_delete      Int       @default(0) @db.TinyInt
 
+  description              String  @default("") @db.VarChar(255)
+  bonus_credits            BigInt  @default(0)
+  activity_tag             String  @default("") @db.VarChar(64)
+  button_text              String  @default("立享加赠") @db.VarChar(32)
+  first_purchase_eligible  Int     @default(0) @db.TinyInt
+  /// 到账积分有效期，单位**月**（默认 2 年 = 24 个月）。口径钉死为月，年表达不了 6/18 个月
+  credits_valid_months     Int     @default(24)
+  /// all 全部登录用户 | user_group 指定用户群 | member_tier 指定会员等级（阶段 2 生效，先占位）
+  permission               String  @default("all") @db.VarChar(16)
+  /// JSON 数组，元素是 userId 的十进制字符串（BigInt 超 JS 安全整数，存串不丢精度）
+  permission_allowlist     Json?
+  permission_denied_hint   String  @default("") @db.VarChar(255)
+
+  /// 用户下单到账的基础积分（整数积分）。**配置值，不是派生值**（推翻迁移 047 的派生决定）：
+  /// 充值的「元 → 积分」与消费锚点「1 元 = 15 积分」不是一回事 —— 充值常有折扣。
+  /// `original_price`/`discount` 只为展示划线价，与积分**再无数学关系**：
+  /// ¥499 给 7,500 积分（499×15=7,485 只是巧合），看到「不是原价的整数倍」不要去修。
+  /// 0 = 还没配过基础积分，下单会被拒（宁可下不了单，也不发 0 积分）。
+  base_credits             BigInt  @default(0)
+
   @@index([status, sort_order], map: "idx_tier_status_sort")
 }
 
-// ===== 管理后台操作审计（blue_whale 侧，记录管理变更操作；只记写操作，查询不记） =====
+model recharge_orders {
+  id               BigInt    @id @default(autoincrement())
+  trade_no         String    @unique(map: "uk_recharge_orders__trade_no") @db.VarChar(64)
+  pay_order_id     String?   @unique(map: "uk_recharge_orders__pay_order_id") @db.VarChar(64)
+  /// 银行统一收银台链接（下单应答的 payData，内嵌银行令牌）。落库是为了**复用未支付订单**：
+  /// 网关按 (mch_no, mch_order_no) 唯一，同一单号重下会被拒，链接事后要不回来。
+  /// ⚠️ 判「有没有拿到过链接」看 pay_order_id（两者同一次更新写入，同真同假）
+  cashier_url      String?   @db.VarChar(512)
+  user_id          BigInt
+  /// 档位 ID。**可空**：NULL = 这不是档位商品（自定义充值，`product_type = 'custom'`）。
+  /// 自定义充值没有档位，编一个 0/1 出来会被后续按 tier_id 聚合的对账当成真档位。
+  /// 判「是不是档位商品」一律看 product_type，不看这一列。
+  tier_id          BigInt?
+  amount_fen       BigInt
+  credits          BigInt
+  credits_per_yuan Int
+  status           String    @default("pending") @db.VarChar(16)
+
+  product_type            String    @default("tier") @db.VarChar(16)
+  product_name            String    @default("") @db.VarChar(100)
+  /// 本单应发的赠送积分（首购加赠），没有则 0。与 credits 分开记：退款只退本金，
+  /// 且两者将来的有效期策略可能不同
+  bonus_credits           BigInt    @default(0)
+  /// 本单积分的到期时刻（**真实发给 billing 的那个时刻**），由发放那一步按
+  /// `paid_pending_at + credits_valid_months` 算出并写上；下单时先写 NULL。
+  /// NULL = 还没发放（或本列上线前的存量单，那种单按 billing 的来源策略发）
+  credits_expire_at       DateTime? @db.DateTime(0)
+  /// 到账积分有效期快照，单位**月**（来自档位 / 自定义充值配置）。
+  /// ⚠️ 存月数不存时刻：起算点是**支付成功时刻**（PRD §9.5），下单那一刻还不知道它。
+  /// NULL = 本列上线前的存量单（发放时由 billing 按来源策略决定有效期）
+  credits_valid_months    Int?
+  /// **发放时**服务端判定的首购状态：unknown 未判定（档位不参与，或拿不到归属）|
+  /// first 本单是该档位首次、赠送已发 | repeat 该档位已用过赠送。
+  /// ⚠️ 不在下单时定：两笔未支付单都会自认首单，真正的裁决在发放那一步（billing 唯一索引）
+  first_purchase_state    String    @default("unknown") @db.VarChar(16)
+  /// 该商品是否参与首购加赠（配置快照）。与 state 分开：一个说人，一个说商品
+  first_purchase_eligible Int       @default(0) @db.TinyInt
+  permission_result       String    @default("allowed") @db.VarChar(32)
+  /// 档位配置版本快照（下单时刻 topup_tiers.version）。回答「这单是改价前还是改价后」
+  config_version          Int       @default(0)
+
+  paid_at          DateTime? @db.DateTime(0)
+  /// **首次**进入 paid_pending（钱到了、积分还没发）的时刻；主动对账据此算持有分钟数。
+  /// ⚠️ 不能用 gmt_modified 顶替（回调到达与查单名额都会改它）。
+  /// NULL = 本列上线前进入该状态的存量单
+  paid_pending_at  DateTime? @db.DateTime(0)
+  last_query_at    DateTime? @db.DateTime(0)
+  notify_count     Int       @default(0)
+  gmt_create       DateTime  @default(now()) @db.DateTime(0)
+  gmt_modified     DateTime  @default(now()) @db.DateTime(0)
+  version          Int       @default(0)
+  is_delete        Int       @default(0) @db.TinyInt
+
+  /// 管理端「充值记录」全站列表：WHERE is_delete = 0 ORDER BY gmt_create DESC, id DESC。
+  /// `is_delete` 做等值前缀、`gmt_create` 提供顺序；id 不必显式写进索引
+  /// （InnoDB 二级索引自带主键，MySQL 8.0 判顺序时算上它，故无 filesort）。
+  @@index([is_delete, gmt_create], map: "idx_recharge_orders__is_delete_gmt_create")
+  /// 同一页「按用户筛选」：WHERE is_delete = 0 AND user_id = ? ORDER BY gmt_create DESC, id DESC。
+  /// user_id 必须排在 gmt_create **之前**才收窄得到一个人；全站那条索引代替不了它。
+  @@index([is_delete, user_id, gmt_create], map: "idx_recharge_orders__is_delete_user_gmt_create")
+}
+
+model system_settings {
+  setting_key   String   @id @db.VarChar(64)
+  setting_value String   @db.Text
+  is_secret     Boolean  @default(false)
+  gmt_create    DateTime @default(now()) @db.DateTime(0)
+  gmt_modified  DateTime @default(now()) @db.DateTime(0)
+  version       Int      @default(0)
+}
+
 
 model admin_operation_logs {
   id             BigInt   @id @default(autoincrement())
@@ -622,7 +833,6 @@ model admin_operation_logs {
   @@index([category, gmt_create], map: "idx_oplog_category_created")
 }
 
-// ===== 生成子系统（简化版，Node 自有 worker）：流水 + 日志 + 素材关联 + 点数 =====
 
 model cost_reservations {
   id                    BigInt   @id @default(autoincrement())
@@ -635,7 +845,6 @@ model cost_reservations {
   reserved_amount_fen   BigInt
   actual_amount_fen     BigInt?
   status                String   @db.VarChar(32)
-  /** IK9VZ0：释放原因/退款校验结果（如 "refund_confirmed" 已确认无扣费 / "refund_unverified" 未校验或可能已扣）。 */
   release_note          String?  @db.VarChar(255)
   price_catalog_version String   @db.VarChar(64)
   exchange_rate_version String   @db.VarChar(64)
@@ -658,10 +867,10 @@ model cost_adjustments {
   generation_job_id BigInt?
   user_id           BigInt
   project_id        BigInt?
-  action_type       String   @db.VarChar(32) // "refund" | "supplement"（退/补）
+  action_type       String   @db.VarChar(32)
   amount_fen        BigInt
   reason            String   @db.VarChar(255)
-  status            String   @db.VarChar(32) // "applied" | "duplicate"
+  status            String   @db.VarChar(32)
   new_api_snapshot  String?  @db.Text
   gmt_create        DateTime @default(now()) @db.DateTime(0)
   gmt_modified      DateTime @default(now()) @db.DateTime(0)
@@ -685,30 +894,6 @@ model generation_job_logs {
   @@index([generation_job_id, occurred_at], map: "idx_gen_job_log_job_time")
 }
 
-/// 计划应用回执（IK67H9/IK67H8，契约 §9 / CONTEXT L217-221）：一次成功应用 PlanMessage 的不可变事实。
-/// 视频路径记 scene_card_id/结果版本/预设摘要；图片路径 scene_card_id 为 NULL 并记会话/运行归属。
-/// uk_plan_application_receipt_message 兜底「每条 PlanMessage 最多一次成功应用」（CONTEXT L227）。
-model plan_application_receipts {
-  id                         BigInt   @id @default(autoincrement())
-  message_id                 BigInt   @unique(map: "uk_plan_application_receipt_message")
-  project_id                 BigInt
-  conversation_id            BigInt?
-  agent_run_id               BigInt?
-  application_kind           String   @db.VarChar(32)
-  scene_card_id              BigInt?
-  first_generation_job_id    BigInt
-  command_id                 String   @db.VarChar(128)
-  content_digest             String   @db.VarChar(80)
-  result_version             Int?
-  preset_digest              String?  @db.VarChar(80)
-  target_scene_card_mention_id BigInt?
-  applied_at                 DateTime @db.DateTime(0)
-  gmt_create                 DateTime @default(now()) @db.DateTime(0)
-
-  @@unique([project_id, command_id], map: "uk_plan_application_command")
-  @@index([first_generation_job_id], map: "idx_plan_application_job")
-}
-
 /// 场景卡生成预设（IK67H9，CONTEXT L49-58）：SceneCard 1:1 持久拥有的视频生成参数，
 /// 首次应用从 PlanMessage 冻结参数创建。必有时长与视频参考模式；首/尾帧角色存 reference_assets。
 model scene_card_generation_presets {
@@ -728,14 +913,16 @@ model scene_card_generation_presets {
 }
 
 /// 场景卡生成记录（IK67H9，CONTEXT L82-86）：User 从 SceneCard 发起的一次新生成及重试的聚合。
-/// summary_status 四态：generating/partial/success/failed。来源指向 plan_message 与应用回执。
+/// summary_status 四态：generating/partial/success/failed。
+/// plan_message_id / application_receipt_id 两列随计划通道退役（写入方在 IKCKOW/IKD806 已删）；
+/// 列保留以留住历史行的溯源，但放宽为 NULL-able，新行不再写入。
 model scene_card_generation_records {
   id                      BigInt   @id @default(autoincrement())
   scene_card_id           BigInt
   project_id              BigInt
   summary_status          String   @db.VarChar(16)
-  plan_message_id         BigInt
-  application_receipt_id  BigInt
+  plan_message_id         BigInt?
+  application_receipt_id  BigInt?
   first_generation_job_id BigInt
   gmt_create              DateTime @default(now()) @db.DateTime(0)
   gmt_modified            DateTime @default(now()) @db.DateTime(0)
@@ -757,10 +944,10 @@ model generation_output_slots {
   generation_job_id               BigInt
   scene_card_generation_record_id BigInt?
   slot_index                      Int
-  status                          String   @db.VarChar(24) // pending/succeeded/failed/missing
+  status                          String   @db.VarChar(24)
   asset_id                        BigInt?
   retry_of_slot_id                BigInt?
-  initial_placement_status        String   @default("pending") @db.VarChar(16) // pending/placed
+  initial_placement_status        String   @default("pending") @db.VarChar(16)
   gmt_create                      DateTime @default(now()) @db.DateTime(0)
   gmt_modified                    DateTime @default(now()) @db.DateTime(0)
 
@@ -834,4 +1021,77 @@ model legacy_card_history {
   gmt_create  DateTime @default(now()) @db.DateTime(0)
 
   @@unique([project_id, node_id], map: "uk_legacy_card_history")
+}
+
+/// 会员周期（bw_memberships）。自建用户体系第一刀，建表理由见 migration 20260924120000。
+/// 一行 = 一个会员周期，**不是**「用户当前等级」——当前等级是这些周期的一个推导。
+/// tier 是 billing 侧会员折扣的输入，也是这张表存在的理由。
+model bw_memberships {
+  id           BigInt    @id @default(autoincrement())
+  user_id      BigInt
+  tier         String    @db.VarChar(16)
+  status       String    @default("active") @db.VarChar(16)
+  started_at   DateTime  @db.DateTime(0)
+  expires_at   DateTime? @db.DateTime(0)
+  source       String    @db.VarChar(24)
+  biz_id       String    @db.VarChar(128)
+  grant_key    String    @db.VarChar(190)
+  gmt_create   DateTime  @default(now()) @db.DateTime(0)
+  gmt_modified DateTime  @default(now()) @db.DateTime(0)
+  version      Int       @default(0)
+  is_delete    Boolean   @default(false)
+
+  @@unique([grant_key], map: "uk_bw_memberships__grant_key")
+  @@index([user_id, status, expires_at], map: "idx_bw_memberships__user_status_expiry")
+}
+
+/// 角色（bw_roles）。替代 `auth.guard.ts` 里 `role >= 10` 的魔数——
+/// 判断管理员是「持不持有 admin 类角色」的**集合成员**问题，不是数值比较问题。
+/// 内置三行由 migration 20260924200000 播种。
+model bw_roles {
+  id           BigInt   @id @default(autoincrement())
+  code         String   @db.VarChar(32)
+  name         String   @db.VarChar(64)
+  description  String   @default("") @db.VarChar(255)
+  is_builtin   Boolean  @default(false)
+  sort_order   Int      @default(0)
+  gmt_create   DateTime @default(now()) @db.DateTime(0)
+  gmt_modified DateTime @default(now()) @db.DateTime(0)
+  version      Int      @default(0)
+  is_delete    Boolean  @default(false)
+
+  @@unique([code], map: "uk_bw_roles__code")
+}
+
+/// 用户 ↔ 角色（bw_user_roles）。存 role_id 而非 code：角色改名只改一行，
+/// 不散落成几十条待更新的关联行。
+model bw_user_roles {
+  id           BigInt   @id @default(autoincrement())
+  user_id      BigInt
+  role_id      BigInt
+  granted_by   String   @default("system") @db.VarChar(64)
+  grant_key    String   @db.VarChar(190)
+  gmt_create   DateTime @default(now()) @db.DateTime(0)
+  gmt_modified DateTime @default(now()) @db.DateTime(0)
+  version      Int      @default(0)
+  is_delete    Boolean  @default(false)
+
+  @@unique([grant_key], map: "uk_bw_user_roles__grant_key")
+  @@index([user_id, is_delete], map: "idx_bw_user_roles__user")
+}
+
+/// 登录日志（bw_login_logs）。`user_id` 可空——登录失败时用户可能压根不存在，
+/// 而这些恰恰是最需要留痕的尝试。
+model bw_login_logs {
+  id         BigInt   @id @default(autoincrement())
+  user_id    BigInt?
+  username   String   @db.VarChar(50)
+  ip         String   @db.VarChar(50)
+  user_agent String   @default("") @db.VarChar(255)
+  success    Boolean
+  reason     String   @default("") @db.VarChar(64)
+  gmt_create DateTime @default(now()) @db.DateTime(0)
+
+  @@index([user_id, gmt_create], map: "idx_bw_login_logs__user_time")
+  @@index([ip, gmt_create], map: "idx_bw_login_logs__ip_time")
 }

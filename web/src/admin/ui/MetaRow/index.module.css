@@ -1,0 +1,35 @@
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--admin-space-2) var(--admin-space-6);
+  margin: 0 0 var(--admin-space-5);
+}
+
+.sunken {
+  padding: var(--admin-space-3) var(--admin-space-4);
+  border-radius: var(--admin-radius-surface);
+  background: var(--admin-surface-sunken);
+}
+
+.item {
+  display: flex;
+  align-items: baseline;
+  gap: var(--admin-space-2);
+  min-width: 0;
+}
+
+.label {
+  flex-shrink: 0;
+  margin: 0;
+  font-size: var(--admin-font-xs);
+  color: var(--admin-text-muted);
+}
+
+.value {
+  margin: 0;
+  min-width: 0;
+  font-size: var(--admin-font-sm);
+  font-weight: 500;
+  color: var(--admin-text);
+  overflow-wrap: anywhere;
+}

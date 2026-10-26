@@ -1,14 +1,13 @@
 import { BadRequestException, BadGatewayException, NotFoundException } from "@nestjs/common";
 import { z } from "zod";
 import { PROMPT_TEXT_LIMITS as limits, previewSourceSchema, validPromptMentions, type PromptPreviewSource, type PromptPreviewContent } from "@lib/contracts";
-import { agentServiceBaseUrl, agentServiceToken, agentTenantId } from "../../../apps/blue-whale/src/api/agent/agent-service-env.js";
+import { agentServiceBaseUrl, agentServiceToken, agentTenantId } from "@lib/shared/agent/agent-service-env.js";
 
 export function sourceKey(source: unknown): string | null {
   const parsed = previewSourceSchema.safeParse(source);
   return parsed.success ? JSON.stringify([parsed.data.sessionId, parsed.data.revisionId, parsed.data.shotNo]) : null;
 }
 
-/** Agent 按需历史修订读取路由（IKDLQL 契约）：修订不存在返回 null；网关故障与快照读取同口径抛 502。 */
 async function fetchHistoricalRevision(ownerId: string, projectId: string, source: PromptPreviewSource): Promise<unknown> {
   let response: Response;
   try {
@@ -22,7 +21,6 @@ async function fetchHistoricalRevision(ownerId: string, projectId: string, sourc
       },
       signal: AbortSignal.timeout(15_000),
     });
-    // Agent 尚未发布该路由（404/405）＝修订不可读取，与「查不到的 id 省略」同为 null
     if (response.status === 404 || response.status === 405) return null;
     if (!response.ok) throw new BadGatewayException("暂时无法读取预览，请重试");
     const body = await response.json() as { revisions?: Array<{ revision_id?: string; payload?: { shots?: Array<{ shot_no: number; title: string; prompt_text: string }> } }> };
@@ -34,7 +32,6 @@ async function fetchHistoricalRevision(ownerId: string, projectId: string, sourc
   }
 }
 
-/** Read only committed Agent output, using the same trusted context as the existing BFF. */
 export async function readPromptPreview(ownerId: string, projectId: string, source: PromptPreviewSource): Promise<PromptPreviewContent> {
   let response: Response;
   try {

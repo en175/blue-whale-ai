@@ -175,7 +175,6 @@ export interface TemplateTag {
   tag_code: string;
   label: string;
   sort_order: number;
-  /** 1 首页可见 / 0 隐藏（IKA64P：与 DB visible 列对齐的兜底快照） */
   visible: 0 | 1;
 }
 
@@ -193,7 +192,6 @@ export function isValidTagCode(tagCode: string): boolean {
   return TEMPLATE_TAGS.some((t) => t.tag_code === tagCode);
 }
 
-/** 公开接口兜底（IKA64P）：仅可见标签 */
 export function listTemplateTags(): { tag_code: string; label: string }[] {
   return [...TEMPLATE_TAGS]
     .filter((t) => t.visible === 1)
@@ -201,7 +199,6 @@ export function listTemplateTags(): { tag_code: string; label: string }[] {
     .map(({ tag_code, label }) => ({ tag_code, label }));
 }
 
-/** 管理端兜底（IKA64P）：全量标签含 visible */
 export function listAllTemplateTags(): {
   tag_code: string;
   label: string;

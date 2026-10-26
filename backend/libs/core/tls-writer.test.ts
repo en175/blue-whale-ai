@@ -80,7 +80,6 @@ import {
   resetTlsWriterStats,
 } from "./tls-writer.js";
 
-/** SendLog 第 6 参回调的最小形状（与 tls-writer 内部结构一致）。 */
 interface FakeCallBack {
   Success(result: {
     Attempts?: Array<{ ErrorCode?: string; ErrorMessage?: string; RequestId?: string }>;
@@ -95,7 +94,6 @@ function lastCallBack(producer: InstanceType<typeof FakeProducer>): FakeCallBack
   return args[5] as FakeCallBack;
 }
 
-/** 等微任务排空（SendLog 的 .catch 在 rejection 后执行）。 */
 async function flushMicrotasks(): Promise<void> {
   await new Promise<void>((resolve) => setTimeout(resolve, 0));
 }
@@ -291,7 +289,6 @@ describe("错误可见性（IK7TED）", () => {
     expect(getTlsWriterStats().startFailures).toBe(1);
     expect(errSpy.mock.calls[0]![0]).toContain("[tls-writer] start: dispatcher broken");
 
-    // 降级后 write/close 不抛、不触达 Producer。
     const producer = producerInstances[0]!;
     writer.write({ time: Date.now(), contents: [] });
     expect(producer.sendLogs).toHaveLength(0);
@@ -406,14 +403,12 @@ describe("默认 writer 与停机超时兜底", () => {
     }
     getDefaultTlsLogWriter();
     const producer = producerInstances[0]!;
-    // 挂起 Close，模拟 TLS 不可达时在途重试阻塞优雅关闭。
     producer.closeResolve = () => {};
 
     const start = Date.now();
     await closeDefaultTlsLogWriter(100);
     expect(Date.now() - start).toBeLessThan(2_000);
 
-    // 默认 writer 已重置：再次获取会新建实例。
     getDefaultTlsLogWriter();
     expect(producerInstances).toHaveLength(2);
     await closeDefaultTlsLogWriter();

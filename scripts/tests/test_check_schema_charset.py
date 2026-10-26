@@ -18,8 +18,6 @@ def run_script(repo_root: pathlib.Path) -> subprocess.CompletedProcess:
         [sys.executable, str(script_copy)],
         capture_output=True,
         text=True,
-        # 显式 utf-8：Windows 原生 Python 默认 cp936，子进程按 utf-8 打印的
-        # 中文会被解码崩溃（与 sync/start-task 同根因）；POSIX 本就 UTF-8，no-op。
         encoding="utf-8",
     )
 

@@ -1,0 +1,20 @@
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.label {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  font-size: var(--admin-font-sm);
+  color: var(--admin-text);
+}
+
+.hint {
+  font-size: var(--admin-font-xs);
+  line-height: 1.5;
+  color: var(--admin-text-muted);
+}

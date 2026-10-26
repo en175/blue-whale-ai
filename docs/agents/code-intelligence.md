@@ -11,9 +11,13 @@
 | 数据流追踪 | CBM | `trace_path(func, mode=data_flow)` |
 | 跨服务调用追踪 | CBM | `trace_path(func, mode=cross_service)` |
 | 复杂度 / 热点 / 重构候选 | CBM | `query_graph`（Cypher，查 complexity / loop_depth） |
-| 影响分析 / 死代码 / 高扇出 | CBM | `query_graph` / `trace_path(direction=inbound)` |
+| 写 Cypher 前查边类型 / 属性 | CBM | `get_graph_schema(diagnostics="full")` |
+| 变更影响面（git diff → 波及符号与调用方） | CBM | `detect_changes(scope="impact")` |
+| 两份索引快照的结构级 diff | CBM | `compare_graphs(base_project, target_project)` |
+| 死代码 / 高扇入扇出 | CBM | `search_graph(max_degree=0 / min_degree=N)` |
 | 架构全景 / 模块边界 | CBM | `get_architecture(aspects=['clusters'])` |
 | 取精确符号源码 | CBM | `get_code_snippet(qualified_name)` |
+| 单文件声明大纲（先扫再决定精读） | CBM | `get_file_outline(file_path)` |
 | 文本搜索（图谱增强 grep） | CBM | `search_code(pattern)` |
 | 可视化 HTML 报告 / 交互图 | graphify | `graphify query "<问题>"` |
 | 跨文档导航（wiki / index） | graphify | `graphify query` / 读 `graphify-out/wiki/` |
@@ -26,9 +30,14 @@
 - `search_graph(query="..." | name_pattern=... | label=...)` — 找符号
 - `trace_path(function_name, mode=calls|data_flow|cross_service, direction=inbound|outbound)` — 调用链
 - `get_code_snippet(qualified_name)` — 精确源码
-- `query_graph(query="<Cypher>")` — 复杂图查询
+- `get_file_outline(file_path)` — 单文件声明大纲（类/函数/导出，可分页）
+- `query_graph(query="<Cypher>")` — 复杂图查询；宽查询加 `LIMIT`
+- `get_graph_schema(diagnostics="full")` — 节点标签 / 边类型 / 可查属性
+- `detect_changes(base_branch=...)` — git diff → 变更文件 + 波及符号（调用方/依赖，可选方向与深度）
+- `compare_graphs(base_project, target_project)` — 两快照确定性结构增删对比
 - `get_architecture(aspects=[...])` — 结构全景。aspects 可选 `overview` / `structure` / `dependencies` / `routes` / `languages` / `packages` / `entry_points` / `hotspots` / `boundaries` / `layers` / `file_tree` / `clusters` / `all`（完整枚举见工具 schema）
 - `search_code(pattern)` — 图谱增强文本搜索
+- 低频：`manage_adr`（ADR 大纲/读/写）、`ingest_traces`（运行时轨迹校验计数，不建图边）、`delete_project`（删索引，重建前清理）
 
 **graphify**（CLI，需 `graphify-out/`）：
 
@@ -39,9 +48,16 @@
 
 > task worktree 需 graphify 时再跑 `scripts/ensure-graphify-worktree.sh`（按需，不强制每个 worktree 都建图）。
 
+## 易错点
+
+- `trace_path` 要精确符号名：先 `search_graph(name_pattern=...)` 拿全名再 trace。
+- 跨服务追踪用 `direction="both"`：outbound 会漏掉远端调用方。
+- `detect_changes` 默认 `base_branch="main"`：本仓日常基线是 `release/*`，必须显式传当前发布线。
+- `search_graph(relationship=...)` 只按度过滤节点、不返回边：看真实边用 `query_graph` Cypher。
+
 ## 索引维护
 
-- **CBM**：watcher 自动增量索引。但**语义边（`SEMANTICALLY_RELATED`）增量不重新生成** —— 定期跑 `index_repository(repo_path=., mode=full)` 刷新语义边（需 `CBM_SEMANTIC_ENABLED=1`）。
+- **CBM**：watcher 自动增量索引。但**语义边（`SEMANTICALLY_RELATED`）增量不重新生成** —— 定期跑 `index_repository(repo_path=., mode=full)` 刷新语义边（需 `CBM_SEMANTIC_ENABLED=1`）；索引损坏时 `delete_project` 后同参重建。
 - **graphify**：`graphify update .` AST-only 增量，零费用，改代码后随手跑。
 
 ## 团队 onboarding（CBM 不随仓库分发）

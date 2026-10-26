@@ -1,0 +1,295 @@
+
+.dialogWrap {
+  position: absolute;
+  bottom: var(--spacing-lg);
+  left: 50%;
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: 90%;
+  z-index: 20;
+  animation: cutoutFadeIn 0.2s ease;
+}
+
+.dialogWrapFollow {
+  bottom: auto;
+  left: 0;
+  transform: translateX(-50%);
+  animation: cutoutFadeInFollow 0.2s ease;
+}
+
+@keyframes cutoutFadeIn {
+  from { opacity: 0; transform: translateX(-50%) translateY(8px); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+@keyframes cutoutFadeInFollow {
+  from { opacity: 0; transform: translate(-50%, 8px); }
+  to   { opacity: 1; transform: translate(-50%, 0); }
+}
+
+.toolbar {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  background-color: #1e1e1e;
+  border: 1px solid #2c2c2c;
+  border-radius: 24px;
+  padding: 8px 10px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+
+.iconBtn {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-tertiary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.iconBtn:hover {
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-hover);
+}
+
+.divider {
+  width: 1px;
+  height: 16px;
+  background-color: #333;
+  flex: none;
+}
+
+.menuAnchor {
+  position: relative;
+  display: flex;
+}
+
+.triggerBtn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 12px;
+  font-size: var(--font-size-sm);
+  color: #ddd;
+  background-color: #2a2a2a;
+  border: none;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  user-select: none;
+}
+
+.triggerBtn:hover {
+  background-color: #333;
+  color: #fff;
+}
+
+.triggerBtnActive {
+  background-color: #fff;
+  color: #111;
+}
+
+.triggerBtnActive:hover {
+  background-color: #e8e8e8;
+  color: #111;
+}
+
+.menuPopup {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  min-width: 168px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background-color: #1e1e1e;
+  border: 1px solid #2c2c2c;
+  border-radius: 14px;
+  padding: 6px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+  z-index: 30;
+  animation: cutoutMenuIn 0.15s ease;
+}
+
+@keyframes cutoutMenuIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.menuItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: var(--font-size-sm);
+  color: #999;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  text-align: left;
+}
+
+.menuItem:hover {
+  color: #ddd;
+  background-color: #2a2a2a;
+}
+
+.menuItemActive {
+  background-color: #3a3a3a;
+  color: #fff;
+  font-weight: 700;
+}
+
+.contourPopup {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background-color: #1e1e1e;
+  border: 1px solid #2c2c2c;
+  border-radius: 14px;
+  padding: 10px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+  z-index: 30;
+  animation: cutoutMenuIn 0.15s ease;
+}
+
+.toggleBtn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  font-size: var(--font-size-sm);
+  color: #ddd;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  user-select: none;
+}
+
+.toggleBtn:hover {
+  background-color: #2a2a2a;
+}
+
+.togglePill {
+  position: relative;
+  width: 30px;
+  height: 16px;
+  border-radius: 999px;
+  background-color: #3a3a3a;
+  transition: background-color var(--transition-fast);
+  flex: none;
+}
+
+.toggleBtnOn .togglePill {
+  background-color: #fff;
+}
+
+.toggleKnob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background-color: #999;
+  transition: all var(--transition-fast);
+}
+
+.toggleBtnOn .toggleKnob {
+  left: 16px;
+  background-color: #111;
+}
+
+.contourRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px 2px;
+}
+
+.contourLabel {
+  font-size: var(--font-size-sm);
+  color: #999;
+  user-select: none;
+}
+
+.contourRange {
+  width: 96px;
+}
+
+.contourValue {
+  min-width: 34px;
+  font-size: var(--font-size-sm);
+  color: #ddd;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+}
+
+.iconToggle {
+  width: 32px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-tertiary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.iconToggle:hover {
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-hover);
+}
+
+.iconToggleOn {
+  background-color: #fff;
+  color: #111;
+}
+
+.iconToggleOn:hover {
+  background-color: #e8e8e8;
+  color: #111;
+}
+
+.sendBtn {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: #2a2a2a;
+  color: #777;
+  border: none;
+  cursor: not-allowed;
+  transition: all var(--transition-fast);
+  flex: none;
+}
+
+.sendBtnActive {
+  background-color: #4a4a4a;
+  color: #fff;
+  cursor: pointer;
+}
+
+.sendBtnActive:hover {
+  background-color: #555;
+}

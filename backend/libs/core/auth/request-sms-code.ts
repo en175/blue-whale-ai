@@ -1,17 +1,16 @@
 import { randomInt } from "node:crypto";
 
-/** requestSmsCode 用例：依赖注入 db/sms，core 不直接耦合 persistence/volcengine。
- *  行为对齐 Java AuthService.sendCode（happy path）：生成 6 位码 → 写 verification_codes → 发短信。 */
-
-const CODE_TTL_MS = 5 * 60 * 1000; // 300s，对齐 Java SMS 码 TTL
+const CODE_TTL_MS = 5 * 60 * 1000;
 
 export interface RequestSmsCodeInput {
   phone: string;
+  purpose: string;
   ip: string;
 }
 
 export interface VerificationCodeRecord {
   phone: string;
+  purpose: string;
   code: string;
   ip: string;
   expiresAt: Date;
@@ -19,7 +18,9 @@ export interface VerificationCodeRecord {
 
 export interface RequestSmsCodeDeps {
   db: {
-    createVerificationCode(record: VerificationCodeRecord): Promise<unknown>;
+    createVerificationCode(record: VerificationCodeRecord): Promise<{ id: string }>;
+    invalidateOtherCodes(phone: string, purpose: string, keepId: string): Promise<unknown>;
+    consumeCode(codeId: string): Promise<boolean>;
   };
   sms: {
     send(phone: string, code: string): Promise<unknown>;
@@ -43,7 +44,19 @@ export async function requestSmsCode(
   const { db, sms, generateCode = defaultGenerateCode, now = () => new Date() } = deps;
   const code = generateCode();
   const expiresAt = new Date(now().getTime() + CODE_TTL_MS);
-  await db.createVerificationCode({ phone: input.phone, code, ip: input.ip, expiresAt });
-  await sms.send(input.phone, code);
+  const created = await db.createVerificationCode({
+    phone: input.phone,
+    purpose: input.purpose,
+    code,
+    ip: input.ip,
+    expiresAt,
+  });
+  try {
+    await sms.send(input.phone, code);
+  } catch (error) {
+    await db.consumeCode(created.id);
+    throw error;
+  }
+  await db.invalidateOtherCodes(input.phone, input.purpose, created.id);
   return { code };
 }

@@ -1,4 +1,3 @@
-"""Black-box tests of repository-scoped CBM context hooks."""
 import json
 import os
 from pathlib import Path
@@ -28,11 +27,9 @@ class CbmContextTests(unittest.TestCase):
         result = self.context()
         self.assertEqual(result['hookEventName'], 'SessionStart')
         self.assertIn(str(ROOT), result['additionalContext'])
-        self.assertIn('agent-rules/code-discovery.md', result['additionalContext'])
-        self.assertIn('search_graph', result['additionalContext'])
+        self.assertIn(str(ROOT / 'agent-rules/code-discovery.md'), result['additionalContext'])
 
     def test_global_plugin_does_not_suppress_repository_protocol(self):
-        # The real home has the official plugin installed: local rules must still arrive.
         result = self.context()
         self.assertIn('CBM', result['additionalContext'])
 
@@ -78,21 +75,23 @@ class CbmContextTests(unittest.TestCase):
     def test_kimi_observation_events_are_silent(self):
         self.assertEqual(self.invoke('SessionStart', client_type='kimi_code_cli'), '')
 
-    def test_subagent_reminder_requires_explicit_handoff(self):
-        self.assertIn('子代理', self.context(event='SubagentStart')['additionalContext'])
+    def test_subagent_reminder_routes_to_protocol(self):
+        result = self.context(event='SubagentStart')
+        self.assertIn(str(ROOT / 'agent-rules/code-discovery.md'), result['additionalContext'])
 
     def test_five_platforms_install_repository_reminders(self):
-        for filename, nested in [('.claude/settings.json', False),
-                                 ('.codex/hooks.json', False),
-                                 ('.zcode/config.json', True),
-                                 ('.qoder/settings.json', False)]:
+        for filename, nested, events in [
+                ('.claude/settings.json', False, ('SessionStart', 'SubagentStart', 'PreToolUse')),
+                ('.codex/hooks.json', False, ('SessionStart', 'SubagentStart', 'PreToolUse')),
+                ('.zcode/config.json', True, ('SessionStart', 'PreToolUse')),
+                ('.qoder/settings.json', False, ('SessionStart', 'SubagentStart', 'PreToolUse'))]:
             with self.subTest(platform=filename):
                 path = ROOT / filename
                 self.assertTrue(path.exists(), filename)
                 hooks = json.loads(path.read_text())['hooks']
                 if nested:
                     hooks = hooks['events']
-                for event in ('SessionStart', 'SubagentStart', 'PreToolUse'):
+                for event in events:
                     matches = [h for group in hooks.get(event, [])
                                for h in group['hooks'] if 'cbm-' in h.get('command', '')]
                     self.assertEqual(len(matches), 1, (filename, event))

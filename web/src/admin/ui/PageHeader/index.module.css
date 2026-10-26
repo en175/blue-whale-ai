@@ -1,0 +1,31 @@
+.head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.text {
+  min-width: 0;
+}
+
+.title {
+  margin: 0;
+  font-size: var(--admin-font-lg);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--admin-text);
+}
+
+.subtitle {
+  margin: 4px 0 0;
+  font-size: var(--admin-font-xs);
+  color: var(--admin-text-muted);
+}
+
+.extra {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}

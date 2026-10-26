@@ -1,14 +1,12 @@
-import { signVolcengineRequest } from "@lib/core";
+import { isTelecomPhone, signVolcengineRequest } from "@lib/core";
 import { logger } from "@lib/infra/logging/blue-whale-logger.js";
 
-/** SMS provider 抽象 + 两个实现（对齐 Java SmsProvider / VolcengineSmsProvider / ConsoleSmsProvider）。 */
 export interface SmsProvider {
   send(phone: string, code: string): Promise<void>;
 }
 
 export const consoleSmsProvider: SmsProvider = {
   async send(phone, code) {
-    // dev 专用 console 实现（SMS_PROVIDER !== volcengine）；本地 TLS 为 noop，仅落 stdout。
     logger.info(`[SMS console] phone=${phone} code=${code}`);
   },
 };
@@ -18,11 +16,40 @@ export interface VolcengineSmsConfig {
   sk: string;
   smsAccount: string;
   sign: string;
+  signTelecom?: string | undefined;
   templateId: string;
   region?: string;
 }
 
+export class SmsUpstreamError extends Error {
+  constructor(
+    readonly code: string,
+    readonly upstreamMessage: string,
+    readonly httpStatus: number,
+  ) {
+    super(`${code}: ${upstreamMessage}`);
+    this.name = "SmsUpstreamError";
+  }
+}
+
 const SMS_HOST = "open.volcengineapi.com";
+
+type SmsResponse = {
+  ResponseMetadata?: { Error?: { Code: string; Message: string } };
+};
+
+async function readSmsResponse(res: Response): Promise<SmsResponse> {
+  try {
+    return (await res.json()) as SmsResponse;
+  } catch (error) {
+    logger.warn("[sms] send failed", {
+      stage: "response",
+      http_status: res.status,
+      error_type: error instanceof Error ? error.name : typeof error,
+    });
+    throw error;
+  }
+}
 
 export function createVolcengineSmsProvider(
   config: VolcengineSmsConfig,
@@ -31,9 +58,13 @@ export function createVolcengineSmsProvider(
   return {
     async send(phone, code) {
       const templateParam = JSON.stringify({ code });
+      const sign =
+        config.signTelecom && isTelecomPhone(phone)
+          ? config.signTelecom
+          : config.sign;
       const body = JSON.stringify({
         SmsAccount: config.smsAccount,
-        Sign: config.sign,
+        Sign: sign,
         TemplateID: config.templateId,
         TemplateParam: templateParam,
         PhoneNumbers: phone,
@@ -52,39 +83,65 @@ export function createVolcengineSmsProvider(
         ak: config.ak,
         sk: config.sk,
       });
-      const res = await fetch(
-        `https://${SMS_HOST}/?Action=SendSms&Version=2020-01-01`,
-        {
-          method: "POST",
-          body,
-          headers: {
-            Host: SMS_HOST,
-            "X-Date": signed.xDate,
-            "X-Content-Sha256": signed.contentHash,
-            "Content-Type": "application/json",
-            Authorization: signed.authorization,
+      let res: Response;
+      try {
+        res = await fetch(
+          `https://${SMS_HOST}/?Action=SendSms&Version=2020-01-01`,
+          {
+            method: "POST",
+            body,
+            headers: {
+              Host: SMS_HOST,
+              "X-Date": signed.xDate,
+              "X-Content-Sha256": signed.contentHash,
+              "Content-Type": "application/json",
+              Authorization: signed.authorization,
+            },
           },
-        },
-      );
-      const json = (await res.json()) as {
-        ResponseMetadata?: { Error?: { Code: string; Message: string } };
-      };
+        );
+      } catch (error) {
+        logger.warn("[sms] send failed", {
+          stage: "network",
+          error_type: error instanceof Error ? error.name : typeof error,
+          error_message: error instanceof Error ? error.message : String(error),
+        });
+        throw error;
+      }
+      const json = await readSmsResponse(res);
       const err = json?.ResponseMetadata?.Error;
-      if (err) throw new Error(`${err.Code}: ${err.Message}`);
+      if (err) {
+        logger.warn("[sms] send failed", {
+          stage: "upstream",
+          http_status: res.status,
+          upstream_code: err.Code,
+          upstream_message: err.Message,
+        });
+        throw new SmsUpstreamError(err.Code, err.Message, res.status);
+      }
     },
   };
 }
 
-/** env → SMS provider：SMS_PROVIDER=volcengine 走真短信，否则 console（dev）。 */
+export function resolveSmsCredentials(
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): { ak: string; sk: string } {
+  return {
+    ak: env.VOLC_SMS_ACCESS_KEY_ID?.trim() || env.VOLC_ACCESS_KEY_ID || "",
+    sk: env.VOLC_SMS_SECRET_ACCESS_KEY?.trim() || env.VOLC_SECRET_ACCESS_KEY || "",
+  };
+}
+
 export function resolveSmsProvider(
   env: Readonly<Record<string, string | undefined>> = process.env,
 ): SmsProvider {
   if (env.SMS_PROVIDER === "volcengine") {
+    const credentials = resolveSmsCredentials(env);
     return createVolcengineSmsProvider({
-      ak: env.VOLC_ACCESS_KEY_ID ?? "",
-      sk: env.VOLC_SECRET_ACCESS_KEY ?? "",
+      ak: credentials.ak,
+      sk: credentials.sk,
       smsAccount: env.VOLC_SMS_ACCOUNT ?? "",
       sign: env.VOLC_SMS_SIGN ?? "玄浮科技",
+      signTelecom: env.VOLC_SMS_SIGN_TELECOM?.trim() || "杭州玄浮科技",
       templateId: env.VOLC_SMS_TEMPLATE_ID ?? "",
     });
   }

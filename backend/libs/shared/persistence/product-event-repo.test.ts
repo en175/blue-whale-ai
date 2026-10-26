@@ -30,7 +30,6 @@ describe("ProductEventRepo", () => {
       payload: { message_id: "8" },
     });
 
-    // 关键：cursor 用雪花，不再碰 project_event_stream（去掉了那把 per-project 行锁）
     expect(streamUpsert).not.toHaveBeenCalled();
     expect(streamUpdate).not.toHaveBeenCalled();
     const cursor = BigInt(event.cursor);

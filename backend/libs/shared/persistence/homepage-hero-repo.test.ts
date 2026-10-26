@@ -11,6 +11,7 @@ function row(overrides: Record<string, unknown> = {}) {
   const now = new Date("2026-09-01T00:00:00Z");
   return {
     id: 1n,
+    scene: "homepage",
     media_type: "video",
     media_url: "https://tos.example.com/v.mp4",
     poster_url: "https://tos.example.com/p.jpg",
@@ -22,7 +23,6 @@ function row(overrides: Record<string, unknown> = {}) {
   };
 }
 
-/** 构造可用的 mock prisma：$transaction 直接透传回调，findMany 等按需覆盖。 */
 function mockPrisma(overrides: Record<string, unknown> = {}) {
   const prisma = {
     homepage_hero: {
@@ -48,26 +48,26 @@ function repoOf(prisma: ReturnType<typeof mockPrisma>): HomepageHeroRepo {
   return createHomepageHeroRepo(prisma as never);
 }
 
-describe("homepage_hero repo — 首页背景配置", () => {
-  it("listAll 只取存活条目并按 sort_order 升序", async () => {
+describe("homepage_hero repo — 首页/登录弹窗背景配置", () => {
+  it("listAll 只取指定场景的存活条目并按 sort_order 升序", async () => {
     const prisma = mockPrisma({
       homepage_hero: {
-        // 传入已排序的 mock 行；repo 透传 findMany 结果并按查询参数升序请求
         findMany: vi.fn().mockResolvedValue([
           row({ id: 1n, sort_order: 0 }),
           row({ id: 2n, sort_order: 1 }),
         ]),
       },
     });
-    const list = await repoOf(prisma).listAll();
+    const list = await repoOf(prisma).listAll("auth");
     expect(prisma.homepage_hero.findMany).toHaveBeenCalledWith({
-      where: { is_delete: 0 },
+      where: { is_delete: 0, scene: "auth" },
       orderBy: [{ sort_order: "asc" }, { id: "asc" }],
     });
     expect(list.map((r) => Number(r.id))).toEqual([1, 2]);
     expect(list[0]).toEqual(
       expect.objectContaining({
         id: "1",
+        scene: "homepage",
         media_type: "video",
         media_url: "https://tos.example.com/v.mp4",
         poster_url: "https://tos.example.com/p.jpg",
@@ -77,7 +77,7 @@ describe("homepage_hero repo — 首页背景配置", () => {
     );
   });
 
-  it("listEnabled 只返回 enabled=1 存活条目，且只 select 公开 5 字段", async () => {
+  it("listEnabled 只返回指定场景 enabled=1 存活条目，且只 select 公开 5 字段", async () => {
     const prisma = mockPrisma({
       homepage_hero: {
         findMany: vi.fn().mockResolvedValue([
@@ -85,9 +85,9 @@ describe("homepage_hero repo — 首页背景配置", () => {
         ]),
       },
     });
-    const list = await repoOf(prisma).listEnabled();
+    const list = await repoOf(prisma).listEnabled("auth");
     expect(prisma.homepage_hero.findMany).toHaveBeenCalledWith({
-      where: { is_delete: 0, enabled: 1 },
+      where: { is_delete: 0, enabled: 1, scene: "auth" },
       orderBy: [{ sort_order: "asc" }, { id: "asc" }],
       select: {
         id: true,
@@ -117,7 +117,7 @@ describe("homepage_hero repo — 首页背景配置", () => {
     expect(await repoOf(miss).getById(99n)).toBeNull();
   });
 
-  it("create 缺省 sort_order 取 max+1；未显式禁用时校验上限 8 条", async () => {
+  it("create 缺省 sort_order 取同场景 max+1；未显式禁用时校验同场景上限 8 条", async () => {
     const prisma = mockPrisma({
       homepage_hero: {
         aggregate: vi.fn().mockResolvedValue({ _max: { sort_order: 3 } }),
@@ -126,19 +126,24 @@ describe("homepage_hero repo — 首页背景配置", () => {
       },
     });
     const id = await repoOf(prisma).create({
+      scene: "auth",
       media_type: "video",
       media_url: "https://tos.example.com/new.mp4",
     });
     expect(id).toBe("9");
-    // count 用于上限校验（enabled 缺省 1）
     expect(prisma.homepage_hero.count).toHaveBeenCalledWith({
-      where: { is_delete: 0, enabled: 1 },
+      where: { is_delete: 0, enabled: 1, scene: "auth" },
+    });
+    expect(prisma.homepage_hero.aggregate).toHaveBeenCalledWith({
+      where: { is_delete: 0, scene: "auth" },
+      _max: { sort_order: true },
     });
     expect(prisma.homepage_hero.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
+          scene: "auth",
           media_type: "video",
-          sort_order: 4, // max(3)+1
+          sort_order: 4,
           enabled: 1,
         }),
       }),
@@ -148,6 +153,7 @@ describe("homepage_hero repo — 首页背景配置", () => {
   it("create 显式传 sort_order / enabled=0 时不再校验上限", async () => {
     const prisma = mockPrisma({});
     await repoOf(prisma).create({
+      scene: "homepage",
       media_type: "image",
       media_url: "https://tos.example.com/i.png",
       sort_order: 7,
@@ -166,7 +172,7 @@ describe("homepage_hero repo — 首页背景配置", () => {
       homepage_hero: { count: vi.fn().mockResolvedValue(HOMEPAGE_HERO_MAX_ENABLED) },
     });
     await expect(
-      repoOf(prisma).create({ media_type: "image", media_url: "https://x/i.png" }),
+      repoOf(prisma).create({ scene: "homepage", media_type: "image", media_url: "https://x/i.png" }),
     ).rejects.toThrow(HomepageHeroLimitError);
   });
 
@@ -181,7 +187,6 @@ describe("homepage_hero repo — 首页背景配置", () => {
     await expect(
       repoOf(prisma).update(2n, { enabled: 1 }),
     ).rejects.toThrow(HomepageHeroLimitError);
-    // 已是启用态（1→1）不再触发上限校验
     const prisma2 = mockPrisma({
       homepage_hero: {
         findFirst: vi.fn().mockResolvedValue(row({ id: 2n, enabled: 1 })),
@@ -236,7 +241,10 @@ describe("homepage_hero repo — 首页背景配置", () => {
     });
     const res = await repoOf(prisma).move(3n, "up");
     expect(res).toEqual({ ok: true });
-    // 上移 3（sort 2→1），1（sort 0→2）：整体重排后更新的 sort_order 为 [2, 1]
+    expect(prisma.homepage_hero.findMany).toHaveBeenCalledWith({
+      where: { is_delete: 0, scene: "homepage" },
+      orderBy: [{ sort_order: "asc" }, { id: "asc" }],
+    });
     const calls = prisma.homepage_hero.update.mock.calls.map((c) => c[0].data.sort_order);
     expect(calls.sort()).toEqual([1, 2]);
   });
@@ -255,13 +263,13 @@ describe("homepage_hero repo — 首页背景配置", () => {
     expect(await repoOf(prisma2).move(99n, "up")).toEqual({ ok: false, reason: "not_found" });
   });
 
-  it("countEnabled 统计 enabled=1 存活条目", async () => {
+  it("countEnabled 统计指定场景 enabled=1 存活条目", async () => {
     const prisma = mockPrisma({
       homepage_hero: { count: vi.fn().mockResolvedValue(5) },
     });
-    expect(await repoOf(prisma).countEnabled()).toBe(5);
+    expect(await repoOf(prisma).countEnabled("homepage")).toBe(5);
     expect(prisma.homepage_hero.count).toHaveBeenCalledWith({
-      where: { is_delete: 0, enabled: 1 },
+      where: { is_delete: 0, enabled: 1, scene: "homepage" },
     });
   });
 });

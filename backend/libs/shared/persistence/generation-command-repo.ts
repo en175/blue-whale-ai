@@ -1,25 +1,58 @@
 import { NewApiError } from "@lib/core";
-import { promptPlanSnapshotSchema } from "@lib/contracts";
 import {
-  findPlacement,
-  SCENE_CARD_FALLBACK_HEIGHT,
-  SCENE_CARD_WIDTH,
-  type CostReservationSnapshot,
-  type Rect,
-} from "@lib/core";
+  DomainError,
+  ERROR_TASK_TYPE_PARAM_CONSTRAINT,
+  checkGenerationParamLimit,
+  errorCodeToNumeric,
+  hasModeConstraint,
+  normalizeVideoMode,
+  promptPlanSnapshotSchema,
+  toGenerationParamCheckInput,
+  type RecoveryErrorEnvelope,
+  type VideoMode,
+} from "@lib/contracts";
 import type { Prisma, PrismaClient } from "@prisma/client";
 
 import { transactionWithUniqueRetry } from "./conversation-repo.js";
+import {
+  canvasBindingView,
+  lockCanvasRecoveryForAcceptance,
+  lockCanvasRecoveryForRetry,
+  verifyRetryCanvasRecoveryLink,
+  writeCanvasRecoveryRows,
+  type CanvasBindingView,
+  type CanvasRecoveryAcceptance,
+  type CanvasRecoveryPlan,
+} from "./generation-canvas-recovery-repo.js";
+import { assertPureJobInput } from "./job-input-purity.js";
+import {
+  jobExistenceProbe,
+  withBillingCompensation,
+  type JobBilling,
+  type JobBillingSource,
+} from "./job-billing.js";
+import { createModelCapabilityRepo, serializePricingRule } from "./model-capability-repo.js";
+import { createAssetOwnershipOps } from "./asset-ownership-repo.js";
+import { checkReferenceLimits } from "../generation-runtime/reference-limits.js";
+import { freezePlacementAnchor } from "./generation-job-placement-anchor.js";
+import {
+  readCreateIdempotency,
+  runWithCreateIdempotency,
+  writeCreateIdempotency,
+  type CreateJobIdempotency,
+  type CreateJobResult,
+} from "./generation-job-idempotency.js";
 import {
   resolveLogicalSlots,
   type OutputSlotStatus,
 } from "./generation-output-slot-repo.js";
 import { appendProjectEvent } from "./product-event-repo.js";
-import { cancelImageJob } from "./generation-image-cancel.js";
+import {
+  extraString,
+  loadJobExtrasOne,
+  setJobExtras,
+} from "./generation-jobs-extra-repo.js";
 
-/** 生成命令 repo（Prisma-backed）：创建/取消/重试生成任务 + 操作日志 + 点数预留。
- *  简化模型：一次任务一行（单输出语义，产出写 output_asset_ids JSON 数组）。
- *  对齐本仓 Java GenerationJobCommandService 的字段与状态语义，但不做多槽/幂等表。 */
 
 export interface CreateJobInput {
   projectId: string;
@@ -29,20 +62,18 @@ export interface CreateJobInput {
   input: Record<string, unknown>;
   actionIdentity: string;
   actionType: string;
-  /** 任务来源（generation_jobs.source）：默认 bottom_dock；视频计划应用走 plan，图片计划应用走 plan_apply。 */
   source?: string;
-  /** 关联 AgentRun（图片计划应用来自冻结的 plan_message.agent_run_id）。 */
-  agentRunId?: string;
-  /** 关联 PlanMessage（计划应用追溯用，写入日志 payload）。 */
   planMessageId?: string;
-  /** IK67HE/T14：关联 SceneCardGenerationRecord（视频路径）；输出槽会绑定此 record 用于聚合。
-   *  图片路径留空（槽位仍创建，仅 job 级聚合）。 */
   sceneCardGenerationRecordId?: string;
-  /** SceneCard 来源身份；用于在 job 接纳时冻结实际 Canvas 位置与尺寸。 */
   sceneCardId?: string;
-  /** IK7G9X：建预留时写入 cost_reservations 的记账快照（真实预估金额 + 定价口径版本）。
-   *  缺省时沿用旧行为：reserved_amount_fen=0 + 四版本 "dev"。 */
-  costReservation?: CostReservationSnapshot;
+  videoStage?: "sample";
+  canvasRecovery?: CanvasRecoveryAcceptance;
+}
+
+export interface CreateJobOptions {
+  callerTx?: Prisma.TransactionClient;
+  billing?: JobBilling;
+  idempotency?: CreateJobIdempotency;
 }
 
 export interface CreatedJob {
@@ -51,27 +82,15 @@ export interface CreatedJob {
 }
 
 export interface GenerationCommandRepo {
-  /** 创建任务。callerTx 非空时复用调用方事务（如 plan apply 同 tx 建 job 行），
-   *  否则自起 $transaction（CONTEXT：job 行可随业务事务原子创建，执行队列在提交后进入）。 */
   createJob(
     input: CreateJobInput,
-    callerTx?: Prisma.TransactionClient,
-  ): Promise<CreatedJob>;
-  /** 图片取消原子收敛并撤销写入权；其他媒体登记软取消，由 worker 确认终态。 */
-  requestCancel(jobId: string, userId: string): Promise<boolean>;
-  /** 重试失败/缺失输出槽（IK67HE/T14，spec §4.4）：复用原参数快照，只补 failed/missing 槽，
-   *  不覆盖成功输出。创建新 GenerationJob（retry_of_job_id 指向原 job），expected_output_count =
-   *  需补槽数。接入 command_idempotency：同 Key 同摘要重放首次结果，同 Key 异摘要判冲突。
-   *  返回值带 type，供路由按 image/video 重新入队。
-   *  - 重放命中（同 Key 同摘要）→ 返回既有结果；
-   *  - 冲突（同 Key 异摘要）→ 返回 { kind: "idempotency_conflict" }；
-   *  - 原 job 非终态 failed/partially_succeeded → null。
-   *
-   *  IKF YHJ（ADR-0087 决策 7）：`guardInput` 在「确实要建新 job」的那一刻（幂等重放之后、
-   *  create 之前）拿原 job 的 input 再过一次素材状态门。位置不能提前——重放是既有结果，
-   *  不该被此刻的素材状态改写；也不能由调用方在事务外做——那样拿不到「是否重放」。
-   *  返回非 null 字符串即拒绝，本方法返回 { kind: "material_blocked", reason }，
-   *  不建行。 */
+    options?: CreateJobOptions,
+  ): Promise<CreateJobResult>;
+  lookupCreateIdempotency(
+    projectId: string,
+    idempotency: CreateJobIdempotency,
+  ): Promise<CreateJobResult | null>;
+  requestCancel(jobId: string, userId: string): Promise<CancelOutcome>;
   retryJob(
     originalJobId: string,
     projectId: string,
@@ -82,12 +101,19 @@ export interface GenerationCommandRepo {
       input: Record<string, unknown>,
       jobType: string,
     ) => Promise<string | null>,
+    canvasRecovery?: CanvasRecoveryAcceptance,
+    billing?: JobBillingSource,
   ): Promise<
     | (CreatedJob & { type: "image" | "video" | "audio" })
     | { kind: "idempotency_conflict" }
     | { kind: "material_blocked"; reason: string }
+    | { kind: "not_retryable_status" }
+    | { kind: "already_retried" }
+    | { kind: "finalize_retry_closed" }
+    | { kind: "recovery_contract_error"; envelope: RecoveryErrorEnvelope }
     | null
   >;
+  canvasBindingView(projectId: string, submissionId: string): Promise<CanvasBindingView | null>;
   appendLog(
     jobId: string,
     event: string,
@@ -95,167 +121,45 @@ export interface GenerationCommandRepo {
     message?: string,
     payload?: unknown,
   ): Promise<void>;
-  /** 入队失败兜底（IKDZGH）：queued 任务置 failed——只改 queued 态，不改终态/在途。
-   *  供 generation/media-extract 共用，消除两处重复的实现（本 repo 内规范化 updateMany）。 */
   markFailedQueued(
     jobId: string,
     code: string,
     message: string,
     details?: Record<string, unknown>,
-  ): Promise<void>;
+  ): Promise<boolean>;
 }
 
-const SOURCE_BOTTOM_DOCK = "bottom_dock";
+export type CancelOutcome = "cancelled" | "not_found" | "not_cancelable";
 
-function validAnchor(value: unknown): value is {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-} {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  const anchor = value as Record<string, unknown>;
-  return (
-    typeof anchor.x === "number" &&
-    typeof anchor.y === "number" &&
-    typeof anchor.width === "number" &&
-    typeof anchor.height === "number"
-  );
+export const SOURCE_BOTTOM_DOCK = "bottom_dock";
+
+export const VIDEO_STRATEGY_VERSION = "seedance-2.0-v1";
+
+export function strategyVersionOf(type: string): string {
+  return type === "video"
+    ? VIDEO_STRATEGY_VERSION
+    : type === "audio"
+      ? "audio-sync-v1"
+      : "image-sync-v1";
 }
 
-async function freezePlacementAnchor(
-  tx: Prisma.TransactionClient,
-  input: CreateJobInput,
-): Promise<Record<string, unknown>> {
-  if (validAnchor(input.input.placement_anchor)) return input.input;
-  const ports = tx as unknown as {
-    canvas?: {
-      findFirst(args: unknown): Promise<{
-        viewport_json: unknown;
-        nodes_json: unknown;
-      } | null>;
-    };
-  };
-  if (!ports.canvas?.findFirst) return input.input;
-
-  const canvas = await ports.canvas.findFirst({
-    where: { project_id: BigInt(input.projectId) },
-    select: { viewport_json: true, nodes_json: true },
-  });
-  const viewport =
-    canvas?.viewport_json &&
-    typeof canvas.viewport_json === "object" &&
-    !Array.isArray(canvas.viewport_json)
-      ? (canvas.viewport_json as Record<string, unknown>)
-      : {};
-  const zoom =
-    typeof viewport.zoom === "number" && viewport.zoom > 0 ? viewport.zoom : 1;
-  let anchor = {
-    x: -(typeof viewport.x === "number" ? viewport.x : 0) / zoom,
-    y: -(typeof viewport.y === "number" ? viewport.y : 0) / zoom,
-    width: 0,
-    height: 0,
-  };
-
-  if (input.sceneCardId) {
-    const nodes = Array.isArray(canvas?.nodes_json) ? canvas.nodes_json : [];
-    const sceneCardNode = nodes.find((node) => {
-      if (!node || typeof node !== "object" || Array.isArray(node)) {
-        return false;
-      }
-      const candidate = node as Record<string, unknown>;
-      const data =
-        candidate.data &&
-        typeof candidate.data === "object" &&
-        !Array.isArray(candidate.data)
-          ? (candidate.data as Record<string, unknown>)
-          : {};
-      return (
-        candidate.type === "scene_card" &&
-        String(candidate.scene_card_id ?? data.sceneCardId) ===
-          input.sceneCardId
-      );
-    });
-    let hasActualAnchor = false;
-    if (sceneCardNode && typeof sceneCardNode === "object") {
-      const node = sceneCardNode as Record<string, unknown>;
-      const position = node.position;
-      if (
-        position &&
-        typeof position === "object" &&
-        !Array.isArray(position)
-      ) {
-        const point = position as Record<string, unknown>;
-        if (typeof point.x === "number" && typeof point.y === "number") {
-          anchor = {
-            x: point.x,
-            y: point.y,
-            width:
-              typeof node.width === "number" ? node.width : SCENE_CARD_WIDTH,
-            height:
-              typeof node.height === "number"
-                ? node.height
-                : SCENE_CARD_FALLBACK_HEIGHT,
-          };
-          hasActualAnchor = true;
-        }
-      }
-    }
-    if (!hasActualAnchor) {
-      const existing: Rect[] = nodes.flatMap((candidate) => {
-        if (
-          !candidate ||
-          typeof candidate !== "object" ||
-          Array.isArray(candidate)
-        ) {
-          return [];
-        }
-        const node = candidate as Record<string, unknown>;
-        const isSceneCard = node.type === "scene_card";
-        const position =
-          node.position &&
-          typeof node.position === "object" &&
-          !Array.isArray(node.position)
-            ? (node.position as Record<string, unknown>)
-            : {};
-        return [
-          {
-            x: typeof position.x === "number" ? position.x : 0,
-            y: typeof position.y === "number" ? position.y : 0,
-            width:
-              typeof node.width === "number"
-                ? node.width
-                : isSceneCard
-                  ? SCENE_CARD_WIDTH
-                  : 200,
-            height:
-              typeof node.height === "number"
-                ? node.height
-                : isSceneCard
-                  ? SCENE_CARD_FALLBACK_HEIGHT
-                  : 200,
-          },
-        ];
-      });
-      const position = findPlacement({
-        existing,
-        anchor,
-        nodeWidth: SCENE_CARD_WIDTH,
-        nodeHeight: SCENE_CARD_FALLBACK_HEIGHT,
-      });
-      anchor = {
-        ...position,
-        width: SCENE_CARD_WIDTH,
-        height: SCENE_CARD_FALLBACK_HEIGHT,
-      };
-    }
-  }
-  return { ...input.input, placement_anchor: anchor };
+export function readInputCount(input: Prisma.JsonValue | null): number {
+  if (input === null || typeof input !== "object" || Array.isArray(input)) return 1;
+  const n = Number((input as Record<string, unknown>).expected_output_count);
+  return Number.isInteger(n) && n > 0 ? n : 1;
 }
 
-/** cost_reservations 建行数据：真实快照或旧行为兜底（reserved=0 + 四版本 dev）。 */
+
+interface LegacyReservationCarryOver {
+  reserved_amount_fen: bigint;
+  price_catalog_version: string;
+  exchange_rate_version: string;
+  model_policy_version: string;
+  cost_rule_version: string;
+}
+
 function costReservationCreateData(
-  reservation: CostReservationSnapshot | undefined,
+  carryOver: LegacyReservationCarryOver | null,
   jobId: bigint,
   userId: string,
   projectId: string,
@@ -268,22 +172,29 @@ function costReservationCreateData(
     action_identity: input.actionIdentity,
     action_type: input.actionType,
     provider: "volc",
-    reserved_amount_fen: reservation?.reservedAmountFen ?? 0n,
+    reserved_amount_fen: carryOver?.reserved_amount_fen ?? 0n,
     status: "reserved",
-    price_catalog_version: reservation?.priceCatalogVersion ?? "dev",
-    exchange_rate_version: reservation?.exchangeRateVersion ?? "dev",
-    model_policy_version: reservation?.modelPolicyVersion ?? "dev",
-    cost_rule_version: reservation?.costRuleVersion ?? "dev",
+    price_catalog_version: carryOver?.price_catalog_version ?? "dev",
+    exchange_rate_version: carryOver?.exchange_rate_version ?? "dev",
+    model_policy_version: carryOver?.model_policy_version ?? "dev",
+    cost_rule_version: carryOver?.cost_rule_version ?? "dev",
   };
 }
 
-/** 在调用方事务内创建 GenerationJob + cost 预留 + 日志 + 事件（IK67H9 抽出，让计划应用可组合进更大事务）。
- *  IK67HE/T14：同时固定 expectedOutputCount 个输出槽（status=pending），槽身份与顺序稳定。
- *  surgical：行为与原 createJob 内联实现完全一致，只是把事务体上提 + 增加槽位固定。 */
 export async function createJobWithinTx(
   tx: Prisma.TransactionClient,
   input: CreateJobInput,
-): Promise<CreatedJob> {
+  billing?: JobBilling,
+  idempotency?: CreateJobIdempotency,
+): Promise<CreateJobResult> {
+  assertPureJobInput(input);
+  let recoveryPlan: CanvasRecoveryPlan | null = null;
+  if (input.canvasRecovery) {
+    const locked = await lockCanvasRecoveryForAcceptance(tx, input.canvasRecovery);
+    if (locked.kind === "replay") return locked.result;
+    if (locked.kind === "idempotency_conflict") return { kind: "idempotency_conflict" };
+    recoveryPlan = locked.plan;
+  }
   if (input.input.prompt_plan_snapshot !== undefined) {
     const snapshot = promptPlanSnapshotSchema.parse(input.input.prompt_plan_snapshot);
     const rows = await tx.$queryRaw<Array<{ version: number }>>`SELECT version FROM canvas WHERE project_id = ${BigInt(input.projectId)} FOR UPDATE`;
@@ -301,33 +212,33 @@ export async function createJobWithinTx(
     }
   }
   const now = new Date();
-  const deadline = new Date(now.getTime() + 30 * 60 * 1000); // 30min 超时
+  const deadline = new Date(now.getTime() + 24 * 60 * 60 * 1000);
   const frozenInput = await freezePlacementAnchor(tx, input);
+  const jobInput = { ...frozenInput, expected_output_count: input.expectedOutputCount };
   const job = await tx.generation_jobs.create({
     data: {
       project_id: BigInt(input.projectId),
       user_id: BigInt(input.userId),
       type: input.type,
       source: input.source ?? SOURCE_BOTTOM_DOCK,
-      ...(input.agentRunId ? { agent_run_id: BigInt(input.agentRunId) } : {}),
       status: "queued",
       progress: 0,
-      input: frozenInput as never,
-      expected_output_count: input.expectedOutputCount,
-      action_identity: input.actionIdentity,
-      project_action_identity: input.actionIdentity,
-      strategy_version:
-        input.type === "video"
-          ? "seedance-2.0-v1"
-          : input.type === "audio"
-            ? "audio-sync-v1"
-            : "image-sync-v1",
+      input: jobInput as never,
       execution_deadline_at: deadline,
       next_action_at: now,
       fencing_token: 0,
     },
   });
-  // IK67HE/T14：固定输出槽（spec §4.4「输出槽位在首次提交时固定」）。
+  await setJobExtras(tx, job.id, {
+    strategy_version: strategyVersionOf(input.type),
+    ...(input.videoStage !== undefined
+      ? { video_stage: input.videoStage, charge_state: "charged" }
+      : {}),
+  });
+  if (billing) {
+    await billing.charge(Number(job.id));
+  }
+
   if (input.expectedOutputCount > 0) {
     for (let i = 0; i < input.expectedOutputCount; i += 1) {
       await tx.generation_output_slots.create({
@@ -349,7 +260,7 @@ export async function createJobWithinTx(
   }
   await tx.cost_reservations.create({
     data: costReservationCreateData(
-      input.costReservation,
+      null,
       job.id,
       input.userId,
       input.projectId,
@@ -386,6 +297,12 @@ export async function createJobWithinTx(
       output_asset_ids: [],
     },
   });
+  await writeCreateIdempotency(
+    tx,
+    { projectId: input.projectId, jobId: job.id, acceptedCursor: event.cursor },
+    idempotency,
+  );
+  if (recoveryPlan) await writeCanvasRecoveryRows(tx, recoveryPlan, job.id);
   return {
     generation_job_id: job.id.toString(),
     cursor: Number(event.cursor),
@@ -395,36 +312,58 @@ export async function createJobWithinTx(
 export function createGenerationCommandRepo(
   prisma: PrismaClient,
 ): GenerationCommandRepo {
+  const compensate = <T>(
+    billing: JobBilling | undefined,
+    run: (billing: JobBilling | undefined) => Promise<T>,
+  ): Promise<T> =>
+    withBillingCompensation(billing, run, jobExistenceProbe(prisma));
   return {
-    async createJob(input, callerTx) {
-      // callerTx 非空：复用调用方事务（plan apply 同 tx 建 job 行）；否则自起事务。
-      if (callerTx) return createJobWithinTx(callerTx, input);
-      return prisma.$transaction((tx) => createJobWithinTx(tx, input), {
-        maxWait: 10_000,
-        timeout: 30_000,
-      });
+    async createJob(input, options) {
+      const idempotency = options?.idempotency;
+      const run = () =>
+        compensate(
+          options?.billing,
+          (billing) =>
+            options?.callerTx
+              ? createJobWithinTx(options.callerTx, input, billing, idempotency)
+              : prisma.$transaction(
+                  (tx) => createJobWithinTx(tx, input, billing, idempotency),
+                  { maxWait: 10_000, timeout: 30_000 },
+                ),
+        );
+      return options?.callerTx
+        ? run()
+        : runWithCreateIdempotency(prisma, input.projectId, idempotency, run);
+    },
+
+    lookupCreateIdempotency(projectId, idempotency) {
+      return readCreateIdempotency(prisma, projectId, idempotency);
     },
 
     async requestCancel(jobId, userId) {
-      // 仅归属当前用户的 queued/processing 任务可取消。
-      const job = await prisma.generation_jobs.findFirst({
-        where: { id: BigInt(jobId), user_id: BigInt(userId), is_delete: false },
-        select: { id: true, status: true, type: true },
+      const updated = await prisma.generation_jobs.updateMany({
+        where: {
+          id: BigInt(jobId),
+          user_id: BigInt(userId),
+          is_delete: false,
+          status: "queued",
+        },
+        data: { cancel_requested_at: new Date(), next_action_at: new Date() },
       });
-      if (job?.type === "image") return cancelImageJob(prisma, jobId, userId);
-      if (!job || (job.status !== "queued" && job.status !== "processing"))
-        return false;
-      await prisma.generation_jobs.update({
-        where: { id: BigInt(jobId) },
-        data: { cancel_requested_at: new Date() },
-      });
+      if (updated.count !== 1) {
+        const exists = await prisma.generation_jobs.findFirst({
+          where: { id: BigInt(jobId), user_id: BigInt(userId), is_delete: false },
+          select: { status: true },
+        });
+        return exists ? "not_cancelable" : "not_found";
+      }
       await this.appendLog(
         jobId,
         "cancel_requested",
-        job.status,
+        "queued",
         "用户请求取消",
       );
-      return true;
+      return "cancelled";
     },
 
     retryJob(
@@ -434,11 +373,48 @@ export function createGenerationCommandRepo(
       idempotencyKey,
       requestHash,
       guardInput,
+      canvasRecovery,
+      billing,
     ) {
-      return transactionWithUniqueRetry(
+      let chargeContext: {
+        commandId: string;
+        modelId: string;
+        taskType: string;
+        input: Record<string, unknown>;
+        ruleSnapshot?: string;
+      } | null = null;
+      const jobBilling: JobBilling | undefined = billing
+        ? {
+            charge: async (jobId) => {
+              if (chargeContext === null) {
+                throw new Error("retry billing context 未初始化");
+              }
+              await billing.charge({
+                userId,
+                jobId,
+                commandId: chargeContext.commandId,
+                modelId: chargeContext.modelId,
+                taskType: chargeContext.taskType,
+                input: chargeContext.input,
+                ...(chargeContext.ruleSnapshot !== undefined
+                  ? { ruleSnapshot: chargeContext.ruleSnapshot }
+                  : {}),
+              });
+            },
+            release: (jobId, reason) =>
+              billing.release({ userId, jobId, reason }),
+          }
+        : undefined;
+      return compensate(jobBilling, (billing) =>
+        transactionWithUniqueRetry(
         prisma,
         async (tx) => {
         const pid = BigInt(projectId);
+        let recoveryPlan: CanvasRecoveryPlan | null = null;
+        if (canvasRecovery) {
+          const rejected = await verifyRetryCanvasRecoveryLink(tx, projectId, originalJobId, canvasRecovery.binding.target_node_id);
+          if (rejected) return { kind: "recovery_contract_error", envelope: rejected } as const;
+        }
         const original = await tx.generation_jobs.findFirst({
           where: {
             id: BigInt(originalJobId),
@@ -448,17 +424,16 @@ export function createGenerationCommandRepo(
           },
         });
         if (!original) return null;
+        const originalExtras = await loadJobExtrasOne(tx, original.id.toString());
+        if (extraString(originalExtras, "video_stage") === "final") {
+          return { kind: "finalize_retry_closed" } as const;
+        }
         if (
           original.status !== "failed" &&
           original.status !== "partially_succeeded"
         ) {
-          return null;
+          return { kind: "not_retryable_status" } as const;
         }
-
-        // IK7G9X：重试复用原 job 的记账快照（同一任务的重试，定价口径不变）。
-        const originalReservation = await tx.cost_reservations.findFirst({
-          where: { generation_job_id: original.id },
-        });
 
         const operation = "generation.retry";
         const existing = idempotencyKey
@@ -529,14 +504,66 @@ export function createGenerationCommandRepo(
         ).filter(
           (slot) => slot.status === "failed" || slot.status === "missing",
         );
-        if (originalSlotIds.size > 0 && failedSlots.length === 0) return null;
+        if (originalSlotIds.size > 0 && failedSlots.length === 0) {
+          return { kind: "already_retried" } as const;
+        }
         const retryCount =
           originalSlotIds.size > 0
             ? failedSlots.length
-            : (original.expected_output_count ?? 1);
+            : readInputCount(original.input);
 
-        // IKF YHJ（ADR-0087 决策 7）：重试复用原 job 的参数快照，但那批素材的校验状态
-        // 可能在首次生成之后变了（撤销/删除/失败）。采纳之前重过一道门，拒绝就不建行。
+        const input = (original.input ?? {}) as Record<string, unknown>;
+        const sceneParameters = original.source === "scene_card" &&
+          typeof input.parameters === "object" && input.parameters !== null && !Array.isArray(input.parameters)
+          ? input.parameters : null;
+        const retryParameters: Record<string, unknown> = sceneParameters ? { ...sceneParameters, ...input } : input;
+        const capability = original.type === "video" || billing
+          ? (await createModelCapabilityRepo(prisma).listEnabledByType(original.type))
+              .find((model) => model.model_id === retryParameters.model_id)
+          : undefined;
+        if (original.type === "video") {
+          const params = toGenerationParamCheckInput(retryParameters);
+          const references = (input.references ?? input.reference_materials ?? []) as Array<{
+            role?: string; type: "image" | "video" | "audio"; duration?: number;
+          }>;
+          const localReferences = Array.isArray(input.reference_asset_ids)
+            ? await createAssetOwnershipOps(prisma).resolveInputAssets(input.reference_asset_ids.map(String), userId, projectId)
+            : [];
+          const ordinaryReferences = [
+            ...references.filter((reference) => reference.role === undefined || reference.role === "reference"),
+            ...localReferences.flatMap<(typeof references)[number]>((asset) => asset.type === "image" || asset.type === "video" || asset.type === "audio"
+              ? [{ type: asset.type, ...(asset.duration !== null ? { duration: asset.duration } : {}) }]
+              : []),
+          ];
+          let legacySceneMode: VideoMode | null = null;
+          if (sceneParameters &&
+            input.video_mode === undefined && input.video_task_type === undefined &&
+            input.omni_reference_task_type_allowed === undefined &&
+            ordinaryReferences.every((reference) => reference.type === "image")) {
+            if (input.reference_mode === "first_and_last_frame" && input.first_frame_asset_id && input.last_frame_asset_id && ordinaryReferences.length === 0) {
+              legacySceneMode = "first_last_frame";
+            } else if (input.reference_mode === "first_frame" && input.first_frame_asset_id && !input.last_frame_asset_id && ordinaryReferences.length === 0) {
+              legacySceneMode = "first_frame";
+            } else if (input.reference_mode === "text_to_video" && !input.first_frame_asset_id && !input.last_frame_asset_id) {
+              legacySceneMode = ordinaryReferences.length > 0 ? "image_reference" : "text2video";
+            }
+          }
+          const mode = normalizeVideoMode(input.video_mode ?? input.video_task_type) ?? legacySceneMode;
+          if (
+            !capability || !mode || !params || params.duration === undefined ||
+            (!legacySceneMode && (typeof input.omni_reference_task_type_allowed !== "boolean" ||
+              input.omni_reference_task_type_allowed !== capability.features.omni_reference_task_type)) ||
+            !hasModeConstraint(capability.features.task_types, mode) ||
+            checkGenerationParamLimit({ ...capability, task_types: capability.features.task_types }, { ...params, mode }) ||
+            checkReferenceLimits(capability.features, ordinaryReferences, "video", mode)
+          ) {
+            throw new DomainError(
+              errorCodeToNumeric(ERROR_TASK_TYPE_PARAM_CONSTRAINT),
+              "原视频任务的模式或参数已不满足当前模型要求，请重新编辑，确认视频模式和时长后重新报价提交",
+            );
+          }
+        }
+
         if (guardInput) {
           const reason = await guardInput(
             (original.input ?? {}) as Record<string, unknown>,
@@ -545,8 +572,18 @@ export function createGenerationCommandRepo(
           if (reason !== null) return { kind: "material_blocked", reason } as const;
         }
 
+        if (canvasRecovery) {
+          const locked = await lockCanvasRecoveryForRetry(tx, { ...canvasRecovery, taskType: original.type });
+          if (locked.kind === "replay") {
+            return { generation_job_id: locked.result.generation_job_id, cursor: locked.result.cursor, type: original.type as "image" | "video" | "audio" };
+          }
+          if (locked.kind === "idempotency_conflict") return { kind: "idempotency_conflict" } as const;
+          if (locked.kind === "error") return { kind: "recovery_contract_error", envelope: locked.envelope } as const;
+          recoveryPlan = locked.plan;
+        }
+
         const now = new Date();
-        const deadline = new Date(now.getTime() + 30 * 60 * 1000);
+        const deadline = new Date(now.getTime() + 24 * 60 * 60 * 1000);
         const retry = await tx.generation_jobs.create({
           data: {
             project_id: pid,
@@ -556,23 +593,19 @@ export function createGenerationCommandRepo(
             status: "queued",
             progress: 0,
             input: original.input as never,
-            expected_output_count: retryCount,
             retry_of_job_id: original.id,
-            action_identity: idempotencyKey || `retry:${originalJobId}`,
-            project_action_identity: idempotencyKey || `retry:${originalJobId}`,
-            strategy_version:
-              original.strategy_version ??
-              (original.type === "video"
-                ? "seedance-2.0-v1"
-                : original.type === "audio"
-                  ? "audio-sync-v1"
-                  : "image-sync-v1"),
             execution_deadline_at: deadline,
             next_action_at: now,
             fencing_token: 0,
           },
         });
-        // IK7G9X：为重试 job 补 cost_reservations 行（复用原 job 的金额与版本口径）。
+        const inheritedStage = extraString(originalExtras, "video_stage");
+        await setJobExtras(tx, retry.id, {
+          strategy_version:
+            extraString(originalExtras, "strategy_version") ??
+            strategyVersionOf(original.type),
+          ...(inheritedStage !== null ? { video_stage: inheritedStage } : {}),
+        });
         const retryInput: CreateJobInput = {
           projectId,
           userId: original.user_id.toString(),
@@ -587,28 +620,21 @@ export function createGenerationCommandRepo(
                 ? "generate_audio"
                 : "generate_image",
         };
-        await tx.cost_reservations.create({
-          data: costReservationCreateData(
-            originalReservation
-              ? {
-                  reservedAmountFen:
-                    originalReservation.reserved_amount_fen ?? 0n,
-                  priceCatalogVersion:
-                    originalReservation.price_catalog_version,
-                  exchangeRateVersion:
-                    originalReservation.exchange_rate_version,
-                  modelPolicyVersion:
-                    originalReservation.model_policy_version,
-                  costRuleVersion: originalReservation.cost_rule_version,
-                }
-              : undefined,
-            retry.id,
-            original.user_id.toString(),
-            projectId,
-            retryInput,
-          ),
-        });
-        // 为重试 job 创建新槽，链 retry_of_slot_id 指向被补的原始槽。
+        const retryModelId = String(retryParameters.model_id ?? "");
+        let ruleSnapshot: string | undefined;
+        if (billing) {
+          ruleSnapshot = serializePricingRule(capability);
+        }
+        chargeContext = {
+          commandId: retryInput.actionIdentity,
+          modelId: retryModelId,
+          taskType: original.type,
+          input: retryParameters,
+          ...(ruleSnapshot !== undefined ? { ruleSnapshot } : {}),
+        };
+        if (billing) {
+          await billing.charge(Number(retry.id));
+        }
         if (failedSlots.length > 0) {
           const recordIds = new Set<bigint>();
           for (const orig of failedSlots) {
@@ -653,7 +679,6 @@ export function createGenerationCommandRepo(
             });
           }
         } else {
-          // 早于 T14 的 job 无槽位：退化为按 expected_output_count 建槽（向后兼容）。
           for (let i = 0; i < retryCount; i += 1) {
             await tx.generation_output_slots.create({
               data: {
@@ -703,16 +728,20 @@ export function createGenerationCommandRepo(
             message: `重试 ${originalJobId}`,
           },
         });
+        if (recoveryPlan) await writeCanvasRecoveryRows(tx, recoveryPlan, retry.id);
         return {
           generation_job_id: retry.id.toString(),
           cursor: Number(event.cursor),
           type: original.type as "image" | "video" | "audio",
         };
         },
-        // 素材门（guardInput）在事务内发 HTTP，默认 5s 的交互事务超时会把它掐成 P2028/500。
-        // 与 createJob 同口径放宽（那里也是同一理由：事务里含外部等待）。
         { maxWait: 10_000, timeout: 30_000 },
+      ),
       );
+    },
+
+    canvasBindingView(projectId, submissionId) {
+      return canvasBindingView(prisma, projectId, submissionId);
     },
 
     async appendLog(jobId, event, status, message, payload) {
@@ -727,18 +756,33 @@ export function createGenerationCommandRepo(
     },
 
     async markFailedQueued(jobId, code, message, details) {
-      // 与原先两处 service 内联的 updateMany 行为一致（IKDZGH 收敛到 repo，消除裸查/重复）。
-      // error 为 Prisma JSON 字段：显式构建对象（avoid optional spread），值按 JSON 契约强转。
       const error: Record<string, unknown> = { code, message };
       if (details !== undefined) error.details = details;
-      await prisma.generation_jobs.updateMany({
-        where: { id: BigInt(jobId), status: "queued" },
-        data: {
-          status: "failed",
-          error: error as Prisma.InputJsonValue,
-          next_action_at: null,
-          version: { increment: 1 },
-        },
+      return prisma.$transaction(async (tx) => {
+        const id = BigInt(jobId);
+        const result = await tx.generation_jobs.updateMany({
+          where: { id, status: "queued" },
+          data: {
+            status: "failed",
+            error: error as Prisma.InputJsonValue,
+            next_action_at: null,
+            version: { increment: 1 },
+          },
+        });
+        if (result.count !== 1) return false;
+        const job = await tx.generation_jobs.findUniqueOrThrow({
+          where: { id },
+          select: { user_id: true },
+        });
+        await tx.generation_outbox.create({
+          data: {
+            job_id: id,
+            user_id: job.user_id,
+            terminal_status: "failed",
+            reason: message,
+          },
+        });
+        return true;
       });
     },
   };

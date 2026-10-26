@@ -1,50 +1,4 @@
 #!/usr/bin/env node
-/**
- * T18 真实 canary 驱动（IK67HJ）：对本地自足开发栈执行一次真实图片 canary +
- * 真实视频 canary，并支持服务重启后的恢复验证，产出脱敏证据。
- *
- * 纯 HTTP 黑盒：不 import 任何产品源码，只打公开 API。端点与载荷形状以仓库实现为准：
- *   - 注册/登录/建项目/建生成任务：tests/typescript-baseline/ik50gb-c-smoke.test.mjs
- *   - Snapshot 形状：blue_whale_web/lib/snapshot/handle-get-snapshot.ts
- *   - 输出槽放置协议：blue_whale_web/lib/conversation/scene-card-placement.ts
- *     （pendingOutputPlacements 见 blue_whale_web/lib/project-recovery.ts:182-221）
- *   - Canvas If-Match 版本协议：blue_whale_web/app/api/canvases/[projectId]/route.ts
- *   - SSE 断线续传做法：tests/typescript-baseline/snapshot-recovery-blackbox.test.mjs:529-570
- *   - factDigest 字段：同上 :388-419
- *
- * 前置条件：
- *   1. 仓库工作树干净，本地自足栈已起；web/worker 用当前 HEAD 注入构建身份：
- *      GIT_COMMIT="$(git rev-parse HEAD)" BUILD_TIME="$(date -u +%FT%TZ)" pnpm --filter @blue-whale/web dev
- *      （compose 项目 bw-ts-dev 先由 scripts/dev-stack.sh up 启动）；
- *   2. new-api 已配真实火山引擎渠道（图片 doubao-seedream-4-0-250828 /
- *      视频 doubao-seedance-2-0-260128，种子见 backend/prisma/schema/002_seed.sql）；
- *   3. 对象存储（TOS：VOLC_ACCESS_KEY_ID / VOLC_SECRET_ACCESS_KEY / VOLC_TOS_ENDPOINT /
- *      VOLC_TOS_BUCKET / VOLC_TOS_REGION）已配到 web 与 worker-java 进程——
- *      未配置时生成结果会直引 provider 源 URL，对象存储断言会 FAIL（这正是要验的点）。
- *
- * 用法：
- *   # 另一个终端以前置条件中的 GIT_COMMIT/BUILD_TIME 命令启动 web/worker
- *   BW_ALLOW_BILLED_CANARY=1 node scripts/run-real-canary.mjs run
- *   node scripts/run-real-canary.mjs verify-recovery
- *
- *   run              完整 canary：前置检查 → 注册 → 建项目 → 真实图片/视频生成 →
- *                    对象存储断言 → Canvas 放置 → SSE 断线续传 → 写状态文件。
- *   verify-recovery  web/worker 重启之后执行：重新登录 → 重拉 Snapshot →
- *                    重算 factDigest 与状态文件深度比对。
- *
- * 计费知情闸：run 子命令真实调用上游计费模型，必须显式设置
- *   BW_ALLOW_BILLED_CANARY=1（沿用 BW_ALLOW_BILLED_MEDIA_PROBE 先例，
- *   见 scripts/run-ik50gb-c-testsite-probe.sh）。
- *
- * 地址配置（环境变量）：
- *   BW_CANARY_WEB_URL      默认 http://localhost:3000
- *   BW_CANARY_NEW_API_URL  默认 http://127.0.0.1:3001
- *
- * 状态文件（verify-recovery 依赖）：
- *   $HOME/.cache/blue-whale-real-canary/state.json        产品事实摘要（不含凭证）
- *   $HOME/.cache/blue-whale-real-canary/credentials.json  canary 账号凭证（0600）
- * 凭证（token / 密码）绝不写 state.json、绝不打印；stdout 证据块整体过 sanitize。
- */
 
 import { execFileSync } from "node:child_process";
 import { randomInt } from "node:crypto";
@@ -53,7 +7,6 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-// ============================== 常量 ==============================
 
 const DEFAULT_WEB_URL = "http://localhost:3000";
 const DEFAULT_NEW_API_URL = "http://127.0.0.1:3001";
@@ -61,17 +14,14 @@ const DEFAULT_NEW_API_URL = "http://127.0.0.1:3001";
 const IMAGE_MODEL_ID = "doubao-seedream-4-0-250828";
 const VIDEO_MODEL_ID = "doubao-seedance-2-0-260128";
 
-// 轮询：图片 ~5 分钟、视频 ~10 分钟封顶，间隔 4s（3-5s 区间内）。
 const IMAGE_JOB_TIMEOUT_MS = 5 * 60_000;
 const VIDEO_JOB_TIMEOUT_MS = 10 * 60_000;
 const JOB_POLL_INTERVAL_MS = 4_000;
 
-// SSE 收窗：最后一条帧后 idle 2s 收窗；全程 30s 封顶；一条都没有时 5s 即收。
 const SSE_IDLE_MS = 2_000;
 const SSE_DEADLINE_MS = 30_000;
 const SSE_EMPTY_DEADLINE_MS = 5_000;
 
-// 输出节点尺寸与前端放置协议一致（scene-card-placement.ts 尾部常量）。
 const IMAGE_OUTPUT_SIZE = { width: 200, height: 112 };
 const VIDEO_OUTPUT_SIZE = { width: 400, height: 225 };
 const OUTPUT_GAP = 10;
@@ -80,8 +30,6 @@ const STATE_DIR = join(homedir(), ".cache", "blue-whale-real-canary");
 const STATE_FILE = join(STATE_DIR, "state.json");
 const CREDENTIALS_FILE = join(STATE_DIR, "credentials.json");
 
-// 候选锚定：运行服务 /build-info 必须与脚本所在仓库的干净 HEAD 一致。
-// dev 模式须在启动时显式注入 GIT_COMMIT；unknown 不构成候选身份。
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 function repoState() {
   try {
@@ -98,7 +46,6 @@ function repoState() {
   }
 }
 
-/** 候选身份问题列表：空数组表示运行服务与干净 checkout 精确一致。 */
 export function candidateIdentityProblems(buildInfo, repo) {
   if (typeof repo?.head !== "string" || repo.head.length === 0) {
     return ["无法解析脚本所在仓库 HEAD"];
@@ -122,30 +69,21 @@ export function candidateIdentityProblems(buildInfo, repo) {
   return [];
 }
 
-/** 证据中只要出现一项失败，最终结论就必须是 FAIL。 */
 export function evidenceVerdict(items) {
   return items.every((item) => item?.ok === true) ? "PASS" : "FAIL";
 }
 
-// ============================== 脱敏（纯函数） ==============================
-// 内联自 scripts/lib/sanitize-acceptance-logs.mjs:14-27，另补 sk- 直出、credential/cookie 键。
 
-// JWT：三段 base64url，以 eyJ 开头。
 const JWT_RE = /eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g;
-// Authorization: Bearer <token>
 const BEARER_RE = /(bearer\s+)[A-Za-z0-9._~+/=-]+/gi;
-// new-api sk- 令牌直出形态。
 const SK_TOKEN_RE = /sk-[A-Za-z0-9][A-Za-z0-9_-]{4,}/g;
-// key=value / "key": "value" 形式的敏感键值（键名保留，值替换）。
 const SECRET_KV_RE =
   /\b([A-Za-z0-9_]*(?:password|passwd|secret|token|access_?key|secret_?key|api_?key|credential|cookie)[A-Za-z0-9_]*)(\s*["']?\s*[:=]\s*["']?)([^\s,"'}\]]+)/gi;
-// 堆栈帧行（异常诊断落盘前剥掉帧细节）。
 const STACK_FRAME_RE = /^\s*at\s+[\w.$_]+\.[\w$<>]+\([^)]*\)\s*$/;
 
 const REDACTED = "[REDACTED]";
 const REDACTED_JWT = "[REDACTED_JWT]";
 
-/** 证据文本脱敏：token/sk-/JWT/敏感键值/堆栈帧一律替换或剥除。 */
 export function sanitizeEvidenceText(text) {
   let out = String(text);
   out = out.replace(JWT_RE, REDACTED_JWT);
@@ -159,10 +97,7 @@ export function sanitizeEvidenceText(text) {
   return out;
 }
 
-// ============================== factDigest（纯函数） ==============================
-// 字段选取对齐 snapshot-recovery-blackbox.test.mjs:388-419：跨重启比较的最小稳定身份集合。
 
-/** 产品事实摘要：跨重启比较的最小稳定身份集合（不含瞬时字段）。 */
 export function computeFactDigest(snapshot) {
   const canvasNodes = snapshot?.canvas?.nodes
     ? JSON.parse(snapshot.canvas.nodes)
@@ -170,15 +105,6 @@ export function computeFactDigest(snapshot) {
   return {
     messages: (snapshot?.conversation_messages ?? [])
       .map((m) => `${m.message_id}:${m.role}:${m.sequence_no}`)
-      .sort(),
-    plans: (snapshot?.plan_messages ?? [])
-      .map(
-        (p) =>
-          `${p.message_id}:${p.application_kind}:${p.applied_at ?? "unapplied"}`,
-      )
-      .sort(),
-    receipts: (snapshot?.plan_applications ?? [])
-      .map((r) => `${r.receipt_id}:${r.application_kind}:${r.command_id}`)
       .sort(),
     sceneCards: (snapshot?.scene_cards ?? [])
       .map((c) => `${c.scene_card_id}:${c.version}`)
@@ -195,13 +121,10 @@ export function computeFactDigest(snapshot) {
   };
 }
 
-/** digest 深度比对：返回中文不一致项列表（空数组 = 一致）。 */
 export function diffFactDigests(expected, actual) {
   const problems = [];
   const fields = [
     "messages",
-    "plans",
-    "receipts",
     "sceneCards",
     "records",
     "jobs",
@@ -234,10 +157,7 @@ export function diffFactDigests(expected, actual) {
   return problems;
 }
 
-// ============================== SSE（纯函数） ==============================
 
-/** SSE 窗口健康检查：schema 版本、项目归属、事件身份唯一、游标严格单调递增。
- *  返回问题列表（空数组 = 健康）。对齐 snapshot-recovery-blackbox.test.mjs:358-385。 */
 export function checkSseWindowHealth(events, projectId) {
   const problems = [];
   const seenIds = new Set();
@@ -254,7 +174,6 @@ export function checkSseWindowHealth(events, projectId) {
       problems.push(`事件身份重复：${eventId}`);
     }
     seenIds.add(eventId);
-    // 游标为雪花 ID（非连续）：只要求严格单调递增。
     const cursor = BigInt(envelope?.cursor ?? 0);
     if (previousCursor !== null && cursor <= previousCursor) {
       problems.push(`游标未严格递增（${previousCursor} → ${cursor}）`);
@@ -264,7 +183,6 @@ export function checkSseWindowHealth(events, projectId) {
   return problems;
 }
 
-/** 断线前窗口 + 断点续传窗口合并：按 event_id 去重、排序后的身份列表。 */
 export function mergeSseEventIds(...windows) {
   const ids = new Set();
   for (const window of windows) {
@@ -275,14 +193,7 @@ export function mergeSseEventIds(...windows) {
   return [...ids].sort();
 }
 
-// ============================== 对象存储身份（纯函数） ==============================
 
-/** 对象存储身份判定：生成产物转存 TOS 后 URL 形态为
- *  https://{bucket}.{endpoint}/uploads/{userId}/{type}/{uuid}.{ext}
- *  （tos-storage.ts prepareUpload/inspectObject 的 publicUrl）。
- *  未配存储时 worker 直引 provider 源 URL（worker-java 的 TOS 降级路径，原 TS generation-worker persistProviderMedia
- *  storage=null 分支），此时该断言必须 FAIL。
- *  返回 { ok, reason, safeUrl }；safeUrl 已剥 query，可进证据。 */
 export function checkStorageIdentity(accessUrl, userId, type) {
   if (typeof accessUrl !== "string" || accessUrl === "") {
     return { ok: false, reason: "access_url 为空", safeUrl: "(empty)" };
@@ -305,8 +216,6 @@ export function checkStorageIdentity(accessUrl, userId, type) {
       safeUrl,
     };
   }
-  // 对象存储两种 key Scheme：用户上传/图片转存走 uploads/（tos-storage.ts:160），
-  // 视频媒体 relay 走 generated/（tos-video-media-relay.ts:96），均为合法对象存储身份。
   const prefixes = [`/uploads/${userId}/${type}/`, `/generated/${userId}/${type}/`];
   if (!prefixes.some((prefix) => parsed.pathname.startsWith(prefix))) {
     return {
@@ -318,7 +227,6 @@ export function checkStorageIdentity(accessUrl, userId, type) {
   return { ok: true, reason: "", safeUrl };
 }
 
-// ============================== Canvas 放置（纯函数） ==============================
 
 function outputNodeId(slotId, isStoryboardFrame) {
   return isStoryboardFrame
@@ -333,8 +241,6 @@ function isWireInteger(value) {
   );
 }
 
-/** 从 Snapshot 提取待放置输出槽：对齐 project-recovery.ts 的 pendingOutputPlacements
- *  （succeeded + initial_placement_status=pending + 有 asset_id）。 */
 export function findPendingOutputPlacements(snapshot) {
   const pending = [];
   for (const job of snapshot?.generation_jobs ?? []) {
@@ -394,7 +300,6 @@ function sceneCardIdOf(node) {
   return null;
 }
 
-/** 视口 {x,y,zoom} → 近似世界锚点（屏幕原点反投）；缺省 {0,0}。 */
 export function viewportAnchorPoint(viewport) {
   if (!viewport) return { x: 0, y: 0 };
   try {
@@ -428,8 +333,6 @@ function nodeRect(node) {
   };
 }
 
-/** 简易网格落位：从锚点起向右排，与既有节点重叠则换行下移。
- *  服务端不校验坐标（只按节点 id 回写 placed），该实现只需确定、不重叠。 */
 function findFreePosition(occupied, anchor, dims) {
   let candidate = { x: anchor.x, y: anchor.y };
   const rowLimit = anchor.x + 4 * (dims.width + OUTPUT_GAP);
@@ -442,12 +345,9 @@ function findFreePosition(occupied, anchor, dims) {
       candidate = { x: anchor.x, y: candidate.y + dims.height + OUTPUT_GAP };
     }
   }
-  // canary 规模不会走到；兜底硬放锚点，宁可重叠也不失节点。
   return { x: anchor.x, y: anchor.y };
 }
 
-/** 构造输出 Canvas 节点：节点 id 形如 generation-output:<slotId>
- *  （canvas-repo.ts 据此正则回写 initial_placement_status=placed）。 */
 export function buildOutputCanvasNode(output, position) {
   const dims = output.type === "video" ? VIDEO_OUTPUT_SIZE : IMAGE_OUTPUT_SIZE;
   return {
@@ -465,8 +365,6 @@ export function buildOutputCanvasNode(output, position) {
   };
 }
 
-/** 规划待追加节点：幂等（已有同 id 节点跳过）；
- *  有 SceneCard 时挂卡下方，否则按视口/声明锚点走网格。 */
 export function planOutputCanvasNodes(existingNodes, pendingOutputs, viewport) {
   const nodes = Array.isArray(existingNodes) ? existingNodes : [];
   const occupied = nodes.map(nodeRect);
@@ -513,7 +411,6 @@ export function planOutputCanvasNodes(existingNodes, pendingOutputs, viewport) {
   return additions;
 }
 
-// ============================== HTTP 层 ==============================
 
 const WEB_URL = (process.env.BW_CANARY_WEB_URL ?? DEFAULT_WEB_URL).replace(
   /\/$/,
@@ -575,8 +472,6 @@ async function fetchSnapshot(projectId, token) {
   return result.body.data;
 }
 
-/** 收集 Project SSE 事件窗口：从 after 游标起读到 idleMs 内无新帧为止。
- *  对齐 snapshot-recovery-blackbox.test.mjs:306-356 的 readSseWindow。 */
 async function readSseWindow(
   projectId,
   token,
@@ -634,7 +529,6 @@ async function readSseWindow(
         }
       }
     } catch {
-      // deadline 中止属于正常收窗：返回已收集事件。
     }
     return events;
   } finally {
@@ -643,7 +537,6 @@ async function readSseWindow(
   }
 }
 
-// ============================== 证据块 ==============================
 
 const evidence = [];
 
@@ -653,7 +546,6 @@ function record(ok, label, detail = "") {
   process.stdout.write(`${sanitizeEvidenceText(line)}\n`);
 }
 
-/** 断言失败：记 FAIL、打印汇总证据块、非零退出。 */
 function abort(step, expected, actual) {
   record(false, step, `期望 ${expected}，实际 ${actual}`);
   printEvidenceSummary();
@@ -676,13 +568,11 @@ function printEvidenceSummary() {
   process.stdout.write(`${sanitizeEvidenceText(block)}\n`);
 }
 
-// ============================== 小工具 ==============================
 
 function pad2(n) {
   return String(n).padStart(2, "0");
 }
 
-/** yyyymmddhhmmss 本地时间戳（canary 用户名/项目名用）。 */
 export function canaryTimestamp(date = new Date()) {
   return (
     `${date.getFullYear()}${pad2(date.getMonth() + 1)}${pad2(date.getDate())}` +
@@ -725,10 +615,8 @@ function readJsonFile(path, label) {
   }
 }
 
-// ============================== canary 步骤 ==============================
 
 async function preflight() {
-  // web 健康：/build-info 200 且含 git_commit 字段。
   let buildInfo;
   try {
     const response = await fetch(`${WEB_URL}/build-info`, {
@@ -761,7 +649,6 @@ async function preflight() {
     `git_commit=${buildInfo.git_commit}`,
   );
 
-  // new-api 健康：/api/status 返回成功（{success:true,...}）。
   let status;
   try {
     const response = await fetch(`${NEW_API_URL}/api/status`, {
@@ -783,9 +670,7 @@ async function preflight() {
 }
 
 async function registerCanaryUser(timestamp) {
-  // new-api 用户名上限 20 字符（超限 BFF 502）：t18- 前缀 + 时间戳后 10 位（DDHHMMSSss）。
   const username = `t18-${timestamp.slice(4)}`;
-  // 复杂度对齐 smoke 测试口令形态：大小写 + 数字 + 特殊字符，12 位随机数字。
   let digits = "";
   for (let i = 0; i < 12; i += 1) digits += String(randomInt(0, 10));
   const password = `Ac${digits}!xY9`;
@@ -806,7 +691,6 @@ async function registerCanaryUser(timestamp) {
   if (typeof token !== "string" || !token.startsWith("sk-")) {
     abort("注册 canary 用户", "响应含 sk- access_token", "缺失");
   }
-  // 凭证只落 credentials.json（0600），证据里只出现用户名与数字 user_id。
   writeCredentials(username, password);
   record(true, "注册 canary 用户", `username=${username} user_id=${userId}`);
   return { username, password, token, userId: String(userId) };
@@ -893,7 +777,6 @@ async function createGenerationJob(projectId, token, type, timestamp) {
   return { jobId, modelId };
 }
 
-/** 轮询任务到终态：succeeded/failed(/cancelled)。打进度点，状态变化时打一行。 */
 async function waitJobTerminal(projectId, token, jobId, type, timeoutMs) {
   const label = type === "image" ? "图片" : "视频";
   const deadline = Date.now() + timeoutMs;
@@ -988,7 +871,6 @@ async function placeOutputsOnCanvas(projectId, token, snapshot) {
   if (pending.length === 0) {
     abort("Canvas 放置", "至少 1 个 pending 输出槽", "0");
   }
-  // If-Match CAS：412 时重读快照重算，最多 3 次（对齐前端 recoverPlacements 循环）。
   let current = snapshot;
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const existingNodes = current.canvas?.nodes
@@ -1027,7 +909,6 @@ async function placeOutputsOnCanvas(projectId, token, snapshot) {
     break;
   }
 
-  // 重拉快照断言：槽转 placed、节点存在且带对 assetId。
   const after = await fetchSnapshot(projectId, token);
   const afterNodes = after.canvas?.nodes ? JSON.parse(after.canvas.nodes) : [];
   for (const output of pending) {
@@ -1086,7 +967,6 @@ async function verifySseResume(projectId, token, beforeWindow, breakCursor) {
       abort("SSE 断线续传", `${name}窗口健康`, problems.join("；"));
     }
   }
-  // 无缺口无重复：断线前 + 续传两段的事件集合与全量回放完全一致。
   const fullReplay = await readSseWindow(projectId, token, 0);
   const fullIds = mergeSseEventIds(fullReplay);
   const joinedIds = mergeSseEventIds(beforeWindow, resumed);
@@ -1107,7 +987,6 @@ async function verifySseResume(projectId, token, beforeWindow, breakCursor) {
   return fullReplay;
 }
 
-// ============================== 子命令 ==============================
 
 async function cmdRun() {
   if (process.env.BW_ALLOW_BILLED_CANARY !== "1") {
@@ -1140,7 +1019,7 @@ async function cmdRun() {
   );
   const { username, password, token, userId } =
     await registerCanaryUser(timestamp);
-  void password; // 已写入 credentials.json；此后只用 token。
+  void password;
 
   const quotaBefore = await readQuota(token);
   const { projectId, projectName } = await createCanaryProject(
@@ -1151,7 +1030,6 @@ async function cmdRun() {
   const image = await createGenerationJob(projectId, token, "image", timestamp);
   const video = await createGenerationJob(projectId, token, "video", timestamp);
 
-  // SSE 断点前窗口：任务创建事件已同步落库，直接收窗；末条游标即断点。
   const beforeWindow = await readSseWindow(projectId, token, 0);
   if (beforeWindow.length === 0) {
     abort(
@@ -1185,7 +1063,6 @@ async function cmdRun() {
     VIDEO_JOB_TIMEOUT_MS,
   );
 
-  // quota 差值（脱敏：只输出差值，不输出绝对余额）。
   const quotaAfter = await readQuota(token);
   if (quotaAfter > quotaBefore) {
     abort(
@@ -1210,7 +1087,6 @@ async function cmdRun() {
     breakCursor,
   );
 
-  // 事实摘要 + 状态文件（不含任何凭证）。
   const factDigest = computeFactDigest(placedSnapshot);
   writeState({
     version: 1,
@@ -1311,7 +1187,6 @@ async function cmdVerifyRecovery() {
   printEvidenceSummary();
 }
 
-// ============================== 入口 ==============================
 
 async function main() {
   const command = process.argv[2];

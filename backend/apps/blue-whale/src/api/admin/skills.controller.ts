@@ -23,8 +23,6 @@ function parseBigId(value: string): bigint | null {
   }
 }
 
-/** IKA64P 后续校准：官方技能分类后台管理（用户侧分类展示已隐藏）。
- *  路由注意：categories/rename 必须先于 :id/category 声明。 */
 @Controller("admin/skills")
 @UseGuards(AdminGuard)
 export class AdminSkillsController {
@@ -48,7 +46,6 @@ export class AdminSkillsController {
     }
   }
 
-  /** IKA64P：补录官方技能 creative 身份映射（幂等；添加/直接使用依赖） */
   @Post("backfill")
   async backfill() {
     try {
@@ -59,7 +56,6 @@ export class AdminSkillsController {
     }
   }
 
-  /** IKA64P 效率优化：批量归类（新分类随归类创建） */
   @Put("assign")
   async assign(@Body() body: Record<string, unknown>) {
     const category =

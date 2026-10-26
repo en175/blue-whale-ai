@@ -1,0 +1,105 @@
+
+.panel {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: var(--spacing-lg);
+  z-index: 21;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background-color: var(--color-bg-overlay);
+  border: 1px solid var(--color-border-overlay);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-overlay);
+  white-space: nowrap;
+}
+
+.panelFollow {
+  bottom: auto;
+  left: 0;
+}
+
+.title {
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin-right: 2px;
+}
+
+.divider {
+  width: 1px;
+  height: 16px;
+  background-color: #333;
+  margin: 0 2px;
+}
+
+.presetRow {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.presetBtn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  background-color: transparent;
+  border: none;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.presetBtn:hover {
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-hover);
+}
+
+.presetBtnActive {
+  color: var(--color-accent-text);
+  background-color: var(--color-accent-primary);
+}
+
+.presetBtnActive:hover {
+  color: var(--color-accent-text);
+  background-color: var(--color-accent-hover);
+}
+
+.cancelBtn {
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+  background-color: #2a2a2a;
+  border: 1px solid #3a3a3a;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.cancelBtn:hover {
+  background-color: #333;
+  border-color: #4a4a4a;
+}
+
+.confirmBtn {
+  width: 28.8px;
+  height: 28.8px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: #4a4a4a;
+  color: #fff;
+  border: none;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.confirmBtn:hover {
+  background-color: #555;
+}

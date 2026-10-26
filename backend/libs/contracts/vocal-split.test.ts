@@ -1,10 +1,3 @@
-// IKHA2C：vocal_split（人声背景分离）跨进程契约双端一致性断言。
-// 防漂移约定（沿用 media-extract.test.ts 读种子文本的同源断言模式）：TS 侧常量直接
-// import 断言值；worker-java 无法 import TS 常量，本测试直接读 Java 源码文本逐值对账——
-// 任一侧改动未同步即红。
-// 官方 API 口径 = 火山引擎 AI MediaKit「人声背景音分离」官方 PDF（scene 四档
-// Audio/Music/Drama/Narrate、格式 aac/mp3/wav/m4a/flac 默认 aac、二分法两轨 / 三分法三轨）。
-// 后续票（IKHA2J worker 编排 / 创建入口 / 前端）照抄本契约与 vocal-split.ts，不得发明字段名。
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
@@ -30,32 +23,30 @@ import {
   vocalSplitInputSchema,
 } from "./vocal-split.js";
 
-// 读 worker-java 侧常量源码（对账基准；3 级 .. = 仓库根）。
 const contractJava = readFileSync(
   new URL(
-    "../../../worker-java/src/main/java/com/bluewhale/worker/domain/contract/VocalSplitContract.java",
+    "../../../server/blue-whale-worker/src/main/java/com/bluewhale/worker/domain/contract/VocalSplitContract.java",
     import.meta.url,
   ),
   "utf8",
 );
 const vocalSplitErrorJava = readFileSync(
   new URL(
-    "../../../worker-java/src/main/java/com/bluewhale/worker/domain/error/VocalSplitError.java",
+    "../../../server/blue-whale-worker/src/main/java/com/bluewhale/worker/domain/error/VocalSplitError.java",
     import.meta.url,
   ),
   "utf8",
 );
 const jobTypeJava = readFileSync(
   new URL(
-    "../../../worker-java/src/main/java/com/bluewhale/worker/domain/contract/JobTypeEnum.java",
+    "../../../server/blue-whale-worker/src/main/java/com/bluewhale/worker/domain/contract/JobTypeEnum.java",
     import.meta.url,
   ),
   "utf8",
 );
-// tag 字面量单处定义在 GenerationMqRoute（VocalSplitContract.TAG 只做转发），故 tag 的对账基准读该枚举。
 const mqRouteJava = readFileSync(
   new URL(
-    "../../../worker-java/src/main/java/com/bluewhale/worker/domain/contract/GenerationMqRouteEnum.java",
+    "../../../server/blue-whale-worker/src/main/java/com/bluewhale/worker/domain/contract/GenerationMqRouteEnum.java",
     import.meta.url,
   ),
   "utf8",
@@ -65,8 +56,6 @@ describe("vocal_split 契约不变量（官方 PDF 口径，TS 侧）", () => {
   it("任务类型 / MQ tag 同值 vocal_split，来源值为专属来源值模式", () => {
     expect(VOCAL_SPLIT_JOB_TYPE).toBe("vocal_split");
     expect(VOCAL_SPLIT_TAG).toBe(VOCAL_SPLIT_JOB_TYPE);
-    // 专属来源值（claim source 白名单模式，video_subtitle_erase / video_enhance 同款）；
-    // media_extract 的 "dock" 是存量迁移特例，新工具不沿用。
     expect(VOCAL_SPLIT_SOURCE).toBe("vocal_split");
   });
 
@@ -79,7 +68,6 @@ describe("vocal_split 契约不变量（官方 PDF 口径，TS 侧）", () => {
       drama: "Drama",
       narrate: "Narrate",
     });
-    // 出站映射的值域与产品键域一一对应（无多余键、无遗漏键）。
     expect(Object.keys(VOCAL_SPLIT_SCENE_UPSTREAM_MAP).sort()).toEqual([...VOCAL_SPLIT_SCENES].sort());
     expect(new Set(Object.values(VOCAL_SPLIT_SCENE_UPSTREAM_MAP)).size).toBe(VOCAL_SPLIT_SCENES.length);
   });
@@ -90,13 +78,11 @@ describe("vocal_split 契约不变量（官方 PDF 口径，TS 侧）", () => {
     expect(VOCAL_SPLIT_SCENE_TRACKS.music).toEqual(["voice", "background"]);
     expect(VOCAL_SPLIT_SCENE_TRACKS.drama).toEqual(["voice", "music", "sfx"]);
     expect(VOCAL_SPLIT_SCENE_TRACKS.narrate).toEqual(["voice", "music", "sfx"]);
-    // 四档轨序全覆盖（键域 = scene 枚举），voice 恒首轨，轨数恒 2/3（expected_output_count 口径）。
     expect(Object.keys(VOCAL_SPLIT_SCENE_TRACKS).sort()).toEqual([...VOCAL_SPLIT_SCENES].sort());
     for (const scene of VOCAL_SPLIT_SCENES) {
       const tracks = VOCAL_SPLIT_SCENE_TRACKS[scene];
       expect(tracks[0]).toBe("voice");
       expect(tracks.length === 2 || tracks.length === 3).toBe(true);
-      // 轨类型都在四值枚举内且不重复。
       expect(new Set(tracks).size).toBe(tracks.length);
       for (const track of tracks) {
         expect((VOCAL_SPLIT_TRACK_TYPES as readonly string[]).includes(track)).toBe(true);
@@ -107,13 +93,11 @@ describe("vocal_split 契约不变量（官方 PDF 口径，TS 侧）", () => {
   it("output_format 枚举五值 aac/mp3/wav/m4a/flac（有 aac 无 ogg），默认 aac", () => {
     expect([...VOCAL_SPLIT_OUTPUT_FORMATS]).toEqual(["aac", "mp3", "wav", "m4a", "flac"]);
     expect(VOCAL_SPLIT_DEFAULT_OUTPUT_FORMAT).toBe("aac");
-    // 与 media_extract 枚举面互斥面核对：本工具有 aac 无 ogg（extract-audio 恰好相反）。
     expect(VOCAL_SPLIT_OUTPUT_FORMATS).not.toContain("ogg");
   });
 
   it("网关端点：提交路径家族惯例预占位（网关票定稿后回填）、查询共用 /v1/mediakit/tasks/", () => {
     expect(VOCAL_SPLIT_SUBMIT_PATH).toBe("/v1/mediakit/separate-voice");
-    // MediaKit 异步工具共用查询路由；网关路径 ≠ 火山上游路径（IKH67T，混用即 404）。
     expect(VOCAL_SPLIT_POLL_PATH_PREFIX).toBe("/v1/mediakit/tasks/");
   });
 
@@ -162,7 +146,6 @@ describe("vocal_split 契约不变量（官方 PDF 口径，TS 侧）", () => {
     expect(ERROR_VOCAL_SPLIT_FAILED).toBe("vocal_split_failed");
     expect(GENERATION_ERROR_NUMERIC_CODES[ERROR_VOCAL_SPLIT_FAILED]).toBe(1047);
     expect(ERROR_CODES[1047]).toBeTruthy();
-    // 1046（video_scene_split）与 1047（vocal_split）各占一号，不与任何既有码撞位。
     for (const [code, numeric] of Object.entries(GENERATION_ERROR_NUMERIC_CODES)) {
       if (code !== ERROR_VOCAL_SPLIT_FAILED) {
         expect(numeric).not.toBe(1047);
@@ -222,8 +205,6 @@ describe("vocal_split 双端一致性（读 worker-java 源码文本，防漂移
     expect(contractJava).toContain(
       'String ERROR_VOCAL_SPLIT_FAILED = "vocal_split_failed";',
     );
-    // Error 类不重复定义字面量（对齐 VideoSceneSplitError 先例）：仅 {@link} 指向
-    // Contract 单源，防漂移面收敛到上面那处断言。
     expect(vocalSplitErrorJava).not.toContain('"vocal_split_failed"');
     expect(vocalSplitErrorJava).toContain(
       "{@link VocalSplitContract#ERROR_VOCAL_SPLIT_FAILED}",

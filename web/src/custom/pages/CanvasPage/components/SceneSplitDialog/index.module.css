@@ -1,0 +1,113 @@
+
+.toolBtn {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.toolBtn:hover:not(:disabled) {
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-hover);
+}
+
+.toolBtn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.barTitle {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+  white-space: nowrap;
+}
+
+.segmentGroup {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--radius-full);
+  background-color: var(--color-bg-hover);
+}
+
+.segmentBtn {
+  height: 22px;
+  padding: 0 10px;
+  border: none;
+  border-radius: var(--radius-full);
+  background: transparent;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all var(--transition-fast);
+}
+
+.segmentBtn:hover:not(:disabled) {
+  color: var(--color-text-primary);
+}
+
+.segmentBtnActive {
+  background-color: var(--color-bg-active);
+  color: var(--color-text-primary);
+}
+
+.segmentBtn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.sendBar {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: var(--spacing-lg);
+  z-index: 21;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  background-color: var(--color-bg-overlay);
+  border: 1px solid var(--color-border-overlay);
+  border-radius: 24px;
+  box-shadow: var(--shadow-overlay);
+  white-space: nowrap;
+}
+
+.sendBarFollow {
+  bottom: auto;
+  left: 0;
+}
+
+.sendBtn {
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--color-bg-active);
+  color: var(--color-text-disabled);
+  border: none;
+  cursor: not-allowed;
+  transition: all var(--transition-fast);
+}
+
+.sendBtnActive {
+  background-color: var(--color-border-hover);
+  color: var(--color-text-primary);
+  cursor: pointer;
+}
+
+.sendBtnActive:hover {
+  background-color: var(--color-border-hover);
+  filter: brightness(1.2);
+}

@@ -1,0 +1,88 @@
+.trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 140px;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--admin-border);
+  border-radius: var(--admin-radius-control);
+  background: var(--admin-surface);
+  color: var(--admin-text);
+  font-size: var(--admin-font-sm);
+  font-family: inherit;
+  cursor: pointer;
+  transition: border-color 0.15s ease;
+}
+
+.trigger:hover:not(:disabled) {
+  border-color: var(--admin-border-strong);
+}
+
+.trigger:focus-visible {
+  outline: none;
+  border-color: var(--admin-accent);
+  box-shadow: var(--admin-focus);
+}
+
+.trigger:disabled {
+  color: var(--admin-text-disabled);
+  cursor: not-allowed;
+}
+
+.trigger[data-placeholder] {
+  color: var(--admin-text-faint);
+}
+
+.chevron {
+  flex-shrink: 0;
+  color: var(--admin-text-faint);
+}
+
+.menu {
+  position: relative;
+  z-index: 300;
+  min-width: var(--radix-select-trigger-width);
+  max-height: 260px;
+  overflow: hidden;
+  background: var(--admin-surface);
+  border: 1px solid var(--admin-border);
+  border-radius: var(--admin-radius-pop);
+  box-shadow: var(--admin-shadow-pop);
+  color: var(--admin-text);
+}
+
+.viewport {
+  padding: 4px;
+  overflow-y: auto;
+}
+
+.option {
+  padding: 6px 10px;
+  border-radius: var(--admin-radius-control);
+  color: var(--admin-text);
+  font-size: var(--admin-font-sm);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.option[data-highlighted] {
+  background: var(--admin-row-hover);
+}
+
+.optionActive {
+  color: var(--admin-accent);
+  font-weight: 500;
+  background: var(--admin-accent-soft);
+}
+
+.optionDisabled {
+  color: var(--admin-text-disabled);
+  cursor: not-allowed;
+}
+
+.sm {
+  height: 26px;
+  font-size: var(--admin-font-xs);
+}

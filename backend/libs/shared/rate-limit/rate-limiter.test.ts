@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const { FakeRedis } = vi.hoisted(() => {
   class FakeRedis {
     store = new Map<string, string>();
+    zsets = new Map<string, Map<string, number>>();
     ttlMs = new Map<string, number>();
     failNext = false;
 
@@ -19,18 +20,32 @@ const { FakeRedis } = vi.hoisted(() => {
       _script: string,
       _numKeys: number,
       key: string,
-      ttlSec: string,
-    ): Promise<number> {
+      nowRaw: string,
+      windowRaw: string,
+      limitRaw: string,
+      member: string,
+    ): Promise<[number, number]> {
       this.fail();
-      const n = Number(this.store.get(key) ?? 0) + 1;
-      this.store.set(key, String(n));
-      if (n === 1) this.ttlMs.set(key, Number(ttlSec) * 1000);
-      return n;
+      const now = Number(nowRaw);
+      const window = Number(windowRaw);
+      const limit = Number(limitRaw);
+      const zset = this.zsets.get(key) ?? new Map<string, number>();
+      for (const [item, score] of zset) {
+        if (score <= now - window) zset.delete(item);
+      }
+      if (zset.size >= limit) {
+        const oldest = Math.min(...zset.values());
+        return [0, window - (now - oldest)];
+      }
+      zset.set(member, now);
+      this.zsets.set(key, zset);
+      this.ttlMs.set(key, window);
+      return [1, 0];
     }
 
     async pttl(key: string): Promise<number> {
       this.fail();
-      if (!this.store.has(key)) return -2;
+      if (!this.zsets.has(key) && !this.store.has(key)) return -2;
       return this.ttlMs.get(key) ?? -1;
     }
 
@@ -38,7 +53,8 @@ const { FakeRedis } = vi.hoisted(() => {
       this.fail();
       let n = 0;
       for (const key of keys) {
-        if (this.store.delete(key)) n += 1;
+        const removed = this.store.delete(key) || this.zsets.delete(key);
+        if (removed) n += 1;
         this.ttlMs.delete(key);
       }
       return n;
@@ -53,7 +69,7 @@ const { FakeRedis } = vi.hoisted(() => {
 
     async exists(key: string): Promise<number> {
       this.fail();
-      return this.store.has(key) ? 1 : 0;
+      return this.store.has(key) || this.zsets.has(key) ? 1 : 0;
     }
 
     async quit(): Promise<"OK"> {
@@ -137,5 +153,27 @@ describe("RateLimiter", () => {
     ).resolves.toEqual({ allowed: true });
     redis.redis.failNext = true;
     await expect(limiter.isBlocked("login", "x")).resolves.toBe(false);
+  });
+});
+
+describe("RateLimiter 滚动窗口", () => {
+  it("窗口滑过之后额度恢复（不是固定窗口边界重置）", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-10-21T12:00:00.000Z"));
+      const limiter = new RateLimiter();
+      const bucket = { scope: "sms", key: "13800001234", limit: 1, windowMs: 60_000 };
+      await expect(limiter.take(bucket)).resolves.toEqual({ allowed: true });
+      await expect(limiter.take(bucket)).resolves.toMatchObject({ allowed: false });
+
+      vi.setSystemTime(new Date("2026-10-21T12:00:30.000Z"));
+      await expect(limiter.take(bucket)).resolves.toMatchObject({ allowed: false });
+
+      vi.setSystemTime(new Date("2026-10-21T12:01:01.000Z"));
+      await expect(limiter.take(bucket)).resolves.toEqual({ allowed: true });
+      await limiter.onModuleDestroy();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

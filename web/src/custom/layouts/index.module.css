@@ -1,0 +1,24 @@
+.layout {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  overflow: hidden;
+}
+
+.main {
+  flex: 1;
+  margin-left: var(--sidebar-width);
+  height: 100%;
+  overflow: hidden;
+  position: relative;
+  background-color: var(--color-bg-primary);
+}
+
+.mainFull {
+  margin-left: 0;
+}
+
+.mainGlass {
+  margin-left: 0;
+  background-color: transparent;
+}

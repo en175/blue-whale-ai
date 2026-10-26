@@ -1,0 +1,34 @@
+syntax = "proto3";
+
+// MQ 事件（**不是 RPC**）。topic 名写在每条消息的注释里。
+package billing.v1;
+
+option java_package = "com.bluewhale.contracts.billing.v1";
+option java_multiple_files = true;
+
+message JobTerminalEvent {
+  int64  job_id  = 1;
+  int64  user_id = 2;
+  string status  = 3;
+  string reason  = 4;
+  bool   refund  = 5;
+}
+
+// topic: pricing.catalog.activated —— 各服务重载内存副本。
+// 消费者：business-api（价格预览）+ billing-svc（权威计价）。
+//
+// ⚠️ **本消息目前没有生产者，也没有消费者**（2026-09-26 架构评审查出）——
+//    全仓 grep 只有它自己。声明留着是因为它所描述的那个需求是真的，但**别以为它在跑**。
+//
+//    今天的实际收敛手段是 billing 侧的
+//    `CatalogReloadTask`（定期兜底重载，默认 5 分钟，见 application.yml 的
+//    `billing.catalog.reload-*`）。没有它的话，目录只由**发布它的那一个实例**热重载，
+//    其余副本永远停在启动时那份 —— 表现是「充值的换算率按实例不同」
+//    「同一笔单在不同实例算出两个价」，而两边日志都正常。
+//
+//    接上这个事件时不必删掉那个定期任务：它是兜底，覆盖事件会漏的场景
+//    （发布后实例立刻重启、事件丢失、网络分区）。
+message CatalogActivatedEvent {
+  int32  catalog_version = 1;
+  string document_hash   = 2; // SHA-256，内容指纹
+}

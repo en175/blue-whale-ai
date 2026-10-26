@@ -1,8 +1,3 @@
--- IK9QKP：画布共享资产。用户主动保存、跨项目可复用的自包含快照库。
--- 两层类型对齐画布节点结构：asset_type = 节点大类（card/media/goods/scene/text），
--- kind = 节点判别字段（card 的 data.kind / media 的 data.mediaType；goods/scene/text 为 NULL）。
--- snapshot 统一存各类型全部数据（自包含，不依赖来源表）；name/thumbnail_url 为列表查询冗余列。
--- dedup_key 幂等去重：媒体 url sha256、卡片 类型+描述 sha256、商品 名称 sha256、场景 内容 sha256、文本 NULL。
 SET NAMES utf8mb4;
 CREATE TABLE `shared_assets` (
     `id`            BIGINT       NOT NULL AUTO_INCREMENT,

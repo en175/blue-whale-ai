@@ -1,20 +1,19 @@
 #!/usr/bin/env python3
-"""Synchronize local master, then create a structured Chinese task worktree."""
 
 import argparse
 import hashlib
-import os
 import re
 import subprocess
 import sys
 import unicodedata
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+from release_line_sync import SyncError, release_line_lock, sync_current_release
+from task_metadata import TaskMetadataError, read_task_metadata, write_task_metadata
+
 
 ALLOWED_TYPES = ("feature", "fix", "hotfix", "docs", "chore")
-# release 分支与任务分支不同：无工单号、日期+描述命名、不建 worktree，单独校验，不进 ALLOWED_TYPES。
-# 形态：release/YYYY.MM.DD[_<描述>][_N]。描述组结构性要求至少一个 CJK 字符（长度另查），
-# 防止同日碰撞序号 "_2" 被贪吃成描述后又被长度检查误杀；_N 为碰撞序号（manage-release-branch.sh 生成）。
 RELEASE_RE = re.compile(
     r"^release/(\d{4})\.(\d{2})\.(\d{2})"
     r"(?:_([A-Za-z0-9\u3400-\u4dbf\u4e00-\u9fff]*[\u3400-\u4dbf\u4e00-\u9fff][A-Za-z0-9\u3400-\u4dbf\u4e00-\u9fff]*))?"
@@ -22,14 +21,6 @@ RELEASE_RE = re.compile(
 )
 ISSUE_RE = re.compile(r"^(?=.*[A-Za-z])[A-Za-z0-9]+$")
 CHINESE_RE = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff]")
-MERGE_MESSAGE = "chore: 同步远程 master 更新"
-GIT_OPERATION_MARKERS = (
-    "MERGE_HEAD",
-    "CHERRY_PICK_HEAD",
-    "REVERT_HEAD",
-    "rebase-merge",
-    "rebase-apply",
-)
 
 
 class WorkflowError(RuntimeError):
@@ -111,113 +102,32 @@ def validate_existing_branch(branch):
     return branch
 
 
-def absolute_git_path(root, value):
-    path = Path(value)
-    if not path.is_absolute():
-        path = root / path
-    return path.resolve()
-
-
-def active_git_operations(root):
-    active = []
-    for marker in GIT_OPERATION_MARKERS:
-        value = git(root, "rev-parse", "--git-path", marker).stdout.strip()
-        if absolute_git_path(root, value).exists():
-            active.append(marker)
-    return active
-
-
-def ensure_primary_master(root):
-    # 路径判等一律 samefile（inode 比较），禁跨来源字面串比较：大小写不敏感
-    # 文件系统上 git toplevel（getcwd 规范大小写）与 BASH_SOURCE/pwd 推导的
-    # root（逻辑拼写）可能仅大小写不同，字符串比较会把同一目录误判为不同目录。
-    # realpath/resolve 保留输入大小写，换用它们不能替代 samefile。
-    # 见 docs/adr/0039-path-identity-via-inode-comparison.md
-    toplevel = Path(git(root, "rev-parse", "--show-toplevel").stdout.strip())
-    if not os.path.samefile(root, toplevel):
-        raise WorkflowError("脚本必须从主 checkout 所在仓库执行。")
-
-    git_dir = absolute_git_path(root, git(root, "rev-parse", "--git-dir").stdout.strip())
-    common_dir = absolute_git_path(
-        root, git(root, "rev-parse", "--git-common-dir").stdout.strip()
-    )
-    if git_dir != common_dir:
-        raise WorkflowError("请在主 checkout 执行，不要在任务 Work Tree 内继续创建。")
-
-    branch = git(root, "branch", "--show-current").stdout.strip()
-    if branch != "master":
-        raise WorkflowError("主 checkout 当前分支必须是 master，实际为：{}".format(branch or "detached HEAD"))
-
-    operations = active_git_operations(root)
-    if operations:
-        raise WorkflowError(
-            "检测到进行中的 Git 操作：{}。请先完成或显式终止该操作。".format(
-                ", ".join(operations)
-            )
-        )
-
-    status = git(root, "status", "--porcelain").stdout
-    if status:
-        raise WorkflowError("本地 master 工作区不干净，不能同步或创建 Work Tree。\n{}".format(status.rstrip()))
-
-
-def is_ancestor(root, ancestor, descendant):
-    result = git(
-        root, "merge-base", "--is-ancestor", ancestor, descendant, check=False
-    )
-    if result.returncode not in (0, 1):
-        detail = (result.stderr or result.stdout).strip()
-        raise WorkflowError("无法比较 master 历史：{}".format(detail))
-    return result.returncode == 0
-
-
-def synchronize_master(root):
-    git(root, "fetch", "origin", "master")
-
-    if is_ancestor(root, "origin/master", "master"):
-        action = "本地 master 已包含最新远程提交"
-    elif is_ancestor(root, "master", "origin/master"):
-        git(root, "merge", "--ff-only", "origin/master")
-        action = "本地 master 已 fast-forward 到 origin/master"
-    else:
-        merge = git(
-            root,
-            "merge",
-            "--no-ff",
-            "-m",
-            MERGE_MESSAGE,
-            "origin/master",
-            check=False,
-        )
-        if merge.returncode != 0:
-            abort = git(root, "merge", "--abort", check=False)
-            detail = (merge.stderr or merge.stdout).strip()
-            if abort.returncode == 0:
-                message = "本地 master 与 origin/master 合并发生冲突，已自动 abort；未创建 Work Tree。\n{}".format(
-                    detail
-                )
-            else:
-                abort_detail = (abort.stderr or abort.stdout).strip()
-                message = (
-                    "本地 master 与 origin/master 合并发生冲突，自动 abort 未成功；"
-                    "请手动执行 git merge --abort 后重试。未创建 Work Tree。\n"
-                    "合并输出：{}\nabort 输出：{}".format(detail, abort_detail)
-                )
-            raise WorkflowError(message)
-        action = "本地 master 已合并 origin/master，并保留双方提交"
-
-    if git(root, "status", "--porcelain").stdout:
-        raise WorkflowError("同步后的 master 工作区异常变脏，已停止创建 Work Tree。")
-    return git(root, "rev-parse", "master").stdout.strip(), action
-
-
 def derive_target(root, task_type, issue, summary):
     if issue:
         directory = "{}-{}".format(task_type, issue.lower())
     else:
         digest = hashlib.sha256(summary.encode("utf-8")).hexdigest()[:8]
         directory = "{}-{}".format(task_type, digest)
-    return root.parent / "blue-whale-worktrees" / directory
+    parent = root.parent
+    base = parent if parent.name == "blue-whale-worktrees" else parent / "blue-whale-worktrees"
+    return base / directory
+
+
+def integration_commit(root, path):
+    if not path.is_absolute():
+        raise WorkflowError("--integration-worktree 必须是父工作树绝对路径。")
+    parent = path.resolve()
+    top = git(parent, "rev-parse", "--show-toplevel").stdout.strip()
+    if parent != Path(top).resolve():
+        raise WorkflowError("父工作树路径必须指向工作树根目录。")
+    common = git(root, "rev-parse", "--path-format=absolute", "--git-common-dir").stdout.strip()
+    parent_common = git(parent, "rev-parse", "--path-format=absolute", "--git-common-dir").stdout.strip()
+    if Path(common).resolve() != Path(parent_common).resolve():
+        raise WorkflowError("父工作树与当前发布线不属于同一仓库。")
+    if git(parent, "status", "--porcelain", "--untracked-files=all").stdout.strip():
+        raise WorkflowError("父工作树不干净；请先提交或处理改动。")
+    parent_meta = read_task_metadata(parent)
+    return parent_meta["target_branch"], git(parent, "rev-parse", "HEAD").stdout.strip()
 
 
 def create_worktree(args):
@@ -226,40 +136,67 @@ def create_worktree(args):
     summary = normalize_summary(args.summary)
     branch = build_branch(args.task_type, issue, summary)
     target = derive_target(root, args.task_type, issue, summary)
+    if args.integration_worktree and not issue:
+        raise WorkflowError("整包子票必须用 --issue 指定已核实父子关系的工单号。")
 
-    ensure_primary_master(root)
     if git(root, "show-ref", "--verify", "--quiet", "refs/heads/{}".format(branch), check=False).returncode == 0:
         raise WorkflowError("本地分支已存在：{}".format(branch))
     if target.exists():
         raise WorkflowError("目标 Work Tree 已存在：{}".format(target))
 
-    base_sha, action = synchronize_master(root)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    git(root, "worktree", "add", str(target), "-b", branch, base_sha)
+    with release_line_lock(root):
+        before_sync = git(root, "rev-parse", "HEAD").stdout.strip()
+        parent_target, parent_sha = (integration_commit(root, args.integration_worktree)
+                                     if args.integration_worktree else (None, None))
+        synced = sync_current_release(root)
+        if parent_target and parent_target != synced["branch"]:
+            raise WorkflowError("父工作树目标发布线 {} 与当前发布线 {} 不匹配；发布线同步前 {}，同步后 {}。".format(
+                parent_target, synced["branch"], before_sync, synced["sha"]))
+        target.parent.mkdir(parents=True, exist_ok=True)
+        git(root, "worktree", "add", str(target), "-b", branch, synced["sha"])
+        try:
+            inherited_sha = None
+            if parent_sha:
+                merge = git(target, "merge", "--no-ff", "--no-edit", "-m",
+                            "chore: 继承整包父整合提交", parent_sha, check=False)
+                if merge.returncode:
+                    raise WorkflowError("整包继承合并失败：{}".format((merge.stderr or merge.stdout).strip()))
+                inherited_sha = git(target, "rev-parse", "HEAD").stdout.strip()
+            write_task_metadata(target, synced["branch"], synced["sha"], inherited_sha=inherited_sha)
+        except (WorkflowError, TaskMetadataError) as exc:
+            removed = git(root, "worktree", "remove", "--force", str(target), check=False)
+            deleted = git(root, "branch", "-D", branch, check=False) if removed.returncode == 0 else None
+            cleanup = ("已清理新建子工作树与分支" if deleted and deleted.returncode == 0
+                       else "自动清理失败；worktree: {}；branch: {}".format(
+                           removed.stderr.strip(), deleted.stderr.strip() if deleted else "未执行"))
+            raise WorkflowError("{}；{}；发布线同步前 {}，同步后 {}。".format(
+                exc, cleanup, before_sync, synced["sha"])) from exc
 
-    print("✅ {}".format(action))
+    print("✅ 发布线同步：{}".format(synced["action"]))
     print("✅ 已创建中文任务分支：{}".format(branch))
     print("✅ Work Tree：{}".format(target))
-    print("✅ 基准提交：{}".format(base_sha))
+    print("✅ 目标发布线：{}".format(synced["branch"]))
+    print("✅ 起点 SHA：{}".format(synced["sha"]))
+    if parent_sha:
+        print("✅ 父整合提交：{}；继承提交：{}".format(parent_sha, inherited_sha))
     print("下一步：将 Agent 工作目录切换到该 Work Tree；无法切换时在该目录开启新会话。")
 
 
 def parse_start_args(argv):
     parser = argparse.ArgumentParser(
-        description="同步本地 master 与 origin/master，再创建结构化中文任务 Work Tree。"
+        description="同步本地活动发布线，再创建结构化中文任务 Work Tree。"
     )
     parser.add_argument("--type", dest="task_type", choices=ALLOWED_TYPES, required=True)
     issue_group = parser.add_mutually_exclusive_group(required=True)
     issue_group.add_argument("--issue", help="Gitee 工单号，例如 IK094T")
     issue_group.add_argument("--no-issue", action="store_true", help="明确声明本任务没有工单")
     parser.add_argument("--summary", required=True, help="6–15 字中文动宾简述")
+    parser.add_argument("--integration-worktree", type=Path,
+                        help="整包子票的父整合任务工作树绝对路径；先核实 Gitee 父子工单关系")
     return parser.parse_args(argv)
 
 
 def main(argv=None):
-    # Windows 原生 Python 的 stdout/stderr 默认 GBK，中文/emoji print 会抛
-    # UnicodeEncodeError（与 subprocess 解码同根因的输出方向）。强制改 UTF-8；
-    # POSIX 本就 UTF-8，reconfigure 为 no-op，不影响其他操作系统。
     for stream in (sys.stdout, sys.stderr):
         reconfigure = getattr(stream, "reconfigure", None)
         if reconfigure is not None:
@@ -271,7 +208,7 @@ def main(argv=None):
             return 0
         create_worktree(parse_start_args(argv))
         return 0
-    except WorkflowError as exc:
+    except (WorkflowError, SyncError, TaskMetadataError) as exc:
         print("❌ start-task-worktree: {}".format(exc), file=sys.stderr)
         return 1
 

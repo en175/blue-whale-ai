@@ -24,12 +24,10 @@ describe("E 层双轨迁移（topup_tiers decimal + assets.duration 合并）", 
     for (const sql of [migrationSql, standaloneSql]) {
       expect(sql).toContain(backfill);
       expect(sql).toContain("ALTER TABLE `assets` DROP COLUMN `duration`");
-      // 回填必须发生在 DROP 之前，否则列已不存在
       expect(sql.indexOf(backfill)).toBeLessThan(
         sql.indexOf("DROP COLUMN `duration`"),
       );
     }
-    // baseline 是 fresh 形态：只有 duration_ms，绝不能再有 duration
     expect(baselineSql).toContain("`duration_ms` INTEGER NULL");
     expect(baselineSql).not.toContain("`duration` INTEGER NULL");
   });
@@ -43,7 +41,6 @@ describe("E 层双轨迁移（topup_tiers decimal + assets.duration 合并）", 
     for (const sql of [migrationSql, standaloneSql]) {
       for (const mod of mods) expect(sql).toContain(mod);
     }
-    // baseline 是 fresh 形态：直接建 DECIMAL，绝不能再是 DOUBLE
     expect(baselineSql).toContain("`original_price` DECIMAL(10, 2) NOT NULL");
     expect(baselineSql).toContain("`discount` DECIMAL(5, 4) NOT NULL DEFAULT 1");
     expect(baselineSql).toContain("`price` DECIMAL(10, 2) NOT NULL");

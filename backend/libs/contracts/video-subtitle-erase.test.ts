@@ -1,9 +1,3 @@
-// IKGZ7Z：video_subtitle_erase（视频智能去字幕）跨进程契约双端一致性断言。
-// 防漂移约定（沿用 image-cutout.test.ts 读种子文本的同源断言模式）：TS 侧常量直接 import 断言值；
-// worker-java 无法 import TS 常量，本测试直接读 Java 源码文本逐值对账——任一侧改动未同步即红。
-// 契约权威章节：docs/specs/2026-09-10-ikel4a-worker-java-migration-contract.md §17（冻结增量）；
-// 官方 API 口径 = 火山引擎 AI MediaKit「提交字幕擦除（精细化版）任务 API」官方 PDF。
-// 后续票（Z80 创建入口 / Z81 worker 执行 / 前端）照抄本契约与 video-subtitle-erase.ts，不得发明字段名。
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
@@ -30,25 +24,23 @@ import {
   videoSubtitleEraseInputSchema,
 } from "./video-subtitle-erase.js";
 
-// 读 worker-java 侧常量源码（对账基准；3 级 .. = 仓库根）。
 const jobTypeJava = readFileSync(
   new URL(
-    "../../../worker-java/src/main/java/com/bluewhale/worker/domain/contract/JobTypeEnum.java",
+    "../../../server/blue-whale-worker/src/main/java/com/bluewhale/worker/domain/contract/JobTypeEnum.java",
     import.meta.url,
   ),
   "utf8",
 );
 const contractJava = readFileSync(
   new URL(
-    "../../../worker-java/src/main/java/com/bluewhale/worker/domain/contract/VideoSubtitleEraseContract.java",
+    "../../../server/blue-whale-worker/src/main/java/com/bluewhale/worker/domain/contract/VideoSubtitleEraseContract.java",
     import.meta.url,
   ),
   "utf8",
 );
-// tag 字面量已上移到 GenerationMqRoute（VideoSubtitleEraseContract.TAG 只做转发），故 tag 的对账基准改读该枚举。
 const mqRouteJava = readFileSync(
   new URL(
-    "../../../worker-java/src/main/java/com/bluewhale/worker/domain/contract/GenerationMqRouteEnum.java",
+    "../../../server/blue-whale-worker/src/main/java/com/bluewhale/worker/domain/contract/GenerationMqRouteEnum.java",
     import.meta.url,
   ),
   "utf8",
@@ -114,12 +106,10 @@ describe("video_subtitle_erase 契约不变量（官方 PDF 口径，TS 侧）",
       erase_boxes: [],
     };
     expect(videoSubtitleEraseInputSchema.parse(valid)).toEqual(valid);
-    // strict：未知键拒；time_segment_filter 本期不实现，传入即拒（结构扩展位仅留类型）。
     expect(videoSubtitleEraseInputSchema.safeParse({ ...valid, extra: 1 }).success).toBe(false);
     expect(
       videoSubtitleEraseInputSchema.safeParse({ ...valid, time_segment_filter: {} }).success,
     ).toBe(false);
-    // 源素材 id 沿用 Asset id 口径（非 0 开头数字串）。
     expect(videoSubtitleEraseInputSchema.safeParse({ ...valid, source_asset_id: "0" }).success).toBe(
       false,
     );
@@ -129,7 +119,6 @@ describe("video_subtitle_erase 契约不变量（官方 PDF 口径，TS 侧）",
     expect(
       videoSubtitleEraseInputSchema.safeParse({ ...valid, target_node_id: "" }).success,
     ).toBe(false);
-    // 范围外检测模式值拒（乱值 / 官方原始值 Subtitle 也不进 input）。
     for (const mode of ["bogus", "", "Subtitle", "Text"]) {
       expect(
         videoSubtitleEraseInputSchema.safeParse({ ...valid, detect_mode: mode }).success,
@@ -151,7 +140,6 @@ describe("video_subtitle_erase 契约不变量（官方 PDF 口径，TS 侧）",
       erase_boxes: [box],
     };
     expect(videoSubtitleEraseInputSchema.parse(valid)).toEqual(valid);
-    // 坐标 [0,1] 越界拒（官方取值范围；失败示例 bottom_right_x > 1）。
     expect(
       videoSubtitleEraseInputSchema.safeParse({
         ...valid,
@@ -164,7 +152,6 @@ describe("video_subtitle_erase 契约不变量（官方 PDF 口径，TS 侧）",
         erase_boxes: [{ ...box, top_left_y: -0.1 }],
       }).success,
     ).toBe(false);
-    // 超过 20 个框拒。
     expect(
       videoSubtitleEraseInputSchema.safeParse({ ...valid, erase_boxes: Array(21).fill(box) })
         .success,
@@ -173,7 +160,6 @@ describe("video_subtitle_erase 契约不变量（官方 PDF 口径，TS 侧）",
       videoSubtitleEraseInputSchema.safeParse({ ...valid, erase_boxes: Array(20).fill(box) })
         .success,
     ).toBe(true);
-    // 框对象 strict：未知键拒。
     expect(
       videoSubtitleEraseInputSchema.safeParse({
         ...valid,

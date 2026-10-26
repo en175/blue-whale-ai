@@ -1,30 +1,42 @@
-/* ============================================
- * TemplateManage 模板管理：首页 dock 模板卡片增删改与标签改名
- * 数据源 GET/POST/PUT/DELETE /api/admin/templates
- * ============================================ */
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
-import { Plus, X, Pencil, Trash2, ChevronUp, ChevronDown, Film, Image as ImageIcon, Upload, Eye, EyeOff } from 'lucide-react';
+import { useCallback, useMemo, useRef, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { Plus, Pencil, Trash2, ChevronUp, ChevronDown, Film, Image as ImageIcon, Upload, Eye, EyeOff } from 'lucide-react';
 import {
-  fetchTemplateCards,
   createTemplateCard,
   updateTemplateCard,
   deleteTemplateCard,
   moveTemplateCard,
-  fetchAdminTemplateTags,
   renameAdminTemplateTag,
   setTemplateTagVisibility,
   presignTemplateMedia,
   completeTemplateMedia,
+  templateCardsOptions,
+  templateTagKeys,
+  templateTagsOptions,
   type TemplateCard,
   type TemplateCardPayload,
   type AdminTemplateTag,
-} from '@/api/admin';
-import { isApiError } from '@/api/http';
+} from '@/admin/api/adminTemplateCards';
+import { isApiError } from '@/shared/api/http';
 import ConfirmModal from '../../components/ConfirmModal';
-import styles from './index.module.css';
+import {
+  Alert,
+  Badge,
+  Button,
+  Card,
+  Chip,
+  Empty,
+  Input,
+  Modal,
+  Page,
+  PageHeader,
+  Select,
+  Table,
+  Textarea,
+  Toolbar,
+  Hint,
+} from '../../ui';
 
-/** 渲染形态：layout code ↔ 展示名 */
 const LAYOUTS: { code: string; label: string }[] = [
   { code: 'wide', label: '横版视频卡' },
   { code: 'portrait', label: '竖版卡' },
@@ -35,10 +47,6 @@ const LAYOUTS: { code: string; label: string }[] = [
 const layoutLabel = (code: string) => LAYOUTS.find((l) => l.code === code)?.label ?? code;
 
 export default function TemplateManage() {
-  const [tags, setTags] = useState<AdminTemplateTag[]>([]);
-  const [templates, setTemplates] = useState<TemplateCard[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState('');
   const [activeTab, setActiveTab] = useState<string>('all');
   const [renameCode, setRenameCode] = useState<string | null>(null);
   const [form, setForm] = useState<{ id?: string } | null>(null);
@@ -48,25 +56,36 @@ export default function TemplateManage() {
 
   const tagName = (code: string) => tags.find((t) => t.tag_code === code)?.label ?? code;
 
-  /** 刷新列表：页面加载 / 切换 tag 筛选 / 操作后 */
-  const load = useCallback((tab: string) => {
-    setLoading(true);
-    setLoadError('');
-    fetchTemplateCards(tab === 'all' ? undefined : tab)
-      .then((list) => setTemplates([...list].sort((a, b) => a.sort_order - b.sort_order)))
-      .catch((e) => setLoadError(isApiError(e) ? e.message : '获取模板列表失败'))
-      .finally(() => setLoading(false));
-  }, []);
+  const queryClient = useQueryClient();
+  const tagsQuery = useQuery(templateTagsOptions());
+  const cardsQuery = useQuery(
+    templateCardsOptions(activeTab === 'all' ? undefined : activeTab),
+  );
+  const tags: AdminTemplateTag[] = tagsQuery.data ?? [];
+  const templates: TemplateCard[] = useMemo(
+    () => [...(cardsQuery.data ?? [])].sort((a, b) => a.sort_order - b.sort_order),
+    [cardsQuery.data],
+  );
+  const loading = cardsQuery.isPending;
+  const loadError = cardsQuery.isError
+    ? isApiError(cardsQuery.error)
+      ? cardsQuery.error.message
+      : '获取模板列表失败'
+    : '';
 
-  // 标签 tabs（后台标签接口）
-  useEffect(() => {
-    fetchAdminTemplateTags().then(setTags).catch(() => undefined);
-  }, []);
+  const load = useCallback(
+    (_tab: string) => {
+      void cardsQuery.refetch();
+    },
+    [cardsQuery],
+  );
 
-  // 页面加载 / 切换 tab 刷新卡片列表
-  useEffect(() => load(activeTab), [activeTab, load]);
+  const writeTags = (updater: (prev: AdminTemplateTag[]) => AdminTemplateTag[]): void => {
+    queryClient.setQueryData<AdminTemplateTag[]>(templateTagKeys.list(), (prev) =>
+      prev === undefined ? prev : updater(prev),
+    );
+  };
 
-  /** 排序：POST /:id/move（同 tag 内上移/下移，边缘后端返回 409），成功后刷新 */
   const move = async (id: string, dir: -1 | 1) => {
     setActionError('');
     try {
@@ -77,25 +96,22 @@ export default function TemplateManage() {
     }
   };
 
-  /** 标签改名：PUT /api/admin/template-tags，成功后本地同步展示名 */
   const handleRename = async (code: string, label: string) => {
     await renameAdminTemplateTag(code, label);
-    setTags((prev) => prev.map((t) => (t.tag_code === code ? { ...t, label } : t)));
+    writeTags((prev) => prev.map((t) => (t.tag_code === code ? { ...t, label } : t)));
     setRenameCode(null);
   };
 
-  /** 标签隐藏开关（IKA64P）：PUT /api/admin/template-tags/visibility，成功后本地同步 */
   const toggleVisibility = async (code: string, next: number) => {
     setActionError('');
     try {
       await setTemplateTagVisibility(code, next);
-      setTags((prev) => prev.map((t) => (t.tag_code === code ? { ...t, visible: next } : t)));
+      writeTags((prev) => prev.map((t) => (t.tag_code === code ? { ...t, visible: next } : t)));
     } catch (e) {
       setActionError(isApiError(e) ? e.message : '切换失败，请稍后重试');
     }
   };
 
-  /** 新建/编辑提交：POST/PUT /api/admin/templates，成功后刷新列表 */
   const handleSubmit = async (data: TemplateCardPayload, id?: string) => {
     setActionError('');
     if (id !== undefined) {
@@ -107,7 +123,6 @@ export default function TemplateManage() {
     load(activeTab);
   };
 
-  /** 确认删除：DELETE /api/admin/templates/:id（软删除） */
   const confirmDelete = async () => {
     if (deleteId === null || deleting) return;
     setDeleting(true);
@@ -124,60 +139,66 @@ export default function TemplateManage() {
   };
 
   return (
-    <div className={styles.page}>
-      {/* 页头 */}
-      <div className={styles.header}>
-        <div>
-          <h1 className={styles.title}>模板管理</h1>
-          <p className={styles.subtitle}>首页 dock 下方模板卡片的增删改与标签改名</p>
+    <Page>
+      {}
+      <PageHeader
+        title="模板管理"
+        subtitle="首页 dock 下方模板卡片的增删改与标签改名"
+        extra={
+          <Button variant="primary" icon={<Plus size={16} strokeWidth={2} />} onClick={() => setForm({})}>
+            新建模板
+          </Button>
+        }
+      />
+
+      {}
+      {actionError && <Alert tone="danger">{actionError}</Alert>}
+
+      <Card padded={false}>
+        {}
+        <div style={{ padding: 'var(--admin-space-3)' }}>
+          <Toolbar>
+            <Chip active={activeTab === 'all'} onClick={() => setActiveTab('all')}>
+              全部
+            </Chip>
+            {tags.map((t) => (
+              <span
+                key={t.tag_code}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}
+              >
+                <Chip active={activeTab === t.tag_code} onClick={() => setActiveTab(t.tag_code)}>
+                  {t.label}
+                  {t.visible === 0 && <Badge tone="neutral">已隐藏</Badge>}
+                </Chip>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  title="重命名标签"
+                  aria-label={`重命名标签 ${t.tag_code}`}
+                  icon={<Pencil size={13} strokeWidth={2} />}
+                  onClick={() => setRenameCode(t.tag_code)}
+                />
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  title={t.visible === 1 ? '隐藏该标签（首页不可见）' : '显示该标签（首页可见）'}
+                  aria-label={`切换标签可见性 ${t.tag_code}`}
+                  icon={
+                    t.visible === 1 ? (
+                      <Eye size={13} strokeWidth={2} />
+                    ) : (
+                      <EyeOff size={13} strokeWidth={2} />
+                    )
+                  }
+                  onClick={() => toggleVisibility(t.tag_code, t.visible === 1 ? 0 : 1)}
+                />
+              </span>
+            ))}
+          </Toolbar>
         </div>
-        <button className={styles.primaryBtn} onClick={() => setForm({})}>
-          <Plus size={16} strokeWidth={2} />
-          <span>新建模板</span>
-        </button>
-      </div>
 
-      {/* 操作错误 */}
-      {actionError && <div className={styles.actionError}>{actionError}</div>}
-
-      {/* 标签 tabs */}
-      <div className={styles.tabs}>
-        <button
-          className={`${styles.tab} ${activeTab === 'all' ? styles.tabActive : ''}`}
-          onClick={() => setActiveTab('all')}
-        >
-          全部
-        </button>
-        {tags.map((t) => (
-          <span className={styles.tabGroup} key={t.tag_code}>
-            <button
-              className={`${styles.tab} ${activeTab === t.tag_code ? styles.tabActive : ''} ${t.visible === 0 ? styles.tabHidden : ''}`}
-              onClick={() => setActiveTab(t.tag_code)}
-            >
-              {t.label}
-              {t.visible === 0 && <span className={styles.tabHiddenMark}>已隐藏</span>}
-            </button>
-            <button
-              className={styles.tabEdit}
-              title="重命名标签"
-              onClick={() => setRenameCode(t.tag_code)}
-            >
-              <Pencil size={13} strokeWidth={2} />
-            </button>
-            <button
-              className={styles.tabEdit}
-              title={t.visible === 1 ? '隐藏该标签（首页不可见）' : '显示该标签（首页可见）'}
-              onClick={() => toggleVisibility(t.tag_code, t.visible === 1 ? 0 : 1)}
-            >
-              {t.visible === 1 ? <Eye size={13} strokeWidth={2} /> : <EyeOff size={13} strokeWidth={2} />}
-            </button>
-          </span>
-        ))}
-      </div>
-
-      {/* 模板表格 */}
-      <div className={styles.tableWrap}>
-        <table className={styles.table}>
+        {}
+        <Table>
           <thead>
             <tr>
               <th>标题</th>
@@ -185,80 +206,114 @@ export default function TemplateManage() {
               <th>形态</th>
               <th>排序</th>
               <th>资源</th>
-              <th className={styles.thRight}>操作</th>
+              <th>操作</th>
             </tr>
           </thead>
           <tbody>
             {loading && (
               <tr>
-                <td colSpan={6} className={styles.tableState}>加载中…</td>
+                <td colSpan={6}>
+                  <Empty message="加载中…" />
+                </td>
               </tr>
             )}
             {!loading && loadError && (
               <tr>
-                <td colSpan={6} className={styles.tableState}>{loadError}</td>
+                <td colSpan={6}>
+                  <Empty
+                    message={loadError}
+                    extra={
+                      <Button onClick={() => load(activeTab)}>重试</Button>
+                    }
+                  />
+                </td>
               </tr>
             )}
             {!loading && !loadError && templates.length === 0 && (
               <tr>
-                <td colSpan={6} className={styles.tableState}>暂无模板</td>
+                <td colSpan={6}>
+                  <Empty
+                    message="暂无模板"
+                    extra={
+                      <Button variant="primary" onClick={() => setForm({})}>
+                        新建模板
+                      </Button>
+                    }
+                  />
+                </td>
               </tr>
             )}
             {templates.map((t) => (
               <tr key={t.id}>
                 <td>
-                  <span className={styles.cellTitle}>{t.title}</span>
-                  {!t.content && <span className={styles.cellSub}>（提示词待补）</span>}
+                  {t.title}
+                  {!t.content && <Badge tone="warning">提示词待补</Badge>}
                 </td>
                 <td>
-                  <span className={styles.badge}>{tagName(t.tag_code)}</span>
+                  <Badge tone="neutral">{tagName(t.tag_code)}</Badge>
                 </td>
                 <td>{layoutLabel(t.layout)}</td>
-                <td className={styles.cellSort}>{t.sort_order}</td>
+                <td>{t.sort_order}</td>
                 <td>
-                  <div className={styles.resGroup}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     {t.video_url && (
-                      <span className={styles.resItem}>
+                      <Badge tone="neutral">
                         <Film size={15} strokeWidth={2} />
-                        <span>视频</span>
-                      </span>
+                        视频
+                      </Badge>
                     )}
                     {t.images.length > 0 && (
-                      <span className={styles.resItem}>
+                      <Badge tone="neutral">
                         <ImageIcon size={15} strokeWidth={2} />
-                        <span>{t.images.length} 张</span>
-                      </span>
+                        {t.images.length} 张
+                      </Badge>
                     )}
-                    {!t.video_url && t.images.length === 0 && <span className={styles.dash}>—</span>}
+                    {!t.video_url && t.images.length === 0 && '—'}
                   </div>
                 </td>
                 <td>
-                  <div className={styles.actionGroup}>
-                    <button className={styles.iconBtn} title="上移" onClick={() => move(t.id, -1)}>
-                      <ChevronUp size={15} strokeWidth={2} />
-                    </button>
-                    <button className={styles.iconBtn} title="下移" onClick={() => move(t.id, 1)}>
-                      <ChevronDown size={15} strokeWidth={2} />
-                    </button>
-                    <button className={styles.iconBtn} title="编辑" onClick={() => setForm({ id: t.id })}>
-                      <Pencil size={15} strokeWidth={2} />
-                    </button>
-                    <button
-                      className={`${styles.iconBtn} ${styles.iconDanger}`}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      title="上移"
+                      aria-label="上移"
+                      icon={<ChevronUp size={15} strokeWidth={2} />}
+                      onClick={() => move(t.id, -1)}
+                    />
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      title="下移"
+                      aria-label="下移"
+                      icon={<ChevronDown size={15} strokeWidth={2} />}
+                      onClick={() => move(t.id, 1)}
+                    />
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      title="编辑"
+                      aria-label="编辑"
+                      icon={<Pencil size={15} strokeWidth={2} />}
+                      onClick={() => setForm({ id: t.id })}
+                    />
+                    <Button
+                      size="sm"
+                      variant="ghost"
                       title="删除"
+                      aria-label="删除"
+                      icon={<Trash2 size={15} strokeWidth={2} />}
                       onClick={() => setDeleteId(t.id)}
-                    >
-                      <Trash2 size={15} strokeWidth={2} />
-                    </button>
+                    />
                   </div>
                 </td>
               </tr>
             ))}
           </tbody>
-        </table>
-      </div>
+        </Table>
+      </Card>
 
-      {/* 标签改名弹窗 */}
+      {}
       {renameCode !== null && (
         <RenameTagModal
           tag={tags.find((t) => t.tag_code === renameCode)!}
@@ -267,7 +322,7 @@ export default function TemplateManage() {
         />
       )}
 
-      {/* 新建/编辑模板弹窗 */}
+      {}
       {form !== null && (
         <TemplateFormModal
           initial={form.id !== undefined ? templates.find((t) => t.id === form.id) : undefined}
@@ -278,7 +333,7 @@ export default function TemplateManage() {
         />
       )}
 
-      {/* 删除二次确认 */}
+      {}
       {deleteId !== null && (
         <ConfirmModal
           title="删除模板"
@@ -288,11 +343,10 @@ export default function TemplateManage() {
           onClose={() => setDeleteId(null)}
         />
       )}
-    </div>
+    </Page>
   );
 }
 
-/* ============ 重命名标签弹窗 ============ */
 function RenameTagModal({
   tag,
   onClose,
@@ -319,40 +373,42 @@ function RenameTagModal({
     }
   };
 
-  return createPortal(
-    <div className={styles.overlay} onClick={onClose}>
-      <div className={styles.smallModal} onClick={(e) => e.stopPropagation()}>
-        <div className={styles.modalHead}>
-          <h2 className={styles.modalTitle}>重命名标签（{tag.tag_code}）</h2>
-          <button className={styles.closeBtn} onClick={onClose} title="关闭">
-            <X size={16} strokeWidth={2} />
-          </button>
-        </div>
-        <div className={styles.modalBody}>
-          <p className={styles.hint}>tag_code 与顺序固定不可改，仅可修改显示名称。</p>
-          <input
-            className={styles.input}
-            maxLength={128}
-            value={label}
-            onChange={(e) => setLabel(e.target.value)}
-          />
-          {error && <div className={styles.formError}>{error}</div>}
-        </div>
-        <div className={styles.modalFoot}>
-          <button className={styles.cancelBtn} onClick={onClose}>
-            取消
-          </button>
-          <button className={styles.saveBtn} disabled={!label.trim() || saving} onClick={save}>
+  return (
+    <Modal
+      open
+      title={
+        <>
+          重命名标签（{tag.tag_code}）{' '}
+          <Hint>tag_code 与顺序固定不可改，仅可修改显示名称。</Hint>
+        </>
+      }
+      width={560}
+      onClose={onClose}
+      footer={
+        <>
+          <Button onClick={onClose}>取消</Button>
+          <Button variant="primary" disabled={!label.trim() || saving} onClick={save}>
             {saving ? '保存中…' : '保存'}
-          </button>
+          </Button>
+        </>
+      }
+    >
+      <Input
+        maxLength={128}
+        value={label}
+        aria-label="标签显示名称"
+        onChange={(e) => setLabel(e.target.value)}
+        style={{ width: '100%', marginTop: 12 }}
+      />
+      {error && (
+        <div style={{ marginTop: 12 }}>
+          <Alert tone="danger">{error}</Alert>
         </div>
-      </div>
-    </div>,
-    document.body
+      )}
+    </Modal>
   );
 }
 
-/* ============ 新建/编辑模板弹窗 ============ */
 interface TemplateFormModalProps {
   initial?: TemplateCard;
   tags: AdminTemplateTag[];
@@ -368,7 +424,6 @@ function TemplateFormModal({ initial, tags, defaultTag, onClose, onSubmit }: Tem
   const [sort, setSort] = useState(initial !== undefined ? String(initial.sort_order) : '0');
   const [videoUrl, setVideoUrl] = useState(initial?.video_url ?? '');
   const [content, setContent] = useState(initial?.content ?? '');
-  // 已有图片携带 id（编辑时保留），新增图片无 id
   const [images, setImages] = useState<{ id?: string; url: string }[]>(
     initial?.images.map((img) => ({ id: img.id, url: img.image_url })) ?? []
   );
@@ -379,7 +434,6 @@ function TemplateFormModal({ initial, tags, defaultTag, onClose, onSubmit }: Tem
   const imgFileRef = useRef<HTMLInputElement>(null);
   const videoFileRef = useRef<HTMLInputElement>(null);
 
-  /** 三步上传：presign → PUT 直传 → complete，成功后将公网 URL 回填表单 */
   const uploadMedia = async (file: File, type: 'image' | 'video') => {
     const isImg = type === 'image';
     const okMime = isImg
@@ -472,162 +526,195 @@ function TemplateFormModal({ initial, tags, defaultTag, onClose, onSubmit }: Tem
     }
   };
 
-  return createPortal(
-    <div className={styles.overlay} onClick={onClose}>
-      <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
-        <div className={styles.modalHead}>
-          <h2 className={styles.modalTitle}>{initial ? '编辑模板' : '新建模板'}</h2>
-          <button className={styles.closeBtn} onClick={onClose} title="关闭">
-            <X size={16} strokeWidth={2} />
-          </button>
-        </div>
-
-        <div className={styles.modalBody}>
-          <div className={styles.label}>
-            标题 <span className={styles.required}>*</span>
-          </div>
-          <input
-            className={styles.input}
-            placeholder="模板卡片标题"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-          />
-
-          <div className={styles.formRow}>
-            <div>
-              <div className={styles.label}>
-                标签 <span className={styles.required}>*</span>
-              </div>
-              <select className={styles.select} value={tag} onChange={(e) => setTag(e.target.value)}>
-                {tags.map((t) => (
-                  <option key={t.tag_code} value={t.tag_code}>
-                    {t.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <div className={styles.label}>渲染形态</div>
-              <select className={styles.select} value={layout} onChange={(e) => setLayout(e.target.value)}>
-                {LAYOUTS.map((l) => (
-                  <option key={l.code} value={l.code}>
-                    {l.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <div className={styles.label}>排序值</div>
-              <input type="number" className={styles.input} value={sort} onChange={(e) => setSort(e.target.value)} />
-            </div>
-          </div>
-
-          <div className={styles.label}>视频 URL（可选）</div>
-          <div className={styles.imgAddRow}>
-            <input
-              className={styles.input}
-              placeholder="https://...（hover 卡片时播放）"
-              value={videoUrl}
-              onChange={(e) => setVideoUrl(e.target.value)}
-            />
-            <button
-              className={styles.ghostBtn}
-              disabled={uploadBusy}
-              onClick={() => videoFileRef.current?.click()}
-            >
-              <Upload size={15} strokeWidth={2} />
-              <span>{uploadBusy ? '上传中…' : '上传视频'}</span>
-            </button>
-            <input
-              ref={videoFileRef}
-              type="file"
-              accept="video/mp4"
-              hidden
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) uploadMedia(f, 'video');
-                e.target.value = '';
-              }}
-            />
-          </div>
-
-          <div className={styles.label}>提示词 content（点击卡片时带入 dock 输入框；留空则兜底用标题）</div>
-          <textarea
-            className={styles.textarea}
-            placeholder="模板提示词正文..."
-            value={content}
-            onChange={(e) => setContent(e.target.value)}
-          />
-
-          <div className={styles.label}>图片列表（顺序即展示顺序，最多 20 张）</div>
-          {images.length > 0 && (
-            <div className={styles.imgList}>
-              {images.map((img, i) => (
-                <div className={styles.imgRow} key={`${img.url}-${i}`}>
-                  <span className={styles.imgUrl} title={img.url}>
-                    {img.url}
-                  </span>
-                  <button className={styles.iconBtn} title="上移" onClick={() => moveImage(i, -1)}>
-                    <ChevronUp size={15} strokeWidth={2} />
-                  </button>
-                  <button className={styles.iconBtn} title="下移" onClick={() => moveImage(i, 1)}>
-                    <ChevronDown size={15} strokeWidth={2} />
-                  </button>
-                  <button
-                    className={`${styles.iconBtn} ${styles.iconDanger}`}
-                    title="移除"
-                    onClick={() => setImages((prev) => prev.filter((_, j) => j !== i))}
-                  >
-                    <Trash2 size={15} strokeWidth={2} />
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-          <div className={styles.imgAddRow}>
-            <input
-              className={styles.input}
-              placeholder="粘贴图片 URL（http(s):// 开头）后点「添加」"
-              value={urlInput}
-              onChange={(e) => setUrlInput(e.target.value)}
-            />
-            <button className={styles.ghostBtn} onClick={addUrl}>
-              添加
-            </button>
-            <button
-              className={styles.ghostBtn}
-              disabled={uploadBusy}
-              onClick={() => imgFileRef.current?.click()}
-            >
-              <Upload size={15} strokeWidth={2} />
-              <span>{uploadBusy ? '上传中…' : '上传图片'}</span>
-            </button>
-            <input
-              ref={imgFileRef}
-              type="file"
-              accept="image/jpeg,image/png,image/webp,image/gif"
-              hidden
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) uploadMedia(f, 'image');
-                e.target.value = '';
-              }}
-            />
-          </div>
-
-          {formError && <div className={styles.formError}>{formError}</div>}
-        </div>
-
-        <div className={styles.modalFoot}>
-          <button className={styles.cancelBtn} onClick={onClose}>
-            取消
-          </button>
-          <button className={styles.saveBtn} disabled={!title.trim() || saving} onClick={handleSave}>
+  return (
+    <Modal
+      open
+      title={initial ? '编辑模板' : '新建模板'}
+      width={760}
+      onClose={onClose}
+      footer={
+        <>
+          <Button onClick={onClose}>取消</Button>
+          <Button variant="primary" disabled={!title.trim() || saving} onClick={handleSave}>
             {saving ? '保存中…' : '保存'}
-          </button>
+          </Button>
+        </>
+      }
+    >
+      {}
+      <div style={{ marginBottom: 6 }}>
+        标题 <Badge tone="danger">*</Badge>
+      </div>
+      <Input
+        placeholder="模板卡片标题"
+        value={title}
+        aria-label="标题"
+        onChange={(e) => setTitle(e.target.value)}
+        style={{ width: '100%' }}
+      />
+
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: '1fr 1.4fr 1fr',
+          gap: 20,
+          marginTop: 22,
+        }}
+      >
+        <div>
+          <div style={{ marginBottom: 6 }}>
+            标签 <Badge tone="danger">*</Badge>
+          </div>
+          <Select
+            options={tags.map((t) => ({ value: t.tag_code, label: t.label }))}
+            value={tag}
+            onChange={setTag}
+            aria-label="标签"
+          />
+        </div>
+        <div>
+          <div style={{ marginBottom: 6 }}>渲染形态</div>
+          <Select
+            options={LAYOUTS.map((l) => ({ value: l.code, label: l.label }))}
+            value={layout}
+            onChange={setLayout}
+            aria-label="渲染形态"
+          />
+        </div>
+        <div>
+          <div style={{ marginBottom: 6 }}>排序值</div>
+          <Input
+            type="number"
+            value={sort}
+            aria-label="排序值"
+            onChange={(e) => setSort(e.target.value)}
+            style={{ width: '100%' }}
+          />
         </div>
       </div>
-    </div>,
-    document.body
+
+      <div style={{ marginTop: 22 }}>
+        <div style={{ marginBottom: 6 }}>视频 URL（可选）</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Input
+            placeholder="https://...（hover 卡片时播放）"
+            value={videoUrl}
+            aria-label="视频 URL"
+            onChange={(e) => setVideoUrl(e.target.value)}
+            style={{ flex: 1, minWidth: 0 }}
+          />
+          <Button
+            disabled={uploadBusy}
+            icon={<Upload size={15} strokeWidth={2} />}
+            onClick={() => videoFileRef.current?.click()}
+          >
+            {uploadBusy ? '上传中…' : '上传视频'}
+          </Button>
+          <input
+            ref={videoFileRef}
+            type="file"
+            accept="video/mp4"
+            hidden
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) uploadMedia(f, 'video');
+              e.target.value = '';
+            }}
+          />
+        </div>
+      </div>
+
+      <div style={{ marginTop: 22 }}>
+        <div style={{ marginBottom: 6 }}>
+          提示词 content（点击卡片时带入 dock 输入框；留空则兜底用标题）
+        </div>
+        <Textarea
+          placeholder="模板提示词正文..."
+          value={content}
+          aria-label="提示词 content"
+          onChange={(e) => setContent(e.target.value)}
+        />
+      </div>
+
+      <div style={{ marginTop: 22 }}>
+        <div style={{ marginBottom: 6 }}>图片列表（顺序即展示顺序，最多 20 张）</div>
+        {images.length > 0 && (
+          <div
+            style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 8 }}
+          >
+            {images.map((img, i) => (
+              <div key={`${img.url}-${i}`} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Input
+                  readOnly
+                  value={img.url}
+                  title={img.url}
+                  aria-label="图片 URL"
+                  style={{ flex: 1, minWidth: 0 }}
+                />
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  title="上移"
+                  aria-label="图片上移"
+                  icon={<ChevronUp size={15} strokeWidth={2} />}
+                  onClick={() => moveImage(i, -1)}
+                />
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  title="下移"
+                  aria-label="图片下移"
+                  icon={<ChevronDown size={15} strokeWidth={2} />}
+                  onClick={() => moveImage(i, 1)}
+                />
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  title="移除"
+                  aria-label="移除图片"
+                  icon={<Trash2 size={15} strokeWidth={2} />}
+                  onClick={() => setImages((prev) => prev.filter((_, j) => j !== i))}
+                />
+              </div>
+            ))}
+          </div>
+        )}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Input
+            placeholder="粘贴图片 URL（http(s):// 开头）后点「添加」"
+            value={urlInput}
+            aria-label="图片 URL 输入"
+            onChange={(e) => setUrlInput(e.target.value)}
+            style={{ flex: 1, minWidth: 0 }}
+          />
+          <Button onClick={addUrl}>添加</Button>
+          <Button
+            disabled={uploadBusy}
+            icon={<Upload size={15} strokeWidth={2} />}
+            onClick={() => imgFileRef.current?.click()}
+          >
+            {uploadBusy ? '上传中…' : '上传图片'}
+          </Button>
+          <input
+            ref={imgFileRef}
+            type="file"
+            accept="image/jpeg,image/png,image/webp,image/gif"
+            hidden
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) uploadMedia(f, 'image');
+              e.target.value = '';
+            }}
+          />
+        </div>
+      </div>
+
+      {}
+      {formError && (
+        <div style={{ marginTop: 12 }}>
+          <Alert tone="danger">{formError}</Alert>
+        </div>
+      )}
+    </Modal>
   );
 }

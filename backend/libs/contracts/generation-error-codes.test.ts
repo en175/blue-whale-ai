@@ -1,8 +1,8 @@
-// IKBQEE / ADR-0078 二期：对外数值错误码映射（前端按 code 映射文案的唯一来源）。
-// 定义收敛到 error-codes.ts（高内聚），此处直接测它。
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import {
+  ERROR_PLATFORM_QUOTA_EXHAUSTED,
   ERROR_QUOTA_EXHAUSTED,
   ERROR_INVALID_INPUT,
   ERROR_PROVIDER_FAILED,
@@ -14,6 +14,14 @@ import {
   isContentPolicySignal,
   isQuotaSignal,
 } from "./error-codes.js";
+
+const generationErrorJava = readFileSync(
+  new URL(
+    "../../../server/blue-whale-worker/src/main/java/com/bluewhale/worker/domain/error/GenerationError.java",
+    import.meta.url,
+  ),
+  "utf8",
+);
 
 describe("generation error numeric codes (external contract)", () => {
   it("关键映射稳定（前端契约）", () => {
@@ -72,7 +80,6 @@ describe("provider 错误信号（IKDAJN）", () => {
   });
 
   it("isQuotaSignal 命中欠费 keyword / HTTP 402", () => {
-    // IKDQ5F：真欠费锚点 = 预扣费额度失败/剩余额度/额度不足/余额不足。
     expect(
       isQuotaSignal("预扣费额度失败, 用户剩余额度: ¥0.9", 200),
     ).toBe(true);
@@ -85,9 +92,6 @@ describe("provider 错误信号（IKDAJN）", () => {
   });
 
   it("isQuotaSignal 不被非用户欠费文案误伤（IKDQ5F）", () => {
-    // 渠道无余额 / 无可用渠道 / 超时：非用户欠费，必须 false。
-    // 注：「new-api 音频生成余额不足」是我们抛 ERROR_QUOTA_EXHAUSTED 时的固定文案
-    // （ADR-0078 message 不泄漏原文），本身就该被 quota 锚点命中——不是本测试的反例。
     expect(isQuotaSignal("当前渠道无余额，请更换渠道", 200)).toBe(false);
     expect(isQuotaSignal("无可用的渠道，请配置渠道后再试", 200)).toBe(false);
     expect(isQuotaSignal("gateway timeout", 503)).toBe(false);
@@ -102,5 +106,35 @@ describe("provider 错误信号（IKDAJN）", () => {
       ),
     ).toBe(false);
     expect(isQuotaSignal("gateway down", 503)).toBe(false);
+  });
+});
+
+describe("GenerationError.java ↔ TS 码表 parity（ADR-0128）", () => {
+  const javaConstants = new Map<string, string>();
+  for (const m of generationErrorJava.matchAll(
+    /String\s+(ERROR_[A-Z0-9_]+)\s*=\s*"([^"]*)"/g,
+  )) {
+    javaConstants.set(m[1]!, m[2]!);
+  }
+
+  it("平台额度不足：Java 字符串码与 TS 逐字一致，数值码 1061", () => {
+    expect(javaConstants.get("ERROR_PLATFORM_QUOTA_EXHAUSTED")).toBe(
+      ERROR_PLATFORM_QUOTA_EXHAUSTED,
+    );
+    expect(GENERATION_ERROR_NUMERIC_CODES[ERROR_PLATFORM_QUOTA_EXHAUSTED]).toBe(1061);
+  });
+
+  it("Java 侧不再有旧码 quota_exhausted（收窄为个人侧专属）", () => {
+    const values = [...javaConstants.values()];
+    expect(values).not.toContain(ERROR_QUOTA_EXHAUSTED);
+  });
+
+  it("Java 每个错误常量都在 TS 数值表里有映射（防漏同步）", () => {
+    for (const [name, value] of javaConstants) {
+      expect(
+        GENERATION_ERROR_NUMERIC_CODES[value],
+        `${name} = "${value}" 在 TS 数值表里没有映射`,
+      ).toBeTypeOf("number");
+    }
   });
 });

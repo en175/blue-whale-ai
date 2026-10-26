@@ -1,0 +1,65 @@
+server:
+  port: ${BILLING_PORT:4003}
+
+spring:
+  application:
+    name: billing-java
+  threads:
+    virtual:
+      enabled: true
+
+  task:
+    scheduling:
+      pool:
+        size: 3
+
+  datasource:
+    url: ${BILLING_DB_URL:jdbc:mysql://localhost:13306/bw_billing?useSSL=false&allowPublicKeyRetrieval=true&characterEncoding=utf8&connectionTimeZone=Asia/Shanghai&forceConnectionTimeZoneToSession=true}
+    username: ${BILLING_DB_USERNAME:root}
+    password: ${BILLING_DB_PASSWORD:}
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    clean-disabled: true
+    baseline-on-migrate: false
+
+  mybatis-plus:
+    mapper-locations: classpath*:mapper/**/*.xml
+    configuration:
+      map-underscore-to-camel-case: true
+
+logging:
+  level:
+    com.bluewhale: INFO
+    org.flywaydb: INFO
+
+billing:
+  grpc:
+    enabled: true
+    port: ${BILLING_GRPC_PORT:4004}
+
+  admin:
+    enabled: ${BILLING_ADMIN_ENABLED:false}
+
+  catalog:
+    reload-interval: ${BILLING_CATALOG_RELOAD_INTERVAL:PT5M}
+    reload-initial-delay: ${BILLING_CATALOG_RELOAD_INITIAL_DELAY:PT1M}
+
+  mq:
+    enabled: ${BILLING_MQ_ENABLED:true}
+    topic-terminal: ${BILLING_MQ_TOPIC_TERMINAL:generation-job-terminal}
+
+  reconciliation:
+
+    self-check:
+      cron: ${BILLING_SELF_CHECK_CRON:0 0 3 * * *}
+      user-limit: ${BILLING_SELF_CHECK_USER_LIMIT:20}
+      break-sample: ${BILLING_SELF_CHECK_BREAK_SAMPLE:10}
+      entry-window: ${BILLING_SELF_CHECK_ENTRY_WINDOW:500}
+
+rocketmq:
+  endpoints: ${ROCKETMQ_ENDPOINTS:}
+  access-key: ${ROCKETMQ_ACCESS_KEY:}
+  secret-key: ${ROCKETMQ_SECRET_KEY:}
+  ssl-enabled: ${ROCKETMQ_SSL_ENABLED:false}

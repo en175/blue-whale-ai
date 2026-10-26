@@ -1,5 +1,5 @@
 import { Injectable, OnModuleDestroy } from "@nestjs/common";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { Redis } from "ioredis";
 import { redisConnectionOptions } from "./redis-connection.js";
 
@@ -15,11 +15,21 @@ export type RateLimitTakeResult = {
   retryAfter?: number;
 };
 
-/** 原子 INCR；首次写入时 EXPIRE。窗口粒度秒。 */
-const INCR_EXPIRE = `
-local n = redis.call('INCR', KEYS[1])
-if n == 1 then redis.call('EXPIRE', KEYS[1], ARGV[1]) end
-return n
+const SLIDING_WINDOW = `
+local now = tonumber(ARGV[1])
+local window = tonumber(ARGV[2])
+local limit = tonumber(ARGV[3])
+redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', now - window)
+local count = redis.call('ZCARD', KEYS[1])
+if count >= limit then
+  local first = redis.call('ZRANGE', KEYS[1], 0, 0, 'WITHSCORES')
+  local retry = window
+  if first[2] then retry = window - (now - tonumber(first[2])) end
+  return {0, retry}
+end
+redis.call('ZADD', KEYS[1], now, ARGV[4])
+redis.call('PEXPIRE', KEYS[1], window)
+return {1, 0}
 `;
 
 @Injectable()
@@ -42,16 +52,22 @@ export class RateLimiter implements OnModuleDestroy {
           retryAfter: await this.retryAfterSeconds(this.blockKey(input.scope, input.key)),
         };
       }
-      const windowSec = Math.max(1, Math.ceil(input.windowMs / 1000));
-      const windowId = Math.floor(Date.now() / 1000 / windowSec);
-      const countKey = this.countKey(input.scope, input.key, windowSec, windowId);
-      const count = Number(
-        await this.redis.eval(INCR_EXPIRE, 1, countKey, String(windowSec)),
-      );
-      if (count > input.limit) {
+      const now = Date.now();
+      const member = `${now}-${randomBytes(6).toString("hex")}`;
+      const result = (await this.redis.eval(
+        SLIDING_WINDOW,
+        1,
+        this.countKey(input.scope, input.key),
+        String(now),
+        String(input.windowMs),
+        String(input.limit),
+        member,
+      )) as [number, number];
+      const [allowed, retryMs] = result;
+      if (!allowed) {
         return {
           allowed: false,
-          retryAfter: await this.retryAfterSeconds(countKey),
+          retryAfter: Math.max(1, Math.ceil(Number(retryMs) / 1000)),
         };
       }
       return { allowed: true };
@@ -60,18 +76,10 @@ export class RateLimiter implements OnModuleDestroy {
     }
   }
 
-  /** 清锁定；传入 windowMs 时同时删当前窗口计数，不 SCAN。 */
-  async reset(scope: string, key: string, windowMs?: number): Promise<void> {
+  async reset(scope: string, key: string, _windowMs?: number): Promise<void> {
     try {
-      const keys = [this.blockKey(scope, key)];
-      if (windowMs != null) {
-        const windowSec = Math.max(1, Math.ceil(windowMs / 1000));
-        const windowId = Math.floor(Date.now() / 1000 / windowSec);
-        keys.push(this.countKey(scope, key, windowSec, windowId));
-      }
-      await this.redis.del(...keys);
+      await this.redis.del(this.blockKey(scope, key), this.countKey(scope, key));
     } catch {
-      // fail-open
     }
   }
 
@@ -80,7 +88,6 @@ export class RateLimiter implements OnModuleDestroy {
       const ttlSec = Math.max(1, Math.ceil(durationMs / 1000));
       await this.redis.set(this.blockKey(scope, key), "1", "EX", ttlSec);
     } catch {
-      // fail-open
     }
   }
 
@@ -92,13 +99,8 @@ export class RateLimiter implements OnModuleDestroy {
     }
   }
 
-  private countKey(
-    scope: string,
-    key: string,
-    windowSec: number,
-    windowId: number,
-  ): string {
-    return `rl:${scope}:${this.identity(key)}:${windowSec}:${windowId}`;
+  private countKey(scope: string, key: string): string {
+    return `rl:${scope}:${this.identity(key)}`;
   }
 
   private blockKey(scope: string, key: string): string {

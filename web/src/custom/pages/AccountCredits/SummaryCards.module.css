@@ -1,0 +1,29 @@
+.row {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+}
+
+.card {
+  min-height: 128px;
+  padding: 20px 24px;
+  border-radius: 16px;
+  background: #141418;
+  border: 1px solid #242428;
+  box-sizing: border-box;
+}
+
+.label {
+  font-size: 13px;
+  color: #8a8a8a;
+}
+
+.value {
+  margin-top: 12px;
+  font-size: 32px;
+  font-weight: 700;
+  line-height: 1.15;
+  color: #f5f5f5;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.03em;
+}

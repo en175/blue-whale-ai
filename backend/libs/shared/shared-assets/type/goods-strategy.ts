@@ -10,9 +10,6 @@ import {
   type SharedAssetTypeStrategy,
 } from "./shared-asset-type.strategy.js";
 
-/** 商品策略（画布 productNode）：快照由前端直传，无第二层 kind。
- *  - 名称取快照 name；缩略图取首张商品图；
- *  - 去重：按名称 sha256（同名称近似去重，同卡片 R3）。 */
 export class GoodsStrategy implements SharedAssetTypeStrategy {
   readonly assetType = "goods" as const;
   readonly kind = null;

@@ -17,9 +17,6 @@ const standaloneSql = readFileSync(
   "utf8",
 );
 
-// IKCKOW：删除旧内嵌 Agent 引擎的 6 张纯旧运行表；agent_runs 保留（InUse 禁删保护）。
-// creative_skill_activation 当时随 usage_count 埋点保留，后由 IKEEFV（021 轨）删除——
-// 本测试只核对 013 轨与 baseline 的 IKCKOW 语义，021 轨的处置见 ikeefv-parity.test.ts。
 const DROPPED_TABLES = [
   "user_input_requests",
   "agent_provider_calls",

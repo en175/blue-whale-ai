@@ -76,7 +76,6 @@ export class TemplateAuditService {
     });
   }
 
-  /** IKA64P：标签可见性变更审计 */
   async logTagVisibility(tagCode: string, visible: number) {
     await this.writeLog({
       action: visible === 1 ? "显示" : "隐藏",
