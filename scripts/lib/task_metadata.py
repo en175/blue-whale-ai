@@ -13,9 +13,12 @@ from pathlib import Path
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 TASK_PREFIXES = ("feature/", "fix/", "hotfix/", "docs/", "chore/")
 ENVIRONMENT_BRANCHES = ("dev", "test", "release")
+MAIN_BRANCHES = ("master", "main")
 
 
 def is_target_branch(branch):
+    if branch in MAIN_BRANCHES:
+        return True
     return (branch.startswith("release/") and len(branch) > len("release/")) or branch in ENVIRONMENT_BRANCHES
 
 
@@ -159,7 +162,7 @@ def main(argv=None):
     try:
         if args.command == "check-target":
             if not is_target_branch(args.branch):
-                raise TaskMetadataError("目标必须是 release/* 或 dev/test/release 环境分支：{}".format(args.branch))
+                raise TaskMetadataError("目标必须是 master/main、release/* 或 dev/test/release：{}".format(args.branch))
             print(args.branch)
             return 0
         if args.command == "read":

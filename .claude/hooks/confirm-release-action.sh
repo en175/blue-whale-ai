@@ -349,7 +349,7 @@ if [ "$TOOL_NAME" = "mcp__gitee-ent__create_enterprise_repo_pull" ]; then
   esac
 
   printf '%s' "$TARGET_BRANCH" | python3 "$PRETOOL" target-branch >/dev/null || \
-    block "普通任务 PR 只允许合入 release/* 或 dev/test/release；当前目标：${TARGET_BRANCH:-空}。"
+    block "普通任务 PR 只允许合入 master、release/* 或 dev/test/release；当前目标：${TARGET_BRANCH:-空}。"
 
   case "$SOURCE_BRANCH" in
     feature/*|fix/*|hotfix/*|docs/*|chore/*) ;;

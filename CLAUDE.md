@@ -22,7 +22,7 @@
 1. 本仓库工单与 PR 全部读写仅使用 Gitee MCP；操作前读取 [渠道规则](agent-rules/gitee-mcp-only.md)。
 2. 发布须当前对话中的人类明确授权，涵盖 push、PR、merge、release；Agent 自动使用标准入口和授权凭证，已有授权不二次确认。
 3. master 代表生产版本，禁止直推；PR 合并只用 merge，合并后按清理入口处理源分支，`hotfix/*` 无特权。
-4. 代码相关任务，包括只读调查、调试和审查，先在当前本地发布线运行 `scripts/sync-release-line.sh --json` 并核对该目录索引；失败即停止报告。写入任务经 `scripts/start-task-worktree.sh --target-branch <dev|test|release>` 从 `origin/master` 起步进入独立任务区；提示并指定 PR 目标环境，dev/test/release 均只接受 PR 合入。
+4. 代码相关任务，包括只读调查、调试和审查，先在当前本地发布线运行 `scripts/sync-release-line.sh --json` 并核对该目录索引；失败即停止报告。写入任务经 `scripts/start-task-worktree.sh --target-branch <master|dev|test|release>` 从 `origin/master` 起步进入独立任务区；PR 目标在开工时声明，所有受保护分支均只接受 PR 合入。改动工具链、hook 或规范时目标写 `master`，让后续新分支一并继承。
 5. Agent 按文档主动调用标准入口；Hook 只纠偏或阻断，不返回 ASK，不自动同步、选择策略或推进任务状态。
 6. 同一契约章节的基础设施工单先合入目标环境分支，功能工单再开工；跨进程字段先在契约文档确定。
 7. 产品采用 TypeScript、Next.js Web、NestJS API 与 Node.js LTS；已批准的两个 Java 服务和专用计算边界见技术栈规则。工程工具不受产品语言禁令，无关 Python 存量不阻塞功能任务。

@@ -1443,15 +1443,18 @@ for environment_target in dev test release; do
   run_command_hook "printf '%s' '$environment_target' | python3 \"$HOOK_DIR/lib/pretool.py\" target-branch" '{"tool_input":{}}'
   assert_exit 0 "pretool: 环境分支 $environment_target 可作为 PR 目标"
 done
-for rejected_target in master main develop release/; do
+for rejected_target in develop release/ ""; do
   run_command_hook "printf '%s' '$rejected_target' | python3 \"$HOOK_DIR/lib/pretool.py\" target-branch" '{"tool_input":{}}'
-  assert_exit 1 "pretool: $rejected_target 不可作为普通任务 PR 目标"
+  assert_exit 1 "pretool: '$rejected_target' 不可作为普通任务 PR 目标"
 done
-
+for accepted_target in dev test release master main; do
+  run_command_hook "printf '%s' '$accepted_target' | python3 \"$HOOK_DIR/lib/pretool.py\" target-branch" '{"tool_input":{}}'
+  assert_exit 0 "pretool: $accepted_target 可作为 PR 目标"
+done
 write_publish_marker "feature/x" "master"
 run_hook "$RELEASE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/x","target_branch":"master","draft":"false","title":"test"}}'
-assert_exit 2 "release: 旧 master 标记仍拒绝普通任务 PR"
-assert_stderr_has "只允许合入 release/* 或 dev/test/release" "release: master 目标指向独立授权通道"
+assert_exit 2 "release: 主分支目标仍受标记校验约束"
+assert_stderr_has "--user-authorized --create-pr" "release: master 目标须走发布入口"
 remove_publish_marker feature/x
 
 write_publish_marker "feature/x" "release/prod"

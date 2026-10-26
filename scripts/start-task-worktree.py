@@ -10,7 +10,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 from release_line_sync import SyncError, configure_git_hooks, release_line_lock
-from task_metadata import ENVIRONMENT_BRANCHES, TaskMetadataError, read_task_metadata, write_task_metadata
+from task_metadata import ENVIRONMENT_BRANCHES, MAIN_BRANCHES, TaskMetadataError, read_task_metadata, write_task_metadata
 
 
 ALLOWED_TYPES = ("feature", "fix", "hotfix", "docs", "chore")
@@ -139,12 +139,12 @@ def create_worktree(args):
     branch = build_branch(args.task_type, issue, summary)
     target = derive_target(root, args.task_type, issue, summary)
     try:
-        if args.target_branch not in ENVIRONMENT_BRANCHES:
+        if args.target_branch not in ENVIRONMENT_BRANCHES + MAIN_BRANCHES:
             validate_existing_branch(args.target_branch)
             if not args.target_branch.startswith("release/"):
                 raise WorkflowError(args.target_branch)
     except WorkflowError:
-        raise WorkflowError("--target-branch 必须是 dev、test、release 或 release/<批次>：{}".format(
+        raise WorkflowError("--target-branch 必须是 master、dev、test、release 或 release/<批次>：{}".format(
             args.target_branch))
     if args.integration_worktree and not issue:
         raise WorkflowError("整包子票必须用 --issue 指定已核实父子关系的工单号。")
@@ -203,7 +203,7 @@ def parse_start_args(argv):
     issue_group.add_argument("--no-issue", action="store_true", help="明确声明本任务没有工单")
     parser.add_argument("--summary", required=True, help="6–15 字中文动宾简述")
     parser.add_argument("--target-branch", required=True,
-                        help="PR 目标分支：dev、test 或 release（也兼容 release/*）")
+                        help="PR 目标分支：master、dev、test 或 release（也兼容 release/*）")
     parser.add_argument("--integration-worktree", type=Path,
                         help="整包子票的父整合任务工作树绝对路径；先核实 Gitee 父子工单关系")
     return parser.parse_args(argv)
