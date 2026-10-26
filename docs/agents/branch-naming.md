@@ -33,14 +33,15 @@
 ### 规则
 
 - **不受白名单约束**：`dev` / `test` / `release` 是固定环境名，不套用五前缀，也不要求中文简述。
-- **任务分支固定从 `origin/master` 拉**：工单改动在 `feature|fix|hotfix|docs|chore` 分支上完成，命名规范不变；开工时用 `--target-branch` 声明这条任务之后要合入哪条环境分支。
-- **PR 必须显式指定目标环境**：首次发布入口 `publish-review-package.sh --create-pr` 必须带 `--target-branch dev|test|release`（或 `release/*`），不传直接拒绝；目标须与任务开工时记录的一致。PR Hook 同步校验目标，`master` / `main` 等不在白名单的目标一律拦截。
-- **只许合入，禁直推**：三条分支同 `master` 一样受保护，`block-push-to-master.sh` 拒绝本地直接 push；改动只能经 PR 合并（仅 `merge` 方法）。
+- **任务分支固定从 `origin/master` 拉**：工单改动在 `feature|fix|hotfix|docs|chore` 分支上完成，命名规范不变；开工时用 `--target-branch` 声明这条任务之后要合入哪条分支。
+- **PR 必须显式指定目标**：首次发布入口 `publish-review-package.sh --create-pr` 必须带 `--target-branch`，不传直接拒绝。合法目标是 `master`、`dev`、`test`、`release`（兼容 `release/*` 批次）；目标须与任务开工时记录的一致，PR Hook 用同一白名单校验。
+- **工具链与平台改动直接投 `master`**：改的是所有人共用的脚本、hook 或规范时，`--target-branch master`；合入 master 后，之后从 master 拉起的所有新分支自动继承。
+- **只许合入，禁直推**：`master` / `dev` / `test` / `release` 四条同受保护，`block-push-to-master.sh` 拒绝本地直接 push；改动只能经 PR 合并（仅 `merge` 方法）。
 - **裸 `release` 与 `release/` 前缀互斥**：Git 不允许 `refs/heads/release` 与 `refs/heads/release/*` 并存。启用裸 `release` 前必须先清空全部 `release/*` 批次分支。
 
 ### 切换状态
 
-工具链已支持环境分支：`ENVIRONMENT_BRANCHES` 统一在 `scripts/lib/task_metadata.py` 定义，发布线状态机、开工入口、PR 发布入口、PR Hook 与直推 Hook 共用同一判定。开工起点已从发布线切换为 `origin/master`，`target_branch` 只在开工时声明、作为 PR 目标使用。当前活动发布线为裸 `release`，`release/*` 批次命名保留兼容、不再新建。切换步骤与约束见 [ADR-0133](../adr/0133-environment-branches.md)。
+工具链已支持环境分支与主分支目标：`ENVIRONMENT_BRANCHES` / `MAIN_BRANCHES` 统一在 `scripts/lib/task_metadata.py` 定义，发布线状态机、开工入口、PR 发布入口、PR Hook 与直推 Hook 共用同一判定。开工起点已从发布线切换为 `origin/master`，`target_branch` 只在开工时声明、作为 PR 目标使用。当前活动发布线为裸 `release`，`release/*` 批次命名保留兼容、不再新建。切换步骤与约束见 [ADR-0133](../adr/0133-environment-branches.md)。
 
 ## release 分支（发布批次，逐步退役）
 

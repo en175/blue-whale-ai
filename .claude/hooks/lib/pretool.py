@@ -715,6 +715,8 @@ def mode_dangerous_pattern(command: str) -> int:
 
 def mode_target_branch(command: str) -> int:
     branch = command.strip()
+    if branch in ("master", "main"):
+        return 0
     return 0 if (branch.startswith("release/") and len(branch) > len("release/")) or branch in ENVIRONMENT_BRANCHES else 1
 
 

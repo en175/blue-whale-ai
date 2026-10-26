@@ -509,6 +509,24 @@ class PublishReviewPackageTest(unittest.TestCase):
                 self.assertEqual(result.returncode, 2)
                 self.assertEqual(self.response(result)["status"], "INVALID_TARGET_BRANCH")
 
+    def test_create_mode_accepts_master_target(self) -> None:
+        self.git("push", "origin", "HEAD:master", cwd=self.main)
+        metadata = (Path(self.git("rev-parse", "--absolute-git-dir"))
+                    / "blue-whale" / "task-base.json")
+        data = json.loads(metadata.read_text(encoding="utf-8"))
+        data["target_branch"] = "master"
+        metadata.write_text(json.dumps(data), encoding="utf-8")
+        try:
+            result = self.invoke(
+                "--user-authorized", "--create-pr", "--target-branch", "master", "--json"
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("target=master", self.publish_marker().read_text(encoding="utf-8"))
+        finally:
+            data["target_branch"] = "release/prod"
+            metadata.write_text(json.dumps(data), encoding="utf-8")
+
     def test_update_mode_reads_release_target_from_snapshot(self) -> None:
         self.git("push", "-u", "origin", "HEAD")
         expected_head = self.commit_followup("release review follow-up")
