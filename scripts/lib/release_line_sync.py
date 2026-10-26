@@ -8,6 +8,11 @@ import time
 from contextlib import contextmanager
 from pathlib import Path
 
+try:
+    from .task_metadata import is_target_branch
+except ImportError:
+    from task_metadata import is_target_branch
+
 
 class SyncError(RuntimeError):
     pass
@@ -94,7 +99,8 @@ def current_line(root):
         data = json.loads(result.stdout)
     except json.JSONDecodeError as exc:
         raise SyncError("当前发布线入口未返回有效 JSON。") from exc
-    if not isinstance(data, dict) or not isinstance(data.get("branch"), str) or not data["branch"].startswith("release/") or not data.get("state_sha"):
+    if (not isinstance(data, dict) or not isinstance(data.get("branch"), str)
+            or not is_target_branch(data["branch"]) or not data.get("state_sha")):
         raise SyncError("当前发布线入口缺少 branch 或 state_sha。")
     return data
 

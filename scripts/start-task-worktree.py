@@ -10,7 +10,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 from release_line_sync import SyncError, release_line_lock, sync_current_release
-from task_metadata import TaskMetadataError, read_task_metadata, write_task_metadata
+from task_metadata import ENVIRONMENT_BRANCHES, TaskMetadataError, read_task_metadata, write_task_metadata
 
 
 ALLOWED_TYPES = ("feature", "fix", "hotfix", "docs", "chore")
@@ -82,6 +82,8 @@ def build_branch(task_type, issue, summary):
 
 
 def validate_existing_branch(branch):
+    if branch in ENVIRONMENT_BRANCHES:
+        return branch
     match = RELEASE_RE.fullmatch(branch)
     if match:
         description = match.group(4)

@@ -720,5 +720,22 @@ class ReleaseLineTest(ReleaseLineFixture, unittest.TestCase):
         self.assertIn("日期须晚于当前发布线", duplicate.stderr)
 
 
+    def test_environment_branch_activates_and_keeps_environment_candidates(self):
+        for name in ("dev", "test", "release"):
+            self.release(name)
+        listed = self.command("list", "--json")
+        self.assertEqual(0, listed.returncode, listed.stderr)
+        self.assertEqual({"dev", "test", "release"}, set(json.loads(listed.stdout)["unclassified"]))
+        switched = self.command("activate", "--branch", "release", "--user-authorized",
+                                "--adopt-legacy", "--pr-snapshot", self.snapshot(), "--json")
+        self.assertEqual(0, switched.returncode, switched.stderr)
+        data = json.loads(switched.stdout)
+        self.assertEqual("release", data["branch"])
+        self.assertEqual({"dev", "test"}, set(data["legacy"]))
+        current = json.loads(self.command("current", "--json").stdout)
+        self.assertEqual("release", current["branch"])
+        self.assertEqual({"dev", "test"}, set(current["legacy"]))
+
+
 if __name__ == "__main__":
     unittest.main()
