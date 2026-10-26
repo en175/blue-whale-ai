@@ -287,7 +287,7 @@ class PublishReviewPackageTest(unittest.TestCase):
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
         self.assertEqual(".githooks", self.git("config", "--get", "core.hooksPath"))
         self.assertEqual(".githooks", self.git("config", "--local", "--get", "core.hooksPath"))
-        self.assertIn("ensure --stage pr --json", self.verification_log.read_text(encoding="utf-8"))
+        self.assertIn("ensure --stage pr --target-branch", self.verification_log.read_text(encoding="utf-8"))
 
     def test_head_changed_during_local_checks_is_not_pushed(self) -> None:
         fake_node = self.fake_bin / "node"
@@ -467,30 +467,35 @@ class PublishReviewPackageTest(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("target=release/prod", self.publish_marker().read_text(encoding="utf-8"))
-        self.assertIn("check --stage pr --json", self.verification_log.read_text(encoding="utf-8"))
+        self.assertIn("check --stage pr --target-branch", self.verification_log.read_text(encoding="utf-8"))
 
     def test_create_mode_supports_environment_target_and_binds_marker(self) -> None:
         for target in ("dev", "test"):
             with self.subTest(target=target):
                 self.git("branch", target, cwd=self.main)
                 self.git("push", "origin", target, cwd=self.main)
-                metadata = (Path(self.git("rev-parse", "--absolute-git-dir"))
-                            / "blue-whale" / "task-base.json")
-                data = json.loads(metadata.read_text(encoding="utf-8"))
-                data["target_branch"] = target
-                metadata.write_text(json.dumps(data), encoding="utf-8")
-                try:
-                    result = self.invoke(
-                        "--user-authorized", "--create-pr", "--target-branch", target, "--json"
-                    )
+                result = self.invoke(
+                    "--user-authorized", "--create-pr", "--target-branch", target, "--json"
+                )
 
-                    self.assertEqual(result.returncode, 0, result.stderr)
-                    self.assertIn(
-                        f"target={target}", self.publish_marker().read_text(encoding="utf-8")
-                    )
-                finally:
-                    data["target_branch"] = "release/prod"
-                    metadata.write_text(json.dumps(data), encoding="utf-8")
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn(
+                    f"target={target}", self.publish_marker().read_text(encoding="utf-8")
+                )
+
+    def test_same_task_branch_advances_across_environment_targets(self) -> None:
+        for target in ("dev", "test"):
+            with self.subTest(target=target):
+                self.git("branch", target, cwd=self.main)
+                self.git("push", "origin", target, cwd=self.main)
+                result = self.invoke(
+                    "--user-authorized", "--create-pr", "--target-branch", target, "--json"
+                )
+
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn(
+                    f"target={target}", self.publish_marker().read_text(encoding="utf-8")
+                )
 
     def test_create_mode_requires_explicit_target_branch(self) -> None:
         result = self.invoke("--user-authorized", "--create-pr", "--json")
@@ -535,26 +540,7 @@ class PublishReviewPackageTest(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.response(result)["head"], expected_head)
-        self.assertIn("check --stage pr --json", self.verification_log.read_text(encoding="utf-8"))
-
-    def test_update_mode_rejects_snapshot_target_outside_task_metadata(self) -> None:
-        remote_head = self.git("rev-parse", "HEAD")
-        self.git("push", "-u", "origin", "HEAD")
-        self.commit_followup("review fix")
-        (self.main / "upstream.txt").write_text("upstream\n", encoding="utf-8")
-        self.git("add", "upstream.txt", cwd=self.main)
-        self.git("commit", "-m", "chore: advance master", cwd=self.main)
-        self.git("push", "origin", "release/prod", cwd=self.main)
-        synced = run("bash", str(SYNC_SCRIPT), "sync", "--json", cwd=self.worktree)
-        self.assertEqual(synced.returncode, 0, synced.stderr)
-
-        result = self.invoke_update(
-            self.pr_snapshot(target_branch="release/other", head_sha=remote_head,
-                             changed_files=["task.txt"])
-        )
-
-        self.assertEqual(result.returncode, 12)
-        self.assertEqual(self.response(result)["status"], "TASK_BASE_INVALID")
+        self.assertIn("check --stage pr --target-branch", self.verification_log.read_text(encoding="utf-8"))
 
     def test_update_mode_rejects_explicit_target_even_when_master(self) -> None:
         result = self.invoke_update(self.pr_snapshot(), "--target-branch", "master")

@@ -34,7 +34,7 @@
 
 - **不受白名单约束**：`dev` / `test` / `release` 是固定环境名，不套用五前缀，也不要求中文简述。
 - **任务分支固定从 `origin/master` 拉**：工单改动在 `feature|fix|hotfix|docs|chore` 分支上完成，命名规范不变；开工时用 `--target-branch` 声明这条任务之后要合入哪条分支。
-- **PR 必须显式指定目标**：首次发布入口 `publish-review-package.sh --create-pr` 必须带 `--target-branch`，不传直接拒绝。合法目标是 `master`、`dev`、`test`、`release`（兼容 `release/*` 批次）；目标须与任务开工时记录的一致，PR Hook 用同一白名单校验。
+- **PR 必须显式指定目标**：首次发布入口 `publish-review-package.sh --create-pr` 必须带 `--target-branch`，不传直接拒绝。合法目标是 `master`、`dev`、`test`、`release`（兼容 `release/*` 批次），PR Hook 用同一白名单校验。**同一条任务分支可依次发往 `dev` → `test` → `release`**，每次带对应目标，验证凭证按目标分别生成；开工时记录的 `target_branch` 只是默认目标，不限制后续改投。
 - **工具链与平台改动直接投 `master`**：改的是所有人共用的脚本、hook 或规范时，`--target-branch master`；合入 master 后，之后从 master 拉起的所有新分支自动继承。
 - **只许合入，禁直推**：`master` / `dev` / `test` / `release` 四条同受保护，`block-push-to-master.sh` 拒绝本地直接 push；改动只能经 PR 合并（仅 `merge` 方法）。
 - **裸 `release` 与 `release/` 前缀互斥**：Git 不允许 `refs/heads/release` 与 `refs/heads/release/*` 并存。启用裸 `release` 前必须先清空全部 `release/*` 批次分支。
