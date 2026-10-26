@@ -1439,10 +1439,19 @@ assert_exit 2 "release: 缺 source_branch PR 拦截"
 run_hook "$RELEASE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/x","target_branch":"develop","draft":"false","title":"test"}}'
 assert_exit 2 "release: 非 release 目标 PR 拦截"
 
+for environment_target in dev test release; do
+  run_command_hook "printf '%s' '$environment_target' | python3 \"$HOOK_DIR/lib/pretool.py\" target-branch" '{"tool_input":{}}'
+  assert_exit 0 "pretool: 环境分支 $environment_target 可作为 PR 目标"
+done
+for rejected_target in master main develop release/; do
+  run_command_hook "printf '%s' '$rejected_target' | python3 \"$HOOK_DIR/lib/pretool.py\" target-branch" '{"tool_input":{}}'
+  assert_exit 1 "pretool: $rejected_target 不可作为普通任务 PR 目标"
+done
+
 write_publish_marker "feature/x" "master"
 run_hook "$RELEASE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/x","target_branch":"master","draft":"false","title":"test"}}'
 assert_exit 2 "release: 旧 master 标记仍拒绝普通任务 PR"
-assert_stderr_has "生产 hotfix" "release: master 目标指向独立授权通道"
+assert_stderr_has "只允许合入 release/* 或 dev/test/release" "release: master 目标指向独立授权通道"
 remove_publish_marker feature/x
 
 write_publish_marker "feature/x" "release/prod"
@@ -2524,9 +2533,9 @@ assert_file_not_has_text "scripts/start-task-worktree.sh" "git worktree" "workfl
 assert_file_not_has_text "scripts/cleanup-task-worktree.sh" "sync-master.sh" "workflow: cleanup-task-worktree 不再同步用户本地 master"
 assert_file_not_has_text "scripts/publish-review-package.sh" "任务 worktree 内执行" "workflow: publish-review-package 支持发布包装分支"
 assert_file_has_text "scripts/start-task-worktree.py" 'with release_line_lock(root)' "workflow: 同步与建任务区共用发布线锁"
-assert_file_has_text "scripts/start-task-worktree.py" 'synced = sync_current_release(root)' "workflow: 开工前同步活动发布线"
-assert_file_has_text "scripts/start-task-worktree.py" '"worktree", "add", str(target), "-b", branch, synced["sha"]' "workflow: worktree 基于同步后的精确 SHA"
-assert_file_has_text "scripts/start-task-worktree.py" 'write_task_metadata(target, synced["branch"], synced["sha"],' "workflow: 开工后记录目标发布线与起点"
+assert_file_has_text "scripts/start-task-worktree.py" 'start_sha = git(root, "rev-parse", "--verify", "origin/master")' "workflow: 开工起点固定取 origin/master"
+assert_file_has_text "scripts/start-task-worktree.py" '"worktree", "add", str(target), "-b", branch, start_sha' "workflow: worktree 基于 origin/master 精确 SHA"
+assert_file_has_text "scripts/start-task-worktree.py" 'write_task_metadata(target, args.target_branch, start_sha,' "workflow: 开工后记录目标环境分支与起点"
 assert_file_has_text "AGENTS.md" '@CLAUDE.md 是本仓库团队 Agent 规则的唯一权威源' "workflow: AGENTS 索引 CLAUDE 权威源"
 assert_file_has_text "docs/agents/hooks/README.md" "python3 scripts/check-hook-closed-loop.py" "workflow: 新人路径包含三端闭环检查"
 assert_file_has_text "docs/agents/hooks/README.md" "python3 scripts/query-hook-audit.py" "workflow: 新人路径包含审计查询入口"
@@ -2906,7 +2915,7 @@ if [ -f "$CASE_PROBE_DIR/mixedcaseprobe" ]; then
     git branch "fix/占位分支回归"
   )
   CASE_REPO_LOWER="$(printf '%s' "$CASE_REPO" | tr 'A-Z' 'a-z')"
-  run_repo_script "$CASE_REPO_LOWER" "$CASE_REPO_LOWER/scripts/start-task-worktree.sh" --type fix --no-issue --summary 占位分支回归
+  run_repo_script "$CASE_REPO_LOWER" "$CASE_REPO_LOWER/scripts/start-task-worktree.sh" --type fix --no-issue --summary 占位分支回归 --target-branch release
   assert_exit 1 "start-entry: 小写拼写调入口不被守卫误拦"
   assert_stderr_has "本地分支已存在" "start-entry: 守卫放行后撞分支存在短路"
   rm -rf "$CASE_REPO_PARENT"

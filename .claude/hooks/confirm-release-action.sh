@@ -348,10 +348,8 @@ if [ "$TOOL_NAME" = "mcp__gitee-ent__create_enterprise_repo_pull" ]; then
     *) block "创建 Gitee PR 时必须显式传 draft=true 或 draft=false。" ;;
   esac
 
-  case "$TARGET_BRANCH" in
-    release/?*) ;;
-    *) block "普通任务发布审查包只允许创建指向 release/* 的 PR；生产 hotfix 须独立授权流程。" ;;
-  esac
+  printf '%s' "$TARGET_BRANCH" | python3 "$PRETOOL" target-branch >/dev/null || \
+    block "普通任务 PR 只允许合入 release/* 或 dev/test/release；当前目标：${TARGET_BRANCH:-空}。"
 
   case "$SOURCE_BRANCH" in
     feature/*|fix/*|hotfix/*|docs/*|chore/*) ;;

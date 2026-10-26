@@ -9,7 +9,7 @@ import unicodedata
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
-from release_line_sync import SyncError, release_line_lock, sync_current_release
+from release_line_sync import SyncError, configure_git_hooks, release_line_lock
 from task_metadata import ENVIRONMENT_BRANCHES, TaskMetadataError, read_task_metadata, write_task_metadata
 
 
@@ -138,6 +138,14 @@ def create_worktree(args):
     summary = normalize_summary(args.summary)
     branch = build_branch(args.task_type, issue, summary)
     target = derive_target(root, args.task_type, issue, summary)
+    try:
+        if args.target_branch not in ENVIRONMENT_BRANCHES:
+            validate_existing_branch(args.target_branch)
+            if not args.target_branch.startswith("release/"):
+                raise WorkflowError(args.target_branch)
+    except WorkflowError:
+        raise WorkflowError("--target-branch 必须是 dev、test、release 或 release/<批次>：{}".format(
+            args.target_branch))
     if args.integration_worktree and not issue:
         raise WorkflowError("整包子票必须用 --issue 指定已核实父子关系的工单号。")
 
@@ -147,15 +155,18 @@ def create_worktree(args):
         raise WorkflowError("目标 Work Tree 已存在：{}".format(target))
 
     with release_line_lock(root):
-        before_sync = git(root, "rev-parse", "HEAD").stdout.strip()
         parent_target, parent_sha = (integration_commit(root, args.integration_worktree)
                                      if args.integration_worktree else (None, None))
-        synced = sync_current_release(root)
-        if parent_target and parent_target != synced["branch"]:
-            raise WorkflowError("父工作树目标发布线 {} 与当前发布线 {} 不匹配；发布线同步前 {}，同步后 {}。".format(
-                parent_target, synced["branch"], before_sync, synced["sha"]))
+        if parent_target and parent_target != args.target_branch:
+            raise WorkflowError("父工作树目标 {} 与本次目标 {} 不匹配。".format(
+                parent_target, args.target_branch))
+        fetch = git(root, "fetch", "origin", "--prune", check=False)
+        if fetch.returncode:
+            raise WorkflowError("远端不可达，无法确认任务起点：" + (fetch.stderr or fetch.stdout).strip())
+        start_sha = git(root, "rev-parse", "--verify", "origin/master").stdout.strip()
+        configure_git_hooks(root)
         target.parent.mkdir(parents=True, exist_ok=True)
-        git(root, "worktree", "add", str(target), "-b", branch, synced["sha"])
+        git(root, "worktree", "add", str(target), "-b", branch, start_sha)
         try:
             inherited_sha = None
             if parent_sha:
@@ -164,21 +175,19 @@ def create_worktree(args):
                 if merge.returncode:
                     raise WorkflowError("整包继承合并失败：{}".format((merge.stderr or merge.stdout).strip()))
                 inherited_sha = git(target, "rev-parse", "HEAD").stdout.strip()
-            write_task_metadata(target, synced["branch"], synced["sha"], inherited_sha=inherited_sha)
+            write_task_metadata(target, args.target_branch, start_sha, inherited_sha=inherited_sha)
         except (WorkflowError, TaskMetadataError) as exc:
             removed = git(root, "worktree", "remove", "--force", str(target), check=False)
             deleted = git(root, "branch", "-D", branch, check=False) if removed.returncode == 0 else None
             cleanup = ("已清理新建子工作树与分支" if deleted and deleted.returncode == 0
                        else "自动清理失败；worktree: {}；branch: {}".format(
                            removed.stderr.strip(), deleted.stderr.strip() if deleted else "未执行"))
-            raise WorkflowError("{}；{}；发布线同步前 {}，同步后 {}。".format(
-                exc, cleanup, before_sync, synced["sha"])) from exc
+            raise WorkflowError("{}；{}；起点 {}。".format(exc, cleanup, start_sha)) from exc
 
-    print("✅ 发布线同步：{}".format(synced["action"]))
     print("✅ 已创建中文任务分支：{}".format(branch))
     print("✅ Work Tree：{}".format(target))
-    print("✅ 目标发布线：{}".format(synced["branch"]))
-    print("✅ 起点 SHA：{}".format(synced["sha"]))
+    print("✅ 任务起点：origin/master {}".format(start_sha))
+    print("✅ PR 目标分支：{}".format(args.target_branch))
     if parent_sha:
         print("✅ 父整合提交：{}；继承提交：{}".format(parent_sha, inherited_sha))
     print("下一步：将 Agent 工作目录切换到该 Work Tree；无法切换时在该目录开启新会话。")
@@ -193,6 +202,8 @@ def parse_start_args(argv):
     issue_group.add_argument("--issue", help="Gitee 工单号，例如 IK094T")
     issue_group.add_argument("--no-issue", action="store_true", help="明确声明本任务没有工单")
     parser.add_argument("--summary", required=True, help="6–15 字中文动宾简述")
+    parser.add_argument("--target-branch", required=True,
+                        help="PR 目标分支：dev、test 或 release（也兼容 release/*）")
     parser.add_argument("--integration-worktree", type=Path,
                         help="整包子票的父整合任务工作树绝对路径；先核实 Gitee 父子工单关系")
     return parser.parse_args(argv)

@@ -222,7 +222,7 @@ class PublishReviewPackageTest(unittest.TestCase):
         metadata["inherited_sha"] = metadata["start_sha"]
         metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
 
-        created = self.invoke("--user-authorized", "--create-pr", "--json")
+        created = self.invoke("--user-authorized", "--create-pr", "--target-branch", "release/prod", "--json")
         updated = self.invoke_update(self.pr_snapshot())
 
         self.assertEqual(self.response(created)["status"], "INTEGRATION_CHILD_NO_PR")
@@ -231,7 +231,7 @@ class PublishReviewPackageTest(unittest.TestCase):
         self.assertFalse(self.git("ls-remote", "--heads", "origin", "refs/heads/{}".format(BRANCH)))
 
     def test_create_and_update_modes_are_mutually_exclusive(self) -> None:
-        result = self.invoke("--user-authorized", "--create-pr", "--update-pr", "65", "--json")
+        result = self.invoke("--user-authorized", "--create-pr", "--target-branch", "release/prod", "--update-pr", "65", "--json")
 
         self.assertEqual(result.returncode, 2)
         self.assertEqual(self.response(result)["status"], "INVALID_MODE")
@@ -251,7 +251,7 @@ class PublishReviewPackageTest(unittest.TestCase):
     def test_create_mode_pushes_and_writes_create_marker(self) -> None:
         expected_head = self.git("rev-parse", "HEAD")
 
-        result = self.invoke("--user-authorized", "--create-pr", "--json")
+        result = self.invoke("--user-authorized", "--create-pr", "--target-branch", "release/prod", "--json")
 
         self.assertEqual(result.returncode, 0, result.stderr)
         payload = self.response(result)
@@ -272,7 +272,7 @@ class PublishReviewPackageTest(unittest.TestCase):
         marker = Path(self.git("rev-parse", "--absolute-git-dir")) / "agent-sync-recovery.json"
         marker.write_text(json.dumps({"rebase_tree_failed": True}), encoding="utf-8")
 
-        rejected = self.invoke("--user-authorized", "--create-pr", "--json")
+        rejected = self.invoke("--user-authorized", "--create-pr", "--target-branch", "release/prod", "--json")
 
         self.assertNotEqual(rejected.returncode, 0)
         self.assertEqual(self.response(rejected)["status"], "INVALID_RECOVERY")
@@ -283,7 +283,7 @@ class PublishReviewPackageTest(unittest.TestCase):
     def test_existing_worktree_hook_override_is_enabled_before_publication(self) -> None:
         self.git("config", "extensions.worktreeConfig", "true")
         self.git("config", "--worktree", "core.hooksPath", "/dev/null")
-        result = self.invoke("--user-authorized", "--create-pr", "--json")
+        result = self.invoke("--user-authorized", "--create-pr", "--target-branch", "release/prod", "--json")
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
         self.assertEqual(".githooks", self.git("config", "--get", "core.hooksPath"))
         self.assertEqual(".githooks", self.git("config", "--local", "--get", "core.hooksPath"))
@@ -301,7 +301,7 @@ class PublishReviewPackageTest(unittest.TestCase):
             "exec \"$REAL_NODE\" \"$@\"\n",
             encoding="utf-8",
         )
-        result = self.invoke("--user-authorized", "--create-pr", "--json")
+        result = self.invoke("--user-authorized", "--create-pr", "--target-branch", "release/prod", "--json")
         self.assertEqual(11, result.returncode, result.stdout + result.stderr)
         self.assertEqual("HEAD_CHANGED", self.response(result)["status"])
         self.assertEqual("", self.git("ls-remote", "--heads", "origin", f"refs/heads/{BRANCH}"))
@@ -325,7 +325,7 @@ class PublishReviewPackageTest(unittest.TestCase):
         )
         fake_git.chmod(0o755)
         env = {**self.base_env, "REAL_GIT": real_git, "FIXTURE_HEAD_MOVED": str(moved)}
-        result = self.invoke("--user-authorized", "--create-pr", "--json", env=env)
+        result = self.invoke("--user-authorized", "--create-pr", "--target-branch", "release/prod", "--json", env=env)
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
         self.assertNotEqual(verified_head, self.git("rev-parse", "HEAD"))
         self.assertEqual(verified_head, self.git("ls-remote", "--heads", "origin", f"refs/heads/{BRANCH}").split()[0])
@@ -334,7 +334,7 @@ class PublishReviewPackageTest(unittest.TestCase):
 
     def test_create_mode_can_bind_an_explicit_draft_marker(self) -> None:
         result = self.invoke(
-            "--user-authorized", "--create-pr", "--draft-pr",
+            "--user-authorized", "--create-pr", "--target-branch", "release/prod", "--draft-pr",
             "--draft-reason", "用户明确要求先创建草稿", "--json",
         )
 
@@ -345,7 +345,7 @@ class PublishReviewPackageTest(unittest.TestCase):
     def test_draft_requires_a_single_line_nonempty_basis_before_push(self) -> None:
         for reason in (None, "", " \t", "用户要求\ndraft=false", "用户要求\r其他字段"):
             with self.subTest(reason=reason):
-                args = ["--user-authorized", "--create-pr", "--draft-pr", "--json"]
+                args = ["--user-authorized", "--create-pr", "--target-branch", "release/prod", "--draft-pr", "--json"]
                 if reason is not None:
                     args.extend(["--draft-reason", reason])
                 result = self.invoke(*args)
@@ -358,7 +358,7 @@ class PublishReviewPackageTest(unittest.TestCase):
         report = "工程交付 PASS；部署后业务验收 NOT_RUN，原因：尚未部署，责任：业务验收人"
         self.commit_followup(report)
 
-        result = self.invoke("--user-authorized", "--create-pr", "--json")
+        result = self.invoke("--user-authorized", "--create-pr", "--target-branch", "release/prod", "--json")
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("draft=false", self.publish_marker().read_text(encoding="utf-8"))
@@ -380,7 +380,7 @@ class PublishReviewPackageTest(unittest.TestCase):
                             'exec "$REAL_NODE" "$@"\n',
                             encoding="utf-8",
                         )
-                        args = ["--user-authorized", "--create-pr", "--json"]
+                        args = ["--user-authorized", "--create-pr", "--target-branch", "release/prod", "--json"]
                         if draft:
                             args.extend(["--draft-pr", "--draft-reason", "已确认规格明确要求草稿"])
                         result = self.invoke(*args)
@@ -391,13 +391,13 @@ class PublishReviewPackageTest(unittest.TestCase):
                         self.assertEqual("", self.git("ls-remote", "--heads", "origin", f"refs/heads/{BRANCH}"))
 
     def test_draft_reason_requires_draft_creation_mode(self) -> None:
-        result = self.invoke("--user-authorized", "--create-pr", "--draft-reason", "用户要求", "--json")
+        result = self.invoke("--user-authorized", "--create-pr", "--target-branch", "release/prod", "--draft-reason", "用户要求", "--json")
         self.assertEqual(result.returncode, 2)
         self.assertEqual(self.response(result)["status"], "INVALID_ARGUMENT")
         self.assertFalse(self.publish_marker().exists())
 
     def test_create_pr_hook_rejects_source_commit_after_marker(self) -> None:
-        created = self.invoke("--user-authorized", "--create-pr", "--json")
+        created = self.invoke("--user-authorized", "--create-pr", "--target-branch", "release/prod", "--json")
         self.assertEqual(0, created.returncode, created.stderr)
         self.assertEqual(0, self.invoke_create_pr_hook().returncode)
         self.commit_followup("after marker")
@@ -409,7 +409,7 @@ class PublishReviewPackageTest(unittest.TestCase):
         self.assertIn("源分支", blocked.stderr)
 
     def test_create_pr_hook_rejects_target_advance_after_marker(self) -> None:
-        created = self.invoke("--user-authorized", "--create-pr", "--json")
+        created = self.invoke("--user-authorized", "--create-pr", "--target-branch", "release/prod", "--json")
         self.assertEqual(0, created.returncode, created.stderr)
         self.assertEqual(0, self.invoke_create_pr_hook().returncode)
         self.git("commit", "--allow-empty", "-m", "chore: advance target", cwd=self.main)
@@ -421,7 +421,7 @@ class PublishReviewPackageTest(unittest.TestCase):
         self.assertIn("目标分支", blocked.stderr)
 
     def test_create_pr_hook_rejects_other_repository_scope(self) -> None:
-        created = self.invoke("--user-authorized", "--create-pr", "--json")
+        created = self.invoke("--user-authorized", "--create-pr", "--target-branch", "release/prod", "--json")
         self.assertEqual(0, created.returncode, created.stderr)
 
         same_repository = self.invoke_create_pr_hook(enterprise_id=16660949, project_id=48854568)
@@ -451,7 +451,7 @@ class PublishReviewPackageTest(unittest.TestCase):
         env = self.base_env.copy()
         env["LC_ALL"] = "C.UTF-8"
 
-        result = self.invoke("--user-authorized", "--create-pr", "--json", env=env)
+        result = self.invoke("--user-authorized", "--create-pr", "--target-branch", "release/prod", "--json", env=env)
 
         self.assertEqual(result.returncode, 10, result.stderr)
         self.assertEqual(self.response(result)["status"], "NEEDS_SYNC")
@@ -491,6 +491,13 @@ class PublishReviewPackageTest(unittest.TestCase):
                 finally:
                     data["target_branch"] = "release/prod"
                     metadata.write_text(json.dumps(data), encoding="utf-8")
+
+    def test_create_mode_requires_explicit_target_branch(self) -> None:
+        result = self.invoke("--user-authorized", "--create-pr", "--json")
+
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(self.response(result)["status"], "INVALID_TARGET_BRANCH")
+        self.assertFalse(self.publish_marker().exists())
 
     def test_create_mode_rejects_unprotected_target(self) -> None:
         for target in ("develop", "release/"):
@@ -1398,7 +1405,7 @@ class PublishReviewPackageTest(unittest.TestCase):
     def test_remote_read_failure_returns_structured_status(self) -> None:
         self.git("remote", "set-url", "origin", str(self.root / "missing-origin.git"))
 
-        result = self.invoke("--user-authorized", "--create-pr", "--json")
+        result = self.invoke("--user-authorized", "--create-pr", "--target-branch", "release/prod", "--json")
 
         self.assertEqual(result.returncode, 7, result.stderr)
         self.assertEqual(self.response(result)["status"], "REMOTE_READ_FAILED")
@@ -1419,7 +1426,7 @@ class PublishReviewPackageTest(unittest.TestCase):
         env["PATH"] = str(fake_bin) + os.pathsep + env["PATH"]
 
         result = subprocess.run(
-            [BASH, str(PUBLISH_SCRIPT), "--user-authorized", "--create-pr", "--json"],
+            [BASH, str(PUBLISH_SCRIPT), "--user-authorized", "--create-pr", "--target-branch", "release/prod", "--json"],
             cwd=self.worktree,
             text=True,
             encoding="utf-8",
@@ -1544,7 +1551,7 @@ class PublishReviewPackageTest(unittest.TestCase):
         self.git("push", "origin", "release/prod", cwd=self.main)
         synced = run("bash", str(SYNC_SCRIPT), "sync", "--json", cwd=self.worktree)
         self.assertEqual(synced.returncode, 0, synced.stderr)
-        published = self.invoke("--user-authorized", "--create-pr", "--json")
+        published = self.invoke("--user-authorized", "--create-pr", "--target-branch", "release/prod", "--json")
         self.assertEqual(published.returncode, 0, published.stderr)
 
         rollback = run("bash", str(SYNC_SCRIPT), "rollback", "--json", cwd=self.worktree)
@@ -1591,7 +1598,7 @@ class PublishReviewPackageTest(unittest.TestCase):
         env["PATH"] = str(fake_bin) + os.pathsep + env["PATH"]
 
         result = subprocess.run(
-            [BASH, str(PUBLISH_SCRIPT), "--user-authorized", "--create-pr", "--json"],
+            [BASH, str(PUBLISH_SCRIPT), "--user-authorized", "--create-pr", "--target-branch", "release/prod", "--json"],
             cwd=self.worktree,
             text=True,
             encoding="utf-8",

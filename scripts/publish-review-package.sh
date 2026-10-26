@@ -71,7 +71,7 @@ fail_status() {
 usage() {
   cat <<'EOF'
 用法：
-  scripts/publish-review-package.sh --user-authorized --create-pr [--target-branch release/<name>] [--draft-pr --draft-reason <依据>] [--json]
+  scripts/publish-review-package.sh --user-authorized --create-pr --target-branch dev|test|release [--draft-pr --draft-reason <依据>] [--json]
   scripts/publish-review-package.sh --user-authorized --update-pr <PR编号> --pr-snapshot <JSON文件> [--allow-scope-file <路径>] [--json]
 
 --create-pr         首次推送并生成创建 PR 的短期发布标记
@@ -196,8 +196,7 @@ fi
 [ "${#PYTHON[@]}" -gt 0 ] || fail_status 1 PYTHON_UNAVAILABLE "读取任务起点需要可用的 Python 3。"
 metadata=("${PYTHON[@]}" "$SCRIPT_ROOT/scripts/lib/task_metadata.py" read --worktree "$ROOT")
 if [ "$MODE" = create ] && [ "$TARGET_BRANCH_EXPLICIT" = 0 ]; then
-  TARGET_BRANCH="$("${metadata[@]}" --field target_branch)" \
-    || fail_status 12 TASK_BASE_INVALID "无法读取任务记录的目标发布线。"
+  fail_status 2 INVALID_TARGET_BRANCH "首次发布必须显式指定 --target-branch dev|test|release（或 release/*）。"
 fi
 "${PYTHON[@]}" "$SCRIPT_ROOT/scripts/lib/task_metadata.py" check-target --branch "$TARGET_BRANCH" >/dev/null \
   || fail_status 2 INVALID_TARGET_BRANCH "目标分支必须是 release/* 或 dev/test/release：$TARGET_BRANCH"
