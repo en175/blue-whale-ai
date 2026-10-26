@@ -184,6 +184,10 @@ class StartTaskWorktreeTest(unittest.TestCase):
     def test_branch_validation_mode_supports_hooks(self):
         valid = self.invoke("--validate-branch", "chore/实施极简工作树流程")
         self.assertEqual(0, valid.returncode, valid.stderr)
+        for branch in ("dev", "test", "release"):
+            with self.subTest(branch=branch):
+                environment = self.invoke("--validate-branch", branch)
+                self.assertEqual(0, environment.returncode, environment.stderr)
         invalid_branches = (
             "bug/修复工作树写入护栏",
             "chore/implement-worktree",

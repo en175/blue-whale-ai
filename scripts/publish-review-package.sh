@@ -175,7 +175,8 @@ import json, sys
 print(json.load(open(sys.argv[1], encoding="utf-8")).get("target_branch", ""))
 PY
 )" || fail_status 8 PR_EVIDENCE_INVALID "无法从 PR 快照读取目标分支。"
-  case "$TARGET_BRANCH" in release/?*) ;; *) fail_status 8 PR_EVIDENCE_INVALID "PR 目标分支必须是 release/*。" ;; esac
+  "${PYTHON[@]}" "$SCRIPT_ROOT/scripts/lib/task_metadata.py" check-target --branch "$TARGET_BRANCH" >/dev/null \
+    || fail_status 8 PR_EVIDENCE_INVALID "PR 目标分支必须是 release/* 或 dev/test/release。"
 fi
 
 ROOT="$(git rev-parse --show-toplevel)"
@@ -198,7 +199,8 @@ if [ "$MODE" = create ] && [ "$TARGET_BRANCH_EXPLICIT" = 0 ]; then
   TARGET_BRANCH="$("${metadata[@]}" --field target_branch)" \
     || fail_status 12 TASK_BASE_INVALID "无法读取任务记录的目标发布线。"
 fi
-case "$TARGET_BRANCH" in release/?*) ;; *) fail_status 2 INVALID_TARGET_BRANCH "目标分支必须是 release/*：$TARGET_BRANCH" ;; esac
+"${PYTHON[@]}" "$SCRIPT_ROOT/scripts/lib/task_metadata.py" check-target --branch "$TARGET_BRANCH" >/dev/null \
+  || fail_status 2 INVALID_TARGET_BRANCH "目标分支必须是 release/* 或 dev/test/release：$TARGET_BRANCH"
 start_sha="$("${metadata[@]}" --target-branch "$TARGET_BRANCH" --field start_sha)" \
   || fail_status 12 TASK_BASE_INVALID "任务起点或目标发布线与元数据不符。"
 inherited_sha="$("${metadata[@]}" --target-branch "$TARGET_BRANCH" --field inherited_sha)" \

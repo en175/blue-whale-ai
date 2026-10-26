@@ -12,6 +12,11 @@ from pathlib import Path
 
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 TASK_PREFIXES = ("feature/", "fix/", "hotfix/", "docs/", "chore/")
+ENVIRONMENT_BRANCHES = ("dev", "test", "release")
+
+
+def is_target_branch(branch):
+    return (branch.startswith("release/") and len(branch) > len("release/")) or branch in ENVIRONMENT_BRANCHES
 
 
 class TaskMetadataError(RuntimeError):
@@ -49,7 +54,7 @@ def validate(root, data, expected_target=None):
         raise TaskMetadataError("任务基线元数据字段无效。")
     if data["version"] != 1 or not isinstance(data["task_branch"], str) or not isinstance(data["target_branch"], str):
         raise TaskMetadataError("任务基线元数据版本或字段类型无效。")
-    if not data["target_branch"].startswith("release/") or not isinstance(data["start_sha"], str) or not SHA_RE.fullmatch(data["start_sha"]):
+    if not is_target_branch(data["target_branch"]) or not isinstance(data["start_sha"], str) or not SHA_RE.fullmatch(data["start_sha"]):
         raise TaskMetadataError("任务基线元数据中的发布线或起点 SHA 无效。")
     if data["task_branch"] != task_branch(root):
         raise TaskMetadataError("任务基线元数据与当前任务分支不符。")
@@ -148,8 +153,15 @@ def main(argv=None):
     repair.add_argument("--start-sha", required=True)
     repair.add_argument("--user-authorized", action="store_true")
     repair.add_argument("--worktree", type=Path, default=Path.cwd())
+    check = commands.add_parser("check-target")
+    check.add_argument("--branch", required=True)
     args = parser.parse_args(argv)
     try:
+        if args.command == "check-target":
+            if not is_target_branch(args.branch):
+                raise TaskMetadataError("目标必须是 release/* 或 dev/test/release 环境分支：{}".format(args.branch))
+            print(args.branch)
+            return 0
         if args.command == "read":
             data = read_task_metadata(args.worktree, args.target_branch)
         else:

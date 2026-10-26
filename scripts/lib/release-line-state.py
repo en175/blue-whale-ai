@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 
 from release_line_sync import SyncError, release_line_lock
-from task_metadata import TASK_PREFIXES, TaskMetadataError, read_task_metadata
+from task_metadata import ENVIRONMENT_BRANCHES, TASK_PREFIXES, TaskMetadataError, is_target_branch, read_task_metadata
 
 ROOT = Path(__file__).resolve().parents[2]
 STATE_REF = "refs/heads/chore/发布线状态记录"
@@ -40,6 +40,12 @@ def releases():
     output = git("for-each-ref", "--format=%(refname:lstrip=3)",
                  "refs/remotes/origin/release/*").stdout
     return sorted(filter(None, output.splitlines()))
+
+
+def environment_branches():
+    return [branch for branch in ENVIRONMENT_BRANCHES
+            if not git("show-ref", "--verify", "--quiet",
+                       f"refs/remotes/origin/{branch}", check=False).returncode]
 
 
 def release_date(branch):
@@ -93,16 +99,24 @@ def classify_releases(state, branches):
         latest_count = sum(day == newest for _, day in dated) if newest else 0
         unclassified = [branch for branch, day in dated
                         if day is None or (day == newest and latest_count > 1)]
+        unclassified += [branch for branch in environment_branches() if branch not in unclassified]
         return branches, [], unclassified
     active = state["active"]
-    if not active.startswith("release/") or active not in branches:
+    if not is_target_branch(active) or (active not in branches and active not in environment_branches()):
         raise ReleaseError(f"已启用的 {active} 在远端不存在，状态不一致。")
-    if any(not x.startswith("release/") for x in state["legacy"]):
+    if any(not is_target_branch(x) for x in state["legacy"]):
         raise ReleaseError("共享状态包含非法历史分支。")
     active_date = release_date(active)
     if active_date is None:
-        raise ReleaseError(f"已启用的 {active} 无法按日期识别，请负责人核对共享状态。")
+        pending, historical, unclassified = [], list(state["legacy"]), []
+        for branch in environment_branches():
+            if branch != active and branch not in historical:
+                pending.append(branch)
+        return pending, historical, unclassified
     pending, historical, unclassified = [], list(state["legacy"]), []
+    for branch in environment_branches():
+        if branch != active and branch not in historical:
+            pending.append(branch)
     for branch in branches:
         if branch == active or branch in historical:
             continue
@@ -227,8 +241,8 @@ def assert_main():
 
 
 def validate(branch):
-    if not branch.startswith("release/"):
-        raise ReleaseError("目标必须为 release/* 分支。")
+    if not is_target_branch(branch):
+        raise ReleaseError("目标必须为 release/* 分支或 dev/test/release 环境分支。")
     result = subprocess.run(
         [sys.executable, str(ROOT / "scripts/start-task-worktree.py"),
          "--validate-branch", branch], cwd=ROOT, text=True, encoding="utf-8",
@@ -380,7 +394,7 @@ def activate_locked(args):
     refresh()
     branches = releases()
     previous, state = read_state()
-    if args.branch not in branches:
+    if args.branch not in branches and args.branch not in environment_branches():
         raise ReleaseError(f"目标发布线 {args.branch} 在远端不存在。")
     if args.bootstrap_existing and state is not None:
         raise ReleaseError("--bootstrap-existing 仅适用于首次启用。")
@@ -402,17 +416,20 @@ def activate_locked(args):
             raise ReleaseError("本地旧发布线无同名远端，拒绝首次启用：" + ", ".join(local_only)
                                + "；未保存文件：" + ("; ".join(dirty) or "无")
                                + "；请负责人决定去向。")
-        all_releases = set(branches) | local_releases
+        all_releases = set(branches) | local_releases | set(environment_branches())
         target_date = release_date(args.branch)
-        if target_date is None or any(
+        if target_date is not None and any(
                 day is not None and day > target_date
                 for day in (release_date(name) for name in all_releases)):
             raise ReleaseError("首次启用目标须为日期最新的 release 分支。")
         others = sorted(x for x in all_releases if x != args.branch)
-        if others and not args.adopt_legacy:
+        environment_target = args.branch in ENVIRONMENT_BRANCHES
+        adopted = args.adopt_legacy or environment_target
+        if others and not adopted:
             raise ReleaseError("首次启用发现多条分支，请清点后显式传 --adopt-legacy：" + ", ".join(others))
-        unclassified = [name for name in others if release_date(name) in (None, target_date)]
-        if sorted(args.classify_legacy) != unclassified:
+        unclassified = [name for name in others
+                        if release_date(name) in (None, target_date) and name not in ENVIRONMENT_BRANCHES]
+        if sorted(args.classify_legacy) != unclassified and not environment_target:
             raise ReleaseError("首次启用有待归类分支：" + (", ".join(unclassified) or "无")
                                + "；确认其为历史后逐个传 --classify-legacy <分支名>，或撤回分支。")
         if others:
@@ -438,7 +455,10 @@ def activate_locked(args):
             emit({"branch": args.branch, "state_sha": previous, "candidates": [],
                   "legacy": historical}, args.json, f"当前已启用：{args.branch}")
             return
-        if args.branch in unclassified and args.adopt_legacy:
+        if args.branch in ENVIRONMENT_BRANCHES:
+            assert_closed(state["active"], args.pr_snapshot)
+            legacy = historical + [state["active"]]
+        elif args.branch in unclassified and args.adopt_legacy:
             if pending:
                 raise ReleaseError("还有日期更新的待授权候选：" + ", ".join(pending))
             assert_closed(state["active"], args.pr_snapshot)

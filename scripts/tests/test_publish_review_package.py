@@ -469,6 +469,29 @@ class PublishReviewPackageTest(unittest.TestCase):
         self.assertIn("target=release/prod", self.publish_marker().read_text(encoding="utf-8"))
         self.assertIn("check --stage pr --json", self.verification_log.read_text(encoding="utf-8"))
 
+    def test_create_mode_supports_environment_target_and_binds_marker(self) -> None:
+        for target in ("dev", "test"):
+            with self.subTest(target=target):
+                self.git("branch", target, cwd=self.main)
+                self.git("push", "origin", target, cwd=self.main)
+                metadata = (Path(self.git("rev-parse", "--absolute-git-dir"))
+                            / "blue-whale" / "task-base.json")
+                data = json.loads(metadata.read_text(encoding="utf-8"))
+                data["target_branch"] = target
+                metadata.write_text(json.dumps(data), encoding="utf-8")
+                try:
+                    result = self.invoke(
+                        "--user-authorized", "--create-pr", "--target-branch", target, "--json"
+                    )
+
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertIn(
+                        f"target={target}", self.publish_marker().read_text(encoding="utf-8")
+                    )
+                finally:
+                    data["target_branch"] = "release/prod"
+                    metadata.write_text(json.dumps(data), encoding="utf-8")
+
     def test_create_mode_rejects_unprotected_target(self) -> None:
         for target in ("develop", "release/"):
             with self.subTest(target=target):
