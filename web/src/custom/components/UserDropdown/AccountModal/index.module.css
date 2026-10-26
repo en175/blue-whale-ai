@@ -107,6 +107,10 @@
   border-color: #d64545;
 }
 
+.nicknameInput:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
 .grayButton {
   height: 36px;
   padding: 0 14px;
