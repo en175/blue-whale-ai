@@ -146,7 +146,7 @@ export function buildTx(
       findMany: vi.fn().mockResolvedValue([]),
       ...overrides.assets,
     },
-    canvas: {
+    project_canvas: {
       findFirst: vi.fn().mockResolvedValue({
         viewport_json: { x: 0, y: 0, zoom: 1 },
         nodes_json: [
@@ -159,7 +159,7 @@ export function buildTx(
           },
         ],
       }),
-      ...overrides.canvas,
+      ...overrides.project_canvas,
     },
     generation_jobs: {
       create: vi.fn().mockResolvedValue({

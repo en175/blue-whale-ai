@@ -56,7 +56,7 @@ describe("ProjectRepo GenerationInbox isolation", () => {
       project: { findMany: projectFindMany },
       project_asset: { findMany: linkFindMany },
       assets: { findMany: assetFindMany },
-      canvas: {
+      project_canvas: {
         findMany: canvasFindMany([
           {
             project_id: 1n,
@@ -104,7 +104,7 @@ describe("ProjectRepo GenerationInbox isolation", () => {
       project: { findMany: projectFindMany },
       project_asset: { findMany: linkFindMany },
       assets: { findMany: assetFindMany },
-      canvas: {
+      project_canvas: {
         findMany: canvasFindMany([
           { project_id: 1n, nodes_json: [mediaNode(11)] },
           { project_id: 2n, nodes_json: [mediaNode(99)] },
@@ -142,7 +142,7 @@ describe("ProjectRepo GenerationInbox isolation", () => {
           { id: 11n, project_id: 1n, url: "reused.png" },
         ]),
       },
-      canvas: {
+      project_canvas: {
         findMany: canvasFindMany([
           { project_id: 1n, nodes_json: [mediaNode(11)] },
           { project_id: 2n, nodes_json: [mediaNode(11)] },
@@ -164,7 +164,7 @@ describe("ProjectRepo GenerationInbox isolation", () => {
       project: { findMany: projectFindMany },
       project_asset: { findMany: vi.fn().mockResolvedValue([]) },
       assets: { findMany: vi.fn().mockResolvedValue([]) },
-      canvas: { findMany: canvasFindMany([{ project_id: 1n, nodes_json: [] }]) },
+      project_canvas: { findMany: canvasFindMany([{ project_id: 1n, nodes_json: [] }]) },
     } as unknown as PrismaClient;
 
     const views = await createProjectRepo(prisma).listByOwner("100");
@@ -185,7 +185,7 @@ describe("ProjectRepo GenerationInbox isolation", () => {
           { id: 12n, project_id: 1n, url: "deleted-from-canvas.png" },
         ]),
       },
-      canvas: {
+      project_canvas: {
         findMany: canvasFindMany([{ project_id: 1n, nodes_json: [mediaNode(11)] }]),
       },
     } as unknown as PrismaClient;
@@ -207,7 +207,7 @@ describe("ProjectRepo GenerationInbox isolation", () => {
           { id: 11n, project_id: 1n, url: "orphan.png" },
         ]),
       },
-      canvas: {
+      project_canvas: {
         findMany: canvasFindMany([{ project_id: 1n, nodes_json: [] }]),
       },
     } as unknown as PrismaClient;
@@ -229,7 +229,7 @@ describe("ProjectRepo GenerationInbox isolation", () => {
           { id: 11n, project_id: 1n, url: "product.png" },
         ]),
       },
-      canvas: {
+      project_canvas: {
         findMany: canvasFindMany([
           {
             project_id: 1n,
@@ -267,7 +267,7 @@ describe("ProjectRepo GenerationInbox isolation", () => {
           { id: 11n, project_id: 1n, url: "reused.png" },
         ]),
       },
-      canvas: {
+      project_canvas: {
         findMany: canvasFindMany([
           { project_id: 1n, nodes_json: [mediaNode(11)] },
           { project_id: 2n, nodes_json: [] },
@@ -300,7 +300,7 @@ describe("ProjectRepo GenerationInbox isolation", () => {
       project: { count: projectCount, findMany: projectFindMany },
       project_asset: { findMany: vi.fn().mockResolvedValue([]) },
       assets: { findMany: assetFindMany },
-      canvas: { findMany: canvasFindMany([{ project_id: 3n, nodes_json: [mediaNode(31)] }]) },
+      project_canvas: { findMany: canvasFindMany([{ project_id: 3n, nodes_json: [mediaNode(31)] }]) },
     } as unknown as PrismaClient;
 
     const page = await createProjectRepo(prisma).listByOwnerPaged("100", 2, 2);
@@ -677,7 +677,7 @@ describe("ProjectRepo last_opened_at / pinned_at (IKH1YI)", () => {
       project: { findMany: projectFindMany },
       project_asset: { findMany: vi.fn().mockResolvedValue([]) },
       assets: { findMany: vi.fn().mockResolvedValue([]) },
-      canvas: { findMany: canvasFindMany([]) },
+      project_canvas: { findMany: canvasFindMany([]) },
     } as unknown as PrismaClient;
 
     const views = await createProjectRepo(prisma).listByOwner("100");

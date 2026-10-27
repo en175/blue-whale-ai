@@ -65,7 +65,7 @@ it("migration version conflict rolls back history together with canvas", async (
       let staged: unknown[] = [];
       const result = await run({
         legacy_card_history: { createMany: async ({ data }: any) => { staged = data; } },
-        canvas: { updateMany: async () => ({ count: 0 }) },
+        project_canvas: { updateMany: async () => ({ count: 0 }) },
       });
       persistedHistory = staged;
       return result;

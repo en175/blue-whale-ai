@@ -671,7 +671,7 @@ describe.skipIf(!process.env.IKDMQT_DATABASE_URL)("Audio draft public API (IKDMQ
       await node("d1").click();
       await thumbs.locator('button[title="移除"]').dispatchEvent("click");
       await vi.waitFor(async () => expect(JSON.parse((await getCanvas(projectId)).edges)).toEqual([]));
-      const savedRow = await prisma.client.canvas.findFirst({ where: { project_id: BigInt(projectId) } });
+      const savedRow = await prisma.client.project_canvas.findFirst({ where: { project_id: BigInt(projectId) } });
       expect(savedRow!.edges_json).toEqual([]);
       await node("di").click();
       await entry.waitFor();

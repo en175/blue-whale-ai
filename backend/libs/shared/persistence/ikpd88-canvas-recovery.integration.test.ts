@@ -189,7 +189,7 @@ describe.skipIf(!databaseUrl)("画布恢复保存以对齐取代校验（IKPD88 
     await prisma.generation_canvas_outputs.deleteMany({});
     await prisma.generation_canvas_submissions.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
     await prisma.command_idempotency.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
-    await prisma.canvas.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
+    await prisma.project_canvas.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
     await prisma.generation_output_slots.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
     await prisma.generation_job_logs.deleteMany({});
     await prisma.cost_reservations.deleteMany({});
@@ -263,7 +263,7 @@ describe.skipIf(!databaseUrl)("画布恢复保存以对齐取代校验（IKPD88 
       "UPDATE generation_canvas_submissions SET target_state='replaced' WHERE project_id=? AND submission_id=?",
       [PROJECT_ID, UUID_A],
     );
-    const seed = await prisma.canvas.create({
+    const seed = await prisma.project_canvas.create({
       data: {
         project_id: BigInt(PROJECT_ID),
         version: 5,
@@ -340,7 +340,7 @@ describe.skipIf(!databaseUrl)("画布恢复保存以对齐取代校验（IKPD88 
       "UPDATE generation_canvas_submissions SET target_state='replaced' WHERE project_id=? AND submission_id=?",
       [PROJECT_ID, UUID_A],
     );
-    const seed = await prisma.canvas.create({
+    const seed = await prisma.project_canvas.create({
       data: {
         project_id: BigInt(PROJECT_ID),
         version: 1,

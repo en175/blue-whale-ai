@@ -17,7 +17,7 @@ type CanvasRow = {
 
 function buildService(current: CanvasRow | null = null) {
   const tx = {
-    canvas: {
+    project_canvas: {
       create: vi.fn().mockImplementation(async ({ data }: { data: Record<string, unknown> }) => ({
         id: 1n,
         project_id: data.project_id,
@@ -33,7 +33,7 @@ function buildService(current: CanvasRow | null = null) {
     generation_output_slots: { updateMany: vi.fn() },
   };
   const client = {
-    canvas: { findFirst: vi.fn().mockResolvedValue(current) },
+    project_canvas: { findFirst: vi.fn().mockResolvedValue(current) },
     generation_canvas_submissions: { findFirst: vi.fn().mockResolvedValue(null), findMany: vi.fn().mockResolvedValue([]) },
     generation_canvas_node_owners: { findMany: vi.fn().mockResolvedValue([]) },
     $transaction: vi.fn(
@@ -75,7 +75,7 @@ describe("CanvasService.save edges 校验（IKDLQF）", () => {
     const result = await service.save("u1", "1", saveBody(edges));
 
     expect(result.code).toBe(200);
-    expect(tx.canvas.create).toHaveBeenCalledWith({
+    expect(tx.project_canvas.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         project_id: 1n,
         edges_json: edges,
@@ -98,12 +98,12 @@ describe("CanvasService.save edges 校验（IKDLQF）", () => {
     const result = await service.save("u1", "1", { nodes: NODES });
 
     expect(result.code).toBe(200);
-    expect(tx.canvas.updateMany).toHaveBeenCalledWith(
+    expect(tx.project_canvas.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({ edges_json: existingEdges }),
       }),
     );
-    expect(tx.canvas.create).not.toHaveBeenCalled();
+    expect(tx.project_canvas.create).not.toHaveBeenCalled();
   });
 
   it("edges 未携带且画布不存在 → 新建落 null", async () => {
@@ -112,7 +112,7 @@ describe("CanvasService.save edges 校验（IKDLQF）", () => {
     const result = await service.save("u1", "1", { nodes: NODES });
 
     expect(result.code).toBe(200);
-    expect(tx.canvas.create).toHaveBeenCalledWith({
+    expect(tx.project_canvas.create).toHaveBeenCalledWith({
       data: expect.objectContaining({ edges_json: null }),
     });
   });
@@ -123,7 +123,7 @@ describe("CanvasService.save edges 校验（IKDLQF）", () => {
     await expect(
       service.save("u1", "1", saveBody('{"id":"e1"}')),
     ).rejects.toThrow(new BadRequestException("画布连线格式无效，原内容未改动"));
-    expect(client.canvas.findFirst).not.toHaveBeenCalled();
+    expect(client.project_canvas.findFirst).not.toHaveBeenCalled();
     expect(client.$transaction).not.toHaveBeenCalled();
   });
 
@@ -137,7 +137,7 @@ describe("CanvasService.save edges 校验（IKDLQF）", () => {
     await expect(service.save("u1", "1", saveBody([edge]))).rejects.toThrow(
       new BadRequestException("画布连线格式无效，原内容未改动"),
     );
-    expect(client.canvas.findFirst).not.toHaveBeenCalled();
+    expect(client.project_canvas.findFirst).not.toHaveBeenCalled();
     expect(client.$transaction).not.toHaveBeenCalled();
   });
 
@@ -151,7 +151,7 @@ describe("CanvasService.save edges 校验（IKDLQF）", () => {
     const result = await service.save("u1", "1", saveBody(edges));
 
     expect(result.code).toBe(200);
-    expect(tx.canvas.create).toHaveBeenCalledWith({
+    expect(tx.project_canvas.create).toHaveBeenCalledWith({
       data: expect.objectContaining({ project_id: 1n, edges_json: edges }),
     });
     expect(result.data?.edges).toBe(JSON.stringify(edges));
@@ -299,8 +299,8 @@ describe("CanvasService.save 版本冲突返回当前 version", () => {
 
   it("条件写失败（读后被并发改动）→ 412 且 data.version 是重读的最新值，不是本次请求的陈旧快照", async () => {
     const { service, client, tx } = buildService(row(3));
-    tx.canvas.updateMany.mockResolvedValue({ count: 0 });
-    client.canvas.findFirst
+    tx.project_canvas.updateMany.mockResolvedValue({ count: 0 });
+    client.project_canvas.findFirst
       .mockResolvedValueOnce(row(3))
       .mockResolvedValueOnce(row(5));
 
@@ -308,12 +308,12 @@ describe("CanvasService.save 版本冲突返回当前 version", () => {
 
     expect(result.code).toBe(412);
     expect(result.data).toEqual({ version: 5 });
-    expect(client.canvas.findFirst).toHaveBeenCalledTimes(2);
+    expect(client.project_canvas.findFirst).toHaveBeenCalledTimes(2);
   });
 
   it("保存成功仍返回 200 与 data.version，冲突分支不影响成功路径", async () => {
     const { service, tx } = buildService(row(3));
-    tx.canvas.findFirst.mockResolvedValue(row(4));
+    tx.project_canvas.findFirst.mockResolvedValue(row(4));
 
     const result = await service.save("u1", "1", { nodes: NODES, expectedVersion: 3 });
 
@@ -363,8 +363,8 @@ describe("CanvasService.save 空覆盖防护（IKIIWN）", () => {
       msg: "画布非空，本次保存会清空全部节点；确认清空请携带 confirmEmpty",
       data: null,
     });
-    expect(tx.canvas.updateMany).not.toHaveBeenCalled();
-    expect(tx.canvas.create).not.toHaveBeenCalled();
+    expect(tx.project_canvas.updateMany).not.toHaveBeenCalled();
+    expect(tx.project_canvas.create).not.toHaveBeenCalled();
   });
 
   it("confirmEmpty 非 true（如字符串 \"true\"）→ 同样拒绝", async () => {
@@ -373,7 +373,7 @@ describe("CanvasService.save 空覆盖防护（IKIIWN）", () => {
     const result = await service.save("u1", "1", { nodes: "[]", confirmEmpty: "true" });
 
     expect(result.code).toBe(422);
-    expect(tx.canvas.updateMany).not.toHaveBeenCalled();
+    expect(tx.project_canvas.updateMany).not.toHaveBeenCalled();
   });
 
   it("确认清空缺 If-Match → 428 信封，零写入、不消耗版本", async () => {
@@ -387,13 +387,13 @@ describe("CanvasService.save 空覆盖防护（IKIIWN）", () => {
       data: null,
     });
     expect(client.$transaction).not.toHaveBeenCalled();
-    expect(tx.canvas.updateMany).not.toHaveBeenCalled();
-    expect(tx.canvas.create).not.toHaveBeenCalled();
+    expect(tx.project_canvas.updateMany).not.toHaveBeenCalled();
+    expect(tx.project_canvas.create).not.toHaveBeenCalled();
   });
 
   it(`确认清空携带 "missing" 哨兵 → 已有非空画布上 create 撞唯一键 → 412 带当前版本，零写入`, async () => {
     const { service, tx } = buildService(nonEmpty);
-    tx.canvas.create.mockRejectedValue(
+    tx.project_canvas.create.mockRejectedValue(
       Object.assign(new Error("Unique constraint failed"), { code: "P2002" }),
     );
 
@@ -401,22 +401,22 @@ describe("CanvasService.save 空覆盖防护（IKIIWN）", () => {
 
     expect(result.code).toBe(412);
     expect(result.data).toEqual({ version: 3 });
-    expect(tx.canvas.create).toHaveBeenCalled();
-    expect(tx.canvas.updateMany).not.toHaveBeenCalled();
+    expect(tx.project_canvas.create).toHaveBeenCalled();
+    expect(tx.project_canvas.updateMany).not.toHaveBeenCalled();
   });
 
   it("确认清空携带过期数值版本 → 条件写不命中 → 412 带当前版本，零写入", async () => {
     const { service, tx } = buildService(nonEmpty);
-    tx.canvas.updateMany.mockResolvedValue({ count: 0 });
+    tx.project_canvas.updateMany.mockResolvedValue({ count: 0 });
 
     const result = await service.save("u1", "1", { nodes: "[]", confirmEmpty: true, expectedVersion: 2 });
 
     expect(result.code).toBe(412);
     expect(result.data).toEqual({ version: 3 });
-    expect(tx.canvas.updateMany).toHaveBeenCalledWith(
+    expect(tx.project_canvas.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: { project_id: 1n, version: 2 } }),
     );
-    expect(tx.canvas.create).not.toHaveBeenCalled();
+    expect(tx.project_canvas.create).not.toHaveBeenCalled();
   });
 
   it("携带当前数值版本的确认清空 → 放行（用户显式删光场景），空文档条件写入", async () => {
@@ -425,7 +425,7 @@ describe("CanvasService.save 空覆盖防护（IKIIWN）", () => {
     const result = await service.save("u1", "1", { nodes: "[]", confirmEmpty: true, expectedVersion: 3 });
 
     expect(result.code).toBe(200);
-    expect(tx.canvas.updateMany).toHaveBeenCalledWith(
+    expect(tx.project_canvas.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { project_id: 1n, version: 3 },
         data: expect.objectContaining({ nodes_json: [] }),
@@ -439,7 +439,7 @@ describe("CanvasService.save 空覆盖防护（IKIIWN）", () => {
     const result = await service.save("u1", "1", { nodes: "[]" });
 
     expect(result.code).toBe(200);
-    expect(tx.canvas.updateMany).toHaveBeenCalled();
+    expect(tx.project_canvas.updateMany).toHaveBeenCalled();
   });
 
   it("画布行不存在 → 空保存直接新建（首次创建空画布）", async () => {
@@ -448,7 +448,7 @@ describe("CanvasService.save 空覆盖防护（IKIIWN）", () => {
     const result = await service.save("u1", "1", { nodes: "[]" });
 
     expect(result.code).toBe(200);
-    expect(tx.canvas.create).toHaveBeenCalled();
+    expect(tx.project_canvas.create).toHaveBeenCalled();
   });
 });
 
@@ -470,8 +470,8 @@ describe("CanvasService.save 受保护项目版本要求（IKJJQU B.7）", () =>
       code: 428,
       data: { reason: "canvas_version_required" },
     });
-    expect(tx.canvas.create).not.toHaveBeenCalled();
-    expect(tx.canvas.updateMany).not.toHaveBeenCalled();
+    expect(tx.project_canvas.create).not.toHaveBeenCalled();
+    expect(tx.project_canvas.updateMany).not.toHaveBeenCalled();
   });
 
   it("带版本旧请求普通编辑仍可用（无受保护标记节点时不拦）", async () => {
@@ -480,7 +480,7 @@ describe("CanvasService.save 受保护项目版本要求（IKJJQU B.7）", () =>
     const result = await service.save("u1", "1", saveBody([{ id: "text-1", source: "text-1", target: "media-1" }], 3));
 
     expect(result.code).toBe(200);
-    expect(tx.canvas.updateMany).toHaveBeenCalled();
+    expect(tx.project_canvas.updateMany).toHaveBeenCalled();
   });
 });
 
@@ -507,8 +507,8 @@ describe("CanvasService.save 旧协议受保护标记严格比较", () => {
 
     expect(result).toMatchObject({ code: 428, data: { reason: RECOVERY_REASONS.protocolRequired } });
     expect(client.$transaction).not.toHaveBeenCalled();
-    expect(tx.canvas.updateMany).not.toHaveBeenCalled();
-    expect(tx.canvas.create).not.toHaveBeenCalled();
+    expect(tx.project_canvas.updateMany).not.toHaveBeenCalled();
+    expect(tx.project_canvas.create).not.toHaveBeenCalled();
   });
 
   it("合法标记不变时，受保护卡普通编辑仍可保存", async () => {
@@ -518,7 +518,7 @@ describe("CanvasService.save 旧协议受保护标记严格比较", () => {
     const result = await service.save("u1", "1", { expectedVersion: 3, nodes: JSON.stringify(incoming), edges: "[]" });
 
     expect(result.code).toBe(200);
-    expect(tx.canvas.updateMany).toHaveBeenCalledWith(
+    expect(tx.project_canvas.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ nodes_json: incoming }) }),
     );
   });

@@ -65,7 +65,7 @@ async function lockProjectAndCanvas(tx: Prisma.TransactionClient, projectId: big
   await tx.$queryRaw`SELECT id FROM project WHERE id = ${projectId} FOR UPDATE`;
   const canvasRows = await tx.$queryRaw<
     Array<{ version: number; nodes_json: unknown }>
-  >`SELECT version, nodes_json FROM canvas WHERE project_id = ${projectId} FOR UPDATE`;
+  >`SELECT version, nodes_json FROM project_canvas WHERE project_id = ${projectId} FOR UPDATE`;
   return canvasRows[0] ?? null;
 }
 
@@ -451,7 +451,7 @@ export async function listCanvasRecoveryPage(
 ): Promise<{ records: RecoveryRecordView[]; nextCursor: string | null; canvasVersion: number | null }> {
   const pid = BigInt(projectId);
   return prisma.$transaction(async (tx) => {
-    const canvasRows = await tx.canvas.findFirst({ where: { project_id: pid }, select: { version: true } });
+    const canvasRows = await tx.project_canvas.findFirst({ where: { project_id: pid }, select: { version: true } });
     const maxId = cursor?.maxId ?? Number((await tx.generation_canvas_submissions.aggregate({
       where: { project_id: pid }, _max: { id: true },
     }))._max.id ?? 0n);

@@ -112,7 +112,7 @@ describe("generation command placement anchor", () => {
       version: 1,
     });
     const tx = {
-      canvas: {
+      project_canvas: {
         findFirst: vi.fn().mockResolvedValue({
           viewport_json: { x: 0, y: 0, zoom: 1 },
           nodes_json: [
@@ -171,7 +171,7 @@ describe("generation command placement anchor", () => {
       version: 1,
     });
     const tx = {
-      canvas: {
+      project_canvas: {
         findFirst: vi.fn().mockResolvedValue({
           viewport_json: { x: 0, y: 0, zoom: 1 },
           nodes_json: [
@@ -228,7 +228,7 @@ describe("generation command placement anchor", () => {
       version: 1,
     });
     const tx = {
-      canvas: { findFirst: vi.fn().mockResolvedValue(null) },
+      project_canvas: { findFirst: vi.fn().mockResolvedValue(null) },
       generation_jobs: { create: createJob },
       generation_job_extras: extrasDelegate(),
       generation_output_slots: { create: vi.fn().mockResolvedValue({}) },
@@ -1539,7 +1539,7 @@ describe("建任务幂等：同一把 Idempotency-Key 只建一个 job、只扣�
 describe("generation command repo 样片阶段落库（IKIZQ8）", () => {
   function plainTx(createJob: ReturnType<typeof vi.fn>) {
     return {
-      canvas: { findFirst: vi.fn().mockResolvedValue(null) },
+      project_canvas: { findFirst: vi.fn().mockResolvedValue(null) },
       generation_jobs: { create: createJob },
       generation_job_extras: extrasDelegate(),
       generation_output_slots: { create: vi.fn().mockResolvedValue({}) },

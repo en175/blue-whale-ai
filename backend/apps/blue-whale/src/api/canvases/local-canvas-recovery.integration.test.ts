@@ -561,7 +561,7 @@ describe.skipIf(!process.env.IKNCL3_DATABASE_URL)("本地恢复画布公开 API"
     if (explicitId) await prisma.client.assets.create({ data: { user_id: 983003n, project_id: BigInt(sourceId), type: "video", url } });
     const id = crypto.randomUUID();
     const before = await prisma.client.project.count();
-    const canvases = await prisma.client.canvas.count();
+    const canvases = await prisma.client.project_canvas.count();
     const links = await prisma.client.project_asset.count();
     const jobs = await prisma.client.generation_jobs.count();
     const reservations = await prisma.client.cost_reservations.count();
@@ -574,7 +574,7 @@ describe.skipIf(!process.env.IKNCL3_DATABASE_URL)("本地恢复画布公开 API"
     expect((await request("GET", id)).status).toBe(404);
     expect(await prisma.client.command_idempotency.count({ where: { project_id: BigInt(sourceId), operation: "LOCAL_CANVAS_RECOVERY_V1", idempotency_key: id } })).toBe(0);
     expect(await prisma.client.project.count()).toBe(before);
-    expect(await prisma.client.canvas.count()).toBe(canvases);
+    expect(await prisma.client.project_canvas.count()).toBe(canvases);
     expect(await prisma.client.project_asset.count()).toBe(links);
     expect(await prisma.client.generation_jobs.count()).toBe(jobs);
     expect(await prisma.client.cost_reservations.count()).toBe(reservations);

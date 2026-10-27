@@ -114,9 +114,9 @@ model shared_assets {
 }
 
 /// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
-model canvas {
+model project_canvas {
   id            BigInt   @id @default(autoincrement())
-  project_id    BigInt   @unique(map: "uk_canvas_project")
+  project_id    BigInt   @unique(map: "uk_project_canvas__project")
   viewport_json Json?
   nodes_json    Json?
   edges_json    Json?
@@ -290,6 +290,59 @@ model project {
   is_delete      Int       @default(0) @db.TinyInt
 
   @@index([owner_id], map: "idx_project_owner")
+}
+
+model project_nodes {
+  id           BigInt   @id @default(autoincrement())
+  project_id   BigInt
+  node_id      String   @db.VarChar(128)
+  type         String   @db.VarChar(32)
+  name         String?  @db.VarChar(255)
+  source       String   @default("user") @db.VarChar(16)
+  pos_x        Int?
+  pos_y        Int?
+  data_json    Json?
+  gmt_create   DateTime @default(now()) @db.DateTime(0)
+  gmt_modified DateTime @default(now()) @db.DateTime(0)
+  version      Int      @default(0)
+  is_delete    Int      @default(0) @db.TinyInt
+
+  @@unique([project_id, node_id], map: "uk_project_nodes__node")
+  @@index([project_id, type, is_delete], map: "idx_project_nodes__type")
+}
+
+model project_edges {
+  id             BigInt   @id @default(autoincrement())
+  project_id     BigInt
+  edge_id        String   @db.VarChar(128)
+  source_node_id String   @db.VarChar(128)
+  target_node_id String   @db.VarChar(128)
+  ref_role       String?  @db.VarChar(16)
+  data_json      Json?
+  gmt_create     DateTime @default(now()) @db.DateTime(0)
+  gmt_modified   DateTime @default(now()) @db.DateTime(0)
+  version        Int      @default(0)
+  is_delete      Int      @default(0) @db.TinyInt
+
+  @@unique([project_id, edge_id], map: "uk_project_edges__edge")
+  @@unique([project_id, source_node_id, target_node_id], map: "uk_project_edges__pair")
+  @@index([project_id, source_node_id], map: "idx_project_edges__source")
+  @@index([project_id, target_node_id], map: "idx_project_edges__target")
+}
+
+model project_node_revisions {
+  id         BigInt   @id @default(autoincrement())
+  project_id BigInt
+  node_id    String   @db.VarChar(128)
+  revision   Int
+  op         String   @db.VarChar(16)
+  actor      String   @db.VarChar(16)
+  actor_id   String?  @db.VarChar(128)
+  changes    Json?
+  gmt_create DateTime @default(now()) @db.DateTime(0)
+
+  @@unique([project_id, node_id, revision], map: "uk_project_node_revisions__revision")
+  @@index([project_id, gmt_create], map: "idx_project_node_revisions__project_time")
 }
 
 /// IKCNLP（方案C）：素材-项目关联（1 素材可跨多项目）。
@@ -981,7 +1034,7 @@ model storyboard_previews {
 }
 
 /// Immutable first-applied preview content, retained when its Canvas node is deleted.
-model prompt_preview_snapshots {
+model project_prompt_preview_snapshots {
   id          BigInt   @id @default(autoincrement())
   project_id  BigInt
   source_key  String   @db.VarChar(64)
@@ -991,7 +1044,7 @@ model prompt_preview_snapshots {
   content_json Json?
   gmt_create  DateTime @default(now()) @db.DateTime(0)
 
-  @@unique([project_id, source_key], map: "uk_prompt_preview_source")
+  @@unique([project_id, source_key], map: "uk_project_prompt_preview_snapshots__source")
 }
 
 /// Immutable conversation quote snapshot: node text captured when added to the conversation (IKDLQJ); retained after the source node is edited or deleted.

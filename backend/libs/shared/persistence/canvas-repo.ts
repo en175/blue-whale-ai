@@ -164,7 +164,7 @@ export function createCanvasRepo(prisma: PrismaClient): CanvasRepo {
   });
   return {
     async getPromptSnapshot(projectId, source) {
-      const row = await prisma.prompt_preview_snapshots.findUnique({
+      const row = await prisma.project_prompt_preview_snapshots.findUnique({
         where: { project_id_source_key: snapshotWhere(projectId, source) },
         select: { title: true, text: true, content_json: true },
       });
@@ -172,16 +172,16 @@ export function createCanvasRepo(prisma: PrismaClient): CanvasRepo {
     },
     async rememberPromptSnapshot(projectId, source, content) {
       const key = snapshotWhere(projectId, source);
-      await prisma.prompt_preview_snapshots.createMany({
+      await prisma.project_prompt_preview_snapshots.createMany({
         data: [{ ...key, source_json: source, title: content.title, text: content.text, content_json: content as unknown as Prisma.InputJsonValue }], skipDuplicates: true,
       });
-      const row = await prisma.prompt_preview_snapshots.findUniqueOrThrow({
+      const row = await prisma.project_prompt_preview_snapshots.findUniqueOrThrow({
         where: { project_id_source_key: key }, select: { title: true, text: true, content_json: true },
       });
       return (row.content_json as unknown as PromptPreviewContent | null) ?? { title: row.title, text: row.text };
     },
     async getByProject(projectId) {
-      const row = await prisma.canvas.findFirst({
+      const row = await prisma.project_canvas.findFirst({
         where: { project_id: BigInt(projectId) },
       });
       return row ? toView(row) : emptyView(projectId);
@@ -193,7 +193,7 @@ export function createCanvasRepo(prisma: PrismaClient): CanvasRepo {
         nodes_json: nodes ? JSON.parse(nodes) : null,
       };
       return prisma.$transaction(async (tx) => {
-        const row = await tx.canvas.upsert({
+        const row = await tx.project_canvas.upsert({
           where: { project_id: pid },
           create: { project_id: pid, ...data },
           update: { ...data, version: { increment: 1 } },
@@ -212,7 +212,7 @@ export function createCanvasRepo(prisma: PrismaClient): CanvasRepo {
       if (expectedVersion === null) {
         try {
           return await prisma.$transaction(async (tx) => {
-            const row = await tx.canvas.create({
+            const row = await tx.project_canvas.create({
               data: { project_id: pid, ...data },
             });
             await linkPromptMaterials(tx, pid, materials);
@@ -233,7 +233,7 @@ export function createCanvasRepo(prisma: PrismaClient): CanvasRepo {
         }
       }
       return prisma.$transaction(async (tx) => {
-        const result = await tx.canvas.updateMany({
+        const result = await tx.project_canvas.updateMany({
           where: { project_id: pid, version: expectedVersion },
           data: { ...data, version: { increment: 1 } },
         });
@@ -241,7 +241,7 @@ export function createCanvasRepo(prisma: PrismaClient): CanvasRepo {
         await linkPromptMaterials(tx, pid, materials);
         await markOutputSlotsPlaced(tx, pid, data.nodes_json);
         await markAudioMixCards(tx, pid, data.nodes_json, materials?.ownerId);
-        const row = await tx.canvas.findFirst({ where: { project_id: pid } });
+        const row = await tx.project_canvas.findFirst({ where: { project_id: pid } });
         return row ? toView(row) : null;
       });
     },

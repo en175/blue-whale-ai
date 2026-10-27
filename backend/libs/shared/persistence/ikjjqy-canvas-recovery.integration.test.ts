@@ -205,7 +205,7 @@ describe.skipIf(!databaseUrl)("多结果任务逐项恢复与删除（IKJJQY）"
     await prisma.generation_canvas_outputs.deleteMany({});
     await prisma.generation_canvas_submissions.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
     await prisma.command_idempotency.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
-    await prisma.canvas.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
+    await prisma.project_canvas.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
     await prisma.generation_output_slots.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
     await prisma.generation_job_logs.deleteMany({});
     await prisma.cost_reservations.deleteMany({});
@@ -506,7 +506,7 @@ describe.skipIf(!databaseUrl)("多结果任务逐项恢复与删除（IKJJQY）"
 
     expect((await outputsOfSubmission(UUID_A)).map(row => [row.output_key, row.asset_id?.toString() ?? null, row.state]))
       .toEqual([["segment:1", "701", "present"], ["segment:2", "702", "present"]]);
-    expect(await prisma.canvas.count({ where: { project_id: BigInt(PROJECT_ID) } })).toBe(1);
+    expect(await prisma.project_canvas.count({ where: { project_id: BigInt(PROJECT_ID) } })).toBe(1);
   });
 
   it("★ 5. 部分删除：1 apply + 1 remove 同笔扇出，removed 项独立、任务/资产不受影响", async () => {
@@ -632,7 +632,7 @@ describe.skipIf(!databaseUrl)("多结果任务逐项恢复与删除（IKJJQY）"
     expect(oldRecord.items.filter(item => item.state === "present").map(item => item.output_key))
       .toEqual(["segment:1", "segment:2"]);
 
-    const version = await prisma.canvas.findFirst({ where: { project_id: BigInt(PROJECT_ID) } });
+    const version = await prisma.project_canvas.findFirst({ where: { project_id: BigInt(PROJECT_ID) } });
     await save({
       commandId: UUID_E, version: version!.version,
       nodes: [markerNode(seg1, UUID_A, "segment:1", "701")],
@@ -718,7 +718,7 @@ describe.skipIf(!databaseUrl)("多结果任务逐项恢复与删除（IKJJQY）"
       409, RECOVERY_REASONS.itemConflict,
     );
     expect(await prisma.generation_canvas_outputs.count({})).toBe(0);
-    expect(await prisma.canvas.count({ where: { project_id: BigInt(PROJECT_ID) } })).toBe(0);
+    expect(await prisma.project_canvas.count({ where: { project_id: BigInt(PROJECT_ID) } })).toBe(0);
     const submission = await prisma.generation_canvas_submissions.findUnique({
       where: { project_id_submission_id: { project_id: BigInt(PROJECT_ID), submission_id: UUID_A } },
     });

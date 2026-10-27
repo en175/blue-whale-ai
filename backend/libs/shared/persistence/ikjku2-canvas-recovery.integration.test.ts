@@ -169,7 +169,7 @@ describe.skipIf(!databaseUrl)("新协议保存守护未声明受保护卡（IKJK
   }
 
   async function canvasRow() {
-    return prisma.canvas.findFirst({ where: { project_id: BigInt(PROJECT_ID) } });
+    return prisma.project_canvas.findFirst({ where: { project_id: BigInt(PROJECT_ID) } });
   }
 
   async function canvasNodeIds(): Promise<string[]> {
@@ -241,12 +241,12 @@ describe.skipIf(!databaseUrl)("新协议保存守护未声明受保护卡（IKJK
     await prisma.generation_canvas_outputs.deleteMany({});
     await prisma.generation_canvas_submissions.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
     await prisma.command_idempotency.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
-    await prisma.canvas.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
+    await prisma.project_canvas.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
     await prisma.generation_output_slots.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
     await prisma.generation_job_logs.deleteMany({});
     await prisma.cost_reservations.deleteMany({});
     await prisma.generation_jobs.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
-    await prisma.prompt_preview_snapshots.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
+    await prisma.project_prompt_preview_snapshots.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
   });
 
   it("★ 1. 合法 apply B 同时省略 present A → 422，整笔回滚且恢复查询与文档一致", async () => {
@@ -392,7 +392,7 @@ describe.skipIf(!databaseUrl)("新协议保存守护未声明受保护卡（IKJK
     const { fanned } = await seedTwoPresentCards();
 
     const source = { sessionId: "ikjku2-session-1", revisionId: "rev-1", shotNo: 1 };
-    await prisma.prompt_preview_snapshots.create({
+    await prisma.project_prompt_preview_snapshots.create({
       data: {
         project_id: BigInt(PROJECT_ID),
         source_key: createHash("sha256")
