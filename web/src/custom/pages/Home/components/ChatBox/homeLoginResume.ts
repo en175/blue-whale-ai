@@ -3,13 +3,15 @@ import type { SkillRecord } from '@/custom/api/skills';
 export type HomePendingAction =
   | { kind: 'open-skill' }
   | { kind: 'use-skill'; skill: SkillRecord }
-  | { kind: 'send'; text: string };
+  | { kind: 'send'; text: string }
+  | { kind: 'launch'; state: unknown };
 
 export type HomeLoginResume =
   | { action: 'none' }
   | { action: 'open-skill' }
   | { action: 'use-skill'; skill: SkillRecord }
   | { action: 'send'; text: string }
+  | { action: 'launch'; state: unknown }
   | { action: 'restore-text'; text: string };
 
 export function resolveHomeLoginResume(
@@ -28,5 +30,7 @@ export function resolveHomeLoginResume(
       return { action: 'use-skill', skill: pending.skill };
     case 'send':
       return { action: 'send', text: pending.text };
+    case 'launch':
+      return { action: 'launch', state: pending.state };
   }
 }

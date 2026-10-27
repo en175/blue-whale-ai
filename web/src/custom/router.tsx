@@ -20,8 +20,7 @@ const router = createBrowserRouter([
   {
     path: '/auth-success',
     element: <AuthSuccess />,
-  },
-  {
+  },  {
     path: '/account/credits',
     element: (
       <RequireAuth>

@@ -58,3 +58,13 @@ export function findLatestCreatedProjectId(
 export function shouldReturnToProjectsAfterDelete(currentId: string, deletedId: string): boolean {
   return currentId === deletedId;
 }
+
+export const MISSING_PROJECT_MESSAGE = '画布不存在或你没有访问权限，已返回项目列表';
+
+export function isUnreachableProjectId(
+  queryId: string,
+  projectIds: readonly string[],
+  loaded: boolean,
+): boolean {
+  return Boolean(queryId) && loaded && !projectIds.includes(queryId);
+}

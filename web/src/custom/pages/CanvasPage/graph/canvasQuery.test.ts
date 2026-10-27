@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   CANVAS_QUERY_KEY,
+  MISSING_PROJECT_MESSAGE,
   canvasLocationSearch,
   findLastOpenedProjectId,
   findLatestCreatedProjectId,
+  isUnreachableProjectId,
   pickCanvasIdAfterLoad,
   readCanvasIdFromSearch,
   shouldReturnToProjectsAfterDelete,
@@ -154,5 +156,27 @@ describe('shouldReturnToProjectsAfterDelete', () => {
   it('returns to the project list only after deleting the current canvas', () => {
     expect(shouldReturnToProjectsAfterDelete('mid', 'mid')).toBe(true);
     expect(shouldReturnToProjectsAfterDelete('mid', 'oldest')).toBe(false);
+  });
+});
+
+describe('isUnreachableProjectId', () => {
+  it('flags a project missing from the loaded list', () => {
+    expect(isUnreachableProjectId('1615', ['1616', '1617'], true)).toBe(true);
+  });
+
+  it('does not flag a project that is still in the list', () => {
+    expect(isUnreachableProjectId('1616', ['1616', '1617'], true)).toBe(false);
+  });
+
+  it('waits for the project list to load before judging', () => {
+    expect(isUnreachableProjectId('1615', ['1616'], false)).toBe(false);
+  });
+
+  it('ignores an empty project query', () => {
+    expect(isUnreachableProjectId('', ['1616'], true)).toBe(false);
+  });
+
+  it('keeps the permission message readable', () => {
+    expect(MISSING_PROJECT_MESSAGE).toContain('没有访问权限');
   });
 });

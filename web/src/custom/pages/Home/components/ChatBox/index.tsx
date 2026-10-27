@@ -2,12 +2,13 @@
 
 import { PANEL_REF_MEDIA_TYPES, VIDEO_MODE_LABEL } from '@/custom/enums';
 import { useState, useRef, useEffect, useCallback, useLayoutEffect, useMemo, useSyncExternalStore } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useDismissOnOutside } from '@/custom/pages/CanvasPage/hooks/shared/useDismissOnOutside';
 import { createPortal } from 'react-dom';
 import { Plus, ChevronUp, ChevronDown, Music, BookOpen, BookText, X, Upload, FolderOpen } from 'lucide-react';
 import SkillModal from '../SkillModal';
 import LoginModal from '@/custom/components/LoginModal';
+import { useLoginDialogStore } from '@/shared/stores/loginDialog';
 import RatioIcon from '@/custom/components/RatioIcon';
 import Select from '@/custom/components/Select';
 import AssetsPickerModal from '@/custom/pages/CanvasPage/components/AssetsPickerModal';
@@ -71,9 +72,17 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
   const [inputValue, setInputValue] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const navigate = useNavigate();
+  const location = useLocation();
   const user = useSyncExternalStore(subscribe, getCurrentUser);
 
   const [showLogin, setShowLogin] = useState(false);
+
+  useEffect(() => {
+    const returnTo = (location.state as { returnTo?: string } | null)?.returnTo;
+    if (!returnTo || !getCurrentUser()) return;
+    navigate(returnTo, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const [assetsPickerTarget, setAssetsPickerTarget] = useState<'agent' | 'video' | 'image' | null>(null);
 
@@ -260,7 +269,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
     { open: refMenu !== null, ref: [refMenuRef, refCardRef], dismiss: () => setRefMenu(null) },
   ]);
 
-  const goCanvasWithText = (text: string, skillId?: string, skillName?: string) => {
+  const goCanvasWithText = (text: string, skillId?: string, skillName?: string, allowCreate = true) => {
     setInputValue('');
     if (skillId) setArmedSkill(null);
 
@@ -281,10 +290,15 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
       }
       setAgentFiles([]);
     }
-    navigateToNewProject(navigate, { agentText: text, skillId: skillId ?? '', skillName: skillName ?? '' });
+    const state = { agentText: text, skillId: skillId ?? '', skillName: skillName ?? '' };
+    if (!allowCreate) {
+      navigate('/canvas', { state });
+      return;
+    }
+    navigateToNewProject(navigate, state);
   };
 
-  const dispatchByTab = (text: string) => {
+  const dispatchByTab = (text: string, allowCreate = true) => {
     if (activeTab === 'video') {
       if (!selectedVideoModel) {
         showToast('视频模型能力加载中，请稍后重试');
@@ -329,6 +343,10 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
       setInputValue('');
       if (isKeyframe) setKeyframeRefs({});
       else setRefFiles([]);
+      if (!allowCreate) {
+        navigate('/canvas', { state: { genKind: 'video' } });
+        return;
+      }
       navigateToNewProject(navigate, { genKind: 'video' });
       return;
     }
@@ -354,10 +372,14 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
       });
       setInputValue('');
       setImageRefFiles([]);
+      if (!allowCreate) {
+        navigate('/canvas', { state: { genKind: 'image' } });
+        return;
+      }
       navigateToNewProject(navigate, { genKind: 'image' });
       return;
     }
-    goCanvasWithText(text, armedSkill?.id, armedSkill?.name);
+    goCanvasWithText(text, armedSkill?.id, armedSkill?.name, allowCreate);
   };
 
   const handleUseSkill = (skill: SkillRecord) => {
@@ -390,9 +412,11 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
   };
 
   const handleLoginClose = () => {
-    setShowLogin(false);
     const pending = pendingAction.current;
     pendingAction.current = null;
+    setShowLogin(false);
+    useLoginDialogStore.getState().closeLogin();
+    if (!pending) return;
     const resume = resolveHomeLoginResume(pending, !!getCurrentUser());
     switch (resume.action) {
       case 'open-skill':
@@ -402,7 +426,10 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
         handleUseSkill(resume.skill);
         return;
       case 'send':
-        dispatchByTab(resume.text);
+        dispatchByTab(resume.text, false);
+        return;
+      case 'launch':
+        navigate('/canvas', { state: resume.state });
         return;
       case 'restore-text':
         setInputValue(resume.text);
@@ -1441,8 +1468,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
       />
 
       { }
-      {showLogin && <LoginModal onClose={handleLoginClose} />}
-
+      {showLogin && <LoginModal onClose={handleLoginClose} onSuccess={handleLoginClose} />}
       {refMenu && refMenuPos && createPortal(
         <div ref={refMenuRef} className={styles.refMenu} style={refMenuPos}>
           <button

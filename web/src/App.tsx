@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import { RouterProvider } from 'react-router-dom';
 import { Toaster } from 'sonner';
 import router from '@/custom/router';
-import AuthExpiredGate from '@/custom/components/AuthExpiredGate';
+import LoginDialog from '@/custom/components/LoginDialog';
 import ForeignDraftReset from '@/shared/session/ForeignDraftReset';
 import { fetchMe, toSessionUser } from '@/custom/api/auth';
 import { updateUser } from '@/shared/utils/auth';
@@ -25,7 +25,7 @@ function App() {
     <>
       <RouterProvider router={router} />
       <ForeignDraftReset />
-      <AuthExpiredGate />
+      <LoginDialog />
       <Toaster position="top-center" theme="dark" duration={2600} />
     </>
   );

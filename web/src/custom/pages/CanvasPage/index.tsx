@@ -345,6 +345,8 @@ export default function CanvasPage() {
     projects,
     setProjects,
     setCurrentId,
+    navigate,
+    location,
   });
   useCanvasProjectRoute({
     currentId,
