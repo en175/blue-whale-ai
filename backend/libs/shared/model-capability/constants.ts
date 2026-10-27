@@ -22,6 +22,10 @@ export const MODEL_CAPABILITY_LABELS: Record<ModelCapabilityType, string> = {
   audio: "音频",
 };
 
+export const DEFAULT_MAX_REFERENCE_IMAGE_PIXELS = 36_000_000;
+
+export const DEFAULT_MAX_REFERENCE_IMAGE_RATIO = 16;
+
 export const MODEL_FIELD_LIMITS = {
   provider_id: 32,
   model_id: 128,

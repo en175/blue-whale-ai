@@ -4085,3 +4085,39 @@ describe("handleCreateGenerationJob 参考视频提交前物理校验（IKQYED�
     expect(createJob).toHaveBeenCalled();
   });
 });
+
+describe("handleCreateGenerationJob 参考图总像素预检（IKQYEH）", () => {
+  it("单张参考图超过 3600 万像素 → 400 invalid_reference，不建任务", async () => {
+    const { deps, createJob, resolveInputAssets } = buildCapabilityDeps([GPT_IMAGE_CAPABILITY]);
+    resolveInputAssets.mockResolvedValue([
+      { id: "1", type: "image", url: "https://tos.test/1.png", mime: "image/png", size: 100, width: 8000, height: 5000, duration: null, material_id: null },
+    ]);
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      { ...gptImageBody("1:1"), input_asset_ids: ["1"] },
+      null,
+      deps,
+    );
+    expect(result.code).toBe(1034);
+    expect(result.data?.code).toBe("invalid_reference");
+    expect(result.msg).toBe("参考图总像素超出当前模型限制（单张最多 3600 万像素）");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("单张参考图恰在 3600 万像素 → 放行", async () => {
+    const { deps, createJob, resolveInputAssets } = buildCapabilityDeps([GPT_IMAGE_CAPABILITY]);
+    resolveInputAssets.mockResolvedValue([
+      { id: "1", type: "image", url: "https://tos.test/1.png", mime: "image/png", size: 100, width: 6000, height: 6000, duration: null, material_id: null },
+    ]);
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      { ...gptImageBody("1:1"), input_asset_ids: ["1"] },
+      null,
+      deps,
+    );
+    expect(result.code).toBe(200);
+    expect(createJob).toHaveBeenCalled();
+  });
+});
