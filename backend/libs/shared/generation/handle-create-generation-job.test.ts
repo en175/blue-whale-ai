@@ -4101,7 +4101,28 @@ describe("handleCreateGenerationJob 参考图总像素预检（IKQYEH）", () =>
     );
     expect(result.code).toBe(1034);
     expect(result.data?.code).toBe("invalid_reference");
-    expect(result.msg).toBe("参考图总像素超出当前模型限制（单张最多 3600 万像素）");
+    expect(result.msg).toBe(
+      "参考图总像素超出当前模型限制（单张最多 3600 万像素），请更换较小的图片后重试",
+    );
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("能力配置覆盖默认上限 → 按 100 万像素拒绝", async () => {
+    const { deps, createJob, resolveInputAssets } = buildCapabilityDeps([
+      { ...GPT_IMAGE_CAPABILITY, features: { max_reference_image_pixels: 1_000_000 } },
+    ]);
+    resolveInputAssets.mockResolvedValue([
+      { id: "1", type: "image", url: "https://tos.test/1.png", mime: "image/png", size: 100, width: 2000, height: 600, duration: null, material_id: null },
+    ]);
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      { ...gptImageBody("1:1"), input_asset_ids: ["1"] },
+      null,
+      deps,
+    );
+    expect(result.code).toBe(1034);
+    expect(result.data?.params).toEqual({ max_reference_pixels: 1_000_000 });
     expect(createJob).not.toHaveBeenCalled();
   });
 

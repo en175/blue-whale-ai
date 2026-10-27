@@ -30,20 +30,24 @@ export function validateReferenceImages(
     features?.max_reference_image_pixels ?? DEFAULT_MAX_REFERENCE_IMAGE_PIXELS;
   const maxRatio =
     features?.max_reference_image_ratio ?? DEFAULT_MAX_REFERENCE_IMAGE_RATIO;
+  const ratioLimit =
+    Number.isFinite(maxRatio) && maxRatio >= 1
+      ? maxRatio
+      : DEFAULT_MAX_REFERENCE_IMAGE_RATIO;
   for (const asset of assets) {
     const { width, height } = asset;
     if (width === null || height === null || width <= 0 || height <= 0) continue;
     if (width * height > maxPixels) {
       return {
-        message: `参考图总像素超出当前模型限制（单张最多 ${formatPixels(maxPixels)}）`,
+        message: `参考图总像素超出当前模型限制（单张最多 ${formatPixels(maxPixels)}），请更换较小的图片后重试`,
         params: { max_reference_pixels: maxPixels },
       };
     }
     const ratio = width / height;
-    if (ratio > maxRatio || ratio < 1 / maxRatio) {
+    if (ratio > ratioLimit || ratio < 1 / ratioLimit) {
       return {
-        message: `参考图宽高比超出当前模型限制（1/${maxRatio} 至 ${maxRatio}）`,
-        params: { max_reference_ratio: maxRatio },
+        message: `参考图宽高比超出当前模型限制（1/${ratioLimit} 至 ${ratioLimit}），请更换尺寸比例更合适的图片后重试`,
+        params: { max_reference_ratio: ratioLimit },
       };
     }
   }

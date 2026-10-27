@@ -166,11 +166,11 @@ function featuresFieldErr(features: unknown): string | null {
   if (refImageRatio !== undefined && refImageRatio !== null) {
     if (
       typeof refImageRatio !== "number" ||
-      !Number.isFinite(refImageRatio) ||
-      refImageRatio <= 0 ||
+      !Number.isInteger(refImageRatio) ||
+      refImageRatio < 1 ||
       refImageRatio > 100
     )
-      return `参考图宽高比上限(max_reference_image_ratio)须为 0–100 的正数或 null`;
+      return `参考图宽高比上限(max_reference_image_ratio)须为 1–100 的整数或 null`;
   }
 
   const taskTypes = features.task_types ?? features.taskTypes;
