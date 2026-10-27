@@ -32,7 +32,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 @Component
@@ -96,10 +95,6 @@ public class VideoJobProcessor implements JobProcessor {
     record MaterialRef(String id, String type) {}
 
     record SingleRef(String role, String type, String assetId, String materialId) {}
-
-    private static final Pattern RESOLUTION_PATTERN = Pattern.compile("^([0-9]+)p$");
-    private static final Pattern RATIO_PATTERN = Pattern.compile("^([1-9][0-9]*):([1-9][0-9]*)$");
-    private static final Pattern SIZE_PATTERN = Pattern.compile("^([0-9]+)x([0-9]+)$", Pattern.CASE_INSENSITIVE);
 
     private final JobStateMachineService stateMachine;
     private final JobFinalizer finalizer;
@@ -410,6 +405,12 @@ public class VideoJobProcessor implements JobProcessor {
         log.info("[video] 转存完成 jobId={} storageKey={} size={}", claim.id(), stored.storageKey(), stored.size());
 
         int[] dimensions = resolveDimensions(claim.input());
+        if (dimensions == null && mediaRelay != null && stored.storageKey() != null) {
+            dimensions = mediaRelay.probeVideoDimensions(stored.storageKey());
+            if (dimensions == null) {
+                log.warn("[video] TOS 探测视频宽高失败，资产宽高留空 jobId={}", claim.id());
+            }
+        }
         Integer width = dimensions != null ? dimensions[0] : null;
         Integer height = dimensions != null ? dimensions[1] : null;
 
@@ -832,21 +833,11 @@ public class VideoJobProcessor implements JobProcessor {
 
 
     static int[] resolveDimensions(Map<String, Object> input) {
-        Map<String, Object> params = input.get("parameters") instanceof Map<?, ?> p
-                ? castMap(p) : null;
-
-        Object resolutionObj = input.get("resolution");
-        Object aspectRatioObj = input.get("aspect_ratio");
-        if (resolutionObj instanceof String resolution && aspectRatioObj instanceof String aspectRatio) {
-            int[] dims = videoDimensions(resolution, aspectRatio);
-            if (dims != null) return dims;
-        }
-
-        Object sizeObj = params != null ? params.get("size") : input.get("size");
-        if (sizeObj instanceof String size) {
-            return dimensionsFromSize(size);
-        }
-        return null;
+        if ("adaptive".equals(input.get("aspect_ratio"))) return null;
+        Integer width = positiveIntOrNull(input.get("output_width"));
+        Integer height = positiveIntOrNull(input.get("output_height"));
+        if (width == null || height == null) return null;
+        return new int[]{width, height};
     }
 
     private static final List<String> EDIT_INTENT_KEYWORDS = List.of(
@@ -890,32 +881,6 @@ public class VideoJobProcessor implements JobProcessor {
         if (hasIntentKeyword(p, EDIT_INTENT_KEYWORDS)) return "edit";
         return "default";
     }
-
-    static int[] videoDimensions(String resolution, String aspectRatio) {
-        Matcher resMatcher = RESOLUTION_PATTERN.matcher(resolution);
-        if (!resMatcher.matches()) return null;
-        if ("adaptive".equals(aspectRatio)) return null;
-        Matcher ratioMatcher = RATIO_PATTERN.matcher(aspectRatio);
-        if (!ratioMatcher.matches()) return null;
-
-        int height = Integer.parseInt(resMatcher.group(1));
-        if (height <= 0) return null;
-
-        int rw = Integer.parseInt(ratioMatcher.group(1));
-        int rh = Integer.parseInt(ratioMatcher.group(2));
-        int width = (int) (Math.round((double) height * rw / rh / 2) * 2);
-        return new int[]{width, height};
-    }
-
-    static int[] dimensionsFromSize(String size) {
-        Matcher m = SIZE_PATTERN.matcher(size);
-        if (!m.matches()) return null;
-        int width = Integer.parseInt(m.group(1));
-        int height = Integer.parseInt(m.group(2));
-        if (width <= 0 || height <= 0) return null;
-        return new int[]{width, height};
-    }
-
 
     static double resolveDuration(Map<String, Object> input) {
         Map<String, Object> params = input.get("parameters") instanceof Map<?, ?> p
