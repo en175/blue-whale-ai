@@ -25,7 +25,7 @@ describe("createJobRepo.listByUser", () => {
           progress: 0, input: { source_node_id: "source" }, output_asset_ids: [],
           gmt_create: new Date("2026-09-23T00:00:00Z"), error: null },
       ]) },
-      assets: { findMany: vi.fn().mockResolvedValue([]) },
+      user_assets: { findMany: vi.fn().mockResolvedValue([]) },
       generation_job_extras: extrasDelegate([extraRow(73n, "canvas_card_state", "string", "removed")]),
     } as never;
     const page = await createJobRepo(prisma).listByUser("9", { projectId: "55", type: "audio_mix", page: 1, size: 100 });
@@ -61,7 +61,7 @@ describe("createJobRepo.listByUser", () => {
     ]);
     const prisma = {
       generation_jobs: { count, findMany },
-      assets: { findMany: vi.fn().mockResolvedValue([]) },
+      user_assets: { findMany: vi.fn().mockResolvedValue([]) },
       generation_job_extras: extrasDelegate(),
     } as never;
 
@@ -116,7 +116,7 @@ describe("createJobRepo.findByIdForUser", () => {
           error: null,
         }),
       },
-      assets: { findMany: vi.fn().mockResolvedValue(assetRows) },
+      user_assets: { findMany: vi.fn().mockResolvedValue(assetRows) },
       generation_job_extras: extrasDelegate(extrasRows),
       generation_job_logs: {
         findFirst: vi.fn().mockResolvedValue({
@@ -196,7 +196,7 @@ describe("createJobRepo.findByIdForUser", () => {
           error: null,
         }),
       },
-      assets: { findMany: vi.fn().mockResolvedValue([
+      user_assets: { findMany: vi.fn().mockResolvedValue([
         { id: 11n, url: "https://tos/mixed.mp3", type: "audio", width: null, height: null, duration_ms: 42750 },
       ]) },
     });
@@ -226,7 +226,7 @@ describe("createJobRepo.findByIdForUser", () => {
     expect(view?.output_assets).toEqual([]);
     expect(view?.result).toBeNull();
     expect(prisma.generation_job_logs.findFirst).not.toHaveBeenCalled();
-    expect(prisma.assets.findMany).not.toHaveBeenCalled();
+    expect(prisma.user_assets.findMany).not.toHaveBeenCalled();
   });
 });
 
@@ -259,7 +259,7 @@ describe("createJobRepo.listForAdmin", () => {
       capabilityFindMany,
       repo: createJobRepo({
         generation_jobs: { count, findMany },
-        generation_model_capability: { findMany: capabilityFindMany },
+        catalog_models: { findMany: capabilityFindMany },
       } as never),
     };
   }
@@ -340,7 +340,7 @@ describe("createJobRepo.listForAdmin", () => {
     ]);
     const repo = createJobRepo({
       generation_jobs: { count: vi.fn().mockResolvedValue(1), findMany },
-      generation_model_capability: { findMany: vi.fn().mockResolvedValue([]) },
+      catalog_models: { findMany: vi.fn().mockResolvedValue([]) },
     } as never);
 
     const page = await repo.listForAdmin({ page: 1, size: 20 });
@@ -355,7 +355,7 @@ describe("createJobRepo.listForAdmin", () => {
     ]);
     const repo = createJobRepo({
       generation_jobs: { count: vi.fn().mockResolvedValue(1), findMany },
-      generation_model_capability: { findMany: vi.fn().mockResolvedValue(CAPS) },
+      catalog_models: { findMany: vi.fn().mockResolvedValue(CAPS) },
     } as never);
 
     const page = await repo.listForAdmin({ page: 1, size: 20 });
@@ -372,7 +372,7 @@ describe("createJobRepo.listForAdmin", () => {
     ]);
     const repo = createJobRepo({
       generation_jobs: { count: vi.fn().mockResolvedValue(1), findMany },
-      generation_model_capability: { findMany: vi.fn().mockResolvedValue([]) },
+      catalog_models: { findMany: vi.fn().mockResolvedValue([]) },
     } as never);
 
     const page = await repo.listForAdmin({ page: 1, size: 20 });
@@ -385,7 +385,7 @@ describe("createJobRepo.listForAdmin", () => {
     const capabilityFindMany = vi.fn().mockResolvedValue(CAPS);
     const repo = createJobRepo({
       generation_jobs: { count: vi.fn().mockResolvedValue(1), findMany },
-      generation_model_capability: { findMany: capabilityFindMany },
+      catalog_models: { findMany: capabilityFindMany },
     } as never);
 
     const page = await repo.listForAdmin({ page: 1, size: 20 });
@@ -403,7 +403,7 @@ describe("createJobRepo.listForAdmin", () => {
     const capabilityFindMany = vi.fn().mockResolvedValue([]);
     const repo = createJobRepo({
       generation_jobs: { count: vi.fn().mockResolvedValue(3), findMany },
-      generation_model_capability: { findMany: capabilityFindMany },
+      catalog_models: { findMany: capabilityFindMany },
     } as never);
 
     await repo.listForAdmin({ page: 1, size: 20 });
@@ -440,7 +440,7 @@ describe("createJobRepo.loadChargeTaskSummaries", () => {
     return {
       repo: createJobRepo({
         generation_jobs: { findMany: jobsFindMany },
-        generation_model_capability: { findMany: capFindMany },
+        catalog_models: { findMany: capFindMany },
       } as never),
       jobsFindMany,
       capFindMany,
@@ -620,7 +620,7 @@ describe("createJobRepo 两阶段视频阶段投影（IKIZQ8）", () => {
           source_sample_job_id: null,
         }),
       },
-      assets: { findMany: vi.fn().mockResolvedValue([]) },
+      user_assets: { findMany: vi.fn().mockResolvedValue([]) },
       generation_job_extras: extrasDelegate([
         extraRow(302n, "video_stage", "string", "sample"),
         extraRow(302n, "final_job_id", "number", "305"),
@@ -654,7 +654,7 @@ describe("createJobRepo 两阶段视频阶段投影（IKIZQ8）", () => {
           error: null,
         }),
       },
-      assets: { findMany: vi.fn().mockResolvedValue([]) },
+      user_assets: { findMany: vi.fn().mockResolvedValue([]) },
       generation_job_extras: extrasDelegate(),
     } as never;
 
@@ -686,7 +686,7 @@ describe("createJobRepo 两阶段视频阶段投影（IKIZQ8）", () => {
           },
         ]),
       },
-      assets: { findMany: vi.fn().mockResolvedValue([]) },
+      user_assets: { findMany: vi.fn().mockResolvedValue([]) },
       generation_job_extras: extrasDelegate([
         extraRow(303n, "video_stage", "string", "sample"),
         extraRow(303n, "charge_state", "string", "charged"),
@@ -717,7 +717,7 @@ describe("createJobRepo 两阶段历史与资产查询（IKIZQH）", () => {
           source_sample_job_id: 302n,
         }),
       },
-      assets: {
+      user_assets: {
         findMany: vi.fn().mockResolvedValue([
           { id: 88n, url: "https://tos.test/88.mp4", type: "video", width: 1920, height: 1080 },
         ]),
@@ -752,7 +752,7 @@ describe("createJobRepo 两阶段历史与资产查询（IKIZQH）", () => {
           source_sample_job_id: 302n,
         }),
       },
-      assets: { findMany: assetsFindMany },
+      user_assets: { findMany: assetsFindMany },
       generation_job_extras: extrasDelegate([
         extraRow(306n, "video_stage", "string", "final"),
         extraRow(306n, "charge_state", "string", "refunded"),
@@ -799,7 +799,7 @@ describe("createJobRepo 两阶段历史与资产查询（IKIZQH）", () => {
     ]);
     const prisma = {
       generation_jobs: { count, findMany },
-      assets: { findMany: vi.fn().mockResolvedValue([]) },
+      user_assets: { findMany: vi.fn().mockResolvedValue([]) },
       generation_job_extras: extrasDelegate([
         extraRow(301n, "video_stage", "string", "sample"),
         extraRow(301n, "charge_state", "string", "charged"),

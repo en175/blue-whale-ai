@@ -248,7 +248,7 @@ async function resolveMaterialStatuses(
 
   for (let i = 0; i < materialIds.length; i += MATERIAL_ID_CHUNK) {
     const chunk = materialIds.slice(i, i + MATERIAL_ID_CHUNK);
-    const statusRows = await prisma.material_assets.findMany({
+    const statusRows = await prisma.catalog_material_states.findMany({
       where: { user_id: BigInt(userId), material_id: { in: chunk } },
       select: { material_id: true, status: true, status_checked_at: true },
     });
@@ -315,7 +315,7 @@ async function resolveAssetJobMeta(
   }
   if (modelIds.size === 0) return { modelByJobId, promptByJobId, nameByJobId, stageByJobId };
 
-  const caps = await prisma.generation_model_capability.findMany({
+  const caps = await prisma.catalog_models.findMany({
     where: { model_id: { in: [...modelIds] }, enabled: true, is_delete: false },
     select: { model_id: true, model_label: true },
   });
@@ -411,7 +411,7 @@ function toAssetDetailView(
 export function createAssetRepo(prisma: PrismaClient): AssetRepo {
   return {
     async findOwnedById(assetId, userId) {
-      const row = await prisma.assets.findFirst({
+      const row = await prisma.user_assets.findFirst({
         where: {
           id: BigInt(assetId),
           user_id: BigInt(userId),
@@ -425,7 +425,7 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
     },
     async softDeleteOwned(assetId, userId) {
       return prisma.$transaction(async (tx) => {
-        const result = await tx.assets.updateMany({
+        const result = await tx.user_assets.updateMany({
           where: {
             id: BigInt(assetId),
             user_id: BigInt(userId),
@@ -451,7 +451,7 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
       const aid = BigInt(assetId);
       const pid = BigInt(projectId);
       const uid = BigInt(userId);
-      const existing = await prisma.assets.findFirst({
+      const existing = await prisma.user_assets.findFirst({
         where: { id: aid, user_id: uid, is_delete: false },
         select: { id: true },
       });
@@ -469,7 +469,7 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
       const aid = BigInt(assetId);
       const uid = BigInt(userId);
       const [direct, linked] = await Promise.all([
-        prisma.assets.groupBy({
+        prisma.user_assets.groupBy({
           by: ["project_id"],
           where: { id: aid, user_id: uid, is_delete: false, project_id: { not: BigInt(0) } },
         }),
@@ -495,7 +495,7 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
       return liveProjects.length;
     },
     async listGcCandidates(cutoff) {
-      const rows = await prisma.assets.findMany({
+      const rows = await prisma.user_assets.findMany({
         where: { is_delete: true, deleted_at: { not: null, lt: cutoff } },
         select: { id: true, storage_key: true },
         orderBy: { id: "asc" },
@@ -508,7 +508,7 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
     },
     async findLiveRefs(storageKeys) {
       if (storageKeys.length === 0) return [];
-      const rows = await prisma.assets.findMany({
+      const rows = await prisma.user_assets.findMany({
         where: { storage_key: { in: storageKeys }, is_delete: false },
         select: { storage_key: true },
       });
@@ -518,7 +518,7 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
     },
     async hardDeleteRows(ids) {
       if (ids.length === 0) return 0;
-      const result = await prisma.assets.deleteMany({
+      const result = await prisma.user_assets.deleteMany({
         where: { id: { in: ids } },
       });
       return result.count;
@@ -531,8 +531,8 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
         NOT: { source: IMAGE_ERASE_MASK_ASSET_SOURCE },
       };
       const [total, rows] = await Promise.all([
-        prisma.assets.count({ where }),
-        prisma.assets.findMany({
+        prisma.user_assets.count({ where }),
+        prisma.user_assets.findMany({
           where,
           orderBy: [{ gmt_create: "desc" }, { id: "desc" }],
           skip: (filter.page - 1) * filter.size,
@@ -549,7 +549,7 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
       };
     },
     async findAccessible(assetId, userId) {
-      const row = await prisma.assets.findFirst({
+      const row = await prisma.user_assets.findFirst({
         where: {
           id: BigInt(assetId),
           user_id: BigInt(userId),
@@ -575,7 +575,7 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
         : null;
     },
     async findOwnedSource(sourceAssetId, userId) {
-      const row = await prisma.assets.findFirst({
+      const row = await prisma.user_assets.findFirst({
         where: {
           id: BigInt(sourceAssetId),
           user_id: BigInt(userId),
@@ -598,7 +598,7 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
       };
     },
     async createPendingUpload(input) {
-      const row = await prisma.assets.create({
+      const row = await prisma.user_assets.create({
         data: {
           user_id: BigInt(input.userId),
           project_id: BigInt(0),
@@ -614,7 +614,7 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
       return row.id.toString();
     },
     async findPendingUpload(assetId, userId) {
-      const row = await prisma.assets.findFirst({
+      const row = await prisma.user_assets.findFirst({
         where: {
           id: BigInt(assetId),
           user_id: BigInt(userId),
@@ -632,7 +632,7 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
       };
     },
     async markUploadReady(assetId, userId) {
-      const result = await prisma.assets.updateMany({
+      const result = await prisma.user_assets.updateMany({
         where: {
           id: BigInt(assetId),
           user_id: BigInt(userId),
@@ -644,7 +644,7 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
       return result.count === 1;
     },
     async findCommittedUpload(userId, storageKey) {
-      const row = await prisma.assets.findFirst({
+      const row = await prisma.user_assets.findFirst({
         where: {
           user_id: BigInt(userId),
           storage_key: storageKey,
@@ -656,7 +656,7 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
       return row ? toUploadAsset(row) : null;
     },
     async findOwnedByMd5(userId, md5) {
-      const row = await prisma.assets.findFirst({
+      const row = await prisma.user_assets.findFirst({
         where: {
           user_id: BigInt(userId),
           md5,
@@ -670,7 +670,7 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
       return row ? toUploadAsset(row) : null;
     },
     async findOwnedByMaterialId(userId, materialId) {
-      const row = await prisma.assets.findFirst({
+      const row = await prisma.user_assets.findFirst({
         where: {
           user_id: BigInt(userId),
           material_id: materialId,
@@ -683,7 +683,7 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
     },
     async bindMaterialId({ userId, assetId, materialId }) {
       const uid = BigInt(userId);
-      const owned = await prisma.assets.findFirst({
+      const owned = await prisma.user_assets.findFirst({
         where: {
           id: BigInt(assetId),
           user_id: uid,
@@ -697,7 +697,7 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
       }
       const apply = () =>
         prisma.$transaction(async (tx) => {
-          await tx.assets.updateMany({
+          await tx.user_assets.updateMany({
             where: {
               material_id: materialId,
               user_id: uid,
@@ -709,7 +709,7 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
               gmt_modified: new Date(),
             },
           });
-          await tx.assets.update({
+          await tx.user_assets.update({
             where: { id: owned.id },
             data: {
               material_id: materialId,
@@ -730,7 +730,7 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
     async createUploadedAsset(input) {
       const row = await prisma.$transaction(async (tx) => {
         if (input.materialId) {
-          await tx.assets.updateMany({
+          await tx.user_assets.updateMany({
             where: {
               material_id: input.materialId,
               user_id: BigInt(input.userId),
@@ -742,7 +742,7 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
             },
           });
         }
-        const created = await tx.assets.create({
+        const created = await tx.user_assets.create({
           data: {
             user_id: BigInt(input.userId),
             project_id: BigInt(input.projectId),
@@ -785,7 +785,7 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
         return created;
       }).catch(async (error: unknown) => {
         if (isUniqueViolation(error) && input.materialId) {
-          const existing = await prisma.assets.findFirst({
+          const existing = await prisma.user_assets.findFirst({
             where: {
               user_id: BigInt(input.userId),
               material_id: input.materialId,
@@ -805,7 +805,7 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
       return asset;
     },
     async linkAssetToMaterial({ userId, assetId, materialId }) {
-      const owned = await prisma.assets.findFirst({
+      const owned = await prisma.user_assets.findFirst({
         where: {
           id: BigInt(assetId),
           user_id: BigInt(userId),
@@ -814,7 +814,7 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
         select: { id: true },
       });
       if (!owned) return false;
-      await prisma.assets.update({
+      await prisma.user_assets.update({
         where: { id: owned.id },
         data: {
           material_id: materialId,
@@ -825,7 +825,7 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
       return true;
     },
     async clearMaterialLink(userId, materialId) {
-      await prisma.assets.updateMany({
+      await prisma.user_assets.updateMany({
         where: { material_id: materialId, user_id: BigInt(userId) },
         data: {
           material_id: null,
@@ -836,13 +836,13 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
     },
     async clearMaterialGroupLink(userId, materialGroupId) {
       const uid = BigInt(userId);
-      const rows = await prisma.material_assets.findMany({
+      const rows = await prisma.catalog_material_states.findMany({
         where: { user_id: uid, material_group_id: materialGroupId },
         select: { material_id: true },
       });
       const materialIds = rows.map((row) => row.material_id);
       if (materialIds.length === 0) return;
-      await prisma.assets.updateMany({
+      await prisma.user_assets.updateMany({
         where: { user_id: uid, material_id: { in: materialIds } },
         data: {
           material_id: null,
@@ -853,7 +853,7 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
     },
     async findOwnedByMaterialIds(userId, materialIds) {
       if (materialIds.length === 0) return [];
-      const rows = await prisma.assets.findMany({
+      const rows = await prisma.user_assets.findMany({
         where: {
           user_id: BigInt(userId),
           material_id: { in: [...materialIds] },
@@ -875,7 +875,7 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
     },
     async findOwnedMaterialLink(userId, assetId) {
       if (!/^\d+$/.test(assetId)) return null;
-      const row = await prisma.assets.findFirst({
+      const row = await prisma.user_assets.findFirst({
         where: {
           id: BigInt(assetId),
           user_id: BigInt(userId),
@@ -887,7 +887,7 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
     },
     async findBoundMaterialIds(userId, assetIds) {
       if (assetIds.length === 0) return [];
-      const rows = await prisma.assets.findMany({
+      const rows = await prisma.user_assets.findMany({
         where: {
           id: { in: assetIds.map((id) => BigInt(id)) },
           user_id: BigInt(userId),

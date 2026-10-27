@@ -52,7 +52,7 @@ describe.skipIf(!process.env.IKDMQR_DATABASE_URL)("Image media reference public 
   beforeAll(async () => {
     process.env.DATABASE_URL = process.env.IKDMQR_DATABASE_URL;
     const sizes = [{ id: "1024x1024", label: "1024x1024" }];
-    await prisma.client.generation_model_capability.upsert({
+    await prisma.client.catalog_models.upsert({
       where: { provider_id_model_id: { provider_id: "ikdmqr-test", model_id: MODEL_ID } },
       create: {
         provider_id: "ikdmqr-test",
@@ -72,7 +72,7 @@ describe.skipIf(!process.env.IKDMQR_DATABASE_URL)("Image media reference public 
       update: { supported_sizes: sizes, default_size: "1024x1024", features: { reference_image: true } },
     });
 
-    await prisma.client.generation_model_capability.upsert({
+    await prisma.client.catalog_models.upsert({
       where: { provider_id_model_id: { provider_id: "ikdmqr-test", model_id: STRICT_MODEL_ID } },
       create: {
         provider_id: "ikdmqr-test",
@@ -173,7 +173,7 @@ describe.skipIf(!process.env.IKDMQR_DATABASE_URL)("Image media reference public 
     return { id, type: "textNode", position: { x: 560, y: 80 }, data: { title, text } };
   }
   async function createAsset(projectId: string, type: "image" | "video", url: string) {
-    const row = await prisma.client.assets.create({
+    const row = await prisma.client.user_assets.create({
       data: {
         user_id: BigInt(987654),
         project_id: BigInt(projectId),

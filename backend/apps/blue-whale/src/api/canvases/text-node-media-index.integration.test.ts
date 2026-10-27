@@ -53,7 +53,7 @@ describe.skipIf(!process.env.IKFM3Q_DATABASE_URL)("Text node media index contrac
     });
   }
   async function createAsset(projectId: bigint, type: "image" | "video" | "audio", url: string, ownerId = 987654n) {
-    const asset = await prisma.client.assets.create({ data: { user_id: ownerId, project_id: projectId, type, url, width: 640, height: 480 } });
+    const asset = await prisma.client.user_assets.create({ data: { user_id: ownerId, project_id: projectId, type, url, width: 640, height: 480 } });
     return asset.id.toString();
   }
   async function saveCanvas(projectId: bigint, nodes: unknown[], edges: unknown[], version: number | "missing") {

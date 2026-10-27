@@ -1454,7 +1454,7 @@ class JobStateMachineMySqlIntegrationTest {
 
         assertThat(readJob(retryId).getStatus()).isEqualTo("succeeded");
         assertThat(readJob(retryId).getFencingToken()).isEqualTo(2L);
-        assertThat(jdbc.queryForObject("SELECT url FROM assets WHERE generation_job_id=?",
+        assertThat(jdbc.queryForObject("SELECT url FROM user_assets WHERE generation_job_id=?",
                 String.class, retryId)).isEqualTo("http://cdn/video.mp4");
         assertThat(countAssets(retryId)).isEqualTo(1);
         assertThat(countLogs(retryId)).isEqualTo(1);
@@ -1635,9 +1635,9 @@ class JobStateMachineMySqlIntegrationTest {
                 500L, "0123456789abcdef0123456789abcdef", 12.5))).isTrue();
 
         assertThat(readJob(jobId).getStatus()).isEqualTo("succeeded");
-        assertThat(jdbc.queryForObject("SELECT url FROM assets WHERE generation_job_id=?", String.class, jobId))
+        assertThat(jdbc.queryForObject("SELECT url FROM user_assets WHERE generation_job_id=?", String.class, jobId))
                 .isEqualTo("https://our-tos.example/audio.mp3");
-        assertThat(jdbc.queryForObject("SELECT duration_ms FROM assets WHERE generation_job_id=?", Integer.class, jobId))
+        assertThat(jdbc.queryForObject("SELECT duration_ms FROM user_assets WHERE generation_job_id=?", Integer.class, jobId))
                 .isEqualTo(12_500);
         assertThat(countAssets(jobId)).isEqualTo(1);
     }
@@ -1714,11 +1714,11 @@ class JobStateMachineMySqlIntegrationTest {
             processor.handle(String.valueOf(jobId));
             assertThat(readJob(jobId).getStatus()).isEqualTo("succeeded");
             assertThat(countAssets(jobId)).isEqualTo(1);
-            String assetUrl = jdbc.queryForObject("SELECT url FROM assets WHERE generation_job_id=?", String.class, jobId);
+            String assetUrl = jdbc.queryForObject("SELECT url FROM user_assets WHERE generation_job_id=?", String.class, jobId);
             assertThat(assetUrl).isEqualTo(base.get() + "/stored/out.mp3")
                     .isNotEqualTo(base.get() + "/temporary/out.mp3");
             assertThat(java.net.URI.create(assetUrl).toURL().openStream().readAllBytes()).isEqualTo(audio);
-            assertThat(jdbc.queryForObject("SELECT duration_ms FROM assets WHERE generation_job_id=?", Integer.class, jobId))
+            assertThat(jdbc.queryForObject("SELECT duration_ms FROM user_assets WHERE generation_job_id=?", Integer.class, jobId))
                     .isEqualTo(12_500);
         } finally {
             gateway.stop(0);

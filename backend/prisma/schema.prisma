@@ -7,7 +7,7 @@ datasource db {
 }
 
 /// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
-model assets {
+model user_assets {
   id                BigInt   @id @default(autoincrement())
   user_id           BigInt
   project_id        BigInt   @default(0)
@@ -47,7 +47,7 @@ model assets {
 /// kind：virtual=虚拟人像库组（每用户至多 1 个默认组），real=真人像库组（每用户可多个）。
 /// cover_url：封面图（真人组用，虚拟组可空）。material_group_id：上游组 id（group-...）。
 /// is_default 每用户 virtual 至多 1 个用应用层保证（MySQL 唯一索引无法表达条件唯一，不设 DB 约束）。
-model material_groups {
+model catalog_material_groups {
   id                BigInt    @id @default(autoincrement())
   user_id           BigInt
   material_group_id String    @db.VarChar(128)
@@ -71,9 +71,9 @@ model material_groups {
 /// status = Processing | Active | Failed；素材真身在上游，本表只存状态与失败原文（error_* 仅供内部归因，不展示）。
 /// status_checked_at = 最后一次向上游确认状态的时间。
 /// 无 is_delete/deleted_at：本表行是素材的附属状态，没有独立价值，删除时硬删（ADR-0087 决策 5）。
-model material_assets {
+model catalog_material_states {
   id                BigInt    @id @default(autoincrement())
-  material_id       String    @unique(map: "uk_material_assets_material") @db.VarChar(128)
+  material_id       String    @unique(map: "uk_catalog_material_states__material") @db.VarChar(128)
   user_id           BigInt
   material_group_id String    @db.VarChar(128)
   status            String    @db.VarChar(16)
@@ -84,8 +84,8 @@ model material_assets {
   gmt_modified      DateTime  @default(now()) @db.DateTime(0)
   version           Int       @default(0)
 
-  @@index([status, gmt_create], map: "idx_material_assets_poll")
-  @@index([material_group_id], map: "idx_material_assets_group")
+  @@index([status, gmt_create], map: "idx_catalog_material_states__poll")
+  @@index([material_group_id], map: "idx_catalog_material_states__group")
 }
 
 /// 画布共享资产（IK9QKP）：用户主动保存、跨项目可复用的自包含快照库。
@@ -93,7 +93,7 @@ model material_assets {
 /// kind = 节点判别字段（card 的 data.kind / media 的 data.mediaType；goods/scene/text 为 NULL）。
 /// snapshot 统一存各类型全部数据（自包含，不依赖来源表）；name/thumbnail_url 为列表查询冗余列。
 /// dedup_key 幂等去重：媒体 url sha256、卡片 类型+描述 sha256、商品 名称 sha256、场景 内容 sha256、文本 NULL。
-model shared_assets {
+model user_shared_asset_snapshots {
   id            BigInt   @id @default(autoincrement())
   user_id       BigInt
   asset_type    String   @db.VarChar(16)
@@ -218,7 +218,7 @@ model generation_outbox {
 }
 
 /// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
-model generation_model_capability {
+model catalog_models {
   id                      BigInt   @id @default(autoincrement())
   provider_id             String   @db.VarChar(32)
   model_id                String   @db.VarChar(128)
@@ -259,7 +259,7 @@ model generation_model_capability {
   @@index([capability_type, enabled], map: "idx_capability_type_enabled")
 }
 
-model media_tool_pricing {
+model catalog_media_tools {
   id             BigInt   @id @default(autoincrement())
   tool_type      String   @db.VarChar(64)
   label          String   @db.VarChar(64)
@@ -271,7 +271,7 @@ model media_tool_pricing {
   gmt_modified   DateTime @default(now()) @db.DateTime(0)
   is_delete      Boolean  @default(false)
 
-  @@unique([tool_type], map: "uk_media_tool_pricing__tool_type")
+  @@unique([tool_type], map: "uk_catalog_media_tools__tool_type")
 }
 
 /// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
@@ -562,7 +562,7 @@ model project_events {
 }
 
 /// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
-model skill {
+model catalog_skills {
   id              BigInt   @id @default(autoincrement())
   name            String   @unique(map: "uk_name") @db.VarChar(255)
   skill_code      String?  @unique(map: "uk_skill_code") @db.VarChar(32)
@@ -586,7 +586,7 @@ model skill {
 }
 
 /// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
-model template_card {
+model catalog_templates {
   id           BigInt   @id @default(autoincrement())
   tag_code     String   @db.VarChar(64)
   title        String   @db.VarChar(255)
@@ -604,7 +604,7 @@ model template_card {
 }
 
 /// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
-model template_card_image {
+model catalog_template_images {
   id           BigInt   @id @default(autoincrement())
   card_id      BigInt
   image_url    String   @db.VarChar(512)
@@ -619,7 +619,7 @@ model template_card_image {
 }
 
 /// IK764F：首页模板标签（原硬编码枚举落库）。tag_code 与顺序固定，仅 label 可由管理后台改名。
-model template_tag {
+model catalog_template_tags {
   id           BigInt   @id @default(autoincrement())
   tag_code     String   @db.VarChar(64)
   label        String   @db.VarChar(128)
@@ -633,7 +633,7 @@ model template_tag {
 }
 
 /// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
-model user_skill {
+model user_skills {
   id           BigInt   @id @default(autoincrement())
   user_id      BigInt
   skill_id     BigInt
@@ -643,14 +643,14 @@ model user_skill {
   version      Int      @default(0)
   is_delete    Int      @default(0) @db.TinyInt
 
-  @@unique([user_id, skill_id], map: "uk_user_skill")
+  @@unique([user_id, skill_id], map: "uk_user_skills__user_skill")
   @@index([skill_id], map: "idx_skill")
   @@index([user_id], map: "idx_user")
 }
 
 /// IKCH05：首页背景图/视频后台动态配置条目。media_type=video 时 poster_url 必填；
 /// enabled=1 进首页轮播（按 sort_order 升序）；上限 8 条（应用层校验，不设 DB 唯一约束）。
-model homepage_hero {
+model content_homepage_heroes {
   id           BigInt   @id @default(autoincrement())
   scene        String   @default("homepage") @db.VarChar(20)
   media_type   String   @default("video") @db.VarChar(16)
@@ -670,9 +670,9 @@ model homepage_hero {
 
 /// Creative Skill 稳定身份（IK60WS，资产契约 §1）：官方与个人共用一表；
 /// owner_user_id=0 表示平台官方资产，asset_domain 区分 official/personal。
-model creative_skill {
+model catalog_creative_skills {
   id                BigInt   @id @default(autoincrement())
-  creative_skill_id String   @unique(map: "uk_creative_skill_id") @db.VarChar(80)
+  creative_skill_id String   @unique(map: "uk_catalog_creative_skills__creative_skill_id") @db.VarChar(80)
   name              String   @db.VarChar(255)
   description       String?  @db.VarChar(1000)
   source_skill_id   BigInt?
@@ -690,9 +690,9 @@ model creative_skill {
 
 /// Creative Skill 不可变版本快照（IK60WS，资产契约 §1）：
 /// body 为剥掉 frontmatter 的纯正文，digest=sha256(body)，仅受信任运行时按 pin 读取。
-model creative_skill_version {
+model catalog_creative_skill_versions {
   id                        BigInt   @id @default(autoincrement())
-  creative_skill_version_id String   @unique(map: "uk_creative_skill_version_id") @db.VarChar(80)
+  creative_skill_version_id String   @unique(map: "uk_catalog_creative_skill_versions__creative_skill_version_id") @db.VarChar(80)
   creative_skill_id         String   @db.VarChar(80)
   display_version           String   @db.VarChar(64)
   body                      String   @db.LongText
@@ -702,7 +702,7 @@ model creative_skill_version {
   gmt_create                DateTime @default(now()) @db.DateTime(0)
   gmt_modified              DateTime @default(now()) @db.DateTime(0)
 
-  @@unique([creative_skill_id, display_version], map: "uk_creative_skill_version_semver")
+  @@unique([creative_skill_id, display_version], map: "uk_catalog_creative_skill_versions__semver")
 }
 
 /// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments

@@ -25,7 +25,7 @@ function row(overrides: Record<string, unknown> = {}) {
 
 function mockPrisma(overrides: Record<string, unknown> = {}) {
   const prisma = {
-    homepage_hero: {
+    content_homepage_heroes: {
       findMany: vi.fn().mockResolvedValue([]),
       findFirst: vi.fn().mockResolvedValue(null),
       aggregate: vi.fn().mockResolvedValue({ _max: { sort_order: null } }),
@@ -33,13 +33,13 @@ function mockPrisma(overrides: Record<string, unknown> = {}) {
       create: vi.fn().mockResolvedValue(row({ id: 1n })),
       update: vi.fn().mockResolvedValue(row()),
       updateMany: vi.fn().mockResolvedValue({ count: 0 }),
-      ...(overrides.homepage_hero ?? {}),
+      ...(overrides.content_homepage_heroes ?? {}),
     },
     $transaction: vi.fn((fn: (tx: unknown) => unknown) => fn(prisma)),
     ...(overrides.$transaction !== undefined ? { $transaction: overrides.$transaction } : {}),
   } as never;
   return prisma as unknown as {
-    homepage_hero: Record<string, ReturnType<typeof vi.fn>>;
+    content_homepage_heroes: Record<string, ReturnType<typeof vi.fn>>;
     $transaction: ReturnType<typeof vi.fn>;
   };
 }
@@ -51,7 +51,7 @@ function repoOf(prisma: ReturnType<typeof mockPrisma>): HomepageHeroRepo {
 describe("homepage_hero repo — 首页/登录弹窗背景配置", () => {
   it("listAll 只取指定场景的存活条目并按 sort_order 升序", async () => {
     const prisma = mockPrisma({
-      homepage_hero: {
+      content_homepage_heroes: {
         findMany: vi.fn().mockResolvedValue([
           row({ id: 1n, sort_order: 0 }),
           row({ id: 2n, sort_order: 1 }),
@@ -59,7 +59,7 @@ describe("homepage_hero repo — 首页/登录弹窗背景配置", () => {
       },
     });
     const list = await repoOf(prisma).listAll("auth");
-    expect(prisma.homepage_hero.findMany).toHaveBeenCalledWith({
+    expect(prisma.content_homepage_heroes.findMany).toHaveBeenCalledWith({
       where: { is_delete: 0, scene: "auth" },
       orderBy: [{ sort_order: "asc" }, { id: "asc" }],
     });
@@ -79,14 +79,14 @@ describe("homepage_hero repo — 首页/登录弹窗背景配置", () => {
 
   it("listEnabled 只返回指定场景 enabled=1 存活条目，且只 select 公开 5 字段", async () => {
     const prisma = mockPrisma({
-      homepage_hero: {
+      content_homepage_heroes: {
         findMany: vi.fn().mockResolvedValue([
           row({ id: 3n, media_type: "image", poster_url: null }),
         ]),
       },
     });
     const list = await repoOf(prisma).listEnabled("auth");
-    expect(prisma.homepage_hero.findMany).toHaveBeenCalledWith({
+    expect(prisma.content_homepage_heroes.findMany).toHaveBeenCalledWith({
       where: { is_delete: 0, enabled: 1, scene: "auth" },
       orderBy: [{ sort_order: "asc" }, { id: "asc" }],
       select: {
@@ -104,10 +104,10 @@ describe("homepage_hero repo — 首页/登录弹窗背景配置", () => {
 
   it("getById 命中存活条目返回字符串 id；已删/不存在返回 null", async () => {
     const prisma = mockPrisma({
-      homepage_hero: { findFirst: vi.fn().mockResolvedValue(row({ id: 5n })) },
+      content_homepage_heroes: { findFirst: vi.fn().mockResolvedValue(row({ id: 5n })) },
     });
     const found = await repoOf(prisma).getById(5n);
-    expect(prisma.homepage_hero.findFirst).toHaveBeenCalledWith({
+    expect(prisma.content_homepage_heroes.findFirst).toHaveBeenCalledWith({
       where: { id: 5n, is_delete: 0 },
     });
     expect(found?.id).toBe("5");
@@ -119,7 +119,7 @@ describe("homepage_hero repo — 首页/登录弹窗背景配置", () => {
 
   it("create 缺省 sort_order 取同场景 max+1；未显式禁用时校验同场景上限 8 条", async () => {
     const prisma = mockPrisma({
-      homepage_hero: {
+      content_homepage_heroes: {
         aggregate: vi.fn().mockResolvedValue({ _max: { sort_order: 3 } }),
         count: vi.fn().mockResolvedValue(0),
         create: vi.fn().mockResolvedValue(row({ id: 9n })),
@@ -131,14 +131,14 @@ describe("homepage_hero repo — 首页/登录弹窗背景配置", () => {
       media_url: "https://tos.example.com/new.mp4",
     });
     expect(id).toBe("9");
-    expect(prisma.homepage_hero.count).toHaveBeenCalledWith({
+    expect(prisma.content_homepage_heroes.count).toHaveBeenCalledWith({
       where: { is_delete: 0, enabled: 1, scene: "auth" },
     });
-    expect(prisma.homepage_hero.aggregate).toHaveBeenCalledWith({
+    expect(prisma.content_homepage_heroes.aggregate).toHaveBeenCalledWith({
       where: { is_delete: 0, scene: "auth" },
       _max: { sort_order: true },
     });
-    expect(prisma.homepage_hero.create).toHaveBeenCalledWith(
+    expect(prisma.content_homepage_heroes.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
           scene: "auth",
@@ -159,8 +159,8 @@ describe("homepage_hero repo — 首页/登录弹窗背景配置", () => {
       sort_order: 7,
       enabled: 0,
     });
-    expect(prisma.homepage_hero.count).not.toHaveBeenCalled();
-    expect(prisma.homepage_hero.create).toHaveBeenCalledWith(
+    expect(prisma.content_homepage_heroes.count).not.toHaveBeenCalled();
+    expect(prisma.content_homepage_heroes.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({ sort_order: 7, enabled: 0 }),
       }),
@@ -169,7 +169,7 @@ describe("homepage_hero repo — 首页/登录弹窗背景配置", () => {
 
   it("create 启用数已达上限时抛 HomepageHeroLimitError", async () => {
     const prisma = mockPrisma({
-      homepage_hero: { count: vi.fn().mockResolvedValue(HOMEPAGE_HERO_MAX_ENABLED) },
+      content_homepage_heroes: { count: vi.fn().mockResolvedValue(HOMEPAGE_HERO_MAX_ENABLED) },
     });
     await expect(
       repoOf(prisma).create({ scene: "homepage", media_type: "image", media_url: "https://x/i.png" }),
@@ -178,7 +178,7 @@ describe("homepage_hero repo — 首页/登录弹窗背景配置", () => {
 
   it("update 从禁用改启用（0→1）时校验上限", async () => {
     const prisma = mockPrisma({
-      homepage_hero: {
+      content_homepage_heroes: {
         findFirst: vi.fn().mockResolvedValue(row({ id: 2n, enabled: 0 })),
         count: vi.fn().mockResolvedValue(HOMEPAGE_HERO_MAX_ENABLED),
         update: vi.fn().mockResolvedValue(row()),
@@ -188,37 +188,37 @@ describe("homepage_hero repo — 首页/登录弹窗背景配置", () => {
       repoOf(prisma).update(2n, { enabled: 1 }),
     ).rejects.toThrow(HomepageHeroLimitError);
     const prisma2 = mockPrisma({
-      homepage_hero: {
+      content_homepage_heroes: {
         findFirst: vi.fn().mockResolvedValue(row({ id: 2n, enabled: 1 })),
         update: vi.fn().mockResolvedValue(row()),
       },
     });
     expect(await repoOf(prisma2).update(2n, { enabled: 1 })).toBe(true);
-    expect(prisma2.homepage_hero.count).not.toHaveBeenCalled();
+    expect(prisma2.content_homepage_heroes.count).not.toHaveBeenCalled();
   });
 
   it("update 未命中存活条目返回 false；poster_url 显式传 null 可清空", async () => {
-    const prisma = mockPrisma({ homepage_hero: { findFirst: vi.fn().mockResolvedValue(null) } });
+    const prisma = mockPrisma({ content_homepage_heroes: { findFirst: vi.fn().mockResolvedValue(null) } });
     expect(await repoOf(prisma).update(9n, { poster_url: null })).toBe(false);
 
     const prisma2 = mockPrisma({
-      homepage_hero: {
+      content_homepage_heroes: {
         findFirst: vi.fn().mockResolvedValue(row({ id: 2n })),
         update: vi.fn().mockResolvedValue(row()),
       },
     });
     await repoOf(prisma2).update(2n, { poster_url: null });
-    expect(prisma2.homepage_hero.update).toHaveBeenCalledWith(
+    expect(prisma2.content_homepage_heroes.update).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ poster_url: null }) }),
     );
   });
 
   it("softDelete 仅命中存活条目（updateMany + is_delete=0）", async () => {
     const prisma = mockPrisma({
-      homepage_hero: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
+      content_homepage_heroes: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
     });
     expect(await repoOf(prisma).softDelete(3n)).toBe(true);
-    expect(prisma.homepage_hero.updateMany).toHaveBeenCalledWith({
+    expect(prisma.content_homepage_heroes.updateMany).toHaveBeenCalledWith({
       where: { id: 3n, is_delete: 0 },
       data: expect.objectContaining({ is_delete: 1 }),
     });
@@ -233,7 +233,7 @@ describe("homepage_hero repo — 首页/登录弹窗背景配置", () => {
       row({ id: 3n, sort_order: 2 }),
     ];
     const prisma = mockPrisma({
-      homepage_hero: {
+      content_homepage_heroes: {
         findFirst: vi.fn().mockResolvedValue(rows[2]),
         findMany: vi.fn().mockResolvedValue(rows),
         update: vi.fn().mockResolvedValue(row()),
@@ -241,34 +241,34 @@ describe("homepage_hero repo — 首页/登录弹窗背景配置", () => {
     });
     const res = await repoOf(prisma).move(3n, "up");
     expect(res).toEqual({ ok: true });
-    expect(prisma.homepage_hero.findMany).toHaveBeenCalledWith({
+    expect(prisma.content_homepage_heroes.findMany).toHaveBeenCalledWith({
       where: { is_delete: 0, scene: "homepage" },
       orderBy: [{ sort_order: "asc" }, { id: "asc" }],
     });
-    const calls = prisma.homepage_hero.update.mock.calls.map((c) => c[0].data.sort_order);
+    const calls = prisma.content_homepage_heroes.update.mock.calls.map((c) => c[0].data.sort_order);
     expect(calls.sort()).toEqual([1, 2]);
   });
 
   it("move 边界：首条上移 / 末条下移 → boundary；目标不存在 → not_found", async () => {
     const rows = [row({ id: 1n, sort_order: 0 }), row({ id: 2n, sort_order: 1 })];
     const prisma = mockPrisma({
-      homepage_hero: {
+      content_homepage_heroes: {
         findFirst: vi.fn().mockResolvedValue(rows[0]),
         findMany: vi.fn().mockResolvedValue(rows),
       },
     });
     expect(await repoOf(prisma).move(1n, "up")).toEqual({ ok: false, reason: "boundary" });
 
-    const prisma2 = mockPrisma({ homepage_hero: { findFirst: vi.fn().mockResolvedValue(null) } });
+    const prisma2 = mockPrisma({ content_homepage_heroes: { findFirst: vi.fn().mockResolvedValue(null) } });
     expect(await repoOf(prisma2).move(99n, "up")).toEqual({ ok: false, reason: "not_found" });
   });
 
   it("countEnabled 统计指定场景 enabled=1 存活条目", async () => {
     const prisma = mockPrisma({
-      homepage_hero: { count: vi.fn().mockResolvedValue(5) },
+      content_homepage_heroes: { count: vi.fn().mockResolvedValue(5) },
     });
     expect(await repoOf(prisma).countEnabled("homepage")).toBe(5);
-    expect(prisma.homepage_hero.count).toHaveBeenCalledWith({
+    expect(prisma.content_homepage_heroes.count).toHaveBeenCalledWith({
       where: { is_delete: 0, enabled: 1, scene: "homepage" },
     });
   });

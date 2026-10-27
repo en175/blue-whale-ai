@@ -43,7 +43,7 @@ describe.skipIf(!process.env.IKDLQH_DATABASE_URL)("Text attachment ordering publ
   const previousDatabase = process.env.DATABASE_URL;
   beforeAll(async () => {
     process.env.DATABASE_URL = process.env.IKDLQH_DATABASE_URL;
-    await prisma.client.generation_model_capability.upsert({
+    await prisma.client.catalog_models.upsert({
       where: { provider_id_model_id: { provider_id: "ikdlqh-test", model_id: IMAGE_MODEL_ID } },
       create: {
         provider_id: "ikdlqh-test",
@@ -60,7 +60,7 @@ describe.skipIf(!process.env.IKDLQH_DATABASE_URL)("Text attachment ordering publ
       },
       update: { supported_sizes: [{ id: "1024x1024", label: "1024x1024" }], default_size: "1024x1024" },
     });
-    await prisma.client.generation_model_capability.upsert({
+    await prisma.client.catalog_models.upsert({
       where: { provider_id_model_id: { provider_id: "ikdlqh-test", model_id: VIDEO_MODEL_ID } },
       create: {
         provider_id: "ikdlqh-test",
@@ -315,7 +315,7 @@ describe.skipIf(!process.env.IKDLQH_DATABASE_URL)("Text attachment ordering publ
 
   async function seedBrowserProject(name: string, mediaType: "image" | "video") {
     const projectId = (await projects.create("987654", name)).id;
-    const asset = await prisma.client.assets.create({
+    const asset = await prisma.client.user_assets.create({
       data: {
         user_id: BigInt(987654),
         project_id: BigInt(projectId),

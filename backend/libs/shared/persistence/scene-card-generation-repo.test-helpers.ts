@@ -134,17 +134,17 @@ export function buildTx(
       create: vi.fn().mockResolvedValue({ id: 8001n }),
       ...overrides.scene_card_generation_records,
     },
-    generation_model_capability: {
+    catalog_models: {
       findUnique: vi.fn().mockResolvedValue(buildCapabilityRow()),
-      ...overrides.generation_model_capability,
+      ...overrides.catalog_models,
     },
     conversation_message_mentions: {
       findMany: vi.fn().mockResolvedValue([]),
       ...overrides.conversation_message_mentions,
     },
-    assets: {
+    user_assets: {
       findMany: vi.fn().mockResolvedValue([]),
-      ...overrides.assets,
+      ...overrides.user_assets,
     },
     project_canvas: {
       findFirst: vi.fn().mockResolvedValue({

@@ -1,0 +1,10 @@
+SET NAMES utf8mb4;
+ALTER TABLE `media_tool_pricing` RENAME INDEX `uk_media_tool_pricing__tool_type` TO `uk_catalog_media_tools__tool_type`;
+ALTER TABLE `user_skill` RENAME INDEX `uk_user_skill` TO `uk_user_skills__user_skill`;
+ALTER TABLE `material_assets` RENAME INDEX `uk_material_assets_material` TO `uk_catalog_material_states__material`;
+ALTER TABLE `material_assets` RENAME INDEX `idx_material_assets_poll` TO `idx_catalog_material_states__poll`;
+ALTER TABLE `material_assets` RENAME INDEX `idx_material_assets_group` TO `idx_catalog_material_states__group`;
+ALTER TABLE `creative_skill` RENAME INDEX `uk_creative_skill_id` TO `uk_catalog_creative_skills__creative_skill_id`;
+ALTER TABLE `creative_skill_version` RENAME INDEX `uk_creative_skill_version_id` TO `uk_catalog_creative_skill_versions__creative_skill_version_id`;
+ALTER TABLE `creative_skill_version` RENAME INDEX `uk_creative_skill_version_semver` TO `uk_catalog_creative_skill_versions__semver`;
+RENAME TABLE `assets` TO `user_assets`, `shared_assets` TO `user_shared_asset_snapshots`, `material_groups` TO `catalog_material_groups`, `material_assets` TO `catalog_material_states`, `generation_model_capability` TO `catalog_models`, `media_tool_pricing` TO `catalog_media_tools`, `skill` TO `catalog_skills`, `user_skill` TO `user_skills`, `creative_skill` TO `catalog_creative_skills`, `creative_skill_version` TO `catalog_creative_skill_versions`, `template_card` TO `catalog_templates`, `template_card_image` TO `catalog_template_images`, `template_tag` TO `catalog_template_tags`, `homepage_hero` TO `content_homepage_heroes`;

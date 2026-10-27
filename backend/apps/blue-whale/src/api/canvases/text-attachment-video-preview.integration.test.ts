@@ -43,7 +43,7 @@ describe.skipIf(!process.env.IKFCXC_DATABASE_URL)("Text attachment video preview
   beforeAll(async () => {
     process.env.DATABASE_URL = process.env.IKFCXC_DATABASE_URL;
     const sizes = [{ id: "720p", label: "720P", api_value: "720p" }];
-    await prisma.client.generation_model_capability.upsert({
+    await prisma.client.catalog_models.upsert({
       where: { provider_id_model_id: { provider_id: "ikfcxc-test", model_id: MODEL_ID } },
       create: {
         provider_id: "ikfcxc-test",
@@ -124,10 +124,10 @@ describe.skipIf(!process.env.IKFCXC_DATABASE_URL)("Text attachment video preview
 
   it("文本附件与媒体参考共存冻结：text_attachments 与 references 各就各位，文本不混入媒体参考（API 段）", async () => {
     const projectId = (await projects.create("987654", "IKFCXC coexist")).id;
-    const videoAsset = await prisma.client.assets.create({
+    const videoAsset = await prisma.client.user_assets.create({
       data: { user_id: BigInt(987654), project_id: BigInt(projectId), type: "video", url: "https://example.com/ikfcxc-target.mp4", width: 1280, height: 720, size: BigInt(2048) },
     });
-    const firstAsset = await prisma.client.assets.create({
+    const firstAsset = await prisma.client.user_assets.create({
       data: { user_id: BigInt(987654), project_id: BigInt(projectId), type: "image", url: "https://example.com/ikfcxc-first.png", width: 1024, height: 1024, size: BigInt(1024) },
     });
     const nodes = [
@@ -171,10 +171,10 @@ describe.skipIf(!process.env.IKFCXC_DATABASE_URL)("Text attachment video preview
     const projectId = (await projects.create("987654", "IKFCXC browser")).id;
     const longBody = Array.from({ length: 24 }, (_, i) => `第${i + 1}段落：蓝鲸在深海里缓慢游动，霓虹灯映在浪尖。`).join("\n");
     const LONG_TAIL_MARK = "末尾标记-VZ9";
-    const firstAsset = await prisma.client.assets.create({
+    const firstAsset = await prisma.client.user_assets.create({
       data: { user_id: BigInt(987654), project_id: BigInt(projectId), type: "image", url: "https://example.com/ikfcxc-b-first.png", width: 1024, height: 1024, size: BigInt(1024) },
     });
-    const lastAsset = await prisma.client.assets.create({
+    const lastAsset = await prisma.client.user_assets.create({
       data: { user_id: BigInt(987654), project_id: BigInt(projectId), type: "image", url: "https://example.com/ikfcxc-b-last.png", width: 1024, height: 1024, size: BigInt(1024) },
     });
     const seeded = await saveCanvas(projectId, [

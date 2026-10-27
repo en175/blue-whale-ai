@@ -144,7 +144,7 @@ async function createStoryboardPreviewInTransaction(
 
   const snapshot = input.capability_snapshot_version;
 
-  const capability = await tx.generation_model_capability.findUnique({
+  const capability = await tx.catalog_models.findUnique({
     where: {
       provider_id_model_id: {
         provider_id: snapshot.provider_id,
@@ -342,12 +342,12 @@ export async function validateStoryboardFrames(
 }
 
 async function findAccessibleAssetIds(
-  client: Pick<Prisma.TransactionClient, "assets">,
+  client: Pick<Prisma.TransactionClient, "user_assets">,
   projectId: bigint,
   assetIds: bigint[],
 ): Promise<Set<bigint>> {
   if (assetIds.length === 0) return new Set();
-  const assets = await client.assets.findMany({
+  const assets = await client.user_assets.findMany({
     where: {
       id: { in: assetIds },
       project_id: projectId,

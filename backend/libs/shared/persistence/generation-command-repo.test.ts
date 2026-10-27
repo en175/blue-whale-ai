@@ -331,7 +331,7 @@ describe("generation command repo retry", () => {
       generation_job_logs: { create: vi.fn().mockResolvedValue({}) },
     };
     const prisma = {
-      generation_model_capability: capabilityDelegate([capabilityRow()]),
+      catalog_models: capabilityDelegate([capabilityRow()]),
       $transaction: vi.fn(
         async (callback: (client: typeof tx) => Promise<unknown>) =>
           callback(tx),
@@ -424,7 +424,7 @@ describe("generation command repo retry", () => {
           callback(tx),
       ),
       generation_jobs: { findUnique: vi.fn().mockResolvedValue(null) },
-      generation_model_capability: capabilityDelegate([capabilityRow()]),
+      catalog_models: capabilityDelegate([capabilityRow()]),
     };
     const repo = createGenerationCommandRepo(prisma as never);
     const charge = vi.fn(async () => {});
@@ -507,7 +507,7 @@ describe("generation command repo retry", () => {
           callback(tx),
       ),
       generation_jobs: { findUnique: vi.fn().mockResolvedValue(null) },
-      generation_model_capability: capabilityDelegate([capabilityRow()]),
+      catalog_models: capabilityDelegate([capabilityRow()]),
     };
     const repo = createGenerationCommandRepo(prisma as never);
     const charge = vi.fn(async () => {});
@@ -820,7 +820,7 @@ describe("generation command repo retry", () => {
     };
     let attempt = 0;
     const prisma = {
-      generation_model_capability: capabilityDelegate([capabilityRow()]),
+      catalog_models: capabilityDelegate([capabilityRow()]),
       $transaction: vi.fn(
         async (callback: (client: never) => Promise<unknown>) => {
           attempt += 1;
@@ -889,7 +889,7 @@ describe("generation command repo retry", () => {
         generation_job_logs: { create: vi.fn().mockResolvedValue({}) },
       };
       const prisma = {
-        generation_model_capability: capabilityDelegate([capabilityRow()]),
+        catalog_models: capabilityDelegate([capabilityRow()]),
         $transaction: vi.fn(
           async (callback: (client: typeof tx) => Promise<unknown>) =>
             callback(tx),
@@ -1063,7 +1063,7 @@ describe("retryJob 计费快照（IKL406：重试的 charge 必须带 rule_snaps
         async (callback: (client: typeof tx) => Promise<unknown>) =>
           callback(tx),
       ),
-      generation_model_capability: capabilityDelegate(capabilityRows),
+      catalog_models: capabilityDelegate(capabilityRows),
     };
     const repo = createGenerationCommandRepo(prisma as never);
     const charge = vi.fn(async (_ctx: BillingChargeContext) => {});

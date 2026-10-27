@@ -23,7 +23,7 @@ export function createAssetOwnershipOps(prisma: PrismaClient): AssetOwnershipOps
     async resolveInputAssets(assetIds, userId, projectId) {
       if (assetIds.length === 0) return [];
       const linkedAssetIds = await findLinkedAssetIds(prisma, userId, projectId);
-      const rows = await prisma.assets.findMany({
+      const rows = await prisma.user_assets.findMany({
         where: {
           id: { in: assetIds.map((id) => BigInt(id)) },
           user_id: BigInt(userId),
@@ -71,7 +71,7 @@ export function createAssetOwnershipOps(prisma: PrismaClient): AssetOwnershipOps
 
     async findStorageKeys(assetIds, userId) {
       if (assetIds.length === 0) return new Map();
-      const rows = await prisma.assets.findMany({
+      const rows = await prisma.user_assets.findMany({
         where: {
           id: { in: assetIds.map((id) => BigInt(id)) },
           user_id: BigInt(userId),
@@ -91,7 +91,7 @@ export function createAssetOwnershipOps(prisma: PrismaClient): AssetOwnershipOps
     },
 
     async saveMediaInfo(assetId, info) {
-      const updated = await prisma.assets.updateMany({
+      const updated = await prisma.user_assets.updateMany({
         where: { id: BigInt(assetId), is_delete: false },
         data: {
           duration_ms: info.durationMs,

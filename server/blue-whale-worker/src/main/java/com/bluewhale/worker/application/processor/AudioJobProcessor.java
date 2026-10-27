@@ -232,7 +232,7 @@ public class AudioJobProcessor implements JobProcessor {
                     "audio/mpeg", (long) data.length, uploaded.md5());
         }
         if (url != null && !url.isEmpty()) {
-            log.warn("[audio] 上游未返回字节，仅回退 URL：assets.md5 将为空（IKGS73 已知边界）");
+            log.warn("[audio] 上游未返回字节，仅回退 URL：user_assets.md5 将为空（IKGS73 已知边界）");
             return new StoredMedia(url, null, null, null, null);
         }
         throw new AudioProviderError(GenerationError.ERROR_NO_RESULT, "生成服务未返回音频结果");

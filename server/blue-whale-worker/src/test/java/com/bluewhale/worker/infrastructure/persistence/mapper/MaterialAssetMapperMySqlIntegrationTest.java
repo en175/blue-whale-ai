@@ -100,13 +100,13 @@ class MaterialAssetMapperMySqlIntegrationTest {
 
     @BeforeEach
     void cleanup() {
-        jdbc.execute("DELETE FROM material_assets");
-        jdbc.execute("DELETE FROM assets WHERE id IN (880001, 880002)");
+        jdbc.execute("DELETE FROM catalog_material_states");
+        jdbc.execute("DELETE FROM user_assets WHERE id IN (880001, 880002)");
     }
 
     private void insert(String materialId, long userId, String status, int ageMinutes) {
         jdbc.update("""
-                INSERT INTO material_assets
+                INSERT INTO catalog_material_states
                   (material_id, user_id, material_group_id, status, gmt_create, gmt_modified)
                 VALUES (?, ?, 'group-1', ?, DATE_SUB(NOW(), INTERVAL ? MINUTE), NOW())
                 """, materialId, userId, status, ageMinutes);
@@ -115,7 +115,7 @@ class MaterialAssetMapperMySqlIntegrationTest {
     private Map<String, Object> read(String materialId) {
         return jdbc.queryForMap(
                 "SELECT status, error_code, error_message, status_checked_at, version "
-                        + "FROM material_assets WHERE material_id = ?", materialId);
+                        + "FROM catalog_material_states WHERE material_id = ?", materialId);
     }
 
     @Test
@@ -188,7 +188,7 @@ class MaterialAssetMapperMySqlIntegrationTest {
     @DisplayName("mirrorStatus 不凭空造行（无行时影响行数为 0）")
     void mirrorStatusNeverInserts() {
         assertThat(assetMapper.mirrorStatus(9L, "asset-nonexistent", "Active", null, null)).isZero();
-        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM material_assets", Integer.class)).isZero();
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM catalog_material_states", Integer.class)).isZero();
     }
 
     @Test
@@ -227,7 +227,7 @@ class MaterialAssetMapperMySqlIntegrationTest {
     @DisplayName("clearMaterialLink：清掉 material_id 关联")
     void clearMaterialLinkClearsLink() {
         jdbc.update("""
-                INSERT INTO assets (id, user_id, project_id, type, url, status,
+                INSERT INTO user_assets (id, user_id, project_id, type, url, status,
                                     material_id, is_delete, gmt_create, gmt_modified)
                 VALUES (880001, 9, 55, 'image', 'u', 'normal',
                         'asset-linked', 0, NOW(), NOW())
@@ -236,7 +236,7 @@ class MaterialAssetMapperMySqlIntegrationTest {
         assertThat(assetMapper.clearMaterialLink(9L, "asset-linked")).isEqualTo(1);
 
         Map<String, Object> row = jdbc.queryForMap(
-                "SELECT material_id, version FROM assets WHERE id = 880001");
+                "SELECT material_id, version FROM user_assets WHERE id = 880001");
         assertThat(row.get("material_id")).isNull();
         assertThat(((Number) row.get("version")).intValue()).isEqualTo(1);
     }
@@ -245,14 +245,14 @@ class MaterialAssetMapperMySqlIntegrationTest {
     @DisplayName("clearMaterialLink：带 user_id 谓词，别的账号清不动")
     void clearMaterialLinkIsScopedByUserId() {
         jdbc.update("""
-                INSERT INTO assets (id, user_id, project_id, type, url, status,
+                INSERT INTO user_assets (id, user_id, project_id, type, url, status,
                                     material_id, is_delete, gmt_create, gmt_modified)
                 VALUES (880002, 9, 55, 'image', 'u', 'normal',
                         'asset-linked2', 0, NOW(), NOW())
                 """);
 
         assertThat(assetMapper.clearMaterialLink(77L, "asset-linked2")).isZero();
-        assertThat(jdbc.queryForMap("SELECT material_id FROM assets WHERE id = 880002")
+        assertThat(jdbc.queryForMap("SELECT material_id FROM user_assets WHERE id = 880002")
                 .get("material_id")).isEqualTo("asset-linked2");
     }
 }

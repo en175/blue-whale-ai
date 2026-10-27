@@ -13,7 +13,7 @@ describe("AssetRepo upload persistence", () => {
     const prisma = {
       $transaction: vi.fn(
         async (cb: (tx: unknown) => Promise<unknown>) =>
-          cb({ assets, project_asset }),
+          cb({ user_assets: assets, project_asset }),
       ),
     };
     const repo = createAssetRepo(prisma as never);
@@ -54,10 +54,10 @@ describe("AssetRepo upload persistence", () => {
       upsert: vi.fn().mockResolvedValue({}),
     };
     const prisma = {
-      assets,
+      user_assets: assets,
       $transaction: vi.fn(
         async (cb: (tx: unknown) => Promise<unknown>) =>
-          cb({ assets, project_asset }),
+          cb({ user_assets: assets, project_asset }),
       ),
     };
     const repo = createAssetRepo(prisma as never);
@@ -119,7 +119,7 @@ describe("AssetRepo upload persistence", () => {
     const prisma = {
       $transaction: vi.fn(
         async (cb: (tx: unknown) => Promise<unknown>) =>
-          cb({ assets, project_asset }),
+          cb({ user_assets: assets, project_asset }),
       ),
     };
     const repo = createAssetRepo(prisma as never);
@@ -160,7 +160,7 @@ describe("AssetRepo upload persistence", () => {
     const prisma = {
       $transaction: vi.fn(
         async (cb: (tx: unknown) => Promise<unknown>) =>
-          cb({ assets, project_asset }),
+          cb({ user_assets: assets, project_asset }),
       ),
     };
     const repo = createAssetRepo(prisma as never);
@@ -212,7 +212,7 @@ describe("AssetRepo upload persistence", () => {
       }),
       updateMany: vi.fn().mockResolvedValue({ count: 1 }),
     };
-    const repo = createAssetRepo({ assets } as never);
+    const repo = createAssetRepo({ user_assets: assets } as never);
     const uploadRepo = repo as typeof repo & {
       createPendingUpload: (input: {
         userId: string;
@@ -283,7 +283,7 @@ describe("AssetRepo upload md5 去重（IKCNLS）", () => {
       height: null,
       duration_ms: null,
     });
-    const prisma = { assets: { findFirst } };
+    const prisma = { user_assets: { findFirst } };
     const repo = createAssetRepo(prisma as never);
 
     const found = await repo.findOwnedByMd5("9", "abc123");
@@ -296,7 +296,7 @@ describe("AssetRepo upload md5 去重（IKCNLS）", () => {
   });
 
   it("findOwnedByMd5 无命中返回 null", async () => {
-    const prisma = { assets: { findFirst: vi.fn().mockResolvedValue(null) } };
+    const prisma = { user_assets: { findFirst: vi.fn().mockResolvedValue(null) } };
     const repo = createAssetRepo(prisma as never);
     await expect(repo.findOwnedByMd5("9", "nonexistent")).resolves.toBeNull();
   });
@@ -310,7 +310,7 @@ describe("AssetRepo upload md5 去重（IKCNLS）", () => {
     };
     const project_asset = { upsert: vi.fn().mockResolvedValue({}) };
     const prisma = {
-      $transaction: vi.fn(async (cb: (tx: unknown) => Promise<unknown>) => cb({ assets, project_asset })),
+      $transaction: vi.fn(async (cb: (tx: unknown) => Promise<unknown>) => cb({ user_assets: assets, project_asset })),
     };
     const repo = createAssetRepo(prisma as never);
 
@@ -347,11 +347,11 @@ describe("AssetRepo.bindMaterialId（IKGQWR / ADR-0093 决策 5）", () => {
     };
     let attempt = 0;
     const prisma = {
-      assets,
+      user_assets: assets,
       $transaction: vi.fn(async (cb: (tx: unknown) => Promise<unknown>) => {
         attempt += 1;
         overrides.onTransaction?.(attempt);
-        return cb({ assets });
+        return cb({ user_assets: assets });
       }),
     };
     return { repo: createAssetRepo(prisma as never), assets, prisma };

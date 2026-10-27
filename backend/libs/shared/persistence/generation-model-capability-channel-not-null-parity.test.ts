@@ -69,7 +69,7 @@ describe("generation_model_capability.channel 收成 NOT NULL（三轨）", () =
   });
 
   it("schema.prisma 同口径（列必填、可空的老写法已消失）", () => {
-    const model = schemaPrisma.slice(schemaPrisma.indexOf("model generation_model_capability {"));
+    const model = schemaPrisma.slice(schemaPrisma.indexOf("model catalog_models {"));
     const body = model.slice(0, model.indexOf("\n}"));
     const fields = body
       .split("\n")

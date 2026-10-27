@@ -159,7 +159,7 @@ export function createProjectRepo(prisma: PrismaClient): ProjectRepo {
       select: { project_id: true, asset_id: true },
     });
     const linkedAssetIds = [...new Set(links.map((link) => link.asset_id))];
-    const imageAssets = await prisma.assets.findMany({
+    const imageAssets = await prisma.user_assets.findMany({
       where: {
         user_id: uid,
         type: "image",
@@ -343,7 +343,7 @@ export function createProjectRepo(prisma: PrismaClient): ProjectRepo {
       });
       if (!owned) return false;
       await prisma.$transaction([
-        prisma.assets.updateMany({
+        prisma.user_assets.updateMany({
           where: { project_id: BigInt(id), is_delete: false },
           data: { is_delete: true, deleted_at: new Date() },
         }),
@@ -369,7 +369,7 @@ export function createProjectRepo(prisma: PrismaClient): ProjectRepo {
       const toDelete = [...ownedSet];
       if (toDelete.length > 0) {
         await prisma.$transaction([
-          prisma.assets.updateMany({
+          prisma.user_assets.updateMany({
             where: { project_id: { in: toDelete }, is_delete: false },
             data: { is_delete: true, deleted_at: new Date() },
           }),

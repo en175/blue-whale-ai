@@ -249,7 +249,7 @@ describe.skipIf(!process.env.IKDLQJ_DATABASE_URL)("Conversation quote public API
     try {
       projectId = (await projects.create("987654", "IKDXHO browser")).id;
       const url = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='80'%3E%3Crect width='120' height='80' fill='blue'/%3E%3C/svg%3E";
-      const asset = await prisma.client.assets.create({ data: { user_id: 987654n, project_id: BigInt(projectId), type: "image", url } });
+      const asset = await prisma.client.user_assets.create({ data: { user_id: 987654n, project_id: BigInt(projectId), type: "image", url } });
       const seeded = await fetch(`${base}/api/canvases/${projectId}`, {
         method: "PUT", headers: { "content-type": "application/json", "if-match": '"missing"' },
         body: JSON.stringify({ nodes: JSON.stringify([
@@ -421,7 +421,7 @@ describe.skipIf(!process.env.IKDLQJ_DATABASE_URL)("Conversation quote public API
         { type: "audio", url: `${mediaBase}/audio.wav` },
         { type: "image", url: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20'/%3E" },
       ];
-      const assets = await Promise.all(media.map(item => prisma.client.assets.create({ data: {
+      const assets = await Promise.all(media.map(item => prisma.client.user_assets.create({ data: {
         user_id: 987654n, project_id: BigInt(projectId), type: item.type, url: item.url,
       } })));
       const seeded = await fetch(`${base}/api/canvases/${projectId}`, {
@@ -578,7 +578,7 @@ describe.skipIf(!process.env.IKDLQJ_DATABASE_URL)("Conversation quote public API
     try {
       projectId = (await projects.create("987654", "IKDXHQ browser")).id;
       const imageUrl = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='80'%3E%3Crect width='120' height='80' fill='blue'/%3E%3C/svg%3E";
-      const asset = await prisma.client.assets.create({ data: { user_id: 987654n, project_id: BigInt(projectId), type: "image", url: imageUrl } });
+      const asset = await prisma.client.user_assets.create({ data: { user_id: 987654n, project_id: BigInt(projectId), type: "image", url: imageUrl } });
       expect((await fetch(`${base}/api/canvases/${projectId}`, {
         method: "PUT", headers: { "content-type": "application/json", "if-match": '"missing"' },
         body: JSON.stringify({ nodes: JSON.stringify([
@@ -789,7 +789,7 @@ describe.skipIf(!process.env.IKDLQJ_DATABASE_URL)("Conversation quote public API
         { type: "video", title: "视频", url: `data:video/webm;base64,${Buffer.from(video).toString("base64")}` },
         { type: "audio", title: "音频", url: `data:audio/wav;base64,${wav.toString("base64")}` },
       ];
-      const assets = await Promise.all(media.map(item => prisma.client.assets.create({ data: {
+      const assets = await Promise.all(media.map(item => prisma.client.user_assets.create({ data: {
         user_id: 987654n, project_id: BigInt(projectId), type: item.type, url: item.url,
       } })));
       expect((await fetch(`${base}/api/canvases/${projectId}`, {

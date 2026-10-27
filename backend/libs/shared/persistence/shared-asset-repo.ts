@@ -115,7 +115,7 @@ function toRow(row: SharedAssetDbRow): SharedAssetRow {
 export function createSharedAssetRepo(prisma: PrismaClient): SharedAssetRepo {
   return {
     async create(input) {
-      const row = await prisma.shared_assets.create({
+      const row = await prisma.user_shared_asset_snapshots.create({
         data: {
           user_id: BigInt(input.userId),
           asset_type: input.assetType,
@@ -132,7 +132,7 @@ export function createSharedAssetRepo(prisma: PrismaClient): SharedAssetRepo {
     },
 
     async findByDedupKey(userId, dedupKey) {
-      const row = await prisma.shared_assets.findFirst({
+      const row = await prisma.user_shared_asset_snapshots.findFirst({
         where: {
           user_id: BigInt(userId),
           dedup_key: dedupKey,
@@ -144,7 +144,7 @@ export function createSharedAssetRepo(prisma: PrismaClient): SharedAssetRepo {
     },
 
     async reviveByDedupKey(userId, dedupKey, update) {
-      const result = await prisma.shared_assets.updateMany({
+      const result = await prisma.user_shared_asset_snapshots.updateMany({
         where: {
           user_id: BigInt(userId),
           dedup_key: dedupKey,
@@ -161,7 +161,7 @@ export function createSharedAssetRepo(prisma: PrismaClient): SharedAssetRepo {
         },
       });
       if (result.count !== 1) return null;
-      const row = await prisma.shared_assets.findFirst({
+      const row = await prisma.user_shared_asset_snapshots.findFirst({
         where: { user_id: BigInt(userId), dedup_key: dedupKey },
         select: rowSelect,
       });
@@ -176,8 +176,8 @@ export function createSharedAssetRepo(prisma: PrismaClient): SharedAssetRepo {
         ...(filter.kind ? { kind: filter.kind } : {}),
       };
       const [total, rows] = await Promise.all([
-        prisma.shared_assets.count({ where }),
-        prisma.shared_assets.findMany({
+        prisma.user_shared_asset_snapshots.count({ where }),
+        prisma.user_shared_asset_snapshots.findMany({
           where,
           orderBy: { gmt_create: "desc" },
           skip: (filter.page - 1) * filter.size,
@@ -194,7 +194,7 @@ export function createSharedAssetRepo(prisma: PrismaClient): SharedAssetRepo {
     },
 
     async findById(userId, id) {
-      const row = await prisma.shared_assets.findFirst({
+      const row = await prisma.user_shared_asset_snapshots.findFirst({
         where: {
           id: BigInt(id),
           user_id: BigInt(userId),
@@ -206,7 +206,7 @@ export function createSharedAssetRepo(prisma: PrismaClient): SharedAssetRepo {
     },
 
     async softDeleteOwned(id, userId) {
-      const result = await prisma.shared_assets.updateMany({
+      const result = await prisma.user_shared_asset_snapshots.updateMany({
         where: {
           id: BigInt(id),
           user_id: BigInt(userId),

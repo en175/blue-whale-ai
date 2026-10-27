@@ -203,7 +203,7 @@ export class CanvasService {
         ? new Set((existing.data.promptMentions as Array<{ assetId: string }>).map(mention => mention.assetId)) : undefined;
       for (const material of content.promptMaterials ?? []) {
         if (requiredIds && !requiredIds.has(material.assetId)) continue;
-        const asset = await this.prisma.client.assets.findFirst({ where: {
+        const asset = await this.prisma.client.user_assets.findFirst({ where: {
           id: BigInt(material.assetId), user_id: BigInt(ownerId), is_delete: false, status: "normal", type: material.mediaType,
         } });
         const indices = content.promptMentions?.filter(mention => mention.assetId === material.assetId).map(mention => `#${mention.index}`).join("、");
@@ -382,7 +382,7 @@ export class CanvasService {
           }
           continue;
         }
-        const asset = await this.prisma.client.assets.findFirst({ where: { id: BigInt(ref.assetId), user_id: BigInt(ownerId), is_delete: false, status: "normal" } });
+        const asset = await this.prisma.client.user_assets.findFirst({ where: { id: BigInt(ref.assetId), user_id: BigInt(ownerId), is_delete: false, status: "normal" } });
         if (!asset || asset.type !== ref.mediaType || asset.url !== ref.url) {
           throw new BadRequestException("媒体素材已删除、无权访问或身份不一致，原内容未改动");
         }
@@ -430,7 +430,7 @@ export class CanvasService {
               if (!/^[1-9][0-9]*$/.test(assetId) || !incoming.some(n => n.type === "mediaNode" && nodeAssetId(n) === assetId)) {
                 planError(node.id, indices, "请从画布选择明确的素材");
               }
-              const asset = await this.prisma.client.assets.findFirst({ where: { id: BigInt(assetId), user_id: BigInt(ownerId), is_delete: false, status: "normal" } });
+              const asset = await this.prisma.client.user_assets.findFirst({ where: { id: BigInt(assetId), user_id: BigInt(ownerId), is_delete: false, status: "normal" } });
               const material = materials.find(m => m.assetId === assetId);
               if (!asset || !material || material.mediaType !== asset.type || material.url !== asset.url || !["image", "video", "audio"].includes(asset.type)) {
                 planError(node.id, indices, "素材已删除、无权访问或身份不一致");

@@ -115,7 +115,7 @@ class AudioVideoMuxCrossRuntimeMySqlIntegrationTest {
     }
 
     private static int countAssets(long jobId) {
-        return jdbc.queryForObject("SELECT COUNT(*) FROM assets WHERE generation_job_id=?", Integer.class, jobId);
+        return jdbc.queryForObject("SELECT COUNT(*) FROM user_assets WHERE generation_job_id=?", Integer.class, jobId);
     }
 
     @Test
@@ -231,15 +231,15 @@ class AudioVideoMuxCrossRuntimeMySqlIntegrationTest {
                 return;
             }
             assertThat(countAssets(Long.parseLong(jobId))).isEqualTo(1);
-            assertThat(jdbc.queryForObject("SELECT url FROM assets WHERE generation_job_id=?", String.class,
+            assertThat(jdbc.queryForObject("SELECT url FROM user_assets WHERE generation_job_id=?", String.class,
                     Long.parseLong(jobId))).isEqualTo(storagePublicUrl);
-            assertThat(jdbc.queryForObject("SELECT duration_ms FROM assets WHERE generation_job_id=?", Integer.class,
+            assertThat(jdbc.queryForObject("SELECT duration_ms FROM user_assets WHERE generation_job_id=?", Integer.class,
                     Long.parseLong(jobId))).isEqualTo(227_000);
-            assertThat(jdbc.queryForObject("SELECT width FROM assets WHERE generation_job_id=?", Integer.class,
+            assertThat(jdbc.queryForObject("SELECT width FROM user_assets WHERE generation_job_id=?", Integer.class,
                     Long.parseLong(jobId))).isEqualTo(1920);
-            assertThat(jdbc.queryForObject("SELECT height FROM assets WHERE generation_job_id=?", Integer.class,
+            assertThat(jdbc.queryForObject("SELECT height FROM user_assets WHERE generation_job_id=?", Integer.class,
                     Long.parseLong(jobId))).isEqualTo(1080);
-            assertThat(jdbc.queryForObject("SELECT name FROM assets WHERE generation_job_id=?", String.class,
+            assertThat(jdbc.queryForObject("SELECT name FROM user_assets WHERE generation_job_id=?", String.class,
                     Long.parseLong(jobId))).isEqualTo(
                     SOURCE_VIDEO_NAME.substring(0, SOURCE_VIDEO_NAME.lastIndexOf('.')) + "(音视频合成).mp4");
         } finally {

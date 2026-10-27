@@ -9,7 +9,7 @@ function serviceOf(jobsFindMany = vi.fn().mockResolvedValue([])): {
   const prisma = {
     client: {
       generation_jobs: { findMany: jobsFindMany },
-      generation_model_capability: { findMany: vi.fn().mockResolvedValue([]) },
+      catalog_models: { findMany: vi.fn().mockResolvedValue([]) },
     },
   };
   return { service: new JobsService(prisma as never, {} as never), jobsFindMany };

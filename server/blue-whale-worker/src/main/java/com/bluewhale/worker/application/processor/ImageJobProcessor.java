@@ -379,7 +379,7 @@ public class ImageJobProcessor implements JobProcessor {
 
     private StoredImage persistProviderImageFromUrl(String sourceUrl, String userId) {
         if (tosService == null) {
-            log.warn("[image] TOS 未配置，降级直存供应商 URL：assets.md5 将为空（IKGS73 已知边界）");
+            log.warn("[image] TOS 未配置，降级直存供应商 URL：user_assets.md5 将为空（IKGS73 已知边界）");
             return new StoredImage(sourceUrl, null, null, null, null, null, null);
         }
 

@@ -42,7 +42,7 @@ function makeService(overrides: {
   const prisma = {
     client: {
       generation_jobs: { create },
-      assets: { update: updateAsset },
+      user_assets: { update: updateAsset },
       cost_reservations: { create: costCreate },
     },
   };

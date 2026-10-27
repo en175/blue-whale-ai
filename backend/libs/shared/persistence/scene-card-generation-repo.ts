@@ -196,7 +196,7 @@ async function checkReferenceCountLimits(
 ): Promise<string | null> {
   const ids = flatReferences.reference_asset_ids ?? [];
   if (ids.length === 0) return null;
-  const rows = await tx.assets.findMany({
+  const rows = await tx.user_assets.findMany({
     where: { id: { in: ids.map((id) => BigInt(id)) } },
     select: { type: true, duration_ms: true },
   });
@@ -431,7 +431,7 @@ async function regenerateSceneCardInTransaction(
     return { kind: "capability_drift" } as const;
 
 
-  const capability = await tx.generation_model_capability.findUnique({
+  const capability = await tx.catalog_models.findUnique({
     where: {
       provider_id_model_id: {
         provider_id: snapshot.provider_id,

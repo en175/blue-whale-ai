@@ -37,7 +37,7 @@ function buildRow(overrides: Record<string, unknown> = {}) {
 
 function repoWith(rows: Record<string, unknown>[]) {
   const prisma = {
-    generation_model_capability: { findMany: vi.fn().mockResolvedValue(rows) },
+    catalog_models: { findMany: vi.fn().mockResolvedValue(rows) },
   } as unknown as PrismaClient;
   return { repo: createModelCapabilityRepo(prisma), prisma };
 }
@@ -131,7 +131,7 @@ describe("createModelCapabilityRepo.listEnabledByType", () => {
     const [view] = await repo.listEnabledByType("image");
 
     expect(view.supported_aspect_ratios).toEqual([{ id: "1:1", label: "1:1" }]);
-    expect(prisma.generation_model_capability.findMany).not.toHaveBeenCalled();
+    expect(prisma.catalog_models.findMany).not.toHaveBeenCalled();
   });
 
   it("digest === capabilityDigest(同一 8 字段输入)——用真实函数交叉断言，不写死", async () => {
@@ -315,7 +315,7 @@ function makeRow(overrides: Record<string, unknown> = {}) {
 describe("ModelCapabilityRepo.listEnabledByType 时长归一化", () => {
   function repoWith(rows: unknown[]) {
     const prisma = {
-      generation_model_capability: {
+      catalog_models: {
         findMany: vi.fn().mockResolvedValue(rows),
       },
     } as unknown as PrismaClient;
@@ -361,7 +361,7 @@ describe("ModelCapabilityRepo.listEnabledByType 时长归一化", () => {
   it("过滤 capability_type + enabled + 未软删 + 按 sort_order 升序", async () => {
     const findMany = vi.fn().mockResolvedValue([]);
     const prisma = {
-      generation_model_capability: { findMany },
+      catalog_models: { findMany },
     } as unknown as PrismaClient;
     await createModelCapabilityRepo(prisma).listEnabledByType("text");
     expect(findMany).toHaveBeenCalledWith({

@@ -41,7 +41,7 @@ export class PromptMaterialUnavailableError extends Error {
 export async function linkPromptMaterials(tx: Prisma.TransactionClient, projectId: bigint, context?: { ownerId: string; items: PromptMaterial[] }) {
   if (!context) return;
   for (const material of [...context.items].sort((a, b) => a.assetId.localeCompare(b.assetId))) {
-    const rows = await tx.$queryRaw<Array<{ id: bigint }>>`SELECT id FROM assets WHERE id = ${BigInt(material.assetId)} AND user_id = ${BigInt(context.ownerId)} AND is_delete = false AND status = 'normal' AND type = ${material.mediaType} FOR UPDATE`;
+    const rows = await tx.$queryRaw<Array<{ id: bigint }>>`SELECT id FROM user_assets WHERE id = ${BigInt(material.assetId)} AND user_id = ${BigInt(context.ownerId)} AND is_delete = false AND status = 'normal' AND type = ${material.mediaType} FOR UPDATE`;
     if (rows.length !== 1) throw new PromptMaterialUnavailableError(material.assetId);
     const key = { user_id: BigInt(context.ownerId), project_id: projectId, asset_id: BigInt(material.assetId) };
     await tx.project_asset.upsert({ where: { user_id_asset_id_project_id: key }, create: { ...key, is_delete: 0 }, update: { is_delete: 0 } });
