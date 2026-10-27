@@ -11,7 +11,6 @@ import com.bluewhale.worker.infrastructure.persistence.mapper.GenerationJobExtra
 import com.bluewhale.worker.infrastructure.persistence.mapper.GenerationJobLogMapper;
 import com.bluewhale.worker.infrastructure.persistence.mapper.GenerationJobMapper;
 import com.bluewhale.worker.infrastructure.persistence.mapper.GenerationOutputSlotMapper;
-import com.bluewhale.worker.infrastructure.persistence.mapper.ProjectEventMapper;
 import com.bluewhale.worker.infrastructure.persistence.mapper.SceneCardGenerationRecordMapper;
 import com.bluewhale.worker.infrastructure.persistence.mapper.StoryboardPreviewMapper;
 import com.bluewhale.worker.infrastructure.mq.GenerationMessageProducer;
@@ -79,7 +78,6 @@ class AudioMixCrossRuntimeMySqlIntegrationTest {
         service = new JobStateMachineService(jobMapper,
                 mapper(AssetMapper.class, session),
                 mapper(GenerationJobLogMapper.class, session),
-                mapper(ProjectEventMapper.class, session),
                 mapper(GenerationOutputSlotMapper.class, session),
                 mapper(SceneCardGenerationRecordMapper.class, session),
                 mapper(StoryboardPreviewMapper.class, session),
@@ -88,13 +86,11 @@ class AudioMixCrossRuntimeMySqlIntegrationTest {
         var assetMapper = mapper(AssetMapper.class, session);
         var jobLogMapper = mapper(GenerationJobLogMapper.class, session);
         var slotMapper = mapper(GenerationOutputSlotMapper.class, session);
-        var events = new ProjectEventPublisher(mapper(ProjectEventMapper.class, session));
         finalizer = new JobFinalizer(jobMapper, assetMapper, jobLogMapper, slotMapper, extraMapper,
                 new SceneCardGenerationRecordSync(slotMapper,
-                        mapper(SceneCardGenerationRecordMapper.class, session), events),
+                        mapper(SceneCardGenerationRecordMapper.class, session)),
                 new StoryboardPreviewSync(slotMapper,
-                        mapper(StoryboardPreviewMapper.class, session), events),
-                events,
+                        mapper(StoryboardPreviewMapper.class, session)),
                 TerminalEventOutbox.noop());
     }
 

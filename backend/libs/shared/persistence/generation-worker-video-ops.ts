@@ -1,6 +1,5 @@
 import type {PrismaClient} from "@prisma/client";
 
-import {appendProjectEvent} from "./product-event-repo.js";
 import {syncRecordSummary} from "./generation-worker-internals.js";
 import type {WorkerRepo} from "./generation-worker-types.js";
 
@@ -115,9 +114,6 @@ export function createWorkerVideoOps(prisma: PrismaClient): Pick<WorkerRepo, "ma
             payload: { asset_ids: [asset.id.toString()] },
           } as never,
         });
-        const job = await tx.generation_jobs.findUnique({
-          where: { id: BigInt(input.jobId) },
-        });
         const videoSlot = await tx.generation_output_slots.findFirst({
           where: { generation_job_id: BigInt(input.jobId), slot_index: 0 },
         });
@@ -132,58 +128,6 @@ export function createWorkerVideoOps(prisma: PrismaClient): Pick<WorkerRepo, "ma
               videoSlot.scene_card_generation_record_id,
             );
           }
-        }
-        if (job?.project_id !== null && job?.project_id !== undefined) {
-          await appendProjectEvent(tx, {
-            projectId: job.project_id.toString(),
-            eventType: "asset.created",
-            aggregateType: "asset",
-            aggregateId: asset.id.toString(),
-            aggregateVersion: asset.version,
-            correlationId: `job_${job.id.toString()}`,
-            payload: {
-              asset_id: asset.id.toString(),
-              generation_job_id: job.id.toString(),
-              type: asset.type,
-              access_url: asset.url,
-            },
-          });
-          await appendProjectEvent(tx, {
-            projectId: job.project_id.toString(),
-            eventType: "generation_job.status_changed",
-            aggregateType: "generation_job",
-            aggregateId: job.id.toString(),
-            aggregateVersion: job.version,
-            correlationId: `job_${job.id.toString()}`,
-            payload: {
-              job_id: job.id.toString(),
-              type: job.type,
-              source: job.source,
-              status: job.status,
-              progress: job.progress,
-              output_asset_ids: [asset.id.toString()],
-            },
-          });
-          await appendProjectEvent(tx, {
-            projectId: job.project_id.toString(),
-            eventType: "generation_job.output_attached",
-            aggregateType: "generation_job_output",
-            aggregateId: `${job.id.toString()}:${videoSlot?.slot_index ?? 0}`,
-            aggregateVersion: 0,
-            correlationId: `job_${job.id.toString()}`,
-            payload: {
-              job_id: job.id.toString(),
-              slot_id: videoSlot?.id.toString() ?? null,
-              slot_index: videoSlot?.slot_index ?? 0,
-              status: "succeeded",
-              asset_id: asset.id.toString(),
-              retry_of_slot_id:
-                videoSlot?.retry_of_slot_id == null
-                  ? null
-                  : videoSlot.retry_of_slot_id.toString(),
-              initial_placement_status: "pending",
-            },
-          });
         }
         return true;
       });
@@ -212,9 +156,6 @@ export function createWorkerVideoOps(prisma: PrismaClient): Pick<WorkerRepo, "ma
           },
         });
         if (updated.count !== 1) return false;
-        const job = await tx.generation_jobs.findUnique({
-          where: { id: BigInt(input.jobId) },
-        });
         const pendingVideoSlots = await tx.generation_output_slots.findMany({
           where: { generation_job_id: BigInt(input.jobId), status: "pending" },
         });
@@ -235,47 +176,6 @@ export function createWorkerVideoOps(prisma: PrismaClient): Pick<WorkerRepo, "ma
             message: `${input.code}: ${input.message}`,
           },
         });
-        if (job?.project_id !== null && job?.project_id !== undefined) {
-          await appendProjectEvent(tx, {
-            projectId: job.project_id.toString(),
-            eventType: "generation_job.status_changed",
-            aggregateType: "generation_job",
-            aggregateId: job.id.toString(),
-            aggregateVersion: job.version,
-            correlationId: `job_${job.id.toString()}`,
-            payload: {
-              job_id: job.id.toString(),
-              type: job.type,
-              source: job.source,
-              status: job.status,
-              progress: job.progress,
-              error: { code: input.code, message: input.message },
-            },
-          });
-          for (const slot of pendingVideoSlots) {
-            await appendProjectEvent(tx, {
-              projectId: job.project_id.toString(),
-              eventType: "generation_job.output_updated",
-              aggregateType: "generation_job_output",
-              aggregateId: `${job.id.toString()}:${slot.slot_index}`,
-              aggregateVersion: 0,
-              correlationId: `job_${job.id.toString()}`,
-              payload: {
-                job_id: job.id.toString(),
-                slot_id: slot.id.toString(),
-                slot_index: slot.slot_index,
-                status: "failed",
-                asset_id: null,
-                retry_of_slot_id:
-                  slot.retry_of_slot_id == null
-                    ? null
-                    : slot.retry_of_slot_id.toString(),
-                initial_placement_status: "pending",
-                error: { code: input.code, message: input.message },
-              },
-            });
-          }
-        }
         await tx.billing_cost_reservations.updateMany({
           where: {
             generation_job_id: BigInt(input.jobId),

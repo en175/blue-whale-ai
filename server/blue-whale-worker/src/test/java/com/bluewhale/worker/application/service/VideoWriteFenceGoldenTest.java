@@ -31,7 +31,6 @@ class VideoWriteFenceGoldenTest {
     @Mock private GenerationJobMapper jobMapper;
     @Mock private com.bluewhale.worker.infrastructure.persistence.mapper.AssetMapper assetMapper;
     @Mock private GenerationJobLogMapper jobLogMapper;
-    @Mock private com.bluewhale.worker.infrastructure.persistence.mapper.ProjectEventMapper projectEventMapper;
     @Mock private GenerationOutputSlotMapper slotMapper;
     @Mock private SceneCardGenerationRecordMapper sceneCardRecordMapper;
     @Mock private StoryboardPreviewMapper storyboardPreviewMapper;
@@ -43,13 +42,11 @@ class VideoWriteFenceGoldenTest {
     @BeforeEach
     void setUp() {
         service = new JobStateMachineService(jobMapper, assetMapper, jobLogMapper,
-                projectEventMapper, slotMapper, sceneCardRecordMapper, storyboardPreviewMapper,
+                slotMapper, sceneCardRecordMapper, storyboardPreviewMapper,
                 extraMapper);
-        ProjectEventPublisher events = new ProjectEventPublisher(projectEventMapper);
         finalizer = new JobFinalizer(jobMapper, assetMapper, jobLogMapper, slotMapper, extraMapper,
-                new SceneCardGenerationRecordSync(slotMapper, sceneCardRecordMapper, events),
-                new StoryboardPreviewSync(slotMapper, storyboardPreviewMapper, events),
-                events,
+                new SceneCardGenerationRecordSync(slotMapper, sceneCardRecordMapper),
+                new StoryboardPreviewSync(slotMapper, storyboardPreviewMapper),
                 TerminalEventOutbox.noop());
     }
 

@@ -196,10 +196,6 @@ export function buildTx(
       create: vi.fn().mockResolvedValue({}),
       ...overrides.generation_job_logs,
     },
-    project_events: {
-      create: projectEventsCreate,
-      ...overrides.project_events,
-    },
   };
 }
 

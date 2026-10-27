@@ -534,33 +534,6 @@ model generation_canvas_node_owners {
   @@unique([project_id, node_id], map: "uk_generation_canvas_node_owners__node")
 }
 
-model project_event_stream {
-  project_id     BigInt @id
-  high_watermark BigInt @default(0)
-}
-
-model project_events {
-  id                BigInt   @id @default(autoincrement())
-  project_id        BigInt
-  cursor            BigInt
-  event_id          String   @unique(map: "uk_event_id") @db.VarChar(64)
-  event_type        String   @db.VarChar(64)
-  aggregate_type    String   @db.VarChar(32)
-  aggregate_id      String   @db.VarChar(64)
-  aggregate_version Int      @default(0)
-  correlation_id    String?  @db.VarChar(128)
-  causation_id      String?  @db.VarChar(128)
-  occurred_at       DateTime @db.DateTime(0)
-  payload           Json?
-  gmt_create        DateTime @default(now()) @db.DateTime(0)
-  gmt_modified      DateTime @default(now()) @db.DateTime(0)
-  version           Int      @default(0)
-  is_delete         Int      @default(0) @db.TinyInt
-
-  @@unique([project_id, cursor], map: "uk_project_cursor")
-  @@index([project_id, occurred_at], map: "idx_project_occurred")
-}
-
 /// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
 model catalog_skills {
   id              BigInt   @id @default(autoincrement())

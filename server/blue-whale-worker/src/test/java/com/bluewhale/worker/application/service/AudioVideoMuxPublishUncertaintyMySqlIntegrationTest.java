@@ -13,7 +13,6 @@ import com.bluewhale.worker.infrastructure.persistence.mapper.GenerationJobExtra
 import com.bluewhale.worker.infrastructure.persistence.mapper.GenerationJobLogMapper;
 import com.bluewhale.worker.infrastructure.persistence.mapper.GenerationJobMapper;
 import com.bluewhale.worker.infrastructure.persistence.mapper.GenerationOutputSlotMapper;
-import com.bluewhale.worker.infrastructure.persistence.mapper.ProjectEventMapper;
 import com.bluewhale.worker.infrastructure.persistence.mapper.SceneCardGenerationRecordMapper;
 import com.bluewhale.worker.infrastructure.persistence.mapper.StoryboardPreviewMapper;
 import com.bluewhale.worker.infrastructure.mq.GenerationMessageProducer;
@@ -150,11 +149,6 @@ class AudioVideoMuxPublishUncertaintyMySqlIntegrationTest {
         }
 
         @Bean
-        ProjectEventMapper projectEventMapper(SqlSessionFactory sf) throws Exception {
-            return factory(ProjectEventMapper.class, sf).getObject();
-        }
-
-        @Bean
         GenerationOutputSlotMapper slotMapper(SqlSessionFactory sf) throws Exception {
             return factory(GenerationOutputSlotMapper.class, sf).getObject();
         }
@@ -177,23 +171,20 @@ class AudioVideoMuxPublishUncertaintyMySqlIntegrationTest {
         @Bean
         JobStateMachineService service(
                 GenerationJobMapper jm, AssetMapper am, GenerationJobLogMapper jlm,
-                ProjectEventMapper pem, GenerationOutputSlotMapper sm,
+                GenerationOutputSlotMapper sm,
                 SceneCardGenerationRecordMapper rm, StoryboardPreviewMapper pm,
                 GenerationJobExtraMapper em) {
-            return new JobStateMachineService(jm, am, jlm, pem, sm, rm, pm, em);
+            return new JobStateMachineService(jm, am, jlm, sm, rm, pm, em);
         }
 
         @Bean
         JobFinalizer finalizer(
                 GenerationJobMapper jm, AssetMapper am, GenerationJobLogMapper jlm,
                 GenerationOutputSlotMapper sm, GenerationJobExtraMapper em,
-                ProjectEventMapper pem,
                 SceneCardGenerationRecordMapper rm, StoryboardPreviewMapper pm) {
-            ProjectEventPublisher events = new ProjectEventPublisher(pem);
             return new JobFinalizer(jm, am, jlm, sm, em,
-                    new SceneCardGenerationRecordSync(sm, rm, events),
-                    new StoryboardPreviewSync(sm, pm, events),
-                    events,
+                    new SceneCardGenerationRecordSync(sm, rm),
+                    new StoryboardPreviewSync(sm, pm),
                     TerminalEventOutbox.noop());
         }
 

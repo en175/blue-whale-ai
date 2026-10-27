@@ -15,7 +15,6 @@ import {
 import { createJobWithinTx } from "./generation-command-repo.js";
 import { capabilityDigestFromModelCapability } from "./capability-digest.js";
 import { toFeatures, type ModelFeatures } from "./model-capability-repo.js";
-import { appendProjectEvent } from "./product-event-repo.js";
 import { transactionWithUniqueRetry } from "./conversation-repo.js";
 import {
   validateDerivedReferences,
@@ -550,7 +549,7 @@ async function regenerateSceneCardInTransaction(
     },
   });
   if ("kind" in createdJob) throw new Error("unreachable: scene_card job creation never conflicts idempotency");
-  let cursor = createdJob.cursor;
+  const cursor = createdJob.cursor;
 
   const record = await tx.scene_card_generation_records.create({
     data: {
@@ -576,38 +575,6 @@ async function regenerateSceneCardInTransaction(
       accepted_cursor: BigInt(cursor),
     },
   });
-
-  const presetEvent = await appendProjectEvent(tx, {
-    projectId: input.projectId,
-    eventType: "scene_card.preset_updated",
-    aggregateType: "scene_card_generation_preset",
-    aggregateId: sceneCardId.toString(),
-    aggregateVersion: newPresetVersion,
-    correlationId: input.idempotencyKey,
-    payload: {
-      scene_card_id: sceneCardId.toString(),
-      preset_version: newPresetVersion,
-      generation_job_id: createdJob.generation_job_id,
-    },
-  });
-  const recordEvent = await appendProjectEvent(tx, {
-    projectId: input.projectId,
-    eventType: "scene_card_generation_record.created",
-    aggregateType: "scene_card_generation_record",
-    aggregateId: record.id.toString(),
-    aggregateVersion: 1,
-    correlationId: input.idempotencyKey,
-    payload: {
-      record_id: record.id.toString(),
-      scene_card_id: sceneCardId.toString(),
-      generation_job_id: createdJob.generation_job_id,
-    },
-  });
-  cursor = Math.max(
-    cursor,
-    Number(presetEvent.cursor),
-    Number(recordEvent.cursor),
-  );
 
   return {
     kind: "applied",

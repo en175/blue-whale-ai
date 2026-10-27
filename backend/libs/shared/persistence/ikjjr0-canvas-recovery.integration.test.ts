@@ -227,8 +227,6 @@ describe.skipIf(!databaseUrl)("成片与重生样片恢复契约 v1 真库验证
     await prisma.generation_job_logs.deleteMany({});
     await prisma.billing_cost_reservations.deleteMany({});
     await prisma.generation_jobs.deleteMany({ where: { project_id: pid } });
-    await prisma.project_events.deleteMany({ where: { project_id: pid } });
-    await prisma.$queryRaw`DELETE FROM project_event_stream WHERE project_id = ${pid}`;
 
     await prisma.scene_cards.update({
       where: { id: BigInt(SCENE_CARD_ID) },

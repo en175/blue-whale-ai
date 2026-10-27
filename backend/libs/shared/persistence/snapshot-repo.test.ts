@@ -264,10 +264,6 @@ describe("SnapshotRepo.loadConversationState", () => {
           },
         ]),
       },
-      project_events: {
-        findMany: vi.fn().mockResolvedValue([]),
-        aggregate: vi.fn().mockResolvedValue({ _max: { cursor: 12n } }),
-      },
       scene_cards: {
         findMany: vi.fn().mockResolvedValue([]),
       },
@@ -292,7 +288,6 @@ describe("SnapshotRepo.loadConversationState", () => {
       scene_cards: [],
       scene_card_generation_records: [],
       storyboard_previews: [],
-      high_watermark_cursor: "12",
     });
   });
 
@@ -314,9 +309,6 @@ describe("SnapshotRepo.loadConversationState", () => {
       },
       user_assets: { findMany: assetsFindMany },
       scene_cards: { findMany: vi.fn().mockResolvedValue([]) },
-      project_events: {
-        aggregate: vi.fn().mockResolvedValue({ _max: { cursor: 12n } }),
-      },
       scene_card_generation_records: { findMany: vi.fn().mockResolvedValue([]) },
       storyboard_previews: { findMany: vi.fn().mockResolvedValue([]) },
       generation_output_slots: { findMany: vi.fn().mockResolvedValue([]) },
@@ -337,9 +329,6 @@ describe("SnapshotRepo.loadConversationState output slots", () => {
     const empty = () => ({ findMany: vi.fn().mockResolvedValue([]) });
     const prisma = {
       conversation_messages: empty(),
-      project_events: {
-        aggregate: vi.fn().mockResolvedValue({ _max: { cursor: null } }),
-      },
       scene_cards: empty(),
       scene_card_generation_records: {
         findMany: vi.fn().mockResolvedValue([

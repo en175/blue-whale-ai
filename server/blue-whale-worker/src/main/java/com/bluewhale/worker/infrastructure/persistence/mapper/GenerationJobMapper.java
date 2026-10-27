@@ -591,11 +591,6 @@ public interface GenerationJobMapper extends BaseMapper<GenerationJobEntity> {
             """)
     String findProviderTaskId(@Param("jobId") Long jobId);
 
-    @Select("""
-            SELECT project_id FROM generation_jobs WHERE id = #{jobId}
-            """)
-    Long findProjectId(@Param("jobId") Long jobId);
-
 
 
     @Select("""

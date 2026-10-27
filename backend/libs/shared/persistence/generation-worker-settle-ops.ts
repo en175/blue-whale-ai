@@ -1,6 +1,5 @@
 import type {Prisma, PrismaClient} from "@prisma/client";
 
-import {appendProjectEvent} from "./product-event-repo.js";
 import {syncRecordSummary, syncStoryboardPreviewSummary} from "./generation-worker-internals.js";
 import type {WorkerRepo} from "./generation-worker-types.js";
 
@@ -109,70 +108,6 @@ async function completeJobInTx(
     throw new Error(`completeJob 守卫通过后任务 ${jobId} 不存在，数据损坏`);
   }
   if (job.project_id === null) return true;
-  await appendProjectEvent(tx, {
-    projectId: job.project_id.toString(),
-    eventType: "generation_job.status_changed",
-    aggregateType: "generation_job",
-    aggregateId: job.id.toString(),
-    aggregateVersion: job.version,
-    correlationId: `job_${job.id.toString()}`,
-    payload: {
-      job_id: job.id.toString(),
-      type: job.type,
-      source: job.source,
-      status: job.status,
-      progress: job.progress,
-      output_asset_ids: assetIds,
-    },
-  });
-  for (const [index, assetId] of assetIds.entries()) {
-    const slot = slots[index];
-    const slotIndex = slot?.slot_index ?? index;
-    await appendProjectEvent(tx, {
-      projectId: job.project_id.toString(),
-      eventType: "generation_job.output_attached",
-      aggregateType: "generation_job_output",
-      aggregateId: `${job.id.toString()}:${slotIndex}`,
-      aggregateVersion: 0,
-      correlationId: `job_${job.id.toString()}`,
-      payload: {
-        job_id: job.id.toString(),
-        slot_id: slot?.id.toString() ?? null,
-        slot_index: slotIndex,
-        status: "succeeded",
-        asset_id: assetId,
-        retry_of_slot_id:
-          slot?.retry_of_slot_id == null
-            ? null
-            : slot.retry_of_slot_id.toString(),
-        initial_placement_status: "pending",
-      },
-    });
-  }
-  for (let index = assetIds.length; index < slots.length; index += 1) {
-    const slot = slots[index];
-    if (!slot) continue;
-    await appendProjectEvent(tx, {
-      projectId: job.project_id.toString(),
-      eventType: "generation_job.output_updated",
-      aggregateType: "generation_job_output",
-      aggregateId: `${job.id.toString()}:${slot.slot_index}`,
-      aggregateVersion: 0,
-      correlationId: `job_${job.id.toString()}`,
-      payload: {
-        job_id: job.id.toString(),
-        slot_id: slot.id.toString(),
-        slot_index: slot.slot_index,
-        status: "failed",
-        asset_id: null,
-        retry_of_slot_id:
-          slot.retry_of_slot_id == null
-            ? null
-            : slot.retry_of_slot_id.toString(),
-        initial_placement_status: "pending",
-      },
-    });
-  }
   const firstSlot = slots[0];
   if (firstSlot?.scene_card_generation_record_id) {
     await syncRecordSummary(
@@ -247,47 +182,6 @@ export function createWorkerSettleOps(prisma: PrismaClient): Pick<WorkerRepo, "c
             message: `${errorCode}: ${errorMessage}`,
           },
         });
-        if (job.project_id !== null) {
-          await appendProjectEvent(tx, {
-            projectId: job.project_id.toString(),
-            eventType: "generation_job.status_changed",
-            aggregateType: "generation_job",
-            aggregateId: job.id.toString(),
-            aggregateVersion: job.version,
-            correlationId: `job_${job.id.toString()}`,
-            payload: {
-              job_id: job.id.toString(),
-              type: job.type,
-              source: job.source,
-              status: job.status,
-              progress: job.progress,
-              error: { code: errorCode, message: errorMessage },
-            },
-          });
-          for (const slot of slots) {
-            await appendProjectEvent(tx, {
-              projectId: job.project_id.toString(),
-              eventType: "generation_job.output_updated",
-              aggregateType: "generation_job_output",
-              aggregateId: `${job.id.toString()}:${slot.slot_index}`,
-              aggregateVersion: 0,
-              correlationId: `job_${job.id.toString()}`,
-              payload: {
-                job_id: job.id.toString(),
-                slot_id: slot.id.toString(),
-                slot_index: slot.slot_index,
-                status: "failed",
-                asset_id: null,
-                retry_of_slot_id:
-                  slot.retry_of_slot_id == null
-                    ? null
-                    : slot.retry_of_slot_id.toString(),
-                initial_placement_status: "pending",
-                error: { code: errorCode, message: errorMessage },
-              },
-            });
-          }
-        }
         const firstSlot = slots[0];
         if (firstSlot?.scene_card_generation_record_id) {
           await syncRecordSummary(

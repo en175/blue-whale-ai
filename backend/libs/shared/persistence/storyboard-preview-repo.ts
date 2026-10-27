@@ -18,7 +18,6 @@ import {
   type CanvasRecoveryPlan,
 } from "./generation-canvas-recovery-repo.js";
 import { capabilityDigestFromModelCapability } from "./capability-digest.js";
-import { appendProjectEvent } from "./product-event-repo.js";
 import { transactionWithUniqueRetry } from "./conversation-repo.js";
 
 const OPERATION = "scene_card.storyboard_preview";
@@ -265,27 +264,12 @@ async function createStoryboardPreviewInTransaction(
     },
   });
 
-  const event = await appendProjectEvent(tx, {
-    projectId: input.projectId,
-    eventType: "storyboard_preview.created",
-    aggregateType: "storyboard_preview",
-    aggregateId: preview.id.toString(),
-    aggregateVersion: 1,
-    correlationId: input.idempotencyKey,
-    payload: {
-      preview_id: preview.id.toString(),
-      scene_card_id: sceneCardId.toString(),
-      first_generation_job_id: createdJob.generation_job_id,
-      summary_status: "generating",
-    },
-  });
-
   return {
     kind: "applied",
     preview_id: preview.id.toString(),
     scene_card_id: sceneCardId.toString(),
     generation_job_id: createdJob.generation_job_id,
-    cursor: Math.max(createdJob.cursor, Number(event.cursor)).toString(),
+    cursor: createdJob.cursor.toString(),
   };
 }
 

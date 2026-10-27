@@ -66,7 +66,6 @@ export interface SnapshotConversationState {
   scene_cards: SnapshotSceneCardView[];
   scene_card_generation_records: SnapshotSceneCardGenerationRecordView[];
   storyboard_previews: SnapshotStoryboardPreviewView[];
-  high_watermark_cursor: string;
 }
 
 export interface SnapshotRepo {
@@ -263,15 +262,11 @@ export function createSnapshotRepo(prisma: PrismaClient): SnapshotRepo {
         display_name: string;
         snapshot: unknown;
       }> = [];
-      const [messages, maxCursorRow, sceneCardRows, recordRows, previewRows] =
+      const [messages, sceneCardRows, recordRows, previewRows] =
         await Promise.all([
           prisma.conversation_messages.findMany({
             where: { project_id: pid, is_delete: 0 },
             orderBy: { sequence_no: "asc" },
-          }),
-          prisma.project_events.aggregate({
-            where: { project_id: pid, is_delete: 0 },
-            _max: { cursor: true },
           }),
           prisma.scene_cards.findMany({
             where: { project_id: pid, is_delete: 0 },
@@ -439,7 +434,6 @@ export function createSnapshotRepo(prisma: PrismaClient): SnapshotRepo {
           first_generation_job_id: preview.first_generation_job_id.toString(),
           summary_status: preview.summary_status,
         })),
-        high_watermark_cursor: (maxCursorRow?._max?.cursor ?? 0n).toString(),
       };
     },
   };

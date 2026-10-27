@@ -46,7 +46,7 @@ import {
   resolveLogicalSlots,
   type OutputSlotStatus,
 } from "./generation-output-slot-repo.js";
-import { appendProjectEvent } from "./product-event-repo.js";
+import { nextSnowflake } from "./snowflake.js";
 import {
   extraString,
   loadJobExtrasOne,
@@ -281,31 +281,16 @@ export async function createJobWithinTx(
       },
     } as never,
   });
-  const event = await appendProjectEvent(tx, {
-    projectId: input.projectId,
-    eventType: "generation_job.created",
-    aggregateType: "generation_job",
-    aggregateId: job.id.toString(),
-    aggregateVersion: job.version,
-    correlationId: input.actionIdentity,
-    payload: {
-      job_id: job.id.toString(),
-      type: job.type,
-      source: job.source,
-      status: job.status,
-      progress: job.progress,
-      output_asset_ids: [],
-    },
-  });
+  const cursor = nextSnowflake();
   await writeCreateIdempotency(
     tx,
-    { projectId: input.projectId, jobId: job.id, acceptedCursor: event.cursor },
+    { projectId: input.projectId, jobId: job.id, acceptedCursor: cursor.toString() },
     idempotency,
   );
   if (recoveryPlan) await writeCanvasRecoveryRows(tx, recoveryPlan, job.id);
   return {
     generation_job_id: job.id.toString(),
-    cursor: Number(event.cursor),
+    cursor: Number(cursor),
   };
 }
 
@@ -658,23 +643,11 @@ export function createGenerationCommandRepo(
             }
           }
           for (const recordId of recordIds) {
-            const record = await tx.scene_card_generation_records.update({
+            await tx.scene_card_generation_records.update({
               where: { id: recordId },
               data: {
                 summary_status: "generating",
                 version: { increment: 1 },
-              },
-            });
-            await appendProjectEvent(tx, {
-              projectId: record.project_id.toString(),
-              eventType: "scene_card_generation_record.summary_changed",
-              aggregateType: "scene_card_generation_record",
-              aggregateId: recordId.toString(),
-              aggregateVersion: record.version,
-              correlationId: `record_${recordId.toString()}`,
-              payload: {
-                record_id: recordId.toString(),
-                summary_status: "generating",
               },
             });
           }
@@ -690,23 +663,7 @@ export function createGenerationCommandRepo(
             });
           }
         }
-        const event = await appendProjectEvent(tx, {
-          projectId,
-          eventType: "generation_job.created",
-          aggregateType: "generation_job",
-          aggregateId: retry.id.toString(),
-          aggregateVersion: retry.version,
-          correlationId: idempotencyKey || `retry:${originalJobId}`,
-          payload: {
-            job_id: retry.id.toString(),
-            type: retry.type,
-            source: retry.source,
-            status: retry.status,
-            progress: retry.progress,
-            output_asset_ids: [],
-            retry_of_job_id: originalJobId,
-          },
-        });
+        const cursor = nextSnowflake();
         if (idempotencyKey) {
           await tx.project_command_receipts.create({
             data: {
@@ -716,7 +673,7 @@ export function createGenerationCommandRepo(
               request_hash: requestHash,
               generation_job_id: retry.id,
               resource_id: BigInt(originalJobId),
-              accepted_cursor: BigInt(event.cursor),
+              accepted_cursor: cursor,
             },
           });
         }
@@ -731,7 +688,7 @@ export function createGenerationCommandRepo(
         if (recoveryPlan) await writeCanvasRecoveryRows(tx, recoveryPlan, retry.id);
         return {
           generation_job_id: retry.id.toString(),
-          cursor: Number(event.cursor),
+          cursor: Number(cursor),
           type: original.type as "image" | "video" | "audio",
         };
         },

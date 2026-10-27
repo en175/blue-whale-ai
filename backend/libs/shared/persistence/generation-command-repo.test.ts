@@ -131,11 +131,6 @@ describe("generation command placement anchor", () => {
       generation_output_slots: { create: vi.fn().mockResolvedValue({}) },
       billing_cost_reservations: { create: vi.fn().mockResolvedValue({}) },
       generation_job_logs: { create: vi.fn().mockResolvedValue({}) },
-      project_events: {
-        create: vi.fn(
-          async ({ data }: { data: Record<string, unknown> }) => data,
-        ),
-      },
     };
 
     await createJobWithinTx(tx as never, {
@@ -188,11 +183,6 @@ describe("generation command placement anchor", () => {
       generation_output_slots: { create: vi.fn().mockResolvedValue({}) },
       billing_cost_reservations: { create: vi.fn().mockResolvedValue({}) },
       generation_job_logs: { create: vi.fn().mockResolvedValue({}) },
-      project_events: {
-        create: vi.fn(
-          async ({ data }: { data: Record<string, unknown> }) => data,
-        ),
-      },
     };
 
     await createJobWithinTx(tx as never, {
@@ -234,11 +224,6 @@ describe("generation command placement anchor", () => {
       generation_output_slots: { create: vi.fn().mockResolvedValue({}) },
       billing_cost_reservations: { create: vi.fn().mockResolvedValue({}) },
       generation_job_logs: { create: vi.fn().mockResolvedValue({}) },
-      project_events: {
-        create: vi.fn(
-          async ({ data }: { data: Record<string, unknown> }) => data,
-        ),
-      },
     };
 
     await createJobWithinTx(tx as never, {
@@ -323,11 +308,6 @@ describe("generation command repo retry", () => {
         findUnique: vi.fn().mockResolvedValue(null),
         create: vi.fn().mockResolvedValue({}),
       },
-      project_events: {
-        create: vi.fn(
-          async ({ data }: { data: Record<string, unknown> }) => data,
-        ),
-      },
       generation_job_logs: { create: vi.fn().mockResolvedValue({}) },
     };
     const prisma = {
@@ -357,25 +337,8 @@ describe("generation command repo retry", () => {
       where: { id: 88n },
       data: { summary_status: "generating", version: { increment: 1 } },
     });
-    expect(tx.project_events.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        event_type: "scene_card_generation_record.summary_changed",
-        aggregate_version: 2,
-        payload: { record_id: "88", summary_status: "generating" },
-      }),
-    });
-    const jobEventCall = tx.project_events.create.mock.calls.find(
-      ([args]) =>
-        (args as { data: { event_type: string } }).data.event_type ===
-        "generation_job.created",
-    );
-    const eventCursor = (
-      jobEventCall?.[0] as {
-        data: { cursor: bigint };
-      }
-    ).data.cursor;
     expect(tx.project_command_receipts.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({ accepted_cursor: eventCursor }),
+      data: expect.objectContaining({ accepted_cursor: expect.any(BigInt) }),
     });
   });
 
@@ -412,9 +375,6 @@ describe("generation command repo retry", () => {
       project_command_receipts: {
         findUnique: vi.fn().mockResolvedValue(null),
         create: vi.fn().mockResolvedValue({}),
-      },
-      project_events: {
-        create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => data),
       },
       generation_job_logs: { create: vi.fn().mockResolvedValue({}) },
     };
@@ -489,9 +449,6 @@ describe("generation command repo retry", () => {
       project_command_receipts: {
         findUnique: vi.fn().mockResolvedValue(null),
         create: vi.fn().mockResolvedValue({}),
-      },
-      project_events: {
-        create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => data),
       },
       generation_job_logs: {
         create: vi
@@ -605,11 +562,6 @@ describe("generation command repo retry", () => {
           cost_rule_version: "v1",
         }),
         create: vi.fn().mockResolvedValue({}),
-      },
-      project_events: {
-        create: vi.fn(
-          async ({ data }: { data: Record<string, unknown> }) => data,
-        ),
       },
       generation_job_logs: { create: vi.fn().mockResolvedValue({}) },
     };
@@ -791,11 +743,6 @@ describe("generation command repo retry", () => {
             Object.assign(new Error("unique"), { code: "P2002" }),
           ),
       },
-      project_events: {
-        create: vi.fn(
-          async ({ data }: { data: Record<string, unknown> }) => data,
-        ),
-      },
       generation_job_logs: { create: vi.fn().mockResolvedValue({}) },
     };
     const secondTx = {
@@ -880,11 +827,6 @@ describe("generation command repo retry", () => {
         project_command_receipts: {
           findUnique: vi.fn().mockResolvedValue(null),
           create: vi.fn().mockResolvedValue({}),
-        },
-        project_events: {
-          create: vi.fn(
-            async ({ data }: { data: Record<string, unknown> }) => data,
-          ),
         },
         generation_job_logs: { create: vi.fn().mockResolvedValue({}) },
       };
@@ -1053,9 +995,6 @@ describe("retryJob 计费快照（IKL406：重试的 charge 必须带 rule_snaps
         findUnique: vi.fn().mockResolvedValue(null),
         create: vi.fn().mockResolvedValue({}),
       },
-      project_events: {
-        create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => data),
-      },
       generation_job_logs: { create: vi.fn().mockResolvedValue({}) },
     };
     const prisma = {
@@ -1179,11 +1118,6 @@ describe("generation command repo billing（预扣与失败补偿）", () => {
                 new Error("We could not serialize [object Function] value"),
               )
           : vi.fn().mockResolvedValue({}),
-      },
-      project_events: {
-        create: vi.fn(
-          async ({ data }: { data: Record<string, unknown> }) => data,
-        ),
       },
     };
     const prisma = {
@@ -1310,7 +1244,7 @@ describe("建任务幂等：同一把 Idempotency-Key 只建一个 job、只扣�
 
   function uniqueViolation() {
     return Object.assign(
-      new Error("Unique constraint failed: uk_command_idempotency"),
+      new Error("Unique constraint failed: uk_project_command_receipts__key"),
       { code: "P2002" },
     );
   }
@@ -1359,11 +1293,6 @@ describe("建任务幂等：同一把 Idempotency-Key 只建一个 job、只扣�
           generation_job_extras: extrasDelegate(),
           billing_cost_reservations: { create: vi.fn(async () => ({})) },
           generation_job_logs: { create: vi.fn(async () => ({})) },
-          project_events: {
-            create: vi.fn(
-              async ({ data }: { data: Record<string, unknown> }) => data,
-            ),
-          },
           project_command_receipts: {
             create: vi.fn(async ({ data }: { data: IdemRow }) => {
               const key = rowKey(data);
@@ -1545,7 +1474,6 @@ describe("generation command repo 样片阶段落库（IKIZQ8）", () => {
       generation_output_slots: { create: vi.fn().mockResolvedValue({}) },
       billing_cost_reservations: { create: vi.fn().mockResolvedValue({}) },
       generation_job_logs: { create: vi.fn().mockResolvedValue({}) },
-      project_events: { create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => data) },
     };
   }
 

@@ -70,13 +70,6 @@ export {
   type SnapshotStoryboardPreviewView,
 } from "./snapshot-repo.js";
 export {
-  appendProjectEvent,
-  createProductEventRepo,
-  type AppendProjectEventInput,
-  type ProductEventRepo,
-  type ProductEventView,
-} from "./product-event-repo.js";
-export {
   transactionWithUniqueRetry,
 } from "./conversation-repo.js";
 export {
