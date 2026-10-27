@@ -25,7 +25,7 @@
 
 - [branch-naming.md](branch-naming.md) ↔ [commit-and-review.md](commit-and-review.md):分支前缀 vs Conventional Commits type 区分(刻意不统一,见 branch-naming.md)
 - [worktree-workflow.md](worktree-workflow.md) → [ADR-0009](../../adr/0009-parallel-agent-worktrees.md):并行 Agent Session 的 task worktree 隔离
-- [worktree-workflow.md](worktree-workflow.md) → [ADR-0115](../adr/0115-local-release-code-baseline.md):当前发布线基线与 Agent 任务区边界；替代 [ADR-0010](../adr/0010-local-master-is-user-integration-zone.md)
+- [worktree-workflow.md](worktree-workflow.md) → [ADR-0133](../adr/0133-environment-branches.md):master 基线与环境分支晋级、Agent 任务区边界；替代 [ADR-0115](../adr/0115-local-release-code-baseline.md) 与 [ADR-0010](../adr/0010-local-master-is-user-integration-zone.md)
 - [hooks/README.md](hooks/README.md) → [commit-and-review.md](commit-and-review.md):「合并方法」一节
 - [hooks/README.md](hooks/README.md) → [ADR-0003](../../adr/0003-no-direct-push-to-master.md):「禁止直推 master」决策
 - [branch-naming.md](branch-naming.md) → [ADR-0004](../../adr/0004-branch-naming.md):分支命名决策

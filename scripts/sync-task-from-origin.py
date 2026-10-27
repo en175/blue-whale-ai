@@ -303,9 +303,6 @@ def synchronize(root: Path, as_json: bool, target_branch: str | None,
     remote_target = git_output(root, "ls-remote", "--heads", "origin", "refs/heads/{}".format(target_branch))
     if not remote_target or remote_target.split()[0] != upstream_sha:
         raise WorkflowError("远端目标在 fetch 后变化；重新读取并同步。")
-    if git(root, "merge-base", "--is-ancestor", start_sha, upstream_sha, check=False).returncode != 0:
-        pending = git_output(root, "log", "--format=%h %s", "--reverse", "{}..{}".format(upstream_sha, start_sha))
-        raise WorkflowError("origin/{} 尚未包含任务起点 {}；待共享基线提交：\n{}".format(target_branch, start_sha, pending))
     original_head = git_output(root, "rev-parse", "HEAD")
     marker, backup_ref = recovery_paths(git_dir, branch)
     recovery = (pending_recovery(root, marker, branch, target_branch, original_head,
@@ -538,9 +535,6 @@ def linearize(
     original_head = git_output(root, "rev-parse", "HEAD")
     if git(root, "merge-base", "--is-ancestor", upstream_sha, original_head, check=False).returncode:
         raise WorkflowError("PR 源分支尚未包含当前目标发布线；先核对基线，不能直接线性化。")
-    if git(root, "merge-base", "--is-ancestor", str(metadata["start_sha"]), upstream_sha,
-           check=False).returncode:
-        raise WorkflowError("远端目标发布线尚未包含任务起点，停止线性化。")
     remote_sha = remote_branch_sha(root, branch)
     if remote_sha != original_head:
         raise WorkflowError("本地 HEAD 与已发布 PR 源分支不一致，拒绝覆盖未知远端提交。")

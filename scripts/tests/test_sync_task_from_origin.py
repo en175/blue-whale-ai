@@ -237,24 +237,25 @@ class SyncTaskFromOriginTest(unittest.TestCase):
         )
         self.assertEqual(recovery["target_branch"], "release/prod")
 
-    def test_sync_refuses_local_baseline_not_shared_to_remote_release(self) -> None:
-        (self.main / "local-baseline.txt").write_text("local\n", encoding="utf-8")
-        self.git("add", "local-baseline.txt", cwd=self.main)
-        self.git("commit", "-m", "chore: local release baseline", cwd=self.main)
-        local_start = self.git("rev-parse", "HEAD", cwd=self.main)
-        self.git("merge", "--ff-only", "release/prod")
-        metadata_path = Path(self.git("rev-parse", "--absolute-git-dir")) / "blue-whale" / "task-base.json"
-        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-        metadata["start_sha"] = local_start
-        metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+    def test_sync_rebases_when_target_lacks_task_start(self) -> None:
+        (self.main / "master-only.txt").write_text("master\n", encoding="utf-8")
+        self.git("add", "master-only.txt", cwd=self.main)
+        self.git("commit", "-m", "chore: master baseline ahead", cwd=self.main)
+        self.git("push", "origin", "HEAD:master", cwd=self.main)
+        release_head = self.advance_release()
+        self.git("checkout", "release/prod", cwd=self.main)
         task_head = self.commit_task_change()
 
         result = self.invoke("sync", "--json")
 
-        self.assertEqual(result.returncode, 1)
-        self.assertIn("local release baseline", str(self.response(result)["detail"]))
-        self.assertEqual(self.git("rev-parse", "HEAD"), task_head)
-        self.assertFalse((metadata_path.parent.parent / "agent-sync-recovery.json").exists())
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.response(result)["status"], "SYNCED")
+        self.assertNotEqual(self.git("rev-parse", "HEAD"), task_head)
+        self.assertEqual(
+            run("git", "merge-base", "--is-ancestor", release_head,
+                self.git("rev-parse", "HEAD"), cwd=self.worktree).returncode,
+            0,
+        )
 
     def test_sync_rejects_unprotected_target(self) -> None:
         result = self.invoke("sync", "--target-branch", "develop", "--json")

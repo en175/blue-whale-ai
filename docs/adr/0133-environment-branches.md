@@ -36,7 +36,18 @@
 
 ## 后果
 
-- **一期不改代码**：规范与现实存在过渡期，`branch-naming.md` 的「切换状态」段落显式说明。
-- **二期前 `release/*` 仍是唯一可用发布线**：新任务继续从 `release/2026.09.29` 开工。
-- **裸 `release` 一旦建立，`release/*` 永久不可复建**：工具链若需保留批次能力，应在二期一并决定是否放弃。
-- **`dev` 与 `master` 当前同 SHA**：`dev` 尚无上游，二期推送时确定其同步方向。
+- **裸 `release` 已成为活动发布线**：共享状态 `chore/发布线状态记录` 的 `active` 指向 `release`，六条 `release/*` 批次分支全部转入 `legacy`。裸 `release` 一旦建立，`release/*` 永久不可复建。
+- **`dev` 与 `master` 当前同 SHA**：`dev` 尚无上游，首次合入时确定其同步方向。
+- **保护层级只在客户端**：`master` / `dev` / `test` / `release` 的直推、强推均由本地 hook 拦截；Gitee 服务端分支保护是否配置，工具链无法验证，需人工在仓库设置中核对。
+
+## 三期补充（2026-10-26）
+
+发布线状态机在批次分支删除后卡死：`classify_releases()` 发现 `active` 不在远端即抛错，而 `activate` 路径同样经过该函数，形成无法自愈的死锁。已一次性改写共享状态 ref 修复（`81f3fedb` → `401dadee`），并把保护规则补齐：
+
+| 改动 | 内容 |
+|---|---|
+| `pretool.py` | 新增 `ENVIRONMENT_BRANCHES` / `PROTECTED_BRANCHES` / `target-branch` 模式；`protected-push-target` 与 `release-push-target` 覆盖环境分支 |
+| `block-push-to-master.sh` | 直推拦截扩到 `dev` / `test` / `release` |
+| `confirm-release-action.sh` | PR 目标白名单改走 `target-branch` 谓词，与 `task_metadata.is_target_branch` 语义一致 |
+| `publish-review-package.sh` | 首次发布必须显式传 `--target-branch`，不再从任务元数据静默回退 |
+| `branch-naming.md` | 「保护分支」扩为四条，「切换状态」改为已完成 |
