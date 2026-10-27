@@ -176,7 +176,18 @@ describe('LoginModal 手机号登录', () => {
     await act(async () => setInputValue(phone!, '12345'));
     await act(async () => buttonByText('获取验证码')?.click());
     expect(fetchCaptcha).not.toHaveBeenCalled();
-    expect(document.body.textContent).toContain('请输入正确的手机号');
+    expect(document.body.textContent).toContain('请输入中国大陆11位手机号');
+  });
+
+  it('号码不足 11 位时移开焦点即提示，修正后提示消失', async () => {
+    await renderLoginModal();
+    const phone = inputByPlaceholder('请输入手机号');
+    await act(async () => setInputValue(phone!, '1380000123'));
+    await act(async () => phone!.dispatchEvent(new FocusEvent('focusout', { bubbles: true })));
+    expect(document.body.textContent).toContain('请输入中国大陆11位手机号');
+
+    await act(async () => setInputValue(phone!, '13800001234'));
+    expect(document.body.textContent).not.toContain('请输入中国大陆11位手机号');
   });
 });
 

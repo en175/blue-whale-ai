@@ -80,6 +80,18 @@ export default function RebindPhoneModal({
     setCaptchaAnswer('');
   };
 
+  const flagPhoneFormat = () => {
+    if (targetPhone && !phoneValid) setError(PHONE_FORMAT_MESSAGE);
+  };
+
+  const changeNewPhone = (value: string) => {
+    setNewPhone(value);
+    setCode('');
+    setCooldown(0);
+    setError('');
+    resetCaptcha();
+  };
+
   const loadCaptcha = async () => {
     const challenge = await fetchCaptcha(targetPhone, purpose);
     setCaptcha(challenge);
@@ -269,11 +281,8 @@ export default function RebindPhoneModal({
                 value={newPhone}
                 inputMode="numeric"
                 placeholder="请输入新手机号"
-                onChange={(event) => {
-                  setNewPhone(event.target.value);
-                  setError((current) => (current === PHONE_FORMAT_MESSAGE ? '' : current));
-                  resetCaptcha();
-                }}
+                onBlur={flagPhoneFormat}
+                onChange={(event) => changeNewPhone(event.target.value)}
               />
             </label>
           )}
