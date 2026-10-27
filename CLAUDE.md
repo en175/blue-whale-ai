@@ -22,7 +22,7 @@
 1. 本仓库工单与 PR 全部读写仅使用 Gitee MCP；操作前读取 [渠道规则](agent-rules/gitee-mcp-only.md)。
 2. 发布须当前对话中的人类明确授权，涵盖 push、PR、merge、release；Agent 自动使用标准入口和授权凭证，已有授权不二次确认。
 3. `master` 是唯一基线，不参与环境发布；`master` / `dev` / `test` / `release` 四条分支都禁止直推，PR 合并只用 merge，`hotfix/*` 无特权。每次 `release` 发版后由人把 `release` 合回 `master`。
-4. 代码相关任务，包括只读调查、调试和审查，先 `git fetch origin --prune` 并核对该目录索引；失败即停止报告。写入任务经 `scripts/start-task-worktree.sh --target-branch <master|dev|test|release>` 从 `origin/master` 起步进入独立任务区。开启分支按 `dev` → `test` → `release` 依次发 PR 晋级，环境分支之间不合并、也不接收 master 直接合入。改动工具链、hook 或规范时目标写 `master`，让后续新分支一并继承。
+4. 代码相关任务，包括只读调查、调试和审查，先 `git fetch origin --prune` 并核对该目录索引；失败即停止报告。写入任务经 `scripts/start-task-worktree.sh --target-branch <master|dev>` 从 `origin/master` 起步进入独立任务区。任务分支只发 `master` 或 `dev`；`test` 只接受 `dev` 的 PR，`release` 只接受 `test` 的 PR，环境分支按 `dev` → `test` → `release` 逐级晋级，也不接收 master 直接合入。改动工具链、hook 或规范时目标写 `master`，让后续新分支一并继承。
 5. Agent 按文档主动调用标准入口；Hook 只纠偏或阻断，不返回 ASK，不自动同步、选择策略或推进任务状态。
 6. 同一契约章节的基础设施工单先合入目标环境分支，功能工单再开工；跨进程字段先在契约文档确定。
 7. 产品采用 TypeScript、Next.js Web、NestJS API 与 Node.js LTS；已批准的两个 Java 服务和专用计算边界见技术栈规则。工程工具不受产品语言禁令，无关 Python 存量不阻塞功能任务。
