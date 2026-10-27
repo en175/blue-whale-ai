@@ -1118,4 +1118,67 @@ class TosVideoMediaRelayTest {
                 .hasMessageContaining(TosVideoMediaRelay.TASK_DEADLINE_ABORT_MESSAGE)
                 .hasMessageNotContaining("转存网络失败");
     }
+
+    @Test
+    @DisplayName("video/info 解析：取真实视频流宽高，跳过封面图流")
+    void parseVideoDimensions_picksRealVideoStream() {
+        String body = "{\"streams\":["
+                + "{\"codec_type\":\"video\",\"disposition\":{\"attached_pic\":1},\"width\":400,\"height\":400},"
+                + "{\"codec_type\":\"video\",\"disposition\":{\"attached_pic\":0},\"width\":720,\"height\":1280}]}";
+
+        assertThat(TosVideoMediaRelay.parseVideoDimensions(body)).containsExactly(720, 1280);
+    }
+
+    @Test
+    @DisplayName("video/info 无视频流或非法 JSON → 留空")
+    void parseVideoDimensions_missingVideoStream() {
+        assertThat(TosVideoMediaRelay.parseVideoDimensions(
+                "{\"streams\":[{\"codec_type\":\"audio\",\"width\":0,\"height\":0}]}")).isNull();
+        assertThat(TosVideoMediaRelay.parseVideoDimensions("not-json")).isNull();
+    }
+
+    @Test
+    @DisplayName("TOS media info 探测：预签名 URL 带 x-tos-process=video/info，返回真实宽高")
+    void probeVideoDimensions_readsMediaInfo() throws Exception {
+        byte[] body = "{\"streams\":[{\"codec_type\":\"video\",\"width\":1900,\"height\":1090}]}"
+                .getBytes(StandardCharsets.UTF_8);
+        String url = serve("application/json", 200, body.length, body);
+        TOSV2 client = mock(TOSV2.class);
+        var captured = new java.util.concurrent.atomic.AtomicReference<PreSignedURLInput>();
+        doAnswer(invocation -> {
+            PreSignedURLInput input = invocation.getArgument(0);
+            captured.set(input);
+            return new PreSignedURLOutput(url, java.util.Map.of());
+        }).when(client).preSignedURL(any(PreSignedURLInput.class));
+
+        int[] dims = new TosVideoMediaRelay(client, "bkt", "tos.example.com")
+                .probeVideoDimensions("generated/9/video/a.mp4");
+
+        assertThat(dims).containsExactly(1900, 1090);
+        assertThat(captured.get().getBucket()).isEqualTo("bkt");
+        assertThat(captured.get().getKey()).isEqualTo("generated/9/video/a.mp4");
+        assertThat(captured.get().getQuery()).containsEntry("x-tos-process", "video/info");
+    }
+
+    @Test
+    @DisplayName("TOS media info 返回非 2xx → 宽高留空，不抛异常")
+    void probeVideoDimensions_httpErrorReturnsNull() throws Exception {
+        String url = serve("text/plain", 404, 0, patternBlock());
+        TOSV2 client = mock(TOSV2.class);
+        doAnswer(invocation -> new PreSignedURLOutput(url, java.util.Map.of()))
+                .when(client).preSignedURL(any(PreSignedURLInput.class));
+
+        assertThat(new TosVideoMediaRelay(client, "bkt", "tos.example.com")
+                .probeVideoDimensions("generated/9/video/a.mp4")).isNull();
+    }
+
+    @Test
+    @DisplayName("空 storageKey → 不请求，直接留空")
+    void probeVideoDimensions_blankKeyReturnsNull() {
+        TOSV2 client = mock(TOSV2.class);
+
+        assertThat(new TosVideoMediaRelay(client, "bkt", "tos.example.com")
+                .probeVideoDimensions(" ")).isNull();
+        verify(client, never()).preSignedURL(any(PreSignedURLInput.class));
+    }
 }
