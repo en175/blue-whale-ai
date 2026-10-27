@@ -71,4 +71,17 @@ describe("validateReferenceImages 单图口径（IKQYEH）", () => {
       }),
     ).toBeNull();
   });
+
+  it("配置了非法总像素（0 / NaN）回落到默认 36,000,000", () => {
+    expect(
+      validateReferenceImages([image(6001, 6000)], {
+        max_reference_image_pixels: 0,
+      })?.params,
+    ).toEqual({ max_reference_pixels: 36_000_000 });
+    expect(
+      validateReferenceImages([image(1000, 1000)], {
+        max_reference_image_pixels: Number.NaN,
+      }),
+    ).toBeNull();
+  });
 });

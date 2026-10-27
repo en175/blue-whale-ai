@@ -22,18 +22,24 @@ function formatPixels(value: number): string {
   return value % 10_000 === 0 ? `${value / 10_000} 万像素` : `${value} 像素`;
 }
 
+function positiveLimit(value: number | null | undefined, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 1
+    ? value
+    : fallback;
+}
+
 export function validateReferenceImages(
   assets: ReadonlyArray<ReferenceImageSize>,
   features?: ReferenceImageLimitFeatures | null,
 ): ReferenceImageLimitError | null {
-  const maxPixels =
-    features?.max_reference_image_pixels ?? DEFAULT_MAX_REFERENCE_IMAGE_PIXELS;
-  const maxRatio =
-    features?.max_reference_image_ratio ?? DEFAULT_MAX_REFERENCE_IMAGE_RATIO;
-  const ratioLimit =
-    Number.isFinite(maxRatio) && maxRatio >= 1
-      ? maxRatio
-      : DEFAULT_MAX_REFERENCE_IMAGE_RATIO;
+  const maxPixels = positiveLimit(
+    features?.max_reference_image_pixels,
+    DEFAULT_MAX_REFERENCE_IMAGE_PIXELS,
+  );
+  const ratioLimit = positiveLimit(
+    features?.max_reference_image_ratio,
+    DEFAULT_MAX_REFERENCE_IMAGE_RATIO,
+  );
   for (const asset of assets) {
     const { width, height } = asset;
     if (width === null || height === null || width <= 0 || height <= 0) continue;
