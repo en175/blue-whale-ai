@@ -17,7 +17,7 @@ const { fetchGenerationModels, navigate, pickerOnSelect } = vi.hoisted(() => ({
 
 vi.mock('@/custom/api/generation', () => ({ fetchGenerationModels }));
 
-vi.mock('react-router-dom', () => ({ useNavigate: () => navigate }));
+vi.mock('react-router-dom', () => ({ useNavigate: () => navigate, useLocation: () => ({ pathname: '/', search: '', state: null }) }));
 
 vi.mock('@/shared/utils/auth', () => {
   const user = { id: 'u1', name: 'tester' };
