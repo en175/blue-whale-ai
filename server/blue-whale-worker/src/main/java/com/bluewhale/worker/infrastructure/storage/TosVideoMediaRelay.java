@@ -62,6 +62,8 @@ public class TosVideoMediaRelay {
 
     private static final String MEDIA_INFO_PROCESS = "video/info";
 
+    private static final int MAX_MEDIA_INFO_BYTES = 256 * 1024;
+
     private static final ObjectMapper JSON = new ObjectMapper();
 
     private static final ScheduledExecutorService WATCHDOG_SCHEDULER =
@@ -336,12 +338,19 @@ public class TosVideoMediaRelay {
                     .timeout(PROBE_TIMEOUT)
                     .GET()
                     .build();
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-            if (response.statusCode() >= 400) {
-                log.warn("TOS media info 探测失败 storageKey={} status={}", storageKey, response.statusCode());
-                return null;
+            HttpResponse<InputStream> response = httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
+            try (InputStream body = response.body()) {
+                if (response.statusCode() >= 400) {
+                    log.warn("TOS media info 探测失败 storageKey={} status={}", storageKey, response.statusCode());
+                    return null;
+                }
+                byte[] bytes = body.readNBytes(MAX_MEDIA_INFO_BYTES + 1);
+                if (bytes.length > MAX_MEDIA_INFO_BYTES) {
+                    log.warn("TOS media info 响应超限，资产宽高留空 storageKey={}", storageKey);
+                    return null;
+                }
+                return parseVideoDimensions(new String(bytes, java.nio.charset.StandardCharsets.UTF_8));
             }
-            return parseVideoDimensions(response.body());
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             log.warn("TOS media info 探测被中断 storageKey={}", storageKey);

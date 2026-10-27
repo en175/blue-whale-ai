@@ -1024,6 +1024,33 @@ class VideoJobProcessorTest {
     }
 
     @Test
+    @DisplayName("IKQYI7: 固定比例快照缺宽高 → 回落 TOS 探测")
+    void publishMissingSnapshot_usesProbedDims() {
+        Map<String, Object> input = baseInput();
+        input.remove("output_width");
+        input.remove("output_height");
+        ClaimedVideoJobDto claim = videoClaim("163", false, null, 0, 0, "parent-task-missing-dims", input);
+        doReturn(Optional.of(claim)).when(stateMachine)
+                .claimVideoJobById(eq("163"), anyString());
+        doReturn("token").when(upstreamCredential).requireKey();
+        doReturn(new VideoTaskObservation("succeeded", 100, "http://parent-video.mp4", null, null, null))
+                .when(videoClient).poll(eq("token"), eq("parent-task-missing-dims"));
+        doReturn(new StoredVideo("http://tos/video.mp4", "key", "video/mp4", 100L, "0123456789abcdef0123456789abcdef"))
+                .when(mediaRelay).persist(anyString(), anyString());
+        doReturn(new int[]{1280, 720}).when(mediaRelay).probeVideoDimensions("key");
+        doReturn(true).when(finalizer)
+                .publishVideoResult(anyString(), anyString(), anyString(),
+                        anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(), anyInt(), anyInt(), anyDouble(), any(), any());
+
+        processor.handle("163");
+
+        verify(mediaRelay).probeVideoDimensions("key");
+        verify(finalizer).publishVideoResult(eq("163"), anyString(), anyString(),
+                anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(),
+                eq(1280), eq(720), anyDouble(), any(), any());
+    }
+
+    @Test
     @DisplayName("IKQYI7: TOS 探测失败 → 宽高留空且发布照常")
     void publishProbeFails_publishesWithNullDims() {
         Map<String, Object> input = baseInput();
