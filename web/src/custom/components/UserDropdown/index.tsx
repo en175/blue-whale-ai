@@ -103,7 +103,7 @@ export default function UserDropdown() {
             <div className={styles.userHeader}>
               <div className={styles.avatar}>{(user.nickname || user.username).charAt(0).toUpperCase()}</div>
               <div className={styles.userHeaderInfo}>
-                <span className={styles.username}>{user.username}</span>
+                <span className={styles.username}>{user.nickname || user.username}</span>
                 <span className={styles.userMeta}>ID：{user.userId}</span>
                 {user.email && <span className={styles.userMeta}>{user.email}</span>}
               </div>
