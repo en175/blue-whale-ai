@@ -351,10 +351,21 @@ if [ "$TOOL_NAME" = "mcp__gitee-ent__create_enterprise_repo_pull" ]; then
   printf '%s' "$TARGET_BRANCH" | python3 "$PRETOOL" target-branch >/dev/null || \
     block "普通任务 PR 只允许合入 master、release/* 或 dev/test/release；当前目标：${TARGET_BRANCH:-空}。"
 
+  PROGRESSION=0
+  case "$TARGET_BRANCH:$SOURCE_BRANCH" in
+    test:dev|release:test) PROGRESSION=1 ;;
+    test:*) block "test 只接受 dev 的 PR；当前 source：${SOURCE_BRANCH:-空}。" ;;
+    release:*) block "release 只接受 test 的 PR；当前 source：${SOURCE_BRANCH:-空}。" ;;
+  esac
+
   case "$SOURCE_BRANCH" in
     feature/*|fix/*|hotfix/*|docs/*|chore/*) ;;
-    *) block "创建 Gitee PR 时 source_branch 必须是工单分支。" ;;
+    *)
+      [ "$PROGRESSION" = 1 ] || block "创建 Gitee PR 时 source_branch 必须是工单分支。"
+      ;;
   esac
+
+  [ "$PROGRESSION" = 1 ] && allow
 
   validate_publish_marker "$SOURCE_BRANCH" "$TARGET_BRANCH" "$DRAFT"
 

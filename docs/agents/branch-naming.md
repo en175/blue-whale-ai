@@ -33,27 +33,29 @@
 ### 规则
 
 - **不受白名单约束**：`dev` / `test` / `release` 是固定环境名，不套用五前缀，也不要求中文简述。
-- **任务分支固定从 `origin/master` 拉**：工单改动在 `feature|fix|hotfix|docs|chore` 分支上完成，命名规范不变；开工时用 `--target-branch` 声明这条任务之后要合入哪条分支。
-- **PR 必须显式指定目标**：首次发布入口 `publish-review-package.sh --create-pr` 必须带 `--target-branch`，不传直接拒绝。合法目标是 `master`、`dev`、`test`、`release`（兼容 `release/*` 批次），PR Hook 用同一白名单校验。**同一条任务分支可依次发往 `dev` → `test` → `release`**，每次带对应目标，验证凭证按目标分别生成；开工时记录的 `target_branch` 只是默认目标，不限制后续改投。
+- **任务分支固定从 `origin/master` 拉**：工单改动在 `feature|fix|hotfix|docs|chore` 分支上完成，命名规范不变；开工时用 `--target-branch` 声明这条任务之后要合入 `master` 还是 `dev`。
+- **PR 必须显式指定目标**：首次发布入口 `publish-review-package.sh --create-pr` 必须带 `--target-branch`，不传直接拒绝。任务分支只允许 `master` 或 `dev`（兼容 `release/*` 批次）；`test` / `release` 由发布入口直接拒绝，只接受环境分支晋级 PR。
 - **工具链与平台改动直接投 `master`**：改的是所有人共用的脚本、hook 或规范时，`--target-branch master`；合入 master 后，之后从 master 拉起的所有新分支自动继承。
 - **只许合入，禁直推**：`master` / `dev` / `test` / `release` 四条同受保护，`block-push-to-master.sh` 拒绝本地直接 push；改动只能经 PR 合并（仅 `merge` 方法）。
 - **裸 `release` 与 `release/` 前缀互斥**：Git 不允许 `refs/heads/release` 与 `refs/heads/release/*` 并存。启用裸 `release` 前必须先清空全部 `release/*` 批次分支。
 
 ### 晋级顺序
 
-一条开工分支按环境依次晋级，**每一步都是同一条分支的 PR**：
+任务分支只发 `dev`，之后由环境分支逐级晋级，**每一级都只能用下一级作为 source**：
 
 ```
 master ──拉分支──> feature/xxx ──PR──> dev ──PR──> test ──PR──> release
                       (起点)        (开发环境)   (提测)      (待生产)
+                                     └─ source=dev ─┘  └─ source=test ─┘
 ```
 
-- 开工时用 `--target-branch` 声明先发哪一级，之后每一级都重新带目标发布，不必重建任务区。
-- 每次改投新目标都要带新目标重跑 `node scripts/verify-change-scope.mjs run --stage pr --target-branch <目标>`，凭证不跨目标复用。
-- **环境分支之间不合并**：`dev` 不合入 `test`，`test` 不合入 `release`，`master` 也不直接合入任何环境分支。每条环境分支只从开工分支接收 PR。
+- 开工时用 `--target-branch` 声明目标是 `master` 还是 `dev`，二级以下不由任务分支发起。
+- **来源写死**：`test` 只接受 source 为 `dev` 的 PR，`release` 只接受 source 为 `test` 的 PR。Agent 通道由 `confirm-release-action.sh` 硬校验，工单分支、`master` 或跳级 `dev → release` 一律拦截。
+- 任务分支发 `dev` 前按该目标重跑 `node scripts/verify-change-scope.mjs run --stage pr --target-branch dev`，凭证不跨目标复用；`dev → test`、`test → release` 的晋级 PR 在 Gitee 发起，不经过工单发布入口。
+- **不直接合入环境分支**：`master` 不合入任何环境分支，环境分支之间也不由 master 补提交，只按 `dev` → `test` → `release` 晋级。
 - `release` 发版后由人把 `release` 合回 `master`，下一轮从新的 master 拉分支。
 
-工具链判定统一在 `scripts/lib/task_metadata.py` 的 `ENVIRONMENT_BRANCHES` / `MAIN_BRANCHES`，开工入口、PR 发布入口、PR Hook、直推 Hook 与验证凭证共用同一白名单。`release/*` 批次命名保留兼容、不再新建。切换过程见 [ADR-0133](../adr/0133-environment-branches.md)。
+工具链判定统一在 `scripts/lib/task_metadata.py`：`ENVIRONMENT_BRANCHES` / `MAIN_BRANCHES` 定义合法分支名，`TASK_BRANCH_TARGETS` 限定任务分支可发的目标。开工入口、PR 发布入口、PR Hook、直推 Hook 与验证凭证共用同一份常量。`release/*` 批次命名保留兼容、不再新建。切换过程见 [ADR-0133](../adr/0133-environment-branches.md)。
 
 ## release 分支（发布批次，仅兼容）
 
@@ -113,13 +115,13 @@ release/YYYY.MM.DD_<中文描述> # 日期 + 中文描述（6–15 字）
 scripts/start-task-worktree.sh --type fix --issue IK094T --summary 修复工作树写入护栏 --target-branch dev
 
 # 无工单必须明确声明
-scripts/start-task-worktree.sh --type chore --no-issue --summary 完善工作树启动流程 --target-branch release
+scripts/start-task-worktree.sh --type chore --no-issue --summary 完善工作树启动流程 --target-branch master
 
 # Windows PowerShell / CMD
-py -3 scripts/start-task-worktree.py --type fix --issue IK094T --summary 修复工作树写入护栏 --target-branch test
+py -3 scripts/start-task-worktree.py --type fix --issue IK094T --summary 修复工作树写入护栏 --target-branch dev
 ```
 
-Agent 从当前发布线工作树调用入口，不直接拼接完整分支名或 Work Tree 目录名。`--target-branch` 必填，声明这条任务之后 PR 合入哪条环境分支；起点固定取 `origin/master`。`hotfix` 前缀本身不授予生产修复权限。
+Agent 从当前发布线工作树调用入口，不直接拼接完整分支名或 Work Tree 目录名。`--target-branch` 必填，只能取 `master`、`dev` 或 `release/<批次>`；`test` / `release` 直接拒绝。起点固定取 `origin/master`。`hotfix` 前缀本身不授予生产修复权限。
 
 ### 实例
 
@@ -140,7 +142,7 @@ Agent 从当前发布线工作树调用入口，不直接拼接完整分支名�
 
 ## 生命周期
 
-- **合入最后一级目标后清理本地任务区**：在 task worktree 运行 `scripts/cleanup-task-worktree.sh`，入口核对任务 HEAD 已进入元数据记录的远端目标。合入 `dev` / `test` 时先不清理，同一条分支还要继续发下一级。
+- **合入 `dev` 后清理本地任务区**：在 task worktree 运行 `scripts/cleanup-task-worktree.sh`，入口核对任务 HEAD 已进入元数据记录的远端目标。之后的 `dev → test`、`test → release` 晋级 PR 由人在 Gitee 发起，不依赖任务区。
 - **远端源分支保留**：本地清理入口只删除 task worktree 与本地分支。远端源分支由负责人另行决定去向。
 - **废弃分支**（开了不提 PR）：作者自删，不留 stale。
 - **不设保留期**：代码历史在 git log + PR 记录里，删分支不丢历史。
@@ -175,9 +177,9 @@ git 原生支持 UTF-8 分支名，Gitee 支持。国际惯例分支名走 ASCII
 |---|---|---|
 | `scripts/block-dangerous-git.sh` | 非工单分支的 `--force-with-lease` | `feature/* fix/* hotfix/* docs/* chore/*`（release/* 与环境分支是共享基线，禁强推） |
 | `.claude/hooks/block-push-to-master.sh` | Agent 直推 `master/main/dev/test/release` | 只放行工单分支与普通推送 |
-| `scripts/start-task-worktree.py` | 创建前拒绝不合规命名 | 工单分支五前缀 + 中文简述；`release/YYYY.MM.DD[_描述][_N]`（描述含中文 6–15 字）；裸 `dev`/`test`/`release` |
+| `scripts/start-task-worktree.py` | 创建前拒绝不合规命名与不可达目标 | 工单分支五前缀 + 中文简述；`release/YYYY.MM.DD[_描述][_N]`（描述含中文 6–15 字）；任务目标只允许 `master`/`dev`/`release/*` |
 | `.githooks/pre-push` | 拒绝直推或删除 `master/main/dev/test/release`；拒绝首次 push 新建不合规分支名；普通任务分支日常 push 不检查是否落后 | 复用 Python 校验器（含 release 命名与环境分支） |
-| `.claude/hooks/confirm-release-action.sh` | PR 目标不在 `master` / `dev` / `test` / `release` / `release/*`；`manage-release-branch.sh create` 缺授权 | `list`/`current` 只读放行；`create`/`activate` 须 `--user-authorized` |
-| `scripts/publish-review-package.sh` | 首次发布缺 `--target-branch` | 必须显式指定 `master`/`dev`/`test`/`release`（或 `release/*`） |
+| `.claude/hooks/confirm-release-action.sh` | PR 目标不在 `master` / `dev` / `test` / `release` / `release/*`；`test` 的 source 不是 `dev`、`release` 的 source 不是 `test`；`manage-release-branch.sh create` 缺授权 | `dev → test`、`test → release` 晋级 PR 放行；`list`/`current` 只读放行；`create`/`activate` 须 `--user-authorized` |
+| `scripts/publish-review-package.sh` | 首次发布缺 `--target-branch`，或目标是 `test` / `release` | 必须显式指定 `master`/`dev`（或兼容 `release/*`） |
 
 分支名不合规会在创建和首次 push 两个节点被拒绝。策略生效前已经存在于 `origin` 的 ASCII 分支仅允许继续收尾，不要求迁移；不得据此创建新的 ASCII 分支。排障见入口错误信息或 hook 脚本注释。

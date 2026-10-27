@@ -4,15 +4,16 @@
 
 ## 分支模型
 
-`master` 是唯一基线，不参与环境发布。任务是**一条开工分支依次发 PR**，不是合并环境分支：
+`master` 是唯一基线，不参与环境发布。任务分支只把 PR 发到 `dev`，之后由环境分支逐级晋级：
 
 ```
 release 发版 → 人把 release 合回 master → 从 master 拉开工分支
-  └→ PR 到 dev（开发环境验证）──→ PR 到 test（提测）──→ PR 到 release（待生产发布）
+  └→ PR 到 dev（开发环境验证）──→ dev 发 PR 到 test（提测）──→ test 发 PR 到 release（待生产发布）
 ```
 
-- 同一开工分支依次发往 `dev`、`test`、`release`，每次都带对应 `--target-branch`。
-- **不合并环境分支**：`dev` 不合并到 `test`，`master` 也不直接合入任何环境分支。每条环境分支只从开工分支接收 PR。
+- **任务分支只发 `master` 或 `dev`**：开工分支的 `--target-branch` 只能取这两条（兼容 `release/*` 批次）。
+- **环境分支逐级晋级，来源写死**：`test` 只接受 source 为 `dev` 的 PR，`release` 只接受 source 为 `test` 的 PR。Agent 通道由 `confirm-release-action.sh` 硬校验。
+- **不合并环境分支**：`master` 不直接合入任何环境分支；晋级 PR 由下级环境分支作为 source 发起。
 - 四条分支 `master` / `dev` / `test` / `release` 都只接受 PR 合入，都禁直推，合并方法只用 `merge`。
 - 环境分支之间互不包含对方的提交，因此发 PR 时不需要 rebase 到目标分支，也不需要目标分支包含任务起点。
 
@@ -57,7 +58,7 @@ release 发版 → 人把 release 合回 master → 从 master 拉开工分支
 ## 合并策略
 
 - 只用 merge（禁 squash/rebase）。Gitee MCP `merge_enterprise_pull` 不传或 `merge_method=merge`。
-- Gitee merge 默认不删源分支，MCP 也无 `prune_source_branch` 参数。PR 合并后在任务区跑 `scripts/cleanup-task-worktree.sh` 清理；同一条分支还要继续发下一级环境时先不清理。
+- Gitee merge 默认不删源分支，MCP 也无 `prune_source_branch` 参数。PR 合并后在任务区跑 `scripts/cleanup-task-worktree.sh` 清理。
 
 ## 分支命名
 
@@ -69,11 +70,11 @@ release 发版 → 人把 release 合回 master → 从 master 拉开工分支
 
 - 只读代码任务在主检出区或任一任务区运行 `git fetch origin --prune` 并核对该目录索引；纯非代码资料阅读不触发 Git 同步。
 - **任务起点固定是 `origin/master`**。开工入口先 fetch，再从 `origin/master` 的精确 SHA 建任务分支；调用目录的未推送提交和未提交文件都不进入任务起点。
-- 写入任务，包括普通散文文档与 chore，在主检出区运行 `scripts/start-task-worktree.sh --type <feature|fix|hotfix|docs|chore> (--issue <工单号>|--no-issue) --summary <6–15字中文简述> --target-branch <master|dev|test|release>`。`--target-branch` 必填，决定这条开工分支先发往哪条分支，不限制之后逐级改投。`--type hotfix` 只决定分支命名，不授予生产 hotfix 权限。
+- 写入任务，包括普通散文文档与 chore，在主检出区运行 `scripts/start-task-worktree.sh --type <feature|fix|hotfix|docs|chore> (--issue <工单号>|--no-issue) --summary <6–15字中文简述> --target-branch <master|dev>`。`--target-branch` 必填，只能取 `master`、`dev` 或 `release/<批次>`。`--type hotfix` 只决定分支命名，不授予生产 hotfix 权限。
 - 任务区记录 `target_branch`（默认 PR 目标）和 `start_sha`（master 起点）；旧任务区缺记录时只能显式运行 `scripts/lib/task_metadata.py repair`，须有人类授权和可核对的目标、起点。
-- 完成后用 `scripts/commit-task-for-review.sh -m "<message>"` 形成可审查提交。发布前按目标运行 `node scripts/verify-change-scope.mjs run --stage pr --target-branch <目标>`，再用 `scripts/publish-review-package.sh --user-authorized --create-pr --target-branch <master|dev|test|release>` 推送并建立 PR。`--target-branch` 必填；**改投别的分支不必重建任务区**，直接用新目标重跑验证并再次发布即可，凭证按目标分支分别生成。草稿参数和依据见「PR 草稿条件与回读」，创建 Gitee PR 时显式传同一 `draft` 值。
-- 一条任务分支按环境依次晋级：先发 PR 到 `dev`，开发环境验证后发 `test`，测试通过后发 `release`。每次发布都要带对应目标，PR 合并用 `merge`。
-- 合入最后一级目标后，在任务区运行 `scripts/cleanup-task-worktree.sh`。入口校验元数据记录的远端目标已包含任务 HEAD，只删本地任务区与本地分支，远端任务源分支保留。中间级别（dev/test）合入后不清理。
+- 完成后用 `scripts/commit-task-for-review.sh -m "<message>"` 形成可审查提交。发布前按目标运行 `node scripts/verify-change-scope.mjs run --stage pr --target-branch <目标>`，再用 `scripts/publish-review-package.sh --user-authorized --create-pr --target-branch <master|dev>` 推送并建立 PR。`--target-branch` 必填，入口拒绝 `test` / `release`。草稿参数和依据见「PR 草稿条件与回读」，创建 Gitee PR 时显式传同一 `draft` 值。
+- 合并入 `dev` 后不发 `test` 的 PR：`dev` → `test` 与 `test` → `release` 的晋级 PR 由人从 Gitee 发起，source 分别是 `dev` 与 `test`，合并用 `merge`。
+- 任务 HEAD 已进入 `dev` 后即可在任务区运行 `scripts/cleanup-task-worktree.sh`。入口校验元数据记录的远端目标已包含任务 HEAD，只删本地任务区与本地分支，远端任务源分支保留。
 - 旧 `scripts/commit-spec-on-master.sh` 已废止；`scripts/merge-task-to-local-master.sh` 是历史入口。原本地 master 集成区和散文直写例外已由 [ADR-0133](../adr/0133-environment-branches.md) 替代。仅已忽略的根 `CLAUDE.local.md` 与 `.codex/config.toml` 保留本地个人配置窄例外。
 
 详细步骤见 [worktree-workflow.md](worktree-workflow.md)。
@@ -92,9 +93,9 @@ release 发版 → 人把 release 合回 master → 从 master 拉开工分支
 
 ## 任务 PR 前同步
 
-- 创建或更新 PR 前，先抓取任务元数据记录的远端目标分支。需要把目标上的提交纳入当前分支时运行 `scripts/sync-task-from-origin.sh sync --target-branch <dev|test|release> --json`，它针对该目标 rebase，不能静默切到 master。发 `dev`/`test`/`release` 通常不需要这步：目标分支不包含 master 的新提交是常态，发布入口不要求目标包含任务起点。
+- 创建或更新 PR 前，先抓取任务元数据记录的远端目标分支。需要把目标上的提交纳入当前分支时运行 `scripts/sync-task-from-origin.sh sync --target-branch <dev|release/*> --json`，它针对该目标 rebase，不能静默切到 master。任务分支发 `dev` 通常不需要这步：`dev` 不包含 master 的新提交是常态，发布入口不要求目标包含任务起点。
 - 发布入口核对远端目标的真实 SHA。仅当目标是 `master` 或 `release/<批次>` 时，入口才要求当前分支已包含远端目标，避免把目标上的未知提交带进 PR。
-- 目标前进、同步或改投后，重新运行 `node scripts/verify-change-scope.mjs run --stage pr --target-branch <目标>`；凭证绑定 HEAD、目标分支、远端提交与影响面。
+- 目标前进、同步或换目标后，重新运行 `node scripts/verify-change-scope.mjs run --stage pr --target-branch <目标>`；凭证绑定 HEAD、目标分支、远端提交与影响面。
 - 更新已有 PR 使用当前 Gitee 快照与显式 lease。推送后再次核对远端 PR，再清除同步恢复点；事务细节见 [ADR-0013](../adr/0013-open-pr-update-state-machine.md)。
 
 ## 已有 PR 审查修订

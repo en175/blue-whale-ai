@@ -8,7 +8,7 @@
 2. 通过 `scripts/commit-task-for-review.sh` 形成干净 HEAD；按[高风险条件](#验收范围与高风险行为)检查规格和 diff，再按下方命令分支规划验证。
 3. 按同一命令分支运行验证。代码失败则修复并 amend；基础设施或已知 flaky 按[失败与重试](#失败与重试)处理。
 4. 按同一命令分支检查凭证。取得 `VERIFIED` 并完成[必验行为](#验收范围与高风险行为)和[跳过项检查](#跳过项与完成状态)后，才可报告完成。
-5. 创建或更新 PR 前，按目标运行 `node scripts/verify-change-scope.mjs run --stage pr --target-branch <目标>`，取得该目标的凭证再进入发布入口。凭证绑定目标分支与远端 SHA，改投新目标要重跑一次，不跨目标复用。发往 `dev` / `test` / `release` 不要求分支包含目标提交；仅当目标是 `master` 或 `release/<批次>` 且分支落后时才先运行 `scripts/sync-task-from-origin.sh sync --target-branch <分支> --json`。发布门禁以 `check --stage pr` 硬校验，检查失败或凭证失效则阻断推送。
+5. 创建或更新 PR 前，按目标运行 `node scripts/verify-change-scope.mjs run --stage pr --target-branch <目标>`，取得该目标的凭证再进入发布入口。凭证绑定目标分支与远端 SHA，不跨目标复用。任务分支的目标只允许 `master` / `dev`（兼容 `release/<批次>`）；`test` / `release` 由环境分支逐级晋级，不经过工单发布入口。发往 `dev` 不要求分支包含目标提交；仅当目标是 `master` 或 `release/<批次>` 且分支落后时才先运行 `scripts/sync-task-from-origin.sh sync --target-branch <分支> --json`。发布门禁以 `check --stage pr` 硬校验，检查失败或凭证失效则阻断推送。
 
 完成标准：凭证状态为 `passed`，且 HEAD、合并基线、changed-files 哈希、输入指纹、验证层级、计划和通过结果均与当前状态一致；本阶段相关必验行为已有有效证据。`VERIFIED` 证明所选命令通过，不单独证明产品行为已验收。
 

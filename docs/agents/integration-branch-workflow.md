@@ -37,7 +37,7 @@
 **集成分支**就是未来的 PR 源分支，用普通开工入口从 `origin/master` 建立：
 
 ```bash
-scripts/start-task-worktree.sh --type <类型> --issue <父工单号> --summary <6–15字中文简述> --target-branch <master|dev|test|release>
+scripts/start-task-worktree.sh --type <类型> --issue <父工单号> --summary <6–15字中文简述> --target-branch <master|dev>
 ```
 
 进入返回的 worktree，用 `python3 scripts/lib/task_metadata.py read --json` 核对记录的 `target_branch` 与 `start_sha`，后续同步、验证、发布、清理全程使用该记录。核对目录 CBM 项目后，按状态权威判定开工或恢复，再按 issue-tracker.md 认领并回读父工单，建 worktree 不代替该 API 调用。
@@ -45,7 +45,7 @@ scripts/start-task-worktree.sh --type <类型> --issue <父工单号> --summary 
 **子任务 worktree**同样用开工入口建立，必须带 `--target-branch` 和 `--integration-worktree` 指向集成 worktree 的绝对路径：
 
 ```bash
-scripts/start-task-worktree.sh --type <类型> --issue <子工单号> --summary <6–15字中文简述> --target-branch <master|dev|test|release> --integration-worktree <集成worktree绝对路径>
+scripts/start-task-worktree.sh --type <类型> --issue <子工单号> --summary <6–15字中文简述> --target-branch <master|dev> --integration-worktree <集成worktree绝对路径>
 ```
 
 入口从集成分支记录**固定继承提交**，子任务在该提交之上开工。进入子 worktree 后核对元数据与 CBM 项目，按状态权威与认领流程处理子工单，并备好该工单工具链所需依赖。
@@ -78,10 +78,10 @@ python3 scripts/merge-implement-spec-child.py --child-worktree <子任务worktre
 
 ## 同步、评审与发布
 
-全部工单集成后，在集成 worktree 同步到元数据记录的目标 release：
+全部工单集成后，在集成 worktree 同步到元数据记录的 `target_branch`（`master` 或 `dev`）：
 
 ```bash
-scripts/sync-task-from-origin.sh sync --target-branch <记录的release> --json
+scripts/sync-task-from-origin.sh sync --target-branch <记录的target_branch> --json
 ```
 
 目标改动过本任务删除或替换的路径时，改用 `sync --keep-conflicts` 让 rebase 停在冲突处：逐个核对双方版本并解决，暂存后以 `git -C <集成worktree> -c core.editor=true rebase --continue` 走完（显式 `-C` 让 Hook 在 HEAD detached 时仍能识别任务目录），再运行 `scripts/sync-task-from-origin.sh complete-resolved --json` 并要求返回 `SYNCED_RESOLVED`——它核对最终文件树与 Git 自动合并结果的差异不超出记录的冲突路径并保留恢复引用；继续之前先复核这些路径的内容。
@@ -100,7 +100,7 @@ HEAD 或目标变化使既有证据失效，须重跑受影响的评审与验证
 获得发布授权后，按 git-workflow.md「发布授权」节执行：PR 正文用 `pr` 技能模板，链接规格与每张已交付工单及其验收、验证证据；经发布入口推送：
 
 ```bash
-scripts/publish-review-package.sh --user-authorized --create-pr --target-branch <记录的release> --json
+scripts/publish-review-package.sh --user-authorized --create-pr --target-branch <记录的target_branch> --json
 ```
 
 随后创建 source/target 与发布标记一致、显式 `draft=false` 的 Gitee PR，回读确认非 draft 状态、描述、工单链接、source、target、HEAD、冲突状态与 diff；按 git-workflow.md 保存新鲜快照并运行 `scripts/verify-pr-update.sh --update-pr <PR编号> --pr-snapshot <快照JSON> --json` 核验（新建 PR 同样适用）。若同步事务仍未 finalize，核验通过后运行 `scripts/sync-task-from-origin.sh finalize --json`——它记录发布前 rebase 之后清理子任务所需的谱系证据。随后按 issue-tracker.md 合并保留标签、记录工程进度并交给开发者评审；合并 PR 须单独授权。
