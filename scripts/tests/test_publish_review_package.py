@@ -469,43 +469,25 @@ class PublishReviewPackageTest(unittest.TestCase):
         self.assertIn("target=release/prod", self.publish_marker().read_text(encoding="utf-8"))
         self.assertIn("check --stage pr --target-branch", self.verification_log.read_text(encoding="utf-8"))
 
-    def test_create_mode_supports_environment_target_and_binds_marker(self) -> None:
-        for target in ("dev", "test"):
-            with self.subTest(target=target):
-                self.git("branch", target, cwd=self.main)
-                self.git("push", "origin", target, cwd=self.main)
-                result = self.invoke(
-                    "--user-authorized", "--create-pr", "--target-branch", target, "--json"
-                )
-
-                self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertIn(
-                    f"target={target}", self.publish_marker().read_text(encoding="utf-8")
-                )
-
-    def test_same_task_branch_advances_across_environment_targets(self) -> None:
-        self.git("branch", "dev", BRANCH, cwd=self.main)
+    def test_create_mode_supports_dev_target_and_binds_marker(self) -> None:
+        self.git("branch", "dev", cwd=self.main)
         self.git("push", "origin", "dev", cwd=self.main)
-        first = self.invoke(
+        result = self.invoke(
             "--user-authorized", "--create-pr", "--target-branch", "dev", "--json"
         )
-        self.assertEqual(first.returncode, 0, first.stderr)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("target=dev", self.publish_marker().read_text(encoding="utf-8"))
 
-        self.git("checkout", "dev", cwd=self.main)
-        (self.main / "dev-only.txt").write_text("dev merged\n", encoding="utf-8")
-        self.git("add", "dev-only.txt", cwd=self.main)
-        self.git("commit", "-m", "chore: dev merge", cwd=self.main)
-        self.git("push", "origin", "dev", cwd=self.main)
-        self.git("checkout", "release/prod", cwd=self.main)
-        self.git("branch", "test", "origin/dev", cwd=self.main)
-        self.git("push", "origin", "test", cwd=self.main)
-        second = self.invoke(
-            "--user-authorized", "--create-pr", "--target-branch", "test", "--json"
-        )
-
-        self.assertEqual(second.returncode, 0, second.stderr)
-        self.assertIn("target=test", self.publish_marker().read_text(encoding="utf-8"))
+    def test_task_branch_rejects_test_and_release_targets(self) -> None:
+        for target in ("test", "release"):
+            with self.subTest(target=target):
+                rejected = self.invoke(
+                    "--user-authorized", "--create-pr", "--target-branch", target, "--json"
+                )
+                self.assertEqual(rejected.returncode, 2)
+                self.assertEqual(self.response(rejected)["status"], "INVALID_TARGET_BRANCH")
+                self.assertFalse(self.publish_marker().exists())
 
     def test_create_mode_requires_explicit_target_branch(self) -> None:
         result = self.invoke("--user-authorized", "--create-pr", "--json")

@@ -14,6 +14,7 @@ SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 TASK_PREFIXES = ("feature/", "fix/", "hotfix/", "docs/", "chore/")
 ENVIRONMENT_BRANCHES = ("dev", "test", "release")
 MAIN_BRANCHES = ("master", "main")
+TASK_BRANCH_TARGETS = ("dev",)
 
 
 def is_target_branch(branch):
