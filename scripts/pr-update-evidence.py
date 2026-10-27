@@ -119,8 +119,10 @@ def validate_identity(
     if data["source_branch"] != branch:
         raise EvidenceError("PR source branch 与当前分支不匹配。")
     target = str(data["target_branch"])
-    if target != "master" and not (target.startswith("release/") and len(target) > len("release/")):
-        raise EvidenceError("PR target branch 必须是 master 或 release/*。")
+    if target not in ("master", "main", "dev", "test", "release") and not (
+        target.startswith("release/") and len(target) > len("release/")
+    ):
+        raise EvidenceError("PR target branch 必须是 master、dev、test、release 或 release/*。")
     if data["head_sha"] != expected_head:
         raise EvidenceError("PR head_sha 与预期远端 SHA 不匹配。")
 

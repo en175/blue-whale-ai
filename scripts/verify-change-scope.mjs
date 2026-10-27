@@ -86,7 +86,14 @@ function pythonForVerification() {
   throw new Error("脚本验证需要 Python 3.11+；请安装后重试。");
 }
 
-function currentScope({ baseRef, risk, stage, requireTargetSync = false, frontendPushOnly = false }) {
+function scopeBase(startSha, targetSha, head) {
+  const shared = spawnSync("git", ["merge-base", targetSha, head], { encoding: "utf8" });
+  if (shared.status !== 0) return startSha;
+  const candidate = shared.stdout.trim();
+  return gitSucceeds("merge-base", "--is-ancestor", startSha, candidate) ? candidate : startSha;
+}
+
+function currentScope({ baseRef, targetBranch, risk, stage, frontendPushOnly = false }) {
   const head = git("rev-parse", "HEAD");
   const metadata = taskBaseline();
   const startSha = metadata.start_sha;
@@ -95,12 +102,9 @@ function currentScope({ baseRef, risk, stage, requireTargetSync = false, fronten
     const label = metadata.inherited_sha ? "任务继承提交" : "任务起点";
     throw new Error(`显式基线 ${baseRef} 与${label} ${ownBaseSha} 不一致`);
   }
-  const targetBranch = metadata.target_branch;
+  targetBranch = targetBranch ?? metadata.target_branch;
   const targetSha = remoteTargetSha(targetBranch);
-  const base = metadata.inherited_sha ?? (gitSucceeds("merge-base", "--is-ancestor", startSha, targetSha) &&
-    gitSucceeds("merge-base", "--is-ancestor", targetSha, head)
-    ? targetSha
-    : startSha);
+  const base = metadata.inherited_sha ?? scopeBase(startSha, targetSha, head);
   const changedFiles = git("diff", "--name-only", "-z", `${base}...${head}`)
     .split("\0")
     .filter(Boolean)
@@ -111,10 +115,6 @@ function currentScope({ baseRef, risk, stage, requireTargetSync = false, fronten
   const documentation = documentationOnlyFiles(changedFiles, base, head);
   if (frontendPushOnly && !requiresFrontendBuild(changedFiles, documentation)) {
     return { head, base, changedFiles, frontendBuildRequired: false };
-  }
-  if (requireTargetSync && stage === "pr" &&
-      !gitSucceeds("merge-base", "--is-ancestor", targetSha, head)) {
-    throw new Error(`PR_TARGET_NOT_SYNCED: HEAD 尚未包含 origin/${targetBranch} 的 ${targetSha}；先运行 scripts/sync-task-from-origin.sh sync --target-branch ${targetBranch} --json`);
   }
   const classification = classifyChanges(changedFiles, {
     risk,
@@ -315,9 +315,10 @@ function main() {
   const args = process.argv.slice(2);
   const command = args[0];
   if (!["plan", "run", "ensure", "check", "check-push", "summary"].includes(command)) {
-    throw new Error("usage: verify-change-scope.mjs <plan|run|ensure|check|check-push|summary> [--head SHA] [--base REF] [--stage completion|pr] [--risk high] [--retry-kind KIND --retry-reason REASON] [--json]");
+    throw new Error("usage: verify-change-scope.mjs <plan|run|ensure|check|check-push|summary> [--head SHA] [--base REF] [--target-branch BRANCH] [--stage completion|pr] [--risk high] [--retry-kind KIND --retry-reason REASON] [--json]");
   }
   const baseRef = valueAfter(args, "--base", null);
+  const targetBranchArg = valueAfter(args, "--target-branch", null);
   const risk = valueAfter(args, "--risk", "auto");
   const stage = command === "check-push" ? "pr" : valueAfter(args, "--stage", "completion");
   const retryKind = valueAfter(args, "--retry-kind", null);
@@ -347,8 +348,7 @@ function main() {
       return;
     }
   }
-  const scope = currentScope({ baseRef, risk, stage,
-    requireTargetSync: ["plan", "run", "ensure", "check-push"].includes(command),
+  const scope = currentScope({ baseRef, targetBranch: targetBranchArg, risk, stage,
     frontendPushOnly: command === "check-push" });
   if (command === "check-push" && scope.frontendBuildRequired === false) {
     emit({ status: "BUILD_NOT_REQUIRED", reason: "本次推送不影响前端构建。" }, asJson);
