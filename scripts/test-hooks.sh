@@ -2525,7 +2525,7 @@ assert_markdown_section_has_text "CLAUDE.md" "$WRITE_PREFLIGHT_HEADING" "当前�
 assert_markdown_section_has_text "CLAUDE.md" "$WRITE_PREFLIGHT_HEADING" "开工入口" "workflow: 自检指向唯一 Work Tree 入口（开工入口）"
 assert_markdown_section_has_text "CLAUDE.md" "## 常驻原则" "scripts/start-task-worktree.sh" "workflow: 常驻原则定义开工入口"
 assert_markdown_section_has_text "CLAUDE.md" "$WRITE_PREFLIGHT_HEADING" "每个写入目标所属 Work Tree" "workflow: 自检确认目标路径"
-assert_markdown_section_has_text "CLAUDE.md" "$WRITE_PREFLIGHT_HEADING" "master、main 或 release 检出区" "workflow: 自检识别保护分支"
+assert_markdown_section_has_text "CLAUDE.md" "$WRITE_PREFLIGHT_HEADING" "master 主检出区或任何环境分支检出区" "workflow: 自检识别保护分支"
 assert_markdown_section_has_text "CLAUDE.md" "$WRITE_PREFLIGHT_HEADING" "Git 状态变更仅在该任务区" "workflow: 自检确认 Git 写入区域"
 assert_markdown_section_has_text "CLAUDE.md" "$WRITE_PREFLIGHT_HEADING" "工单分支" "workflow: 自检要求工单分支"
 assert_markdown_section_has_text "CLAUDE.md" "$WRITE_PREFLIGHT_HEADING" "任一项不满足，先停止写入" "workflow: 自检失败时停止写入"
