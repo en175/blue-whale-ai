@@ -103,7 +103,7 @@ PR 合并用 **merge**，**禁用 squash / rebase**。
 | 新增普通代码注释 | 🔴 硬挡 | pre-commit 对实际暂存内容运行 `scripts/check-code-comments.py --staged`；阻断新增或改写的普通注释，保留项须按 [注释规则](../../agent-rules/code-comments.md) 审查必要性。 |
 | 错误码改码注释对账 | 🔴 硬挡 | pre-commit：staged 含 `backend/libs/contracts/error-codes.ts` 时，`scripts/check-error-code-drift.mjs` 对改码项（如让号 1051→1052）全仓 grep 旧数值在该错误域代码注释与测试名的残留，命中拦截；行内含新数值的迁移说明放行；无 node 环境跳过 |
 | 契约 breaking 检测 | 🔴 硬挡 | pre-commit：staged 含 `contracts/proto/` 时，`scripts/check-contract-breaking.sh` 以 buf 对照 `HEAD` 拦破坏性契约变更（字段号复用会让新旧两端读到的数据静默错位，且线上无法回滚）；退出码 1 拦提交，2（buf 未安装）软提醒放行。PR 门禁另跑 `bash scripts/check-contract-breaking.sh <目标环境分支>` 对照该目标基线；字段只加不删、删字段走 `reserved`，规则见 [contracts/README.md](../../contracts/README.md) |
-| 禁直推保护分支 | 🔴 硬挡 | pre-push / PreToolUse：任何本地直推 `master` / `dev` / `test` / `release` 一律拦，合并只在 Gitee 服务端走 PR |
+| 禁直推保护分支 | 🔴 硬挡 | pre-push / PreToolUse：任何本地直推或删除 `master` / `dev` / `test` / `release` 一律拦（含 `git push origin :dev`、`--delete`），合并只在 Gitee 服务端走 PR |
 | PR 前目标基线校验 | 🔴 发布门禁 | 创建/更新 PR 前由 `publish-review-package.sh` 核对远端目标真实 SHA，并要求 PR 阶段凭证绑定该目标。发往 `dev` / `test` / `release` 不要求目标包含任务起点；仅 `master` 或 `release/<批次>` 目标要求当前分支已包含远端目标，未包含时先运行 `sync-task-from-origin.sh sync --target-branch <分支> --json`。Hook 不自动同步。 |
 | 前端推送构建校验 | 🔴 硬挡 | pre-push 核验实际待推送提交的双模式构建凭证；缺失、失败或输入变化均阻断。Agent 先主动执行验证，详见 [前端推送构建门禁](../../agent-rules/frontend-build-push.md)。 |
 | AI 破坏性 git 操作 | 🔴 硬挡 | 裸 `--force`/`-f`、对 `master`/`main` 强推、`reset --hard` / `clean -f` / `branch -D` / `checkout .` / `restore .` 均拦；工单分支上的 `--force-with-lease` 放行（前缀见 [branch-naming.md](branch-naming.md)） |

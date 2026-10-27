@@ -150,7 +150,7 @@ Agent 从当前发布线工作树调用入口，不直接拼接完整分支名�
 
 `master`（`main` 作别名防御，非独立分支）、`dev`、`test`、`release` 四条分支同受保护。三禁：
 
-- 禁直推（`block-push-to-master.sh` 拦；`pre-push` 拦 `master` / `main`，PreToolUse 拦四条保护分支）
+- 禁直推 / 禁删除（`block-push-to-master.sh` 拦 Agent 通道；`.githooks/pre-push` 拦本机终端，含 `git push origin :dev` 与 `--delete`）
 - 禁 force-push（`block-dangerous-git.sh` 拦 `--force` / `-f`；`--force-with-lease` 只放开工单分支）
 - 禁删除（本地 `block-dangerous-git.sh` 拦 `branch -D`）
 
@@ -176,7 +176,7 @@ git 原生支持 UTF-8 分支名，Gitee 支持。国际惯例分支名走 ASCII
 | `scripts/block-dangerous-git.sh` | 非工单分支的 `--force-with-lease` | `feature/* fix/* hotfix/* docs/* chore/*`（release/* 与环境分支是共享基线，禁强推） |
 | `.claude/hooks/block-push-to-master.sh` | Agent 直推 `master/main/dev/test/release` | 只放行工单分支与普通推送 |
 | `scripts/start-task-worktree.py` | 创建前拒绝不合规命名 | 工单分支五前缀 + 中文简述；`release/YYYY.MM.DD[_描述][_N]`（描述含中文 6–15 字）；裸 `dev`/`test`/`release` |
-| `.githooks/pre-push` | 拒绝直推 `master/main`；拒绝首次 push 新建不合规分支名；普通任务分支日常 push 不检查是否落后 | 复用 Python 校验器（含 release 命名与环境分支） |
+| `.githooks/pre-push` | 拒绝直推或删除 `master/main/dev/test/release`；拒绝首次 push 新建不合规分支名；普通任务分支日常 push 不检查是否落后 | 复用 Python 校验器（含 release 命名与环境分支） |
 | `.claude/hooks/confirm-release-action.sh` | PR 目标不在 `master` / `dev` / `test` / `release` / `release/*`；`manage-release-branch.sh create` 缺授权 | `list`/`current` 只读放行；`create`/`activate` 须 `--user-authorized` |
 | `scripts/publish-review-package.sh` | 首次发布缺 `--target-branch` | 必须显式指定 `master`/`dev`/`test`/`release`（或 `release/*`） |
 

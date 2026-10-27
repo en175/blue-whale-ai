@@ -2039,6 +2039,29 @@ test("a direct git push is blocked before the remote changes and reuses a passed
   } finally { rmSync(repository, { recursive: true, force: true }); }
 });
 
+test("pre-push blocks deleting or pushing protected branches from the terminal", () => {
+  const repository = createRepository();
+  try {
+    git(repository, "push", "--no-verify", "origin", ":refs/heads/release/prod");
+    git(repository, "config", "core.hooksPath", join(ROOT, ".githooks"));
+    for (const branch of ["master", "dev", "test", "release"]) {
+      const seed = spawnSync("git", ["push", "--no-verify", "origin", `HEAD:refs/heads/${branch}`],
+        { cwd: repository, encoding: "utf8", env: childEnvironment() });
+      assert.equal(seed.status, 0, seed.stderr);
+    }
+    for (const branch of ["master", "dev", "test", "release"]) {
+      const push = spawnSync("git", ["push", "origin", `HEAD~1:refs/heads/${branch}`],
+        { cwd: repository, encoding: "utf8", env: childEnvironment() });
+      assert.notEqual(push.status, 0, `直推 ${branch} 应被拦`);
+      const remove = spawnSync("git", ["push", "origin", "--delete", branch],
+        { cwd: repository, encoding: "utf8", env: childEnvironment() });
+      assert.notEqual(remove.status, 0, `删除 ${branch} 应被拦`);
+      assert.notEqual(git(repository, "ls-remote", "--heads", "origin", branch), "",
+        `${branch} 应仍存在于远端`);
+    }
+  } finally { rmSync(repository, { recursive: true, force: true }); }
+});
+
 test("unrelated pushes need no frontend receipt", () => {
   const repository = createRepository();
   try {

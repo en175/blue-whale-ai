@@ -14,7 +14,7 @@ Agent 按团队流程运行 `scripts/sync-release-line.sh` 或 `scripts/start-ta
 
 Agent 可以在发布前主动运行 `node scripts/verify-change-scope.mjs run --stage pr` 提前发现问题；已有有效结果不会在发布时重复构建。同一提交和输入已有失败结果时，自动入口继续阻断；修复产生新提交后重新检查，基础设施重试仍按测试策略显式执行。
 
-`.githooks/pre-push` 逐条核验实际待推送 SHA；与当前 HEAD 不同的引用须在对应工作树验证和推送。Hook 不执行构建、不同步分支。删除普通任务分支和推送 tag 不触发前端构建检查，master/main 保护保持生效。
+`.githooks/pre-push` 逐条核验实际待推送 SHA；与当前 HEAD 不同的引用须在对应工作树验证和推送。Hook 不执行构建、不同步分支。删除普通任务分支和推送 tag 不触发前端构建检查，`master`/`main`/`dev`/`test`/`release` 的直推与删除保护保持生效。
 
 批次管理入口初次创建 release 时，仅允许复用与远端 `origin/master` 完全相同的生产提交。已有 release 更新或包含新代码的 release 创建仍进入构建检查；不含任何前端构建输入的仓库保持原推送行为。
 

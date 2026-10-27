@@ -22,10 +22,10 @@ direct_master=0
 while read -r local_ref local_sha remote_ref remote_sha; do
   remote_sha=${remote_sha%$'\r'}
   case "$remote_ref" in
-    refs/heads/master|refs/heads/main)
+    refs/heads/master|refs/heads/main|refs/heads/dev|refs/heads/test|refs/heads/release)
       blocked=1
       direct_master=1
-      reason="${reason}  直推 ${remote_ref#refs/heads/}：禁本地 push master/main\n"
+      reason="${reason}  直推 ${remote_ref#refs/heads/}：禁本地 push 保护分支\n"
       continue
       ;;
   esac
@@ -71,17 +71,17 @@ done
 if [ "$blocked" -ne 0 ]; then
   if [ "$direct_master" -ne 0 ]; then
     cat >&2 <<EOF
-❌ pre-push: 禁止直推 master/main（已拦截）。
+❌ pre-push: 禁止直推或删除 master/main/dev/test/release（已拦截）。
 `printf '%b' "$reason"`
 
-合并只在 Gitee 服务端走 PR。所有进 master 的改动统一走：
+这五条分支只接受 PR 合入，合并只在 Gitee 服务端进行：
 
   git checkout -b <分支名>          # 开工单分支（feature/fix/hotfix/docs/chore，见 docs/agents/branch-naming.md）
   git push -u origin <分支名>        # 推分支
   # → Gitee 建 PR → 服务端合并（低风险可 MCP merge_pull 自审合）
 
 "自审合"只免互审，不免流程。详见 CLAUDE.md「提交与审查」红线
-与 docs/adr/0003-no-direct-push-to-master.md。
+与 docs/adr/0003-no-direct-push-to-master.md、docs/adr/0133-environment-branches.md。
 EOF
   elif [ "$invalid_name" -ne 0 ]; then
     cat >&2 <<EOF
