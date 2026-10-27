@@ -181,7 +181,7 @@ describe.skipIf(!databaseUrl)("显式 apply/restore 核对可信产物资产（I
   }
 
   async function canvasRow() {
-    return prisma.canvas.findFirst({ where: { project_id: BigInt(PROJECT_ID) } });
+    return prisma.project_canvas.findFirst({ where: { project_id: BigInt(PROJECT_ID) } });
   }
 
   async function submissionRow(submissionId: string) {
@@ -221,7 +221,7 @@ describe.skipIf(!databaseUrl)("显式 apply/restore 核对可信产物资产（I
     await prisma.generation_canvas_outputs.deleteMany({});
     await prisma.generation_canvas_submissions.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
     await prisma.command_idempotency.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
-    await prisma.canvas.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
+    await prisma.project_canvas.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
     await prisma.generation_output_slots.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
     await prisma.generation_job_logs.deleteMany({});
     await prisma.cost_reservations.deleteMany({});
@@ -359,7 +359,7 @@ describe.skipIf(!databaseUrl)("显式 apply/restore 核对可信产物资产（I
     await expectRejection(fanout("702", "702", CMD("40002")));
 
     expect(await prisma.generation_canvas_outputs.count({})).toBe(0);
-    expect(await prisma.canvas.count({ where: { project_id: BigInt(PROJECT_ID) } })).toBe(0);
+    expect(await prisma.project_canvas.count({ where: { project_id: BigInt(PROJECT_ID) } })).toBe(0);
     expect(await submissionRow(UUID_A)).toMatchObject({ target_state: "pending" });
     expect(await prisma.command_idempotency.count({
       where: { project_id: BigInt(PROJECT_ID), operation: "SAVE_CANVAS_RECOVERY_V1" },

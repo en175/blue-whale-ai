@@ -34,7 +34,7 @@ export function createLegacyCardHistoryRepo(prisma: PrismaClient): LegacyCardHis
       try {
         await prisma.$transaction(async tx => {
           await createLegacyCardHistoryRepo(tx as unknown as PrismaClient).rememberMany(projectId, rows);
-          const result = await tx.canvas.updateMany({
+          const result = await tx.project_canvas.updateMany({
             where: { project_id: BigInt(projectId), version },
             data: { nodes_json: JSON.parse(nodes), version: { increment: 1 } },
           });

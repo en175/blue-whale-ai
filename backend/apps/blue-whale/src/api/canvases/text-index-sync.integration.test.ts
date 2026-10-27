@@ -295,7 +295,7 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
 
   it("各文本卡独立重编号，重复绑定区间与 Markdown 保留，普通编号不替换", async () => {
     const { projectId, imageAssetId, directAssetId } = await seedIndexedCanvas("IKFR50 bound ranges");
-    const canvas = await prisma.client.canvas.findUnique({ where: { project_id: BigInt(projectId) } });
+    const canvas = await prisma.client.project_canvas.findUnique({ where: { project_id: BigInt(projectId) } });
     const nodes = canvas!.nodes_json as unknown as Array<{ id: string; type: string; position: { x: number; y: number }; data: Record<string, unknown> }>;
     const source = nodes.find((node) => node.id === "text-1")!;
     const text = "**图片1**，图片1；普通图片1";
@@ -322,7 +322,7 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
 
   it("方案快照包含文本带入素材及目标编号正文", async () => {
     const { projectId, imageAssetId, directAssetId } = await seedIndexedCanvas("IKFR50 plan snapshot");
-    const canvas = await prisma.client.canvas.findUnique({ where: { project_id: BigInt(projectId) } });
+    const canvas = await prisma.client.project_canvas.findUnique({ where: { project_id: BigInt(projectId) } });
     const nodes = canvas!.nodes_json as unknown as Array<{ id: string; data: Record<string, unknown> }>;
     const planNodes = [...nodes, {
       id: "plan-1", type: "textNode", position: { x: 0, y: 500 }, data: {
@@ -333,7 +333,7 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
     const planEdges = [...(canvas!.edges_json as unknown as unknown[]), {
       id: "e-plan", source: "plan-1", target: "gen-1",
     }];
-    await prisma.client.canvas.update({ where: { project_id: BigInt(projectId) }, data: {
+    await prisma.client.project_canvas.update({ where: { project_id: BigInt(projectId) }, data: {
       nodes_json: JSON.parse(JSON.stringify(planNodes)), edges_json: JSON.parse(JSON.stringify(planEdges)),
     } });
     const created = await createJob(projectId, imageJobBody("gen-1", "暮色", [directAssetId]));
@@ -349,7 +349,7 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
     const created = await createJob(projectId, imageJobBody("gen-1", "暮色", [directAssetId]));
     expect(created.code).toBe(200);
     const original = await readJob(created.data.generation_job_id);
-    const canvasRow = await prisma.client.canvas.findUnique({ where: { project_id: BigInt(projectId) } });
+    const canvasRow = await prisma.client.project_canvas.findUnique({ where: { project_id: BigInt(projectId) } });
     const retryNodes = canvasRow!.nodes_json as unknown as Array<{ id: string; data: Record<string, unknown> }>;
     retryNodes.find((node) => node.id === "text-1")!.data.text = "提交后改的正文";
     await saveCanvas(projectId, retryNodes, canvasRow!.edges_json as unknown as unknown[], canvasRow!.version);
@@ -433,7 +433,7 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
     const first = await createJob(projectId, imageJobBody("gen-1", "暮色", [directAssetId]));
     expect(first.code).toBe(200);
     const firstJob = await readJob(first.data.generation_job_id);
-    const canvas = await prisma.client.canvas.findUnique({ where: { project_id: BigInt(projectId) } });
+    const canvas = await prisma.client.project_canvas.findUnique({ where: { project_id: BigInt(projectId) } });
     const nodes = canvas!.nodes_json as unknown as Array<{ id: string; data: Record<string, unknown> }>;
     const edges = canvas!.edges_json as unknown as unknown[];
     const text = nodes.find((node) => node.id === "text-1")!;
@@ -543,13 +543,13 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
       });
       await vi.waitFor(async () => expect(await badge.count(), "成功使用最新输入后清除提示").toBe(0), { timeout: 15_000 });
       await vi.waitFor(async () => {
-        const canvas = await prisma.client.canvas.findUnique({ where: { project_id: BigInt(projectId) } });
+        const canvas = await prisma.client.project_canvas.findUnique({ where: { project_id: BigInt(projectId) } });
         const saved = (canvas!.nodes_json as unknown as Array<{ id: string; data: Record<string, unknown> }>).find((n) => n.id === "d1");
         expect(saved!.data.usedInputSignature).toBe((jobRow!.input as Record<string, unknown>).text_input_signature);
         expect(saved!.data.usedInputJobId).toBe(Number(jobRow!.id));
       }, { timeout: 10_000 });
 
-      const canvasRow = await prisma.client.canvas.findUnique({ where: { project_id: BigInt(projectId) } });
+      const canvasRow = await prisma.client.project_canvas.findUnique({ where: { project_id: BigInt(projectId) } });
       const savedNodes = canvasRow!.nodes_json as unknown as Array<{ id: string; data: Record<string, unknown> }>;
       savedNodes.find((n) => n.id === "t1")!.data.text = "改用图片1重绘这张";
       await saveCanvas(projectId, savedNodes, canvasRow!.edges_json as unknown as unknown[], canvasRow!.version);
@@ -722,7 +722,7 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
 
   it("混合目标独立处理：视频目标被帧互斥阻止不影响同文本连接的图片目标提交", async () => {
     const { projectId, directAssetId } = await seedVideoIndexedCanvas("IKFM3W mixed");
-    const canvasRow = await prisma.client.canvas.findUnique({ where: { project_id: BigInt(projectId) } });
+    const canvasRow = await prisma.client.project_canvas.findUnique({ where: { project_id: BigInt(projectId) } });
     const nodes = canvasRow!.nodes_json as unknown as unknown[];
     const edges = [
       ...(canvasRow!.edges_json as unknown as unknown[]),
@@ -743,7 +743,7 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
     const created = await createJob(projectId, videoJobBody("gen-v", "暮色", directVideoRefs(directAssetId)));
     expect(created.code).toBe(200);
     const original = await readJob(created.data.generation_job_id);
-    const canvasRow = await prisma.client.canvas.findUnique({ where: { project_id: BigInt(projectId) } });
+    const canvasRow = await prisma.client.project_canvas.findUnique({ where: { project_id: BigInt(projectId) } });
     const retryNodes = canvasRow!.nodes_json as unknown as Array<{ id: string; data: Record<string, unknown> }>;
     retryNodes.find((node) => node.id === "text-1")!.data.text = "提交后改的正文";
     await saveCanvas(projectId, retryNodes, canvasRow!.edges_json as unknown as unknown[], canvasRow!.version);
@@ -920,13 +920,13 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
       });
       await vi.waitFor(async () => expect(await badge.count(), "成功使用最新输入后清除提示").toBe(0), { timeout: 15_000 });
       await vi.waitFor(async () => {
-        const canvas = await prisma.client.canvas.findUnique({ where: { project_id: BigInt(projectId) } });
+        const canvas = await prisma.client.project_canvas.findUnique({ where: { project_id: BigInt(projectId) } });
         const saved = (canvas!.nodes_json as unknown as Array<{ id: string; data: Record<string, unknown> }>).find((n) => n.id === "d1");
         expect(saved!.data.usedInputSignature).toBe(frozen.text_input_signature);
         expect(saved!.data.usedInputJobId).toBe(Number(jobRow!.id));
       }, { timeout: 10_000 });
 
-      const canvasRow = await prisma.client.canvas.findUnique({ where: { project_id: BigInt(projectId) } });
+      const canvasRow = await prisma.client.project_canvas.findUnique({ where: { project_id: BigInt(projectId) } });
       const savedNodes = canvasRow!.nodes_json as unknown as Array<{ id: string; data: Record<string, unknown> }>;
       savedNodes.find((n) => n.id === "t1")!.data.text = "改用图片1出片吧";
       await saveCanvas(projectId, savedNodes, canvasRow!.edges_json as unknown as unknown[], canvasRow!.version);
@@ -1107,7 +1107,7 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
 
   it("混合目标独立处理：同文本音频素材音频目标正常、图片目标分别报错（不静默丢素材）", async () => {
     const { projectId } = await seedAudioIndexedCanvas("IKFM41 mixed targets");
-    const canvasRow = await prisma.client.canvas.findUnique({ where: { project_id: BigInt(projectId) } });
+    const canvasRow = await prisma.client.project_canvas.findUnique({ where: { project_id: BigInt(projectId) } });
     const nodes = canvasRow!.nodes_json as unknown as unknown[];
     const edges = [
       ...(canvasRow!.edges_json as unknown as unknown[]),
@@ -1123,7 +1123,7 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
 
   it("断开文本→音频目标连线仅解除该来源：文本带入消失、直接参考与素材卡保留", async () => {
     const { projectId, indexedAssetId, directAssetId } = await seedAudioIndexedCanvas("IKFM41 unlink");
-    const canvasRow = await prisma.client.canvas.findUnique({ where: { project_id: BigInt(projectId) } });
+    const canvasRow = await prisma.client.project_canvas.findUnique({ where: { project_id: BigInt(projectId) } });
     const keptEdges = (canvasRow!.edges_json as unknown as Array<{ id: string }>).filter((edge) => edge.id !== "e-text");
     await saveCanvas(projectId, canvasRow!.nodes_json as unknown as unknown[], keptEdges, canvasRow!.version);
     const created = await createJob(projectId, audioJobBody("gen-a", "暮色背景音", directAudioRefs(directAssetId)));
@@ -1132,7 +1132,7 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
     expect(job!.input.references).toEqual([{ role: "reference", asset_id: directAssetId, type: "audio" }]);
     expect(job!.input.text_attachments).toEqual([]);
     expect(job!.input.text_input_signature).toBeUndefined();
-    const after = await prisma.client.canvas.findUnique({ where: { project_id: BigInt(projectId) } });
+    const after = await prisma.client.project_canvas.findUnique({ where: { project_id: BigInt(projectId) } });
     const nodeIds = (after!.nodes_json as unknown as Array<{ id: string }>).map((node) => node.id);
     expect(nodeIds).toContain("media-1");
     expect(nodeIds).toContain("text-1");
@@ -1144,7 +1144,7 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
     const created = await createJob(projectId, audioJobBody("gen-a", "暮色背景音", directAudioRefs(directAssetId)));
     expect(created.code).toBe(200);
     const original = await readJob(created.data.generation_job_id);
-    const canvasRow = await prisma.client.canvas.findUnique({ where: { project_id: BigInt(projectId) } });
+    const canvasRow = await prisma.client.project_canvas.findUnique({ where: { project_id: BigInt(projectId) } });
     const retryNodes = canvasRow!.nodes_json as unknown as Array<{ id: string; data: Record<string, unknown> }>;
     retryNodes.find((node) => node.id === "text-1")!.data.text = "提交后改的正文";
     await saveCanvas(projectId, retryNodes, canvasRow!.edges_json as unknown as unknown[], canvasRow!.version);
@@ -1306,13 +1306,13 @@ describe.skipIf(!process.env.IKFM3S_DATABASE_URL)("Text index downstream sync co
       });
       await vi.waitFor(async () => expect(await badge.count(), "成功使用最新输入后清除提示").toBe(0), { timeout: 15_000 });
       await vi.waitFor(async () => {
-        const canvas = await prisma.client.canvas.findUnique({ where: { project_id: BigInt(projectId) } });
+        const canvas = await prisma.client.project_canvas.findUnique({ where: { project_id: BigInt(projectId) } });
         const saved = (canvas!.nodes_json as unknown as Array<{ id: string; data: Record<string, unknown> }>).find((n) => n.id === "d1");
         expect(saved!.data.usedInputSignature).toBe(frozen.text_input_signature);
         expect(saved!.data.usedInputJobId).toBe(Number(jobRow!.id));
       }, { timeout: 10_000 });
 
-      const canvasRow = await prisma.client.canvas.findUnique({ where: { project_id: BigInt(projectId) } });
+      const canvasRow = await prisma.client.project_canvas.findUnique({ where: { project_id: BigInt(projectId) } });
       const savedNodes = canvasRow!.nodes_json as unknown as Array<{ id: string; data: Record<string, unknown> }>;
       savedNodes.find((n) => n.id === "t1")!.data.text = "改用音频1配音吧";
       await saveCanvas(projectId, savedNodes, canvasRow!.edges_json as unknown as unknown[], canvasRow!.version);

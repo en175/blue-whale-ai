@@ -187,7 +187,7 @@ function buildTx(
       findUnique: vi.fn().mockResolvedValue(buildCapabilityRow()),
       ...overrides.generation_model_capability,
     },
-    canvas: {
+    project_canvas: {
       findFirst: vi.fn().mockResolvedValue({
         viewport_json: { x: 0, y: 0, zoom: 1 },
         nodes_json: [
@@ -200,7 +200,7 @@ function buildTx(
           },
         ],
       }),
-      ...overrides.canvas,
+      ...overrides.project_canvas,
     },
     generation_jobs: {
       create: vi

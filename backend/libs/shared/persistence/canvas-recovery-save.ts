@@ -161,7 +161,7 @@ export async function saveCanvasWithRecovery(
     await tx.$queryRaw`SELECT id FROM project WHERE id = ${pid} FOR UPDATE`;
     const canvasRows = await tx.$queryRaw<
       Array<{ id: bigint; version: number; viewport_json: unknown; nodes_json: unknown; edges_json: unknown }>
-    >`SELECT id, version, viewport_json, nodes_json, edges_json FROM canvas WHERE project_id = ${pid} FOR UPDATE`;
+    >`SELECT id, version, viewport_json, nodes_json, edges_json FROM project_canvas WHERE project_id = ${pid} FOR UPDATE`;
     const canvasRow = canvasRows[0] ?? null;
 
     const receiptRow = await tx.command_idempotency.findUnique({
@@ -853,8 +853,8 @@ export async function saveCanvasWithRecovery(
         [data.viewport_json, data.nodes_json, data.edges_json],
       );
     const saved = unchangedPrimaryApply ? canvasRow : canvasRow === null
-      ? await tx.canvas.create({ data: { project_id: pid, ...data } })
-      : await tx.canvas.update({ where: { id: canvasRow.id }, data: { ...data, version: { increment: 1 } } });
+      ? await tx.project_canvas.create({ data: { project_id: pid, ...data } })
+      : await tx.project_canvas.update({ where: { id: canvasRow.id }, data: { ...data, version: { increment: 1 } } });
 
     if (!unchangedPrimaryApply) {
       if (input.materials) await linkPromptMaterials(tx, pid, input.materials as never);

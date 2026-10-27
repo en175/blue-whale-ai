@@ -30,16 +30,16 @@ export async function freezePlacementAnchor(
 ): Promise<Record<string, unknown>> {
   if (validAnchor(input.input.placement_anchor)) return input.input;
   const ports = tx as unknown as {
-    canvas?: {
+    project_canvas?: {
       findFirst(args: unknown): Promise<{
         viewport_json: unknown;
         nodes_json: unknown;
       } | null>;
     };
   };
-  if (!ports.canvas?.findFirst) return input.input;
+  if (!ports.project_canvas?.findFirst) return input.input;
 
-  const canvas = await ports.canvas.findFirst({
+  const canvas = await ports.project_canvas.findFirst({
     where: { project_id: BigInt(input.projectId) },
     select: { viewport_json: true, nodes_json: true },
   });

@@ -183,7 +183,7 @@ export function createProjectRepo(prisma: PrismaClient): ProjectRepo {
     };
     for (const asset of imageAssets) addMember(asset.id, asset.project_id);
     for (const link of links) addMember(link.asset_id, link.project_id);
-    const canvases = await prisma.canvas.findMany({
+    const canvases = await prisma.project_canvas.findMany({
       where: { project_id: { in: projectIds }, is_delete: 0 },
       select: { project_id: true, nodes_json: true },
     });

@@ -722,7 +722,7 @@ describe.skipIf(!process.env.IKDMQS_DATABASE_URL)("Video draft & explicit ref ro
         await page.getByText("从节点添加素材", { exact: true }).click();
         await page.locator('.react-flow__node[data-id="t1"]').dispatchEvent("click");
         await vi.waitFor(async () => {
-          const row = await prisma.client.canvas.findFirst({ where: { project_id: BigInt(projectId) } });
+          const row = await prisma.client.project_canvas.findFirst({ where: { project_id: BigInt(projectId) } });
           const edges = row!.edges_json as Array<{ source: string; target: string }>;
           expect(edges.map(e => [e.source, e.target])).toEqual([["t1", "d1"]]);
         }, { timeout: 10_000 });

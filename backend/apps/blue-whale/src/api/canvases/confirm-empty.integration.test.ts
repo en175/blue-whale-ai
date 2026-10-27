@@ -59,7 +59,7 @@ describe.skipIf(!process.env.IKIMQJ_DATABASE_URL)("Confirm-empty version guard (
     });
   }
   async function readCanvasRow(projectId: bigint) {
-    return prisma.client.canvas.findUnique({ where: { project_id: projectId } });
+    return prisma.client.project_canvas.findUnique({ where: { project_id: projectId } });
   }
   function parseNodes(row: { nodes_json: unknown }): Array<{ id: string; type: string }> {
     const raw = typeof row.nodes_json === "string" ? JSON.parse(row.nodes_json) : row.nodes_json;
