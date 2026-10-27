@@ -2000,6 +2000,10 @@ export async function handleCreateGenerationJob(
 
 
 
+  let resolvedReferenceAssets: Awaited<
+    ReturnType<typeof deps.assets.resolveInputAssets>
+  > = [];
+
   if (type !== "audio" && referenceAssetIds.length > 0) {
     const ids = referenceAssetIds.map(String);
     const resolved = await deps.assets.resolveInputAssets(ids, userId, projectId);
@@ -2009,6 +2013,7 @@ export async function handleCreateGenerationJob(
         code: ERROR_INVALID_REFERENCE,
       });
     }
+    resolvedReferenceAssets = resolved;
 
 
     if (type === "image" && resolved.some((a) => a.type !== "image")) {
@@ -2121,12 +2126,17 @@ export async function handleCreateGenerationJob(
             ? { ...asset, duration: probedDurations.get(asset.id)! }
             : asset,
         );
-      const legacyIds = referenceAssetIds
-        .map(String)
-        .filter((id) => !ruling.assetsById.has(id));
+      const parsedBodyRefs = parseReferences(body.references);
+      const referencesProvided =
+        parsedBodyRefs.kind === "ok" && parsedBodyRefs.items.length > 0;
+      const legacyIds = referencesProvided
+        ? []
+        : uniqueAssetIds(referenceAssetIds.map(String)).filter(
+            (id) => !ruling.assetsById.has(id),
+          );
       const legacyAssets =
         legacyIds.length > 0
-          ? await deps.assets.resolveInputAssets(legacyIds, userId, projectId)
+          ? resolvedReferenceAssets.filter((asset) => legacyIds.includes(asset.id))
           : [];
       const referenceAssets = [
         ...itemAssets,

@@ -1970,12 +1970,15 @@ describe("handleCreateGenerationJob target_node_id 文本附件（IKDLQF）", ()
 
 
 
-function buildVideoTargetDeps(canvasView: { nodes: string | null; edges: string | null }) {
+function buildVideoTargetDeps(
+  canvasView: { nodes: string | null; edges: string | null },
+  modelRow: Record<string, unknown> = {},
+) {
   const { deps, createJob, getByProject } = buildTargetDeps(canvasView);
 
   (deps as { models: { listEnabledByType: unknown } }).models.listEnabledByType = vi
     .fn()
-    .mockResolvedValue([{ model_id: "doubao-seedance-2-0-260128" }]);
+    .mockResolvedValue([{ model_id: "doubao-seedance-2-0-260128", ...modelRow }]);
   return { deps, createJob, getByProject };
 }
 
@@ -4051,24 +4054,14 @@ describe("handleCreateGenerationJob 参考视频提交前物理校验（IKQYED�
   });
 
   it("画布旧字段 reference_asset_ids 提交不合规参考视频 → 400，不建任务", async () => {
-    const { deps, createJob } = buildVideoDeps({ features: FEATURES });
-    (deps as unknown as { canvas: unknown }).canvas = {
-      getByProject: vi.fn().mockResolvedValue({
-        id: "9",
-        project_id: "1",
-        version: 1,
-        viewport: null,
-        nodes: JSON.stringify([{ id: "d1", type: "mediaNode", data: { mediaType: "video" } }]),
-        edges: "[]",
-      }),
-    };
+    const { deps, createJob } = buildVideoTargetDeps(TARGET_CANVAS, { features: FEATURES });
     vi.mocked(deps.assets.resolveInputAssets).mockResolvedValue([
       videoAsset({ mime: "video/webm" }),
     ]);
     const result = await handleCreateGenerationJob(
       "u1",
       "p1",
-      { ...VIDEO_BODY, target_node_id: "d1", reference_asset_ids: ["1"] },
+      { ...VIDEO_BODY, target_node_id: "media-2", reference_asset_ids: ["1"] },
       null,
       deps,
     );
@@ -4076,5 +4069,19 @@ describe("handleCreateGenerationJob 参考视频提交前物理校验（IKQYED�
     expect(result.data?.code).toBe("invalid_reference_media");
     expect(result.msg).toBe("参考视频只支持 MP4 或 MOV");
     expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("画布旧字段 reference_asset_ids 提交合规参考视频 → 200 建任务", async () => {
+    const { deps, createJob } = buildVideoTargetDeps(TARGET_CANVAS, { features: FEATURES });
+    vi.mocked(deps.assets.resolveInputAssets).mockResolvedValue([videoAsset()]);
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      { ...VIDEO_BODY, target_node_id: "media-2", reference_asset_ids: ["1"] },
+      null,
+      deps,
+    );
+    expect(result.code).toBe(200);
+    expect(createJob).toHaveBeenCalled();
   });
 });
