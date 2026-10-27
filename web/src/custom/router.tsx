@@ -1,4 +1,3 @@
-import { createElement } from 'react';
 import { createBrowserRouter, Navigate, Outlet, RouterProvider } from 'react-router-dom';
 import { useAuthStore } from '@/shared/stores/auth';
 import MainLayout from '@/custom/layouts/MainLayout';
@@ -19,7 +18,12 @@ function AccountScopedOutlet() {
 }
 
 function LoginDialogRoute() {
-  return createElement(LoginDialog);
+  return (
+    <>
+      <LoginDialog />
+      <Outlet />
+    </>
+  );
 }
 
 const router = createBrowserRouter([
