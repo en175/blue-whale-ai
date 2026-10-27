@@ -11,7 +11,7 @@
 
 ## 编辑这些文档
 
-根 `GLOSSARY.md` 与 `docs/**/*.md` 的普通编辑也要从当前发布线建立 task worktree，并按任务目标 release 验证、提 PR。原直写 master 例外已由 [ADR-0115](../adr/0115-local-release-code-baseline.md) 替代。`docs/**/*.json` schema / 契约和 fixtures 同样走任务区，验证按影响面选择。
+根 `GLOSSARY.md` 与 `docs/**/*.md` 的普通编辑也要从 `origin/master` 建立 task worktree，并按声明的目标分支验证、提 PR。原直写 master 例外已由 [ADR-0133](../adr/0133-environment-branches.md) 替代。`docs/**/*.json` schema / 契约和 fixtures 同样走任务区，验证按影响面选择。
 
 ## 文件结构
 
