@@ -14,10 +14,10 @@ function repoWith(overrides: Record<string, Record<string, unknown>>) {
       updateMany: vi.fn(),
       ...overrides.scene_cards,
     },
-    command_idempotency: {
+    project_command_receipts: {
       findUnique: vi.fn().mockResolvedValue(null),
       create: vi.fn().mockResolvedValue({}),
-      ...overrides.command_idempotency,
+      ...overrides.project_command_receipts,
     },
   };
   const prisma = {
@@ -88,7 +88,7 @@ describe("SceneCardResourceRepo", () => {
         gmt_modified: expect.any(Date),
       },
     });
-    expect(tx.command_idempotency.create).toHaveBeenCalledWith({
+    expect(tx.project_command_receipts.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         project_id: 42n,
         operation: "scene_card.delete",
@@ -110,7 +110,7 @@ describe("SceneCardResourceRepo", () => {
         }),
         updateMany,
       },
-      command_idempotency: {
+      project_command_receipts: {
         findUnique: vi.fn().mockResolvedValue({
           request_hash: "b".repeat(64),
           resource_id: 5001n,
@@ -128,7 +128,7 @@ describe("SceneCardResourceRepo", () => {
       }),
     ).resolves.toEqual({ kind: "replayed" });
     expect(updateMany).not.toHaveBeenCalled();
-    expect(tx.command_idempotency.create).not.toHaveBeenCalled();
+    expect(tx.project_command_receipts.create).not.toHaveBeenCalled();
   });
 
   it("If-Match 版本过期时零写入", async () => {
@@ -155,7 +155,7 @@ describe("SceneCardResourceRepo", () => {
       }),
     ).resolves.toEqual({ kind: "version_conflict", current_version: 4 });
     expect(updateMany).not.toHaveBeenCalled();
-    expect(tx.command_idempotency.create).not.toHaveBeenCalled();
+    expect(tx.project_command_receipts.create).not.toHaveBeenCalled();
   });
 
   it("CAS 更新被并发请求抢先时返回数据库中的最新版本", async () => {
@@ -199,7 +199,7 @@ describe("SceneCardResourceRepo", () => {
         updateMany,
       },
       project: { findFirst: vi.fn().mockResolvedValue(null) },
-      command_idempotency: {
+      project_command_receipts: {
         findUnique: vi.fn().mockResolvedValue(null),
         create: idempotencyCreate,
       },

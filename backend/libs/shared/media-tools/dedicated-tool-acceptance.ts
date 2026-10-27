@@ -76,7 +76,7 @@ export async function acceptDedicatedToolJob(
             data: args.createData,
           });
           await billing?.charge(Number(created.id));
-          await tx.command_idempotency.create({
+          await tx.project_command_receipts.create({
             data: {
               project_id: BigInt(args.projectId),
               operation: args.operation,

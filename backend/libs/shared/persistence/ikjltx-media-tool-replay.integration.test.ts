@@ -193,14 +193,14 @@ describe.skipIf(!databaseUrl)("媒体工具已受理意图重放真库验证（I
     for (const pid of [PROJECT_ID, OTHER_PROJECT_ID]) {
       await prisma.generation_canvas_node_owners.deleteMany({ where: { project_id: BigInt(pid) } });
       await prisma.generation_canvas_submissions.deleteMany({ where: { project_id: BigInt(pid) } });
-      await prisma.command_idempotency.deleteMany({ where: { project_id: BigInt(pid) } });
+      await prisma.project_command_receipts.deleteMany({ where: { project_id: BigInt(pid) } });
       await prisma.project_canvas.deleteMany({ where: { project_id: BigInt(pid) } });
       await prisma.generation_output_slots.deleteMany({ where: { project_id: BigInt(pid) } });
       await prisma.generation_jobs.deleteMany({ where: { project_id: BigInt(pid) } });
     }
     await prisma.generation_canvas_outputs.deleteMany({});
     await prisma.generation_job_logs.deleteMany({});
-    await prisma.cost_reservations.deleteMany({});
+    await prisma.billing_cost_reservations.deleteMany({});
   });
 
   for (const tool of TOOLS) {
@@ -220,7 +220,7 @@ describe.skipIf(!databaseUrl)("媒体工具已受理意图重放真库验证（I
         const jobId = (first.data as { job_id: string }).job_id;
         const jobsAfterAccept = await prisma.generation_jobs.count({ where: { project_id: BigInt(PROJECT_ID) } });
         const subsAfterAccept = await prisma.generation_canvas_submissions.count({ where: { project_id: BigInt(PROJECT_ID) } });
-        const idemAfterAccept = await prisma.command_idempotency.count({ where: { project_id: BigInt(PROJECT_ID) } });
+        const idemAfterAccept = await prisma.project_command_receipts.count({ where: { project_id: BigInt(PROJECT_ID) } });
 
 
         stub.visible = false;
@@ -235,8 +235,8 @@ describe.skipIf(!databaseUrl)("媒体工具已受理意图重放真库验证（I
 
         expect(await prisma.generation_jobs.count({ where: { project_id: BigInt(PROJECT_ID) } })).toBe(jobsAfterAccept);
         expect(await prisma.generation_canvas_submissions.count({ where: { project_id: BigInt(PROJECT_ID) } })).toBe(subsAfterAccept);
-        expect(await prisma.command_idempotency.count({ where: { project_id: BigInt(PROJECT_ID) } })).toBe(idemAfterAccept);
-        expect(await prisma.cost_reservations.count({})).toBe(0);
+        expect(await prisma.project_command_receipts.count({ where: { project_id: BigInt(PROJECT_ID) } })).toBe(idemAfterAccept);
+        expect(await prisma.billing_cost_reservations.count({})).toBe(0);
       });
 
       it("★ 2. 同键异载荷重放判幂等冲突（100409），零写入", async () => {

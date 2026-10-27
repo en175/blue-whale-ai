@@ -344,7 +344,7 @@ async function regenerateSceneCardInTransaction(
   });
   if (!project) return { kind: "forbidden" } as const;
 
-  const existing = await tx.command_idempotency.findUnique({
+  const existing = await tx.project_command_receipts.findUnique({
     where: {
       project_id_operation_idempotency_key: {
         project_id: projectId,
@@ -565,7 +565,7 @@ async function regenerateSceneCardInTransaction(
     data: { scene_card_generation_record_id: record.id },
   });
 
-  await tx.command_idempotency.create({
+  await tx.project_command_receipts.create({
     data: {
       project_id: projectId,
       operation: OPERATION,

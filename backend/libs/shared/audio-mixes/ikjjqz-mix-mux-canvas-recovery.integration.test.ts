@@ -165,11 +165,11 @@ describe.skipIf(!databaseUrl)("混合/合成提交归属真库验证（IKJJQZ）
     await prisma.generation_canvas_node_owners.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
     await prisma.generation_canvas_outputs.deleteMany({});
     await prisma.generation_canvas_submissions.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
-    await prisma.command_idempotency.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
+    await prisma.project_command_receipts.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
     await prisma.project_canvas.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
     await prisma.generation_output_slots.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
     await prisma.generation_job_logs.deleteMany({});
-    await prisma.cost_reservations.deleteMany({});
+    await prisma.billing_cost_reservations.deleteMany({});
     await prisma.generation_jobs.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
     await prisma.user_assets.deleteMany({ where: { user_id: BigInt(USER_ID) } });
     await prisma.project_asset.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
@@ -358,7 +358,7 @@ describe.skipIf(!databaseUrl)("混合/合成提交归属真库验证（IKJJQZ）
     });
     expect(Number(owner.binding_revision)).toBe(2);
 
-    expect(await prisma.command_idempotency.count({
+    expect(await prisma.project_command_receipts.count({
       where: { project_id: BigInt(PROJECT_ID), operation: "audio_mix.retry" },
     })).toBe(1);
   });

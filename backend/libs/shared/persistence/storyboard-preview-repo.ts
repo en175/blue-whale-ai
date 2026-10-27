@@ -102,7 +102,7 @@ async function createStoryboardPreviewInTransaction(
   });
   if (!project) return { kind: "forbidden" } as const;
 
-  const existing = await tx.command_idempotency.findUnique({
+  const existing = await tx.project_command_receipts.findUnique({
     where: {
       project_id_operation_idempotency_key: {
         project_id: projectId,
@@ -187,7 +187,7 @@ async function createStoryboardPreviewInTransaction(
   if (input.canvasRecovery) {
     const locked = await lockCanvasRecoveryForAcceptance(tx, input.canvasRecovery);
     if (locked.kind === "replay") {
-      const winner = await tx.command_idempotency.findUnique({
+      const winner = await tx.project_command_receipts.findUnique({
         where: {
           project_id_operation_idempotency_key: {
             project_id: projectId,
@@ -253,7 +253,7 @@ async function createStoryboardPreviewInTransaction(
     },
   });
 
-  await tx.command_idempotency.create({
+  await tx.project_command_receipts.create({
     data: {
       project_id: projectId,
       operation: OPERATION,

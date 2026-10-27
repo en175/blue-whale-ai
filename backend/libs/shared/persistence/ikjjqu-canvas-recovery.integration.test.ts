@@ -127,11 +127,11 @@ describe.skipIf(!databaseUrl)("恢复契约 v1 真库验证（IKJJQU）", () => 
     await prisma.generation_canvas_node_owners.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
     await prisma.generation_canvas_outputs.deleteMany({});
     await prisma.generation_canvas_submissions.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
-    await prisma.command_idempotency.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
+    await prisma.project_command_receipts.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
     await prisma.project_canvas.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
     await prisma.generation_output_slots.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
     await prisma.generation_job_logs.deleteMany({});
-    await prisma.cost_reservations.deleteMany({});
+    await prisma.billing_cost_reservations.deleteMany({});
     await prisma.generation_jobs.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
   });
 
@@ -300,7 +300,7 @@ describe.skipIf(!databaseUrl)("恢复契约 v1 真库验证（IKJJQU）", () => 
     expect(bad.envelope).toMatchObject({ code: 409, data: { reason: RECOVERY_REASONS.itemConflict, currentState: "present" } });
 
     expect(await canvasVersion()).toBe(version);
-    const receipt = await prisma.command_idempotency.findUnique({
+    const receipt = await prisma.project_command_receipts.findUnique({
       where: { project_id_operation_idempotency_key: { project_id: BigInt(PROJECT_ID), operation: "SAVE_CANVAS_RECOVERY_V1", idempotency_key: UUID_E } },
     });
     expect(receipt).toBeNull();

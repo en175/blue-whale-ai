@@ -14,7 +14,7 @@ describe("audio video mux create idempotency", () => {
     const jobs = new Map<bigint, { id: bigint; status: string; version: number; error: null }>();
     const client = {
       project_asset: { findMany: vi.fn().mockResolvedValue([]) },
-      command_idempotency: {
+      project_command_receipts: {
         findUnique: vi.fn(async ({ where }: { where: { project_id_operation_idempotency_key: { idempotency_key: string } } }) =>
           commands.get(where.project_id_operation_idempotency_key.idempotency_key) ?? null),
         create: vi.fn(async ({ data }: { data: { idempotency_key: string; request_hash: string; generation_job_id: bigint } }) => {
@@ -59,7 +59,7 @@ describe("audio video mux create idempotency", () => {
     let command: { request_hash: string; generation_job_id: bigint } | null = null;
     const client = {
       project_asset: { findMany: vi.fn().mockResolvedValue([]) },
-      command_idempotency: {
+      project_command_receipts: {
         findUnique: vi.fn(async () => command),
         create: vi.fn(async ({ data }: { data: { request_hash: string; generation_job_id: bigint } }) => {
           command = data;
@@ -97,7 +97,7 @@ describe("audio video mux create idempotency", () => {
   ])("rejects an %s idempotency key before probing anything", async (_reason, idempotencyKey) => {
     const client = {
       project_asset: { findMany: vi.fn().mockResolvedValue([]) },
-      command_idempotency: { findUnique: vi.fn(), create: vi.fn() },
+      project_command_receipts: { findUnique: vi.fn(), create: vi.fn() },
       generation_jobs: { create: vi.fn() },
     };
     const project = { findOwnedById: vi.fn().mockResolvedValue({ id: 5n }) };

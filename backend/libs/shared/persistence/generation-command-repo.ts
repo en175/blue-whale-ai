@@ -164,7 +164,7 @@ function costReservationCreateData(
   userId: string,
   projectId: string,
   input: CreateJobInput,
-): Prisma.cost_reservationsCreateArgs["data"] {
+): Prisma.billing_cost_reservationsCreateArgs["data"] {
   return {
     generation_job_id: jobId,
     user_id: BigInt(userId),
@@ -258,7 +258,7 @@ export async function createJobWithinTx(
       });
     }
   }
-  await tx.cost_reservations.create({
+  await tx.billing_cost_reservations.create({
     data: costReservationCreateData(
       null,
       job.id,
@@ -437,7 +437,7 @@ export function createGenerationCommandRepo(
 
         const operation = "generation.retry";
         const existing = idempotencyKey
-          ? await tx.command_idempotency.findUnique({
+          ? await tx.project_command_receipts.findUnique({
               where: {
                 project_id_operation_idempotency_key: {
                   project_id: pid,
@@ -708,7 +708,7 @@ export function createGenerationCommandRepo(
           },
         });
         if (idempotencyKey) {
-          await tx.command_idempotency.create({
+          await tx.project_command_receipts.create({
             data: {
               project_id: pid,
               operation,

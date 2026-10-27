@@ -112,7 +112,7 @@ describe.skipIf(!databaseUrl)("audio mix creation when enqueue fails", () => {
     vi.unstubAllGlobals();
     await app?.close();
     if (prisma && projectId) {
-      await prisma.client.command_idempotency.deleteMany({ where: { project_id: projectId } });
+      await prisma.client.project_command_receipts.deleteMany({ where: { project_id: projectId } });
       await prisma.client.generation_jobs.deleteMany({ where: { project_id: projectId, type: "audio_mix" } });
       await prisma.client.user_assets.deleteMany({ where: { id: { in: [sourceId, otherId] } } });
       await prisma.client.project.delete({ where: { id: projectId } });
@@ -150,7 +150,7 @@ describe.skipIf(!databaseUrl)("audio mix creation when enqueue fails", () => {
     });
     const failed = await send();
     expect(failed.status).toBe(400);
-    const record = await prisma.client.command_idempotency.findUniqueOrThrow({
+    const record = await prisma.client.project_command_receipts.findUniqueOrThrow({
       where: { project_id_operation_idempotency_key: {
         project_id: projectId, operation: "audio_mix.create", idempotency_key: "enqueue-recover",
       } },

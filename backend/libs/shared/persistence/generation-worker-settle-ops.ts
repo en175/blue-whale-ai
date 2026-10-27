@@ -18,7 +18,7 @@ async function releaseReservationInTx(
   jobId: string,
   releaseNote?: string,
 ): Promise<void> {
-  await tx.cost_reservations.updateMany({
+  await tx.billing_cost_reservations.updateMany({
     where: { generation_job_id: BigInt(jobId), status: "reserved" },
     data: {
       status: "released",
@@ -33,7 +33,7 @@ async function settleReservationInTx(
   jobId: string,
   actualAmountFen: bigint,
 ): Promise<void> {
-  await tx.cost_reservations.updateMany({
+  await tx.billing_cost_reservations.updateMany({
     where: { generation_job_id: BigInt(jobId), status: "reserved" },
     data: { status: "settled", actual_amount_fen: actualAmountFen },
   });
@@ -312,7 +312,7 @@ export function createWorkerSettleOps(prisma: PrismaClient): Pick<WorkerRepo, "c
           data: { version: { increment: 1 } },
         });
         if (owned.count !== 1) return false;
-        await tx.cost_reservations.updateMany({
+        await tx.billing_cost_reservations.updateMany({
           where: { generation_job_id: BigInt(input.jobId), status: "reserved" },
           data: {
             status: "settled",

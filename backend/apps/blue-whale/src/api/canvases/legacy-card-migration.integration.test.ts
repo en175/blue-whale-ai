@@ -100,7 +100,7 @@ describe.skipIf(!process.env.IKDLQK_DATABASE_URL)("Legacy generation-card migrat
     return ((await response.json()).data?.items ?? []) as Array<Record<string, unknown>>;
   }
   async function historyCount(projectId: string) {
-    return prisma.client.legacy_card_history.count({ where: { project_id: BigInt(projectId) } });
+    return prisma.client.project_card_migration_history.count({ where: { project_id: BigInt(projectId) } });
   }
 
   it("migrates legacy generation cards on open, preserving title, position, edited prompt and edges", async () => {
@@ -215,7 +215,7 @@ describe.skipIf(!process.env.IKDLQK_DATABASE_URL)("Legacy generation-card migrat
   it("preserves both versions when stranded history conflicts with the current card", async () => {
     const projectId = await createProject("IKDLQK recovery");
     await seedCanvas(projectId, [legacyCardNode("card-1", { shotTitle: "现值标题", visual: "现值画面", prompt: "现值提示词" })]);
-    await prisma.client.legacy_card_history.create({
+    await prisma.client.project_card_migration_history.create({
       data: {
         project_id: BigInt(projectId), node_id: "card-1",
         title: "历史标题", prompt_text: "历史提示词", visual_text: "历史画面",

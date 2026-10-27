@@ -42,7 +42,7 @@ function makeService(overrides: {
       findOwnedSource: vi.fn().mockResolvedValue(makeVideoAsset()),
     };
   const tx = {
-    command_idempotency: {
+    project_command_receipts: {
       findUnique:
         overrides.idemFindUnique ?? vi.fn().mockResolvedValue(null),
       create: vi.fn(),
@@ -54,11 +54,11 @@ function makeService(overrides: {
       findUniqueOrThrow: vi.fn().mockResolvedValue({ user_id: 9n }),
     },
     generation_outbox: { create: vi.fn() },
-    cost_reservations: { create: vi.fn() },
+    billing_cost_reservations: { create: vi.fn() },
   };
   const client = {
     assets: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
-    command_idempotency: {
+    project_command_receipts: {
       findUnique: overrides.idemFindUnique ?? vi.fn().mockResolvedValue(null),
     },
     generation_jobs: {
@@ -150,7 +150,7 @@ describe("VideoSceneSplitsService.create：client_token 幂等键校验（≤64 
   it("looks the token up byte-exact (case-sensitive, no normalization)", async () => {
     const { service, client } = makeService();
     await service.create("9", "55", { ...VALID_BODY, client_token: "Tok-001" });
-    expect(client.command_idempotency.findUnique).toHaveBeenCalledWith(
+    expect(client.project_command_receipts.findUnique).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
           project_id_operation_idempotency_key: expect.objectContaining({
@@ -255,7 +255,7 @@ describe("VideoSceneSplitsService.create：client_token 幂等三态", () => {
     expect(result.code).toBe(200);
     expect(result.data).toEqual({ job_id: "400", status: "queued" });
     expect(tx.generation_jobs.create).not.toHaveBeenCalled();
-    expect(tx.command_idempotency.create).not.toHaveBeenCalled();
+    expect(tx.project_command_receipts.create).not.toHaveBeenCalled();
   });
 
   it("returns the job's current status on replay", async () => {
@@ -286,12 +286,12 @@ describe("VideoSceneSplitsService.create：client_token 幂等三态", () => {
 
   it("幂等预检异常时回落到事务内校验", async () => {
     const { service, client, tx } = makeService();
-    client.command_idempotency.findUnique.mockRejectedValueOnce(new Error("corrupt row"));
+    client.project_command_receipts.findUnique.mockRejectedValueOnce(new Error("corrupt row"));
 
     const result = await service.create("9", "55", VALID_BODY);
 
     expect(result.code).toBe(200);
-    expect(tx.command_idempotency.create).toHaveBeenCalledTimes(1);
+    expect(tx.project_command_receipts.create).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -303,8 +303,8 @@ describe("VideoSceneSplitsService.create：任务与占位数据同事务落库"
     expect(result.data).toEqual({ job_id: "400", status: "queued" });
     expect(client.$transaction).toHaveBeenCalledTimes(1);
     expect(tx.generation_jobs.create).toHaveBeenCalledTimes(1);
-    expect(tx.command_idempotency.create).toHaveBeenCalledTimes(1);
-    expect(tx.command_idempotency.create).toHaveBeenCalledWith({
+    expect(tx.project_command_receipts.create).toHaveBeenCalledTimes(1);
+    expect(tx.project_command_receipts.create).toHaveBeenCalledWith({
       data: {
         project_id: 55n,
         operation: "video_scene_split.create",
@@ -345,7 +345,7 @@ describe("VideoSceneSplitsService.create：任务与占位数据同事务落库"
     const { service, tx } = makeService();
     const result = await service.create("9", "55", VALID_BODY);
     expect(result.code).toBe(200);
-    expect(tx.cost_reservations.create).not.toHaveBeenCalled();
+    expect(tx.billing_cost_reservations.create).not.toHaveBeenCalled();
   });
 });
 function hashFor(sourceAssetId: string, targetNodeId: string, granularity: string): string {

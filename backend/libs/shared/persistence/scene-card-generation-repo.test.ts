@@ -157,10 +157,10 @@ function buildTx(
       findFirst: vi.fn().mockResolvedValue({ id: 42n }),
       ...overrides.project,
     },
-    command_idempotency: {
+    project_command_receipts: {
       findUnique: vi.fn().mockResolvedValue(null),
       create: vi.fn().mockResolvedValue({}),
-      ...overrides.command_idempotency,
+      ...overrides.project_command_receipts,
     },
     scene_cards: {
       findFirst: vi
@@ -221,9 +221,9 @@ function buildTx(
       deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
       ...overrides.generation_job_extras,
     },
-    cost_reservations: {
+    billing_cost_reservations: {
       create: vi.fn().mockResolvedValue({}),
-      ...overrides.cost_reservations,
+      ...overrides.billing_cost_reservations,
     },
     generation_output_slots: {
       create: vi.fn().mockResolvedValue({}),
@@ -328,7 +328,7 @@ describe("SceneCardGenerationRepo.regenerateSceneCard", () => {
         status: "pending",
       }),
     });
-    expect(tx.command_idempotency.create).toHaveBeenCalledOnce();
+    expect(tx.project_command_receipts.create).toHaveBeenCalledOnce();
   });
 
   it("新 record 不再写 plan 溯源列（计划通道已退役）", async () => {
@@ -359,7 +359,7 @@ describe("SceneCardGenerationRepo.regenerateSceneCard", () => {
 
   it("重复 CommandId 命中则重放，不再写入（AC 幂等）", async () => {
     const tx = buildTx({
-      command_idempotency: {
+      project_command_receipts: {
         findUnique: vi.fn().mockResolvedValue({
           request_hash: baseInput.requestHash,
           resource_id: 5001n,
@@ -379,7 +379,7 @@ describe("SceneCardGenerationRepo.regenerateSceneCard", () => {
 
   it("同 CommandId 不同内容返回 idempotency_conflict", async () => {
     const tx = buildTx({
-      command_idempotency: {
+      project_command_receipts: {
         findUnique: vi.fn().mockResolvedValue({
           request_hash: "b".repeat(64),
           resource_id: 5001n,

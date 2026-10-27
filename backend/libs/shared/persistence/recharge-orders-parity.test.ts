@@ -53,9 +53,9 @@ describe("recharge_orders / system_settings 三轨迁移", () => {
   });
 
   it("Prisma 模型与建表语句同源（表名与幂等唯一索引对齐）", () => {
-    expect(schemaPrisma).toContain("model recharge_orders {");
-    expect(schemaPrisma).toContain("model system_settings {");
-    expect(schemaPrisma).toContain('map: "uk_recharge_orders__trade_no"');
-    expect(schemaPrisma).toContain('map: "uk_recharge_orders__pay_order_id"');
+    expect(schemaPrisma).toContain("model billing_recharge_orders {");
+    expect(schemaPrisma).toContain("model bw_platform_settings {");
+    expect(schemaPrisma).toContain('map: "uk_billing_recharge_orders__trade_no"');
+    expect(schemaPrisma).toContain('map: "uk_billing_recharge_orders__pay_order_id"');
   });
 });

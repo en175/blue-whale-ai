@@ -157,7 +157,7 @@ describe.skipIf(!databaseUrl)("恢复保存回执丢失可安全重放（IKJKU8�
   }
 
   async function idempotencyRows(): Promise<number> {
-    return prisma.command_idempotency.count({ where: { project_id: BigInt(PROJECT_ID) } });
+    return prisma.project_command_receipts.count({ where: { project_id: BigInt(PROJECT_ID) } });
   }
 
 
@@ -205,11 +205,11 @@ describe.skipIf(!databaseUrl)("恢复保存回执丢失可安全重放（IKJKU8�
     await prisma.generation_canvas_node_owners.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
     await prisma.generation_canvas_outputs.deleteMany({});
     await prisma.generation_canvas_submissions.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
-    await prisma.command_idempotency.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
+    await prisma.project_command_receipts.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
     await prisma.project_canvas.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
     await prisma.generation_output_slots.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
     await prisma.generation_job_logs.deleteMany({});
-    await prisma.cost_reservations.deleteMany({});
+    await prisma.billing_cost_reservations.deleteMany({});
     await prisma.generation_jobs.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
   });
 
