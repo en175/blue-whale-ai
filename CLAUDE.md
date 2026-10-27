@@ -7,7 +7,7 @@
 | 启动/调试本地服务、连接数据库、接管端口 | `.agents/skills/start-local-services/SKILL.md` + `docs/adr/0064-testsite-db-access-governance.md` |
 | 代码理解：查结构、调用链、架构；切换 worktree | `agent-rules/code-discovery.md` |
 | 产品技术选型、运行时例外、Python 工具处置 | `agent-rules/product-runtime.md` |
-| Git 提交、分支、PR、发布、worktree；当前发布线开工、换期、遗留分支清点 | `docs/agents/git-workflow.md` |
+| Git 提交、分支、PR、发布、worktree；环境分支晋级、开工、清理 | `docs/agents/git-workflow.md` |
 | 多工单单 PR、集成分支、并行子任务合回 | `docs/agents/integration-branch-workflow.md` |
 | 任何 Gitee MCP 调用、规格发布与拆单 | `docs/agents/issue-tracker.md` |
 | 工单开工、恢复、返工、部署确认、提测、生产验证与收口 | `docs/agents/gitee-workflow-agent.md` |
@@ -21,8 +21,8 @@
 
 1. 本仓库工单与 PR 全部读写仅使用 Gitee MCP；操作前读取 [渠道规则](agent-rules/gitee-mcp-only.md)。
 2. 发布须当前对话中的人类明确授权，涵盖 push、PR、merge、release；Agent 自动使用标准入口和授权凭证，已有授权不二次确认。
-3. master 代表生产版本，禁止直推；PR 合并只用 merge，合并后按清理入口处理源分支，`hotfix/*` 无特权。
-4. 代码相关任务，包括只读调查、调试和审查，先在当前本地发布线运行 `scripts/sync-release-line.sh --json` 并核对该目录索引；失败即停止报告。写入任务经 `scripts/start-task-worktree.sh --target-branch <master|dev|test|release>` 从 `origin/master` 起步进入独立任务区；PR 目标在开工时声明，所有受保护分支均只接受 PR 合入。改动工具链、hook 或规范时目标写 `master`，让后续新分支一并继承。
+3. `master` 是唯一基线，不参与环境发布；`master` / `dev` / `test` / `release` 四条分支都禁止直推，PR 合并只用 merge，`hotfix/*` 无特权。每次 `release` 发版后由人把 `release` 合回 `master`。
+4. 代码相关任务，包括只读调查、调试和审查，先 `git fetch origin --prune` 并核对该目录索引；失败即停止报告。写入任务经 `scripts/start-task-worktree.sh --target-branch <master|dev|test|release>` 从 `origin/master` 起步进入独立任务区。开启分支按 `dev` → `test` → `release` 依次发 PR 晋级，环境分支之间不合并、也不接收 master 直接合入。改动工具链、hook 或规范时目标写 `master`，让后续新分支一并继承。
 5. Agent 按文档主动调用标准入口；Hook 只纠偏或阻断，不返回 ASK，不自动同步、选择策略或推进任务状态。
 6. 同一契约章节的基础设施工单先合入目标环境分支，功能工单再开工；跨进程字段先在契约文档确定。
 7. 产品采用 TypeScript、Next.js Web、NestJS API 与 Node.js LTS；已批准的两个 Java 服务和专用计算边界见技术栈规则。工程工具不受产品语言禁令，无关 Python 存量不阻塞功能任务。
@@ -45,8 +45,8 @@ URL 中的 `883843` 是项目路由 `program_id`，不能充当 `enterprise_id` 
 
 调用 Edit、Write 或任何改变 Git 状态的操作前，逐项核对：
 
-1. 当前分支与工作目录是从当前发布线经开工入口建立的独立任务区及结构化中文工单分支。
-2. 每个写入目标所属 Work Tree 都是该任务区，不指向 master、main 或 release 检出区。
+1. 当前分支与工作目录是经开工入口从 `origin/master` 建立的独立任务区及结构化中文工单分支。
+2. 每个写入目标所属 Work Tree 都是该任务区，不指向 master 主检出区或任何环境分支检出区。
 3. Git 状态变更仅在该任务区及工单分支执行；任一项不满足，先停止写入并通过同步、开工入口纠正。
 
 ## 任务状态（摘要，全文见 `docs/agents/issue-tracker.md`）

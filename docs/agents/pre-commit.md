@@ -4,10 +4,10 @@
 
 ## 提交期唯一守门：`.githooks/pre-commit`
 
-团队共用的发布线同步、任务开工和 PR 发布入口自动配置 `core.hooksPath = .githooks`，无需成员手动初始化；`scripts/setup-hooks.sh` 保留为人工排障入口。pre-commit 本身为纯 shell 零依赖，只做两件事：
+团队共用的任务开工和 PR 发布入口自动配置 `core.hooksPath = .githooks`，无需成员手动初始化；`scripts/setup-hooks.sh` 保留为人工排障入口。pre-commit 本身为纯 shell 零依赖，只做两件事：
 
 1. **硬拦生成物入库**：staged 文件命中 `dist/`、`target/`、`.next/`、`__pycache__/`、`node_modules/` 等模式即拒绝提交（`graphify-out/` 团队图谱产物除外）。
-2. **工单分支落后软提醒**：按任务元数据记录的目标 release 比对本机已抓取的 `origin/<目标>`，落后时打印提醒（不执行 fetch，不拦提交）；缺任务元数据时同样只提醒。
+2. **工单分支落后软提醒**：按任务元数据记录的目标分支比对本机已抓取的 `origin/<目标>`，落后时打印提醒（不执行 fetch，不拦提交）；缺任务元数据时同样只提醒。目标为 `dev` / `test` / `release` 时落后是常态，不构成问题。
 
 lint、typecheck、测试**不在提交期运行**——由 `verify-change-scope` 在收口与 PR 阶段按影响面分层执行（如 scoped/web 档含 web tsc + oxlint + vitest `--changed`），分层口径见 [testing-strategy.md](testing-strategy.md)。
 

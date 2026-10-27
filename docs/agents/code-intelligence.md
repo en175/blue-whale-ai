@@ -52,7 +52,7 @@
 
 - `trace_path` 要精确符号名：先 `search_graph(name_pattern=...)` 拿全名再 trace。
 - 跨服务追踪用 `direction="both"`：outbound 会漏掉远端调用方。
-- `detect_changes` 默认 `base_branch="main"`：本仓日常基线是 `release/*`，必须显式传当前发布线。
+- `detect_changes` 默认 `base_branch="main"`：本仓日常基线是 `master`，必须显式传 `master` 或对应环境分支。
 - `search_graph(relationship=...)` 只按度过滤节点、不返回边：看真实边用 `query_graph` Cypher。
 
 ## 索引维护
