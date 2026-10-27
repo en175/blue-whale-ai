@@ -1439,6 +1439,17 @@ assert_exit 2 "release: 缺 source_branch PR 拦截"
 run_hook "$RELEASE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"feature/x","target_branch":"develop","draft":"false","title":"test"}}'
 assert_exit 2 "release: 非 release 目标 PR 拦截"
 
+run_hook "$RELEASE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"dev","target_branch":"test","draft":"false","title":"test"}}'
+assert_exit 0 "release: dev → test 晋级 PR 放行"
+
+run_hook "$RELEASE_HOOK" '{"tool_name":"mcp__gitee-ent__create_enterprise_repo_pull","tool_input":{"source_branch":"test","target_branch":"release","draft":"false","title":"test"}}'
+assert_exit 0 "release: test → release 晋级 PR 放行"
+
+for illegal_progression in "feature/x:test" "feature/x:release" "dev:release" "master:test"; do
+  run_hook "$RELEASE_HOOK" "{\"tool_name\":\"mcp__gitee-ent__create_enterprise_repo_pull\",\"tool_input\":{\"source_branch\":\"${illegal_progression%%:*}\",\"target_branch\":\"${illegal_progression##*:}\",\"draft\":\"false\",\"title\":\"test\"}}"
+  assert_exit 2 "release: ${illegal_progression%%:*} → ${illegal_progression##*:} 非晋级链路拦截"
+done
+
 for environment_target in dev test release; do
   run_command_hook "printf '%s' '$environment_target' | python3 \"$HOOK_DIR/lib/pretool.py\" target-branch" '{"tool_input":{}}'
   assert_exit 0 "pretool: 环境分支 $environment_target 可作为 PR 目标"
@@ -2918,7 +2929,7 @@ if [ -f "$CASE_PROBE_DIR/mixedcaseprobe" ]; then
     git branch "fix/占位分支回归"
   )
   CASE_REPO_LOWER="$(printf '%s' "$CASE_REPO" | tr 'A-Z' 'a-z')"
-  run_repo_script "$CASE_REPO_LOWER" "$CASE_REPO_LOWER/scripts/start-task-worktree.sh" --type fix --no-issue --summary 占位分支回归 --target-branch release
+  run_repo_script "$CASE_REPO_LOWER" "$CASE_REPO_LOWER/scripts/start-task-worktree.sh" --type fix --no-issue --summary 占位分支回归 --target-branch master
   assert_exit 1 "start-entry: 小写拼写调入口不被守卫误拦"
   assert_stderr_has "本地分支已存在" "start-entry: 守卫放行后撞分支存在短路"
   rm -rf "$CASE_REPO_PARENT"

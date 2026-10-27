@@ -10,7 +10,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 from release_line_sync import SyncError, configure_git_hooks, release_line_lock
-from task_metadata import ENVIRONMENT_BRANCHES, MAIN_BRANCHES, TaskMetadataError, read_task_metadata, write_task_metadata
+from task_metadata import ENVIRONMENT_BRANCHES, MAIN_BRANCHES, TASK_BRANCH_TARGETS, TaskMetadataError, read_task_metadata, write_task_metadata
 
 
 ALLOWED_TYPES = ("feature", "fix", "hotfix", "docs", "chore")
@@ -139,12 +139,12 @@ def create_worktree(args):
     branch = build_branch(args.task_type, issue, summary)
     target = derive_target(root, args.task_type, issue, summary)
     try:
-        if args.target_branch not in ENVIRONMENT_BRANCHES + MAIN_BRANCHES:
+        if args.target_branch not in TASK_BRANCH_TARGETS + MAIN_BRANCHES:
             validate_existing_branch(args.target_branch)
             if not args.target_branch.startswith("release/"):
                 raise WorkflowError(args.target_branch)
     except WorkflowError:
-        raise WorkflowError("--target-branch 必须是 master、dev、test、release 或 release/<批次>：{}".format(
+        raise WorkflowError("--target-branch 必须是 master、dev 或 release/<批次>：{}".format(
             args.target_branch))
     if args.integration_worktree and not issue:
         raise WorkflowError("整包子票必须用 --issue 指定已核实父子关系的工单号。")

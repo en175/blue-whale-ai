@@ -51,3 +51,21 @@
 | `confirm-release-action.sh` | PR 目标白名单改走 `target-branch` 谓词，与 `task_metadata.is_target_branch` 语义一致 |
 | `publish-review-package.sh` | 首次发布必须显式传 `--target-branch`，不再从任务元数据静默回退 |
 | `branch-naming.md` | 「保护分支」扩为四条，「切换状态」改为已完成 |
+
+## 四期补充（2026-10-27）：晋级链路收紧
+
+任务分支不再是晋级源头，改由环境分支逐级晋级：
+
+```
+任务分支 ──PR──> dev ──PR(source=dev)──> test ──PR(source=test)──> release
+```
+
+| 改动 | 内容 |
+|---|---|
+| `task_metadata.py` | 新增 `TASK_BRANCH_TARGETS = ("dev",)`；`ENVIRONMENT_BRANCHES` / `MAIN_BRANCHES` 不变，`is_target_branch` 仍用于校验分支名合法性 |
+| `confirm-release-action.sh` | 硬校验晋级来源：`test` 只接受 source `dev`，`release` 只接受 source `test`；命中时跳过发布标记校验（晋级 PR 不由工单发布入口发起） |
+| `publish-review-package.sh` | 任务分支目标限定 `master` / `dev`（兼容 `release/<批次>`），`test` / `release` 直接拒绝 |
+| `start-task-worktree.py` | `--target-branch` 只接受 `master` / `dev`（兼容 `release/<批次>`），`test` / `release` 在建区阶段即拒绝 |
+| `dev` 行为 | 保持原逻辑：仍只收 PR，禁直推，禁删除 |
+
+代价：任务 HEAD 进入 `dev` 后，若 `test` / `release` 后续需要再改，必须新开任务分支重新走一遍 `dev`，不能用原任务分支补提交。这一步换来的是来源可校验、不会出现工单分支直插 `test` / `release`。

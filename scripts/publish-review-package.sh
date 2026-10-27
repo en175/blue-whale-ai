@@ -71,13 +71,13 @@ fail_status() {
 usage() {
   cat <<'EOF'
 用法：
-  scripts/publish-review-package.sh --user-authorized --create-pr --target-branch dev|test|release [--draft-pr --draft-reason <依据>] [--json]
+  scripts/publish-review-package.sh --user-authorized --create-pr --target-branch dev [--draft-pr --draft-reason <依据>] [--json]
   scripts/publish-review-package.sh --user-authorized --update-pr <PR编号> --pr-snapshot <JSON文件> [--allow-scope-file <路径>] [--json]
 
 --create-pr         首次推送并生成创建 PR 的短期发布标记
 --update-pr <IID>   安全更新已有 PR 的远端源分支，不生成创建标记
 --pr-snapshot FILE  Gitee MCP 新鲜快照；- 从标准输入读取，入口退出时清理临时文件
---target-branch NAME 创建 PR 的目标分支；默认任务记录的 release/*
+--target-branch NAME 创建 PR 的目标分支；任务分支只发 master|dev（兼容 release/*）
 --draft-pr          创建草稿 PR，须同时传 --draft-reason
 --draft-reason TEXT 用户明确要求或已确认规则、规格的单行依据；写入发布标记
 --allow-scope-file  明确允许本轮审查修订新增到冻结范围的文件；可重复
@@ -177,6 +177,11 @@ PY
 )" || fail_status 8 PR_EVIDENCE_INVALID "无法从 PR 快照读取目标分支。"
   "${PYTHON[@]}" "$SCRIPT_ROOT/scripts/lib/task_metadata.py" check-target --branch "$TARGET_BRANCH" >/dev/null \
     || fail_status 8 PR_EVIDENCE_INVALID "PR 目标分支必须是 master、release/* 或 dev/test/release。"
+  case "$TARGET_BRANCH" in
+    test|release)
+      fail_status 2 INVALID_TARGET_BRANCH "${TARGET_BRANCH} 只接受 dev 逐级晋级：先合入 dev，再用 Gitee 从 dev 发 PR 到 ${TARGET_BRANCH}。"
+      ;;
+  esac
 fi
 
 ROOT="$(git rev-parse --show-toplevel)"
@@ -196,10 +201,15 @@ fi
 [ "${#PYTHON[@]}" -gt 0 ] || fail_status 1 PYTHON_UNAVAILABLE "读取任务起点需要可用的 Python 3。"
 metadata=("${PYTHON[@]}" "$SCRIPT_ROOT/scripts/lib/task_metadata.py" read --worktree "$ROOT")
 if [ "$MODE" = create ] && [ "$TARGET_BRANCH_EXPLICIT" = 0 ]; then
-  fail_status 2 INVALID_TARGET_BRANCH "首次发布必须显式指定 --target-branch master|dev|test|release（或 release/*）。"
+  fail_status 2 INVALID_TARGET_BRANCH "首次发布必须显式指定 --target-branch master|dev（或 release/*）。"
 fi
 "${PYTHON[@]}" "$SCRIPT_ROOT/scripts/lib/task_metadata.py" check-target --branch "$TARGET_BRANCH" >/dev/null \
   || fail_status 2 INVALID_TARGET_BRANCH "目标分支必须是 master、release/* 或 dev/test/release：$TARGET_BRANCH"
+case "$TARGET_BRANCH" in
+  test|release)
+    fail_status 2 INVALID_TARGET_BRANCH "任务分支不发 ${TARGET_BRANCH}：先合入 dev，再由 dev 发 PR 到 test，由 test 发 PR 到 release。"
+    ;;
+esac
 start_sha="$("${metadata[@]}" --field start_sha)" \
   || fail_status 12 TASK_BASE_INVALID "任务起点元数据无效。"
 inherited_sha="$("${metadata[@]}" --field inherited_sha)" \
