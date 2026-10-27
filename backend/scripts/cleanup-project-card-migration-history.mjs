@@ -27,6 +27,8 @@ const connection = await mysql.createConnection({
   bigNumberStrings: true,
 });
 
+await connection.query("SET time_zone = '+08:00'");
+
 const mode = APPLY ? "APPLY（写库）" : "DRY-RUN（只读）";
 console.log(`\n=== project_card_migration_history 保留期清理 — ${mode}，保留 ${RETENTION_DAYS} 天 ===\n`);
 

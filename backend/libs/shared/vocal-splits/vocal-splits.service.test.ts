@@ -24,7 +24,7 @@ function makeService(overrides: {
     client: {
       $transaction: transaction,
       generation_jobs: { create },
-      cost_reservations: { create: costCreate },
+      billing_cost_reservations: { create: costCreate },
     },
   };
   const jobBilling = vi.fn().mockResolvedValue(undefined);

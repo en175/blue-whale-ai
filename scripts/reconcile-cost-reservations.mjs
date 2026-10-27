@@ -22,7 +22,7 @@ const R4_DEVIATION_RATIO = 0.1;
 const STALE_WINDOW_MS = 24 * 3600 * 1000;
 
 try {
-  const reservedRows = await prisma.cost_reservations.findMany({
+  const reservedRows = await prisma.billing_cost_reservations.findMany({
     where: { status: "reserved", is_delete: 0 },
     select: { generation_job_id: true, gmt_modified: true },
   });
@@ -41,7 +41,7 @@ try {
       .filter((r) => FINAL_JOB_STATUSES.includes(jobStatusById.get(r.generation_job_id.toString()) ?? ""))
       .map((r) => r.generation_job_id.toString()),
     zeroSettled: (
-      await prisma.cost_reservations.findMany({
+      await prisma.billing_cost_reservations.findMany({
         where: { status: "settled", actual_amount_fen: 0n, is_delete: 0 },
         select: { generation_job_id: true },
       })
@@ -53,7 +53,7 @@ try {
         .map((r) => r.generation_job_id.toString());
     })(),
     diffOverThreshold: (
-      await prisma.cost_reservations.findMany({
+      await prisma.billing_cost_reservations.findMany({
         where: { status: "settled", is_delete: 0 },
         select: { generation_job_id: true, reserved_amount_fen: true, actual_amount_fen: true },
       })

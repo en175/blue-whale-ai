@@ -53,7 +53,7 @@ function makeService(overrides: {
     client: {
       assets: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
       generation_jobs: { create },
-      cost_reservations: { create: costCreate },
+      billing_cost_reservations: { create: costCreate },
     },
   };
   return {

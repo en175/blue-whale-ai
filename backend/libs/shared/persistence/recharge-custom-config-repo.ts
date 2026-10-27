@@ -169,7 +169,7 @@ function mergeStored(
 
 function invalidConfigError(): NewApiError {
   return new NewApiError(
-    "自定义充值配置缺失或损坏：system_settings.rechargeCustom",
+    "自定义充值配置缺失或损坏：bw_platform_settings.rechargeCustom",
     503,
     "recharge_custom_unconfigured",
   );

@@ -66,6 +66,7 @@ const JAVA_SCHEMA_RENAMED = [...RENAMED].filter(
 );
 
 const BACKEND_ROOT = new URL("../../..", import.meta.url).pathname;
+const REPO_ROOT = new URL("../../../..", import.meta.url).pathname;
 
 function productionSources(dir: string, acc: string[] = []): string[] {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -73,7 +74,23 @@ function productionSources(dir: string, acc: string[] = []): string[] {
     if (entry.isDirectory()) {
       if (entry.name === "gen" || entry.name === "node_modules") continue;
       productionSources(path, acc);
-    } else if (entry.name.endsWith(".ts") && !entry.name.includes(".test.")) {
+    } else if (
+      (entry.name.endsWith(".ts") || entry.name.endsWith(".mjs")) &&
+      !entry.name.includes(".test.")
+    ) {
+      acc.push(path);
+    }
+  }
+  return acc;
+}
+
+function javaSources(dir: string, acc: string[] = []): string[] {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      if (entry.name === "node_modules") continue;
+      javaSources(path, acc);
+    } else if (entry.name.endsWith(".java")) {
       acc.push(path);
     }
   }
@@ -139,19 +156,35 @@ describe("IKQY3O 三轨迁移（计费 / 身份 / 运维 / 命令回执表改名
     expect(baselineSql).not.toContain("CREATE TABLE `project_command_receipts`");
   });
 
-  it("后端生产代码不再访问旧表名", () => {
+  it("生产代码与运维脚本不再访问旧表名", () => {
     const names =
       "topup_tiers|recharge_orders|cost_reservations|cost_adjustments|admin_operation_logs|system_settings|command_idempotency|legacy_card_history";
     const accessor = new RegExp("\\b(prisma|tx|client)\\.(" + names + ")\\b");
     const rawSql = new RegExp("\\b(FROM|INTO|JOIN|UPDATE)\\s+`?(" + names + ")`?\\b", "i");
-    const offenders: string[] = [];
     const files = [
       ...productionSources(join(BACKEND_ROOT, "libs")),
       ...productionSources(join(BACKEND_ROOT, "apps")),
+      ...productionSources(join(BACKEND_ROOT, "scripts")),
+      ...productionSources(join(REPO_ROOT, "scripts")),
     ];
+    expect(files.length).toBeGreaterThan(0);
+    const offenders: string[] = [];
     for (const file of files) {
       const text = readFileSync(file, "utf8");
       if (accessor.test(text) || rawSql.test(text)) offenders.push(file);
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it("Java 生产代码不再引用旧表名", () => {
+    const names =
+      "topup_tiers|recharge_orders|cost_reservations|cost_adjustments|admin_operation_logs|system_settings|command_idempotency|legacy_card_history";
+    const reference = new RegExp("\\b(" + names + ")\\b");
+    const files = javaSources(join(REPO_ROOT, "server/blue-whale-worker/src/main"));
+    expect(files.length).toBeGreaterThan(0);
+    const offenders: string[] = [];
+    for (const file of files) {
+      if (reference.test(readFileSync(file, "utf8"))) offenders.push(file);
     }
     expect(offenders).toEqual([]);
   });

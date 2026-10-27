@@ -3,7 +3,7 @@
 - **状态**：已采纳
 - **日期**：2026-10-27
 - **决策者**：lixq
-- **关联**：[ADR-0117](0117-table-naming-and-module-prefix.md)、[ADR-0135](0135-catalog-material-content-prefixes.md)、IKQY3O / IKQWV1
+- **关联**：[ADR-0117](0117-table-naming-and-module-prefix.md)、ADR-0135（同批 IKQY3N）、IKQY3O / IKQWV1
 
 ## 背景
 
@@ -23,12 +23,13 @@
    - `command_idempotency` → `project_command_receipts`（它按 `project_id + operation + key` 唯一，是画布与建单命令的幂等回执，不是通用命令表）
    - `legacy_card_history` → `project_card_migration_history`（名字去掉版本性形容词）
 4. 只改嵌入完整旧表名的索引（7 条）。`idx_tier_status_sort`、`uk_adj_*`、`idx_oplog_category_created` 不含旧表名，保持原样。
-5. `project_card_migration_history` 保留期定为 **180 天**（按 `gmt_create`）：表注释写明保留期与清理入口，清理脚本 `backend/scripts/cleanup-project-card-migration-history.mjs` 默认 dry-run、`--apply` 分批删除。
+5. `project_card_migration_history` 保留期定为 **180 天**（按 `gmt_create`）：表注释写明保留期与清理入口，清理脚本 `backend/scripts/cleanup-project-card-migration-history.mjs` 默认 dry-run、`--apply` 分批删除。历史从「只增不改」变为「180 天内可回放」；清理由运维按周执行（cron 或发布后手工跑一次），未配调度前旧行只会继续增长，不会误删。
 6. 迁移语句顺序：索引改名在前，8 张表一条多表 `RENAME TABLE` 在后，最后写表注释。
 
 ## 后果
 
-- 破坏性发布：数据库 DDL、后端镜像与 worker jar 必须同批上线，旧镜像读旧表名会立即失败。
+- 破坏性发布：改名后新旧镜像都读不到对侧的表。发布顺序固定为「停旧实例（后端 + worker）→ 执行 079 → 起新镜像」，或先提供过渡视图。
 - `RENAME INDEX` 无 `IF EXISTS`：执行前在目标库 `SHOW INDEX` 核对 7 条索引名；失败按「补完索引改名 → 执行多表 RENAME」恢复。
+- 多表 `RENAME TABLE` 成功但最后写表注释失败时：不要重跑整个文件（索引名已变，第一步就会报错）；手工补执行注释语句即可。
 - billing 服务自己的库（Flyway）里本来就有 `billing_cost_reservations`，与本库新名字同名但属于不同数据库，不要混用连接。
-- ADR-0117 §4 的改名清单至此全部落地；其 §2 前缀空间与 [ADR-0135](0135-catalog-material-content-prefixes.md) 一并生效。
+- ADR-0117 §4 中计费/运维条目的改名在本票落地；目录与素材条目由同批 IKQY3N（ADR-0135）承接，两票合入后该清单才算全部落地。

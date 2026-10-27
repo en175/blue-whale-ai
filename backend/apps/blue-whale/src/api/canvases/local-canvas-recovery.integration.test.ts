@@ -343,7 +343,7 @@ describe.skipIf(!process.env.IKNCL3_DATABASE_URL)("本地恢复画布公开 API"
 
   it("保存成功但回执写入中断，重建服务后从持久画布确认完成", async () => {
     const id = "04e0b9cc-04dd-45ad-930b-3c0000000006";
-    await fixtureSql.query("CREATE TRIGGER ikncl3_fail_receipt BEFORE UPDATE ON command_idempotency FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'isolated receipt interruption'");
+    await fixtureSql.query("CREATE TRIGGER ikncl3_fail_receipt BEFORE UPDATE ON project_command_receipts FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'isolated receipt interruption'");
     try {
       expect((await request("PUT", id, payload)).status).toBe(500);
     } finally {
@@ -362,7 +362,7 @@ describe.skipIf(!process.env.IKNCL3_DATABASE_URL)("本地恢复画布公开 API"
   it("目标在未确认完成前被其他会话编辑时，查询与续作均拒绝覆盖", async () => {
     const id = "04e0b9cc-04dd-45ad-930b-3c0000000007";
     const name = `中断目标 ${sourceId}`;
-    await fixtureSql.query("CREATE TRIGGER ikncl3_fail_receipt BEFORE UPDATE ON command_idempotency FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'isolated receipt interruption'");
+    await fixtureSql.query("CREATE TRIGGER ikncl3_fail_receipt BEFORE UPDATE ON project_command_receipts FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'isolated receipt interruption'");
     try {
       expect((await request("PUT", id, { ...payload, name })).status).toBe(500);
     } finally {

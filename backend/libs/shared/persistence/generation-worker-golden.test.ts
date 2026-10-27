@@ -72,7 +72,7 @@ describe("§3.1 claim 候选 findFirst 谓词", () => {
     const updateMany = vi.fn().mockResolvedValue({ count: 1 });
     const prisma = {
       generation_jobs: { findFirst, updateMany },
-      cost_reservations: { findFirst: vi.fn().mockResolvedValue(null) },
+      billing_cost_reservations: { findFirst: vi.fn().mockResolvedValue(null) },
     } as never;
     const repo = createWorkerRepo(prisma);
 
@@ -164,7 +164,7 @@ describe("§3.1 孤儿接管候选", () => {
     const updateMany = vi.fn().mockResolvedValue({ count: 1 });
     const prisma = {
       generation_jobs: { findFirst, updateMany },
-      cost_reservations: { findFirst: vi.fn().mockResolvedValue(null) },
+      billing_cost_reservations: { findFirst: vi.fn().mockResolvedValue(null) },
     } as never;
     const repo = createWorkerRepo(prisma);
 
@@ -330,7 +330,7 @@ describe("§3.3 cancelVideoBeforeDispatch", () => {
     const transaction = vi.fn(async (cb: (tx: unknown) => unknown) =>
       cb({
         generation_jobs: { updateMany },
-        cost_reservations: { updateMany: releaseReservations },
+        billing_cost_reservations: { updateMany: releaseReservations },
       }),
     );
     const repo = createWorkerRepo({ $transaction: transaction } as never);
@@ -351,7 +351,7 @@ describe("§3.3 cancelVideoBeforeDispatch", () => {
     const transaction = vi.fn(async (cb: (tx: unknown) => unknown) =>
       cb({
         generation_jobs: { updateMany },
-        cost_reservations: { updateMany: releaseReservations },
+        billing_cost_reservations: { updateMany: releaseReservations },
       }),
     );
     const repo = createWorkerRepo({ $transaction: transaction } as never);

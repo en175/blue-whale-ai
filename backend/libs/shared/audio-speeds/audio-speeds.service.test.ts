@@ -26,7 +26,7 @@ function makeService(overrides: {
   const prisma = {
     client: {
       generation_jobs: { create },
-      cost_reservations: { create: costCreate },
+      billing_cost_reservations: { create: costCreate },
     },
   };
   const jobBilling = vi.fn().mockResolvedValue(undefined);
