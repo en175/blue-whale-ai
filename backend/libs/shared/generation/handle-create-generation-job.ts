@@ -7,7 +7,11 @@ import {
 import type { ReferenceItemInput } from "./reference-item-input.js";
 import { freezePromptPlans } from "./prompt-plan-snapshot.js";
 import { checkReferenceLimits } from "../generation-runtime/reference-limits.js";
-import { freezeReferenceLimits } from "../generation-runtime/video-reference-validation.js";
+import {
+  freezeReferenceLimits,
+  validateReferences,
+} from "../generation-runtime/video-reference-validation.js";
+import { VideoInputError } from "../generation-runtime/material-reference.js";
 import type { CanvasEdge } from "@lib/contracts";
 import {
   type PromptTargetNode,
@@ -2096,6 +2100,35 @@ export async function handleCreateGenerationJob(
       return fail(errorCodeToNumeric(ERROR_INVALID_REFERENCE_TYPE), "参考素材类型与声明不符", {
         code: ERROR_INVALID_REFERENCE_TYPE,
       });
+    }
+
+    if (type === "video" && capability?.features) {
+      const referenceItems = ruling.references.filter((item) => item.role === "reference");
+      const referenceAssets = referenceItems
+        .map((item) =>
+          item.asset_id !== undefined
+            ? ruling.assetsById.get(String(item.asset_id))
+            : undefined,
+        )
+        .filter((asset): asset is NonNullable<typeof asset> => asset !== undefined);
+      const materialRefs = referenceItems
+        .filter((item) => item.material_id !== undefined)
+        .map((item) => ({ id: item.material_id!, type: item.type }));
+      try {
+        validateReferences(
+          capability.features,
+          referenceAssets,
+          materialRefs,
+          videoMode ?? null,
+        );
+      } catch (error) {
+        const code = error instanceof VideoInputError ? error.code : ERROR_UNSUPPORTED_INPUT;
+        return fail(
+          errorCodeToNumeric(code),
+          error instanceof Error ? error.message : "参考素材不受支持",
+          { code },
+        );
+      }
     }
 
 
