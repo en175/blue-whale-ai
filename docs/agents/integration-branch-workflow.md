@@ -34,7 +34,7 @@
 
 ## 开工
 
-**集成分支**就是未来的 PR 源分支，从当前本地发布线工作树用普通开工入口建立：
+**集成分支**就是未来的 PR 源分支，用普通开工入口从 `origin/master` 建立：
 
 ```bash
 scripts/start-task-worktree.sh --type <类型> --issue <父工单号> --summary <6–15字中文简述> --target-branch <master|dev|test|release>
@@ -42,7 +42,7 @@ scripts/start-task-worktree.sh --type <类型> --issue <父工单号> --summary 
 
 进入返回的 worktree，用 `python3 scripts/lib/task_metadata.py read --json` 核对记录的 `target_branch` 与 `start_sha`，后续同步、验证、发布、清理全程使用该记录。核对目录 CBM 项目后，按状态权威判定开工或恢复，再按 issue-tracker.md 认领并回读父工单，建 worktree 不代替该 API 调用。
 
-**子任务 worktree**同样从当前本地发布线工作树建立，必须带 `--target-branch` 和 `--integration-worktree` 指向集成 worktree 的绝对路径：
+**子任务 worktree**同样用开工入口建立，必须带 `--target-branch` 和 `--integration-worktree` 指向集成 worktree 的绝对路径：
 
 ```bash
 scripts/start-task-worktree.sh --type <类型> --issue <子工单号> --summary <6–15字中文简述> --target-branch <master|dev|test|release> --integration-worktree <集成worktree绝对路径>
@@ -115,7 +115,7 @@ scripts/publish-review-package.sh --user-authorized --create-pr --target-branch 
 scripts/sync-task-from-origin.sh linearize --user-authorized --update-pr <PR编号> --pr-snapshot <临时JSON> --child-branch <子分支> --json
 ```
 
-多个子分支重复传 `--child-branch`。入口核验各子分支 worktree 元数据与 merge 父提交，要求本地 HEAD 等于远端 PR 源 HEAD、目标发布线已在本地 HEAD 中、所有提交路径属于 PR 冻结范围；保存原 HEAD 恢复点，把原文件树写成线性提交并运行 PR 阶段验证，失败时保留恢复点不推送。成功后在新 HEAD 上重新执行代码评审；评审产生同范围修订时用提交入口落盘，再 `sync --json` 更新恢复点并重跑 PR 阶段验证。评审与验证通过后按 `--update-pr` 入口以远端 SHA 租约推送，回读 Gitee 并运行 `verify-pr-update.sh`，最后 finalize。遇 `REMOTE_SOURCE_CHANGED` 或租约变化先核对远端提交归属，不覆盖未知提交。普通 `sync` 返回 `UP_TO_DATE` 不会自动处理 merge commit。
+多个子分支重复传 `--child-branch`。入口核验各子分支 worktree 元数据与 merge 父提交，要求本地 HEAD 等于远端 PR 源 HEAD、目标分支已合入本地 HEAD、所有提交路径属于 PR 冻结范围；保存原 HEAD 恢复点，把原文件树写成线性提交并运行 PR 阶段验证，失败时保留恢复点不推送。成功后在新 HEAD 上重新执行代码评审；评审产生同范围修订时用提交入口落盘，再 `sync --json` 更新恢复点并重跑 PR 阶段验证。评审与验证通过后按 `--update-pr` 入口以远端 SHA 租约推送，回读 Gitee 并运行 `verify-pr-update.sh`，最后 finalize。遇 `REMOTE_SOURCE_CHANGED` 或租约变化先核对远端提交归属，不覆盖未知提交。普通 `sync` 返回 `UP_TO_DATE` 不会自动处理 merge commit。
 
 ## 清理
 
@@ -125,7 +125,7 @@ scripts/sync-task-from-origin.sh linearize --user-authorized --update-pr <PR编�
 python3 scripts/cleanup-implement-spec-child.py --pr-snapshot - --json
 ```
 
-将规范化快照通过标准输入传入，或继续使用 JSON 文件路径。入口核对远端 PR 源已包含该子任务的工作。普通快进路径要求子任务 HEAD 是远端 PR 源 HEAD 的祖先；集成分支合回后因发布线前进而 rebase 的，须先更新同一 PR、完成 Gitee 回读与同步事务 finalize，清理入口核对旧子提交、每次同步保留的原提交及合并文件树证明；已发布 PR 经 linearize 后，清理入口核对旧子提交属于改写前历史、改写前后文件树相同、新线性提交是远端 PR 源 HEAD 的祖先。入口删除前复核远端核验分支 HEAD 未变化；任一证明断链时保留该子 worktree。报告删除了哪些子 worktree、保留了哪些及原因。
+将规范化快照通过标准输入传入，或继续使用 JSON 文件路径。入口核对远端 PR 源已包含该子任务的工作。普通快进路径要求子任务 HEAD 是远端 PR 源 HEAD 的祖先；集成分支合回后因目标分支前进而 rebase 的，须先更新同一 PR、完成 Gitee 回读与同步事务 finalize，清理入口核对旧子提交、每次同步保留的原提交及合并文件树证明；已发布 PR 经 linearize 后，清理入口核对旧子提交属于改写前历史、改写前后文件树相同、新线性提交是远端 PR 源 HEAD 的祖先。入口删除前复核远端核验分支 HEAD 未变化；任一证明断链时保留该子 worktree。报告删除了哪些子 worktree、保留了哪些及原因。
 
 PR 已合并后也使用同一入口。入口从远端目标 release 确认快照中的 PR 源 HEAD 已合入，再检查子任务提交或保留的同步、线性化证明；不要求源分支或集成 worktree 仍存在。子任务提交经移植进入 PR、原 SHA 已不是源 HEAD 祖先时，须显式传 `--equivalent-commit <完整 SHA>`：入口核验该提交属于 PR 源 HEAD、与子任务补丁逐字节一致，并在隔离索引中重放比对完整文件树。子任务 HEAD 若等于同步证明的原源 HEAD，可直接进入该证明的引用、文件树和远端回读校验。删除前复核远端目标 release 未变化。仅出现在后续 release 提交中的子任务改动，不能作为该 PR 的清理依据。
 

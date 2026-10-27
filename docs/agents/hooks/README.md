@@ -129,7 +129,7 @@ Hook 触发记录在 `~/.claude/logs/` 或本会话 transcript 里搜 `hookSpeci
 
 按下面的顺序排查，不要把 Hook 当作正常开工入口：
 
-1. **先做写入前主动自检**：按 `CLAUDE.md`「写入前自检」确认当前分支、Agent 任务区、目标路径和 Git 写入区域。若仍在 master 或 release 工作树，停止写入，从当前发布线运行 `scripts/start-task-worktree.sh`。
+1. **先做写入前主动自检**：按 `CLAUDE.md`「写入前自检」确认当前分支、Agent 任务区、目标路径和 Git 写入区域。若仍在 master 主检出区或环境分支工作树，停止写入，从主检出区运行 `scripts/start-task-worktree.sh`。
 2. **检查四端配置映射**：运行 `python3 scripts/check-hook-contracts.py`。它从 ZCode、Claude Code、Codex、Kimi CLI 的实际项目配置解析 matcher、执行入口与权威 Gate；失败信息会指出平台、事件、matcher 和 Gate。
 3. **执行配置链闭环**：运行 `python3 scripts/check-hook-closed-loop.py`。它逐端执行 master 与 Agent 任务区的创建/修改场景，并按唯一会话标识和工具调用标识核对阻断/放行结果与审计记录。
 4. **按关联标识定位记录**：使用下节的 `python3 scripts/query-hook-audit.py` 查询。master 和 release 直写应为 exit 2，Agent 任务区等价写入应为 exit 0，且每个工具调用标识只对应一条记录。

@@ -233,13 +233,14 @@ actual_target_sha="${target_line%%[[:space:]]*}"
 if [ "$actual_target_sha" != "$upstream_sha" ]; then
   fail_status 7 REMOTE_TARGET_CHANGED "远端目标在 fetch 后变化；重新读取并验证。" fetched_sha "$upstream_sha" actual_sha "$actual_target_sha"
 fi
-if ! git -C "$ROOT" merge-base --is-ancestor "$start_sha" "$upstream_sha"; then
-  pending="$(git -C "$ROOT" log --format='%h %s' --reverse "$upstream_sha..$start_sha")"
-  fail_status 12 TASK_BASE_NOT_SHARED "origin/${TARGET_BRANCH} 尚未包含任务起点；先让以下基线提交进入目标分支。" target_branch "$TARGET_BRANCH" start_sha "$start_sha" pending_commits "$pending"
-fi
-if ! git -C "$ROOT" merge-base --is-ancestor "$upstream_sha" "$head_sha"; then
-  fail_status 10 NEEDS_SYNC "当前分支未包含 ${upstream_ref}。先运行 scripts/sync-task-from-origin.sh sync --target-branch ${TARGET_BRANCH} --json。" branch "$branch" target_branch "$TARGET_BRANCH" head "$head_sha" upstream_sha "$upstream_sha"
-fi
+case "$TARGET_BRANCH" in
+  dev|test|release) ;;
+  *)
+    if ! git -C "$ROOT" merge-base --is-ancestor "$upstream_sha" "$head_sha"; then
+      fail_status 10 NEEDS_SYNC "当前分支未包含 ${upstream_ref}。先运行 scripts/sync-task-from-origin.sh sync --target-branch ${TARGET_BRANCH} --json。" branch "$branch" target_branch "$TARGET_BRANCH" head "$head_sha" upstream_sha "$upstream_sha"
+    fi
+    ;;
+esac
 if ! verification_output="$(node "$SCRIPT_ROOT/scripts/verify-change-scope.mjs" ensure --stage pr --target-branch "$TARGET_BRANCH" --json 2>&1)"; then
   fail_status 11 VERIFICATION_FAILED "本地发布前检查未通过，禁止推送。修复后重新发布；基础设施重试仍须按测试策略显式执行。" detail "$verification_output" head "$head_sha"
 fi

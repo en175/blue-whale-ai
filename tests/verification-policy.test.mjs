@@ -49,7 +49,7 @@ function git(cwd, ...args) {
   }).trim();
 }
 
-function createRepository({ flakyRuleTest = false, localAhead = false } = {}) {
+function createRepository({ flakyRuleTest = false, localAhead = false, masterAhead = false } = {}) {
   const directory = mkdtempSync(join(tmpdir(), "blue-whale-verification-"));
   git(directory, "init", "-b", "master");
   git(directory, "config", "user.email", "agent@example.com");
@@ -90,6 +90,14 @@ function createRepository({ flakyRuleTest = false, localAhead = false } = {}) {
   }
   git(directory, "switch", "-c", "chore/test-verification");
   const startSha = git(directory, "rev-parse", "HEAD");
+  if (masterAhead) {
+    mkdirSync(join(directory, "docs"), { recursive: true });
+    writeFileSync(join(directory, "docs", "master-only.md"), "master change\n");
+    git(directory, "add", "docs/master-only.md");
+    git(directory, "commit", "-m", "docs: advance master");
+    git(directory, "push", "origin", "HEAD:master");
+    git(directory, "reset", "--hard", startSha);
+  }
   mkdirSync(join(directory, ".git", "blue-whale"), { recursive: true });
   writeFileSync(join(directory, ".git", "blue-whale", "task-base.json"), JSON.stringify({
     version: 1,
@@ -1110,31 +1118,37 @@ test("plans verification from the committed Git diff", () => {
   }
 });
 
-test("local release commits stay outside task verification and block publication until shared", () => {
-  const repository = createRepository({ localAhead: true });
+test("targets behind master publish without rebase and verification follows each target", () => {
+  const repository = createRepository({ masterAhead: true });
   try {
-    const plan = spawnSync(process.execPath, [CLI, "plan", "--json"], {
-      cwd: repository, encoding: "utf8", env: childEnvironment(),
-    });
-    assert.equal(plan.status, 0, plan.stderr);
-    assert.deepEqual(JSON.parse(plan.stdout).changedFiles, ["docs/change.md"]);
-
-    const conflict = spawnSync(process.execPath,
-      [CLI, "plan", "--base", "origin/release/prod", "--json"], {
+    for (const target of ["dev", "test"]) {
+      git(repository, "push", "origin",
+        `${git(repository, "rev-parse", "origin/release/prod")}:refs/heads/${target}`);
+      const plan = spawnSync(process.execPath, [CLI, "plan", "--stage", "pr", "--target-branch", target, "--json"], {
         cwd: repository, encoding: "utf8", env: childEnvironment(),
       });
-    assert.equal(conflict.status, 2);
-    assert.match(conflict.stderr, /显式基线.*任务起点/);
+      assert.equal(plan.status, 0, plan.stderr);
+      const scope = JSON.parse(plan.stdout);
+      assert.deepEqual(scope.changedFiles, ["docs/change.md"]);
+      assert.equal(scope.targetBranch, target);
+      assert.equal(scope.base, git(repository, "rev-parse", `origin/${target}`));
 
-    const publish = spawnSync("bash", [PUBLISH, "--user-authorized", "--create-pr", "--target-branch", "release/prod", "--json"], {
+      const run = spawnSync(process.execPath, [CLI, "run", "--stage", "pr", "--target-branch", target, "--json"], {
+        cwd: repository, encoding: "utf8", env: childEnvironment(),
+      });
+      assert.equal(run.status, 0, run.stderr);
+
+      const check = spawnSync(process.execPath, [CLI, "check", "--stage", "pr", "--target-branch", target, "--json"], {
+        cwd: repository, encoding: "utf8", env: childEnvironment(),
+      });
+      assert.equal(check.status, 0, check.stderr);
+    }
+
+    const publish = spawnSync("bash", [PUBLISH, "--user-authorized", "--create-pr", "--target-branch", "dev", "--json"], {
       cwd: repository, encoding: "utf8", env: childEnvironment(),
     });
-    assert.equal(publish.status, 12, publish.stderr);
-    const payload = JSON.parse(publish.stdout);
-    assert.equal(payload.status, "TASK_BASE_NOT_SHARED");
-    assert.match(payload.pending_commits, /local release baseline/);
-    assert.equal(git(repository, "ls-remote", "--heads", "origin",
-      "refs/heads/chore/test-verification"), "");
+    assert.equal(publish.status, 0, publish.stderr);
+    assert.equal(JSON.parse(publish.stdout).status, "PUSHED_CREATE_PR");
   } finally {
     rmSync(repository, { recursive: true, force: true });
   }
@@ -1147,6 +1161,7 @@ test("target advance invalidates a receipt and synced target files leave the tas
       cwd: repository, encoding: "utf8", env: childEnvironment(),
     });
     assert.equal(initial.status, 0, initial.stderr);
+    const startSha = git(repository, "rev-parse", "HEAD~1");
 
     git(repository, "switch", "release/prod");
     mkdirSync(join(repository, "docs"), { recursive: true });
@@ -1166,8 +1181,10 @@ test("target advance invalidates a receipt and synced target files leave the tas
     const unsynced = spawnSync(process.execPath, [CLI, "plan", "--stage", "pr", "--json"], {
       cwd: repository, encoding: "utf8", env: childEnvironment(),
     });
-    assert.equal(unsynced.status, 2);
-    assert.match(unsynced.stderr, /PR_TARGET_NOT_SYNCED/);
+    assert.equal(unsynced.status, 0, unsynced.stderr);
+    const unsyncedScope = JSON.parse(unsynced.stdout);
+    assert.equal(unsyncedScope.base, startSha);
+    assert.deepEqual(unsyncedScope.changedFiles, ["docs/change.md"]);
 
     git(repository, "rebase", "release/prod");
     const synced = spawnSync(process.execPath, [CLI, "plan", "--stage", "pr", "--json"], {
@@ -1971,19 +1988,19 @@ test("each frontend typecheck or mode failure blocks push", () => {
   }
 });
 
-test("frontend push refuses a completion receipt built without the latest release", () => {
+test("frontend push pins its receipt to the target it will merge into", () => {
   const repository = createFrontendRepository();
   try {
+    assert.equal(frontendCli(repository, ["run"]).status, 0);
     git(repository, "switch", "-c", "release-update", "origin/release/prod");
     writeFileSync(join(repository, "README.md"), "new release input\n");
     git(repository, "add", "README.md");
     git(repository, "commit", "-m", "docs: advance release");
     git(repository, "push", "origin", "HEAD:release/prod");
     git(repository, "switch", "chore/test-verification");
-    assert.equal(frontendCli(repository, ["run"]).status, 0);
     const result = frontendCli(repository, ["check-push", "--head", git(repository, "rev-parse", "HEAD")]);
-    assert.equal(result.status, 2, result.stdout);
-    assert.match(result.stderr, /PR_TARGET_NOT_SYNCED/);
+    assert.equal(result.status, 4, result.stdout);
+    assert.equal(JSON.parse(result.stdout).reason, "PR target changed after verification");
   } finally { rmSync(repository, { recursive: true, force: true }); }
 });
 

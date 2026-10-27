@@ -484,18 +484,28 @@ class PublishReviewPackageTest(unittest.TestCase):
                 )
 
     def test_same_task_branch_advances_across_environment_targets(self) -> None:
-        for target in ("dev", "test"):
-            with self.subTest(target=target):
-                self.git("branch", target, cwd=self.main)
-                self.git("push", "origin", target, cwd=self.main)
-                result = self.invoke(
-                    "--user-authorized", "--create-pr", "--target-branch", target, "--json"
-                )
+        self.git("branch", "dev", BRANCH, cwd=self.main)
+        self.git("push", "origin", "dev", cwd=self.main)
+        first = self.invoke(
+            "--user-authorized", "--create-pr", "--target-branch", "dev", "--json"
+        )
+        self.assertEqual(first.returncode, 0, first.stderr)
+        self.assertIn("target=dev", self.publish_marker().read_text(encoding="utf-8"))
 
-                self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertIn(
-                    f"target={target}", self.publish_marker().read_text(encoding="utf-8")
-                )
+        self.git("checkout", "dev", cwd=self.main)
+        (self.main / "dev-only.txt").write_text("dev merged\n", encoding="utf-8")
+        self.git("add", "dev-only.txt", cwd=self.main)
+        self.git("commit", "-m", "chore: dev merge", cwd=self.main)
+        self.git("push", "origin", "dev", cwd=self.main)
+        self.git("checkout", "release/prod", cwd=self.main)
+        self.git("branch", "test", "origin/dev", cwd=self.main)
+        self.git("push", "origin", "test", cwd=self.main)
+        second = self.invoke(
+            "--user-authorized", "--create-pr", "--target-branch", "test", "--json"
+        )
+
+        self.assertEqual(second.returncode, 0, second.stderr)
+        self.assertIn("target=test", self.publish_marker().read_text(encoding="utf-8"))
 
     def test_create_mode_requires_explicit_target_branch(self) -> None:
         result = self.invoke("--user-authorized", "--create-pr", "--json")
