@@ -1,8 +1,6 @@
 import { useEffect } from 'react';
-import { RouterProvider } from 'react-router-dom';
 import { Toaster } from 'sonner';
-import router from '@/custom/router';
-import LoginDialog from '@/custom/components/LoginDialog';
+import AppRouter from '@/custom/router';
 import ForeignDraftReset from '@/shared/session/ForeignDraftReset';
 import { fetchMe, toSessionUser } from '@/custom/api/auth';
 import { updateUser } from '@/shared/utils/auth';
@@ -23,9 +21,8 @@ function App() {
 
   return (
     <>
-      <RouterProvider router={router} />
+      <AppRouter />
       <ForeignDraftReset />
-      <LoginDialog />
       <Toaster position="top-center" theme="dark" duration={2600} />
     </>
   );
