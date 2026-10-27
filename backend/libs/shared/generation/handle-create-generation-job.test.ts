@@ -4050,4 +4050,3 @@ describe("handleCreateGenerationJob 参考视频提交前物理校验（IKQYED�
     expect(createJob).toHaveBeenCalled();
   });
 });
-
