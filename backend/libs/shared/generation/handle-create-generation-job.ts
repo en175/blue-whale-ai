@@ -2104,21 +2104,45 @@ export async function handleCreateGenerationJob(
 
     if (type === "video" && capability?.features) {
       const referenceItems = ruling.references.filter((item) => item.role === "reference");
-      const referenceAssets = referenceItems
+      const probedDurations = new Map(
+        referenceItems
+          .filter((item) => item.asset_id !== undefined && item.duration !== undefined)
+          .map((item) => [String(item.asset_id), item.duration!]),
+      );
+      const itemAssets = referenceItems
         .map((item) =>
           item.asset_id !== undefined
             ? ruling.assetsById.get(String(item.asset_id))
             : undefined,
         )
-        .filter((asset): asset is NonNullable<typeof asset> => asset !== undefined);
-      const materialRefs = referenceItems
-        .filter((item) => item.material_id !== undefined)
-        .map((item) => ({ id: item.material_id!, type: item.type }));
+        .filter((asset): asset is NonNullable<typeof asset> => asset !== undefined)
+        .map((asset) =>
+          probedDurations.has(asset.id)
+            ? { ...asset, duration: probedDurations.get(asset.id)! }
+            : asset,
+        );
+      const legacyIds = referenceAssetIds
+        .map(String)
+        .filter((id) => !ruling.assetsById.has(id));
+      const legacyAssets =
+        legacyIds.length > 0
+          ? await deps.assets.resolveInputAssets(legacyIds, userId, projectId)
+          : [];
+      const referenceAssets = [
+        ...itemAssets,
+        ...legacyAssets.filter((asset) => !itemAssets.some((item) => item.id === asset.id)),
+      ];
+      const materialReferences = uniqueMaterialRefs([
+        ...referenceItems
+          .filter((item) => item.material_id !== undefined)
+          .map((item) => ({ id: item.material_id!, type: item.type })),
+        ...(materialRefs(body.reference_materials) ?? []),
+      ]);
       try {
         validateReferences(
           capability.features,
           referenceAssets,
-          materialRefs,
+          materialReferences,
           videoMode ?? null,
         );
       } catch (error) {

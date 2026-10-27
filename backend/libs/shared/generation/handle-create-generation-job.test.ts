@@ -4049,4 +4049,32 @@ describe("handleCreateGenerationJob 参考视频提交前物理校验（IKQYED�
     expect(result.code).toBe(200);
     expect(createJob).toHaveBeenCalled();
   });
+
+  it("画布旧字段 reference_asset_ids 提交不合规参考视频 → 400，不建任务", async () => {
+    const { deps, createJob } = buildVideoDeps({ features: FEATURES });
+    (deps as unknown as { canvas: unknown }).canvas = {
+      getByProject: vi.fn().mockResolvedValue({
+        id: "9",
+        project_id: "1",
+        version: 1,
+        viewport: null,
+        nodes: JSON.stringify([{ id: "d1", type: "mediaNode", data: { mediaType: "video" } }]),
+        edges: "[]",
+      }),
+    };
+    vi.mocked(deps.assets.resolveInputAssets).mockResolvedValue([
+      videoAsset({ mime: "video/webm" }),
+    ]);
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      { ...VIDEO_BODY, target_node_id: "d1", reference_asset_ids: ["1"] },
+      null,
+      deps,
+    );
+    expect(result.code).toBe(1036);
+    expect(result.data?.code).toBe("invalid_reference_media");
+    expect(result.msg).toBe("参考视频只支持 MP4 或 MOV");
+    expect(createJob).not.toHaveBeenCalled();
+  });
 });
