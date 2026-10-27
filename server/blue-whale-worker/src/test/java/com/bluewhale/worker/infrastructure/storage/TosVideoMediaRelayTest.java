@@ -1173,6 +1173,18 @@ class TosVideoMediaRelayTest {
     }
 
     @Test
+    @DisplayName("TOS media info 响应超过 256KiB → 视为探测失败，不整段读入内存")
+    void probeVideoDimensions_oversizedResponseReturnsNull() throws Exception {
+        String url = serve("application/octet-stream", 200, 300 * 1024, patternBlock());
+        TOSV2 client = mock(TOSV2.class);
+        doAnswer(invocation -> new PreSignedURLOutput(url, java.util.Map.of()))
+                .when(client).preSignedURL(any(PreSignedURLInput.class));
+
+        assertThat(new TosVideoMediaRelay(client, "bkt", "tos.example.com")
+                .probeVideoDimensions("generated/9/video/a.mp4")).isNull();
+    }
+
+    @Test
     @DisplayName("空 storageKey → 不请求，直接留空")
     void probeVideoDimensions_blankKeyReturnsNull() {
         TOSV2 client = mock(TOSV2.class);

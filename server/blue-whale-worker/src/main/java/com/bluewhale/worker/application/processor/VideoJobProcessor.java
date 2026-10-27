@@ -410,6 +410,8 @@ public class VideoJobProcessor implements JobProcessor {
             if (dimensions == null) {
                 log.warn("[video] TOS 探测视频宽高失败，资产宽高留空 jobId={}", claim.id());
             }
+        } else if (dimensions == null) {
+            log.warn("[video] 缺快照宽高且无 TOS 探测条件，资产宽高留空 jobId={}", claim.id());
         }
         Integer width = dimensions != null ? dimensions[0] : null;
         Integer height = dimensions != null ? dimensions[1] : null;
