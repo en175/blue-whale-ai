@@ -23,7 +23,7 @@
    - `command_idempotency` → `project_command_receipts`（它按 `project_id + operation + key` 唯一，是画布与建单命令的幂等回执，不是通用命令表）
    - `legacy_card_history` → `project_card_migration_history`（名字去掉版本性形容词）
 4. 只改嵌入完整旧表名的索引（7 条）。`idx_tier_status_sort`、`uk_adj_*`、`idx_oplog_category_created` 不含旧表名，保持原样。
-5. `project_card_migration_history` 保留期定为 **180 天**（按 `gmt_create`）：表注释写明保留期与清理入口，清理脚本 `scripts/cleanup-project-card-migration-history.mjs` 默认 dry-run、`--apply` 分批删除。
+5. `project_card_migration_history` 保留期定为 **180 天**（按 `gmt_create`）：表注释写明保留期与清理入口，清理脚本 `backend/scripts/cleanup-project-card-migration-history.mjs` 默认 dry-run、`--apply` 分批删除。
 6. 迁移语句顺序：索引改名在前，8 张表一条多表 `RENAME TABLE` 在后，最后写表注释。
 
 ## 后果

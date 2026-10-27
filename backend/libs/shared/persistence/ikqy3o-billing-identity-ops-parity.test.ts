@@ -33,7 +33,7 @@ const javaSchemaSql = readFileSync(
   "utf8",
 );
 const cleanupScript = readFileSync(
-  new URL("../../../../scripts/cleanup-project-card-migration-history.mjs", import.meta.url),
+  new URL("../../../scripts/cleanup-project-card-migration-history.mjs", import.meta.url),
   "utf8",
 );
 
