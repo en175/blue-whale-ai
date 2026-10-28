@@ -43,9 +43,12 @@ IKHJ0Q_DATABASE_URL="$BW_INTEGRATION_DATABASE_URL" \
 | [ikjltx-media-tool-replay](../../backend/libs/shared/persistence/ikjltx-media-tool-replay.integration.test.ts) | `IKJLTX_DATABASE_URL` | `3309 / bw_gate_ikjltx` | 原意图回读先于素材等可变状态；旧关联重放不重新取得当前归属 |
 | [ikjlxe-canvas-recovery](../../backend/libs/shared/persistence/ikjlxe-canvas-recovery.integration.test.ts) | `IKJLXE_DATABASE_URL` | 以本地隔离库配置为准 | 首次 primary 与目标卡成对转换、同状态重复 apply 和回执重放 |
 | [ikizqc-finalize-unique](../../backend/libs/shared/persistence/ikizqc-finalize-unique.integration.test.ts) | `IKIZQC_DATABASE_URL` | 原示例为 `3307 / ikizqc_probe` | 同成片来源并发插入恰一行成功；NULL 来源允许重复；失败占位仍占唯一键 |
+| [ikjlpc-canvas-recovery](../../backend/libs/shared/persistence/ikjlpc-canvas-recovery.integration.test.ts) | `IKJLPC_DATABASE_URL` | 以本地隔离库配置为准 | 受理接管与保存后的归属版本推进、恢复页可见性 |
+| [ikqy3h-node-owner-arbitration](../../backend/libs/shared/persistence/ikqy3h-node-owner-arbitration.integration.test.ts) | `IKQY3H_DATABASE_URL` | 以本地隔离库配置为准 | 归属三列并入节点行后的版本仲裁、软删保留与整份保存写行表 |
+| [ikqy3g-canvas-read-benchmark](../../backend/libs/shared/persistence/ikqy3g-canvas-read-benchmark.integration.test.ts) | `IKQY3G_DATABASE_URL`（可选 `IKQY3G_NODES`、`IKQY3G_ITERATIONS`） | 以本地隔离库配置为准 | JSON 与行表读取的耗时/数据量对比；默认跑 200 与 1000 节点两档 |
 | [tz-caliber](../../backend/libs/shared/persistence/tz-caliber.integration.test.ts) | `IKHJ0Q_DATABASE_URL` | 原示例为 `13306 / tz_caliber` | 数据库默认时间与 DATETIME 字面量读写均使用北京时间 |
 
-表中端口和库名保留原手册的隔离分配，不作为测试代码的固定配置。运行时以环境变量提供的连接串为准。
+表中端口和库名保留原手册的隔离分配，不作为测试代码的固定配置。运行时以环境变量提供的连接串为准。多个套件共用同一个库时（例如都指向 `bw_gate_ikqy3h`）必须串行执行：`ikjjqw`/`ikjjqy`/`ikjjr0`/`ikjjqz` 等套件使用相同 `PROJECT_ID`，并行会互相清理夹具。
 
 ## 服务接口套件
 

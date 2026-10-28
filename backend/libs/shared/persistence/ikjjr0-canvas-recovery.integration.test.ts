@@ -544,6 +544,8 @@ describe.skipIf(!databaseUrl)("成片与重生样片恢复契约 v1 真库验证
     expect(await prisma.generation_jobs.count({ where: { project_id: BigInt(PROJECT_ID) } })).toBe(0);
     expect(await prisma.project_command_receipts.count({ where: { project_id: BigInt(PROJECT_ID) } })).toBe(0);
     expect(await prisma.project_nodes.count({ where: { project_id: BigInt(PROJECT_ID), owner_submission_id: { not: null } } })).toBe(0);
+    const seededOwner = await findEffectiveRecoveryOwner(prisma, BigInt(PROJECT_ID), "node-compensate");
+    expect(Number(seededOwner?.binding_revision)).toBe(7);
   });
 
   it("★ R5 旧承接版本抢占旧成片节点 → 409，不覆盖旧承接（AC4）", async () => {
