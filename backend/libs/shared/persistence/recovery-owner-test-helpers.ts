@@ -1,5 +1,6 @@
 import type { PrismaClient } from "@prisma/client";
 
+import { createCanvasRepo } from "./canvas-repo.js";
 import { loadRecoveryOwners } from "./generation-canvas-recovery-repo.js";
 
 export interface EffectiveRecoveryOwner {
@@ -7,6 +8,20 @@ export interface EffectiveRecoveryOwner {
   generation_canvas_submission_id: bigint;
   output_key: string;
   binding_revision: number;
+}
+
+export async function effectiveCanvasRow(
+  prisma: PrismaClient,
+  projectId: bigint | string,
+): Promise<Record<string, unknown> | null> {
+  const row = await prisma.project_canvas.findUnique({ where: { project_id: BigInt(projectId) } });
+  if (!row) return null;
+  const view = await createCanvasRepo(prisma).getByProject(projectId.toString());
+  return {
+    ...row,
+    nodes_json: JSON.parse(view.nodes ?? "[]") as unknown,
+    edges_json: JSON.parse(view.edges ?? "[]") as unknown,
+  };
 }
 
 export async function findEffectiveRecoveryOwners(

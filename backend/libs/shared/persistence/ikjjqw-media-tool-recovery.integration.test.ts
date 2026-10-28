@@ -137,14 +137,13 @@ async function submit(
   revision = 0,
 ) {
   const service = tool.make(prisma) as {
-    create: (userId: string, projectId: string, body: Record<string, unknown>, internal?: unknown, key?: string) => Promise<{ code: number; msg?: string; data?: unknown }>;
+    create: (userId: string, projectId: string, body: Record<string, unknown>, key?: string) => Promise<{ code: number; msg?: string; data?: unknown }>;
   };
   const body = tool.body(sid);
   return service.create(
     USER_ID,
     PROJECT_ID,
     { ...body, canvas_binding: bindingOf(sid, node, revision) },
-    {},
     tool.name === "抠像" ? undefined : sid,
   );
 }
@@ -173,6 +172,8 @@ describe.skipIf(!databaseUrl)("单结果媒体工具恢复协议真库验证（I
     await prisma.generation_canvas_submissions.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
     await prisma.project_command_receipts.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
     await prisma.project_canvas.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
+    await prisma.project_edges.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
+    await prisma.project_nodes.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
     await prisma.generation_output_slots.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
     await prisma.generation_job_logs.deleteMany({});
     await prisma.generation_jobs.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });

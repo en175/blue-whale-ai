@@ -927,7 +927,7 @@ export async function saveCanvasWithRecovery(
 
 
       if (write.createOwner) {
-        await tx.project_nodes.updateMany({
+        const updated = await tx.project_nodes.updateMany({
           where: { project_id: pid, node_id: write.nodeId },
           data: {
             owner_submission_id: write.submissionRow.id,
@@ -936,6 +936,21 @@ export async function saveCanvasWithRecovery(
             gmt_modified: new Date(),
           },
         });
+        if (updated.count === 0) {
+          await tx.project_nodes.create({
+            data: {
+              project_id: pid,
+              node_id: write.nodeId,
+              type: "mediaNode",
+              source: "user",
+              is_delete: 1,
+              version: 0,
+              owner_submission_id: write.submissionRow.id,
+              owner_output_key: write.outputKey,
+              owner_binding_revision: 1,
+            },
+          });
+        }
       }
     }
 

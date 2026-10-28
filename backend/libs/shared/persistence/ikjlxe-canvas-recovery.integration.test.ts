@@ -1,4 +1,4 @@
-import { findEffectiveRecoveryOwners, clearEffectiveRecoveryOwners } from "./recovery-owner-test-helpers.js";
+import { findEffectiveRecoveryOwners, clearEffectiveRecoveryOwners, effectiveCanvasRow } from "./recovery-owner-test-helpers.js";
 
 
 
@@ -81,7 +81,7 @@ describe.skipIf(!databaseUrl)("首次 primary 必须原子转换目标（IKJLXE�
     const project_id = BigInt(PROJECT_ID);
     const submissions = await prisma.generation_canvas_submissions.findMany({ where: { project_id } });
     return {
-      canvas: await prisma.project_canvas.findUnique({ where: { project_id } }),
+      canvas: await effectiveCanvasRow(prisma, project_id),
       submissions,
       outputs: await prisma.generation_canvas_outputs.findMany({ where: { generation_canvas_submission_id: { in: submissions.map(row => row.id) } } }),
       owners: await findEffectiveRecoveryOwners(prisma, project_id),
@@ -107,6 +107,8 @@ describe.skipIf(!databaseUrl)("首次 primary 必须原子转换目标（IKJLXE�
     await prisma.project_asset.deleteMany({ where: { project_id } });
     await prisma.user_assets.deleteMany({ where: { project_id } });
     await prisma.project_canvas.deleteMany({ where: { project_id } });
+    await prisma.project_edges.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
+    await prisma.project_nodes.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
     await prisma.generation_jobs.deleteMany({ where: { project_id } });
   });
   afterAll(async () => {

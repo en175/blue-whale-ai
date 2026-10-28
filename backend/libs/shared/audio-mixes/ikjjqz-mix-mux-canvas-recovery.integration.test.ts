@@ -80,6 +80,8 @@ describe.skipIf(!databaseUrl)("混合/合成提交归属真库验证（IKJJQZ）
 
   async function seedCanvas(nodeIds: string[]) {
     await prisma.project_canvas.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
+    await prisma.project_edges.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
+    await prisma.project_nodes.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
     await prisma.project_canvas.create({
       data: {
         project_id: BigInt(PROJECT_ID),
@@ -145,7 +147,7 @@ describe.skipIf(!databaseUrl)("混合/合成提交归属真库验证（IKJJQZ）
       findOwnedSource: vi.fn(async (id: string) => ({
         project_id: BigInt(PROJECT_ID), type: id === "22" ? "video" : "audio",
         url: `https://store.test/${id}.mp4`, storage_key: `uploads/9/${id}.mp4`,
-        duration_ms: 5000,
+        duration_ms: 5000, width: 1920, height: 1080,
       })),
     };
     const storage = { uploads: { inspectObject: vi.fn(async (key: string) => ({ size: 10, publicUrl: `https://store.test/${key}` })) } };
@@ -204,7 +206,7 @@ describe.skipIf(!databaseUrl)("混合/合成提交归属真库验证（IKJJQZ）
     const created = await createMixJob(binding(S3, "mix-node", 0), S3);
     const jobId = created.data!.job_id!;
     await markJobFailed(jobId);
-    const retried = await mixes.retry(USER_ID, PROJECT_ID, jobId, S4, undefined, binding(S4, "mix-node", 1));
+    const retried = await mixes.retry(USER_ID, PROJECT_ID, jobId, S4, binding(S4, "mix-node", 1));
     const retriedJobId = retried.data!.job_id!;
     expect(retriedJobId).not.toBe(jobId);
     expect(retried).toMatchObject({
@@ -284,7 +286,7 @@ describe.skipIf(!databaseUrl)("混合/合成提交归属真库验证（IKJJQZ）
     const created = await createMixJob(binding(S7, "mix-node", 0), S7);
     const jobId = created.data!.job_id!;
     await markJobFailed(jobId);
-    const rejected = await mixes.retry(USER_ID, PROJECT_ID, jobId, S8, undefined, binding(S8, "other-node", 0));
+    const rejected = await mixes.retry(USER_ID, PROJECT_ID, jobId, S8, binding(S8, "other-node", 0));
     expect(rejected).toMatchObject({
       code: 422,
       data: { reason: RECOVERY_REASONS.documentMismatch },
@@ -302,25 +304,25 @@ describe.skipIf(!databaseUrl)("混合/合成提交归属真库验证（IKJJQZ）
     const legacyMix = await prisma.generation_jobs.create({ data: {
       project_id: BigInt(PROJECT_ID), user_id: BigInt(USER_ID), type: "audio_mix", source: "dock",
       status: "failed", progress: 0, input: {
-        source_node_id: "legacy-mix-node", inputs: [{ asset_id: "11", url: "https://our-tos/11.flac" }],
+        source_node_id: "legacy-mix-node", estimated_duration_ms: 5000, inputs: [{ asset_id: "11", url: "https://our-tos/11.flac" }],
       } as never, fencing_token: 0,
     } });
-    const accepted = await mixes.retry(USER_ID, PROJECT_ID, legacyMix.id.toString(), S9, undefined, binding(S9, "legacy-mix-node", 0));
+    const accepted = await mixes.retry(USER_ID, PROJECT_ID, legacyMix.id.toString(), S9, binding(S9, "legacy-mix-node", 0));
     expect(accepted).toMatchObject({ code: 200, data: { canvas_binding: { submission_id: S9, binding_revision: 1, is_current: true } } });
 
     const legacyMix2 = await prisma.generation_jobs.create({ data: {
       project_id: BigInt(PROJECT_ID), user_id: BigInt(USER_ID), type: "audio_mix", source: "dock",
       status: "failed", progress: 0, input: {
-        source_node_id: "legacy-mix-node", inputs: [{ asset_id: "11", url: "https://our-tos/11.flac" }],
+        source_node_id: "legacy-mix-node", estimated_duration_ms: 5000, inputs: [{ asset_id: "11", url: "https://our-tos/11.flac" }],
       } as never, fencing_token: 0,
     } });
-    const rejected = await mixes.retry(USER_ID, PROJECT_ID, legacyMix2.id.toString(), S10, undefined, binding(S10, "other-node", 0));
+    const rejected = await mixes.retry(USER_ID, PROJECT_ID, legacyMix2.id.toString(), S10, binding(S10, "other-node", 0));
     expect(rejected).toMatchObject({ code: 422, data: { reason: RECOVERY_REASONS.documentMismatch } });
 
     const legacyMux = await prisma.generation_jobs.create({ data: {
       project_id: BigInt(PROJECT_ID), user_id: BigInt(USER_ID), type: "audio_video_mux", source: "dock",
       status: "failed", progress: 0, input: {
-        audio: { assetId: "21" }, video: { assetId: "22" }, estimated_duration_ms: null, submit_attempt: 1,
+        audio: { assetId: "21" }, video: { assetId: "22" }, estimated_duration_ms: 5000, resolution: "1080p", submit_attempt: 1,
       } as never, fencing_token: 0,
     } });
     const muxRejected = await muxes.retry(USER_ID, PROJECT_ID, legacyMux.id.toString(), S1, binding(S1, "legacy-mux-node", 0));
@@ -332,8 +334,8 @@ describe.skipIf(!databaseUrl)("混合/合成提交归属真库验证（IKJJQZ）
     const jobId = created.data!.job_id!;
     await markJobFailed(jobId);
     const attempts = await Promise.allSettled([
-      mixes.retry(USER_ID, PROJECT_ID, jobId, S3, undefined, binding(S3, "mix-node", 1)),
-      mixes.retry(USER_ID, PROJECT_ID, jobId, S4, undefined, binding(S4, "mix-node", 1)),
+      mixes.retry(USER_ID, PROJECT_ID, jobId, S3, binding(S3, "mix-node", 1)),
+      mixes.retry(USER_ID, PROJECT_ID, jobId, S4, binding(S4, "mix-node", 1)),
     ]);
     const fulfilled = attempts.filter(attempt => attempt.status === "fulfilled");
     const values = fulfilled.map(attempt => (attempt as PromiseFulfilledResult<{ code: number; data?: { reason?: string } }>).value);
@@ -401,7 +403,7 @@ describe.skipIf(!databaseUrl)("混合/合成提交归属真库验证（IKJJQZ）
     expect(Number(owner.binding_revision)).toBe(1);
 
     await markJobFailed(jobId);
-    const again = await mixes.retry(USER_ID, PROJECT_ID, jobId, S7, undefined, binding(S7, "settle-node", 1));
+    const again = await mixes.retry(USER_ID, PROJECT_ID, jobId, S7, binding(S7, "settle-node", 1));
     expect(again).toMatchObject({ code: 200, data: { canvas_binding: { submission_id: S7, binding_revision: 2, is_current: true } } });
     const ownerAfter = await requireEffectiveRecoveryOwner(prisma, BigInt(PROJECT_ID), "settle-node");
     expect(Number(ownerAfter.binding_revision)).toBe(2);
@@ -415,12 +417,12 @@ describe.skipIf(!databaseUrl)("混合/合成提交归属真库验证（IKJJQZ）
     const created = await createMixJob(binding(S8, "mix-node", 0), S8);
     const jobId = created.data!.job_id!;
     await markJobFailed(jobId);
-    const first = await mixes.retry(USER_ID, PROJECT_ID, jobId, S9, undefined, binding(S9, "mix-node", 1));
+    const first = await mixes.retry(USER_ID, PROJECT_ID, jobId, S9, binding(S9, "mix-node", 1));
     const firstRetryJobId = first.data!.job_id!;
     expect(first).toMatchObject({ code: 200, data: { replayed: false, canvas_binding: { submission_id: S9 } } });
     expect(firstRetryJobId).not.toBe(jobId);
 
-    const replay = await mixes.retry(USER_ID, PROJECT_ID, jobId, S9, undefined, binding(S9, "mix-node", 1));
+    const replay = await mixes.retry(USER_ID, PROJECT_ID, jobId, S9, binding(S9, "mix-node", 1));
     expect(replay).toMatchObject({ code: 200, data: { job_id: firstRetryJobId, replayed: true, canvas_binding: { submission_id: S9 } } });
     const original = await prisma.generation_jobs.findUniqueOrThrow({ where: { id: BigInt(jobId) } });
     expect(original.status).toBe("failed");
@@ -432,7 +434,7 @@ describe.skipIf(!databaseUrl)("混合/合成提交归属真库验证（IKJJQZ）
   });
 
   it("★10 绑定校验：Idempotency-Key 与 submission_id 不一致 / 非法载荷 → 400", async () => {
-    const badKey = await mixes.retry(USER_ID, PROJECT_ID, "1", "not-a-uuid-key", undefined, binding(S1, "mix-node", 0));
+    const badKey = await mixes.retry(USER_ID, PROJECT_ID, "1", "not-a-uuid-key", binding(S1, "mix-node", 0));
     expect(badKey).toMatchObject({ code: 400, data: { reason: RECOVERY_REASONS.invalidPayload } });
     const badPayload = await muxes.retry(USER_ID, PROJECT_ID, "1", S2, { protocol_version: 2 });
     expect(badPayload).toMatchObject({ code: 400, data: { reason: RECOVERY_REASONS.invalidPayload } });
@@ -454,7 +456,7 @@ describe.skipIf(!databaseUrl)("混合/合成提交归属真库验证（IKJJQZ）
     const jobId = created.data!.job_id!;
     await markJobFailed(jobId);
 
-    const stale = await mixes.retry(USER_ID, PROJECT_ID, jobId, S2, undefined, binding(S2, "mix-node", 0));
+    const stale = await mixes.retry(USER_ID, PROJECT_ID, jobId, S2, binding(S2, "mix-node", 0));
     expect(stale).toMatchObject({
       code: 409,
       data: { reason: RECOVERY_REASONS.bindingConflict, currentBindingRevision: 1 },
