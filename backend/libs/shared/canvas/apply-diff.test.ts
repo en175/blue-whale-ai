@@ -56,17 +56,17 @@ describe("画布 apply 差异", () => {
       data_json: {},
     };
     expect(edgeWriteOrNull(base, { id: "e1", source: "a", target: "b" })).toBeNull();
-    const write = edgeWriteOrNull(base, { id: "e1", source: "a", target: "b", ref_role: "first" });
+    const write = edgeWriteOrNull(base, { id: "e1", source: "a", target: "b", data: { refRole: "first" } });
     expect(write!.changes.ref_role).toEqual({ from: null, to: "first" });
   });
 
-  it("边载荷剔除标识列后仅保留扩展字段", () => {
-    expect(edgeRowFromInput({ id: "e1", source: "a", target: "b", refRole: "last", extra: 1 })).toEqual({
+  it("边载荷保留 data 内的扩展字段，不重复包一层 data", () => {
+    expect(edgeRowFromInput({ id: "e1", source: "a", target: "b", data: { refRole: "last", extra: 1 } })).toEqual({
       edge_id: "e1",
       source_node_id: "a",
       target_node_id: "b",
       ref_role: "last",
-      data_json: { extra: 1 },
+      data_json: { refRole: "last", extra: 1 },
     });
   });
 

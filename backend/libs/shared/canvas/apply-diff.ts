@@ -112,19 +112,22 @@ export function nodeWriteOrNull(row: CanvasNodeRow, input: CanvasNodeInput): Nod
 export function edgeRowFromInput(
   input: CanvasEdgeInput,
 ): Omit<CanvasEdgeRow, "edge_id"> & { edge_id: string } {
-  const rest: Record<string, unknown> = { ...input };
-  delete rest.id;
-  delete rest.source;
-  delete rest.target;
-  delete rest.refRole;
-  delete rest.ref_role;
-  const role = typeof input.refRole === "string" ? input.refRole : typeof input.ref_role === "string" ? input.ref_role : null;
+  const data =
+    input.data && typeof input.data === "object" && !Array.isArray(input.data)
+      ? (input.data as Record<string, unknown>)
+      : {};
+  const role =
+    typeof data.refRole === "string"
+      ? data.refRole
+      : typeof input.ref_role === "string"
+        ? input.ref_role
+        : null;
   return {
     edge_id: input.id,
     source_node_id: input.source,
     target_node_id: input.target,
     ref_role: role,
-    data_json: rest as unknown as Prisma.JsonValue,
+    data_json: data as unknown as Prisma.JsonValue,
   };
 }
 

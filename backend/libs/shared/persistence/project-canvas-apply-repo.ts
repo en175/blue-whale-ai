@@ -6,6 +6,7 @@ import {
   edgeWriteOrNull,
   nodeRowFromInput,
   nodeWriteOrNull,
+  stableJson,
   type CanvasEdgeInput,
   type CanvasEdgeRow,
   type CanvasNodeInput,
@@ -42,17 +43,30 @@ export interface CanvasApplyResult {
 }
 
 export class CanvasApplyConflictError extends Error {
-  constructor(readonly reason: "duplicate_edge_pair" | "duplicate_node_id" | "duplicate_edge_id") {
+  constructor(
+    readonly reason:
+      | "duplicate_edge_pair"
+      | "duplicate_node_id"
+      | "duplicate_edge_id"
+      | "missing_endpoint",
+  ) {
     super(reason);
   }
 }
 
 type Tx = Prisma.TransactionClient;
 
-function audioMixJobId(node: { id: string; data?: Record<string, unknown> | null }): bigint | null {
+function audioMixJobId(node: { id: string; type?: string; data?: Record<string, unknown> | null }): bigint | null {
+  if (node.type !== undefined && node.type !== "mediaNode") return null;
   const match = /^audio-mix-([1-9][0-9]*)$/.exec(node.id);
-  if (!match || String(node.data?.jobId) !== match[1]) return null;
-  return BigInt(match[1]);
+  if (!match) return null;
+  if (node.data !== undefined && String(node.data?.jobId) !== match[1]) return null;
+  return BigInt(match[1]!);
+}
+
+function audioMixJobIdFromNodeId(id: string): bigint | null {
+  const match = /^audio-mix-([1-9][0-9]*)$/.exec(id);
+  return match ? BigInt(match[1]!) : null;
 }
 
 async function markAudioMixScoped(
@@ -64,7 +78,9 @@ async function markAudioMixScoped(
 ) {
   if (!/^[1-9][0-9]*$/.test(ownerId)) return;
   const present = nodes.map(audioMixJobId).filter((id): id is bigint => id !== null);
-  const removed = deletedNodeIds.map((id) => audioMixJobId({ id })).filter((id): id is bigint => id !== null);
+  const removed = deletedNodeIds
+    .map(audioMixJobIdFromNodeId)
+    .filter((id): id is bigint => id !== null);
   const scope = { project_id: projectId, user_id: BigInt(ownerId), type: "audio_mix", is_delete: false };
   if (present.length > 0) {
     const jobs = await tx.generation_jobs.findMany({
@@ -87,13 +103,14 @@ async function markAudioMixScoped(
 }
 
 async function lockCanvas(tx: Tx, projectId: bigint) {
-  const rows = await tx.$queryRaw<Array<{ id: bigint; version: number }>>`
-    SELECT id, version FROM project_canvas WHERE project_id = ${projectId} FOR UPDATE
+  await tx.$queryRaw`SELECT id FROM project WHERE id = ${projectId} FOR UPDATE`;
+  const rows = await tx.$queryRaw<Array<{ id: bigint; version: number; viewport_json: Prisma.JsonValue | null }>>`
+    SELECT id, version, viewport_json FROM project_canvas WHERE project_id = ${projectId} FOR UPDATE
   `;
   if (rows.length > 0) return rows[0]!;
   return tx.project_canvas.create({
     data: { project_id: projectId, version: 0 },
-    select: { id: true, version: true },
+    select: { id: true, version: true, viewport_json: true },
   });
 }
 
@@ -337,6 +354,24 @@ export async function applyCanvasChanges(
     });
     const edgeById = new Map(existingEdges.map((row) => [row.edge_id, row]));
 
+    const referencedEndpoints = [
+      ...new Set(input.edges.flatMap((edge) => [edge.source, edge.target])),
+    ];
+    const endpointIsBatchAlive = new Set(
+      input.nodes.map((node) => node.id).filter((id) => !removedNodeIds.has(id)),
+    );
+    const endpointsToCheck = referencedEndpoints.filter((id) => !endpointIsBatchAlive.has(id));
+    if (endpointsToCheck.length > 0) {
+      const aliveEndpoints = await tx.project_nodes.findMany({
+        where: { project_id: pid, node_id: { in: endpointsToCheck }, is_delete: 0 },
+        select: { node_id: true },
+      });
+      const aliveEndpointIds = new Set(aliveEndpoints.map((row) => row.node_id));
+      if (endpointsToCheck.some((id) => !aliveEndpointIds.has(id))) {
+        throw new CanvasApplyConflictError("missing_endpoint");
+      }
+    }
+
     for (const edge of input.edges) {
       if (cascadeSet.has(edge.id)) throw new CanvasApplyConflictError("duplicate_edge_id");
       const existing = edgeById.get(edge.id);
@@ -346,16 +381,23 @@ export async function applyCanvasChanges(
           result.skipped_edge_ids.push(edge.id);
           continue;
         }
-        await tx.project_edges.update({
-          where: { project_id_edge_id: { project_id: pid, edge_id: edge.id } },
-          data: {
-            source_node_id: write.row.source_node_id,
-            target_node_id: write.row.target_node_id,
-            ref_role: write.row.ref_role,
-            data_json: write.row.data_json as Prisma.InputJsonValue,
-            version: { increment: 1 },
-          },
-        });
+        try {
+          await tx.project_edges.update({
+            where: { project_id_edge_id: { project_id: pid, edge_id: edge.id } },
+            data: {
+              source_node_id: write.row.source_node_id,
+              target_node_id: write.row.target_node_id,
+              ref_role: write.row.ref_role,
+              data_json: write.row.data_json as Prisma.InputJsonValue,
+              version: { increment: 1 },
+            },
+          });
+        } catch (error) {
+          if (typeof error === "object" && error !== null && "code" in error && error.code === "P2002") {
+            throw new CanvasApplyConflictError("duplicate_edge_pair");
+          }
+          throw error;
+        }
         result.upserted_edge_ids.push(edge.id);
         continue;
       }
@@ -406,13 +448,16 @@ export async function applyCanvasChanges(
     }
 
     if (input.viewport !== undefined) {
-      await tx.project_canvas.update({
-        where: { id: canvas.id },
-        data: {
-          viewport_json: input.viewport === null ? Prisma.JsonNull : (input.viewport as Prisma.InputJsonValue),
-          version: { increment: 1 },
-        },
-      });
+      const next = input.viewport === null ? null : input.viewport;
+      if (stableJson(next) !== stableJson(canvas.viewport_json ?? null)) {
+        await tx.project_canvas.update({
+          where: { id: canvas.id },
+          data: {
+            viewport_json: next === null ? Prisma.DbNull : (next as Prisma.InputJsonValue),
+            version: { increment: 1 },
+          },
+        });
+      }
     }
 
     if (input.materials && input.materials.items.length > 0) {
@@ -426,5 +471,5 @@ export async function applyCanvasChanges(
     const row = await tx.project_canvas.findUniqueOrThrow({ where: { id: canvas.id } });
     result.version = row.version;
     return result;
-  });
+  }, { maxWait: 10_000, timeout: 30_000 });
 }
