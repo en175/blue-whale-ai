@@ -9,11 +9,14 @@ import type { CanvasService } from "@lib/shared/canvas/canvas.service.js";
 
 type SaveResult = Record<string, unknown>;
 
-function makeController(outcome: SaveResult | Error) {
+function makeController(outcome: SaveResult | Error, applyOutcome: SaveResult | Error = {}) {
   const save = vi.fn();
   if (outcome instanceof Error) save.mockRejectedValue(outcome);
   else save.mockResolvedValue(outcome);
-  const canvas = { save } as unknown as CanvasService;
+  const apply = vi.fn();
+  if (applyOutcome instanceof Error) apply.mockRejectedValue(applyOutcome);
+  else apply.mockResolvedValue(applyOutcome);
+  const canvas = { save, apply } as unknown as CanvasService;
   const controller = new CanvasesController(canvas);
   const res = {
     status: vi.fn().mockReturnThis(),
@@ -23,6 +26,55 @@ function makeController(outcome: SaveResult | Error) {
 }
 
 const USER = { userId: "100" } as never;
+
+describe("CanvasesController.applyChanges 版本前置", () => {
+  it("带 If-Match 透传 expectedVersion，成功按 200 写出", async () => {
+    const { controller, canvas, res } = makeController({}, { code: 200, msg: "ok", data: { version: 4 } });
+
+    await controller.applyChanges(USER, "523", { upsert_nodes: [] }, '"3"', res);
+
+    expect(canvas.apply).toHaveBeenCalledWith("100", "523", { upsert_nodes: [], expectedVersion: 3 });
+    expect(res.status).toHaveBeenCalledWith(200);
+  });
+
+  it("missing 哨兵透传 null", async () => {
+    const { controller, canvas, res } = makeController({}, { code: 200, msg: "ok", data: { version: 1 } });
+
+    await controller.applyChanges(USER, "523", {}, '"missing"', res);
+
+    expect(canvas.apply).toHaveBeenCalledWith("100", "523", { expectedVersion: null });
+    expect(res.status).toHaveBeenCalledWith(200);
+  });
+
+  it("过期版本 → 412 且响应体带当前版本", async () => {
+    const { controller, res } = makeController({}, {
+      code: 412,
+      msg: "Canvas 版本冲突",
+      data: { version: 7 },
+    });
+
+    await controller.applyChanges(USER, "523", {}, '"3"', res);
+
+    expect(res.status).toHaveBeenCalledWith(412);
+    expect(res.json).toHaveBeenCalledWith({ code: 412, msg: "Canvas 版本冲突", data: { version: 7 } });
+  });
+
+  it("不带 If-Match → 不传 expectedVersion", async () => {
+    const { controller, canvas, res } = makeController({}, { code: 200, msg: "ok", data: { version: 1 } });
+
+    await controller.applyChanges(USER, "523", {}, undefined, res);
+
+    expect(canvas.apply).toHaveBeenCalledWith("100", "523", {});
+    expect(res.status).toHaveBeenCalledWith(200);
+  });
+
+  it("无效 If-Match → 400 且不调用服务", async () => {
+    const { controller, canvas, res } = makeController({}, {});
+
+    await expect(controller.applyChanges(USER, "523", {}, "v3", res)).rejects.toBeInstanceOf(NewApiError);
+    expect(canvas.apply).not.toHaveBeenCalled();
+  });
+});
 
 describe("CanvasesController.save 响应写出", () => {
   it("版本冲突 → HTTP 412，且响应体 data.version 为服务端当前版本", async () => {

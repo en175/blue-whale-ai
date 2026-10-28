@@ -28,6 +28,7 @@ export interface CanvasApplyInput {
   edges: CanvasEdgeInput[];
   deleteEdgeIds: string[];
   viewport?: unknown;
+  expectedVersion?: number | null;
   actorId: string;
   materials?: CanvasApplyMaterials;
 }
@@ -52,6 +53,12 @@ export class CanvasApplyConflictError extends Error {
       | "missing_endpoint",
   ) {
     super(reason);
+  }
+}
+
+export class CanvasApplyVersionError extends Error {
+  constructor(readonly version: number | null) {
+    super("canvas_version_conflict");
   }
 }
 
@@ -109,7 +116,7 @@ async function lockCanvas(tx: Tx, projectId: bigint) {
     SELECT id FROM project_canvas WHERE project_id = ${projectId} FOR UPDATE
   `;
   if (locked.length > 0) {
-    return tx.project_canvas.findUniqueOrThrow({
+    const row = await tx.project_canvas.findUniqueOrThrow({
       where: { project_id: projectId },
       select: {
         id: true,
@@ -120,8 +127,9 @@ async function lockCanvas(tx: Tx, projectId: bigint) {
         rows_authoritative: true,
       },
     });
+    return { row, created: false };
   }
-  return tx.project_canvas.create({
+  const row = await tx.project_canvas.create({
     data: { project_id: projectId, version: 0 },
     select: {
       id: true,
@@ -132,6 +140,7 @@ async function lockCanvas(tx: Tx, projectId: bigint) {
       rows_authoritative: true,
     },
   });
+  return { row, created: true };
 }
 
 function toNodeRow(row: {
@@ -206,7 +215,14 @@ export async function applyCanvasChanges(
   if (new Set(edgeIds).size !== edgeIds.length) throw new CanvasApplyConflictError("duplicate_edge_id");
 
   return prisma.$transaction(async (tx) => {
-    const canvas = await lockCanvas(tx, pid);
+    const locked = await lockCanvas(tx, pid);
+    const canvas = locked.row;
+    if (input.expectedVersion !== undefined) {
+      const currentVersion = locked.created ? null : canvas.version;
+      if (input.expectedVersion !== currentVersion) {
+        throw new CanvasApplyVersionError(currentVersion);
+      }
+    }
     if (canvas.rows_authoritative !== 1) {
       await importCanvasJsonToRows(tx, pid, canvas);
     }
@@ -470,17 +486,27 @@ export async function applyCanvasChanges(
       result.deleted_edge_ids.push(edgeId);
     }
 
-    if (input.viewport !== undefined) {
+    const contentChanged = result.upserted_node_ids.length > 0
+      || result.deleted_node_ids.length > 0
+      || result.upserted_edge_ids.length > 0
+      || result.deleted_edge_ids.length > 0
+      || result.cascaded_edge_ids.length > 0;
+    const viewportChanged = input.viewport !== undefined
+      && stableJson(input.viewport === null ? null : input.viewport) !== stableJson(canvas.viewport_json ?? null);
+    if (viewportChanged) {
       const next = input.viewport === null ? null : input.viewport;
-      if (stableJson(next) !== stableJson(canvas.viewport_json ?? null)) {
-        await tx.project_canvas.update({
-          where: { id: canvas.id },
-          data: {
-            viewport_json: next === null ? Prisma.DbNull : (next as Prisma.InputJsonValue),
-            version: { increment: 1 },
-          },
-        });
-      }
+      await tx.project_canvas.update({
+        where: { id: canvas.id },
+        data: {
+          viewport_json: next === null ? Prisma.DbNull : (next as Prisma.InputJsonValue),
+          version: { increment: 1 },
+        },
+      });
+    } else if (contentChanged) {
+      await tx.project_canvas.update({
+        where: { id: canvas.id },
+        data: { version: { increment: 1 } },
+      });
     }
 
     if (input.materials && input.materials.items.length > 0) {
