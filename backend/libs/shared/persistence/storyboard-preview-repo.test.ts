@@ -12,8 +12,8 @@ describe("StoryboardPreviewRepo.createStoryboardPreview 计费（IKR60U）", () 
     vi.clearAllMocks();
   });
 
-  it("建单时按图片口径扣费一次，输出张数带入规格", async () => {
-    const tx = buildTx({
+  function storyboardTx(jobId = 9001n) {
+    return buildTx({
       catalog_models: {
         findUnique: vi.fn().mockResolvedValue({
           version: 3,
@@ -32,21 +32,27 @@ describe("StoryboardPreviewRepo.createStoryboardPreview 计费（IKR60U）", () 
           features: { quantity_max: 2 },
         }),
       },
+      generation_jobs: {
+        create: vi.fn().mockResolvedValue({
+          id: jobId,
+          type: "image",
+          source: "storyboard_preview",
+          status: "queued",
+          progress: 0,
+          version: 0,
+        }),
+      },
       storyboard_previews: {
         create: vi.fn().mockResolvedValue({ id: 8001n }),
       },
     });
-    const transaction = vi.fn(
-      async (callback: (tx: unknown) => Promise<unknown>) => callback(tx),
-    );
-    const prisma = { $transaction: transaction } as unknown as PrismaClient;
-    const repo = createStoryboardPreviewRepo(prisma);
-    const billing = {
-      charge: vi.fn().mockResolvedValue(undefined),
-      release: vi.fn().mockResolvedValue(undefined),
-    };
+  }
 
-    const result = await repo.createStoryboardPreview({
+  function storyboardInput(billing: {
+    charge: ReturnType<typeof vi.fn>;
+    release: ReturnType<typeof vi.fn>;
+  }) {
+    return {
       userId: "100",
       projectId: "42",
       sceneCardId: "5001",
@@ -61,7 +67,26 @@ describe("StoryboardPreviewRepo.createStoryboardPreview 计费（IKR60U）", () 
       },
       capability_snapshot_version: CAPABILITY_SNAPSHOT,
       billing,
-    });
+    };
+  }
+
+  function billingStub() {
+    return {
+      charge: vi.fn().mockResolvedValue(undefined),
+      release: vi.fn().mockResolvedValue(undefined),
+    };
+  }
+
+  it("建单时按图片口径扣费一次，输出张数带入规格", async () => {
+    const tx = storyboardTx();
+    const transaction = vi.fn(
+      async (callback: (tx: unknown) => Promise<unknown>) => callback(tx),
+    );
+    const prisma = { $transaction: transaction } as unknown as PrismaClient;
+    const repo = createStoryboardPreviewRepo(prisma);
+    const billing = billingStub();
+
+    const result = await repo.createStoryboardPreview(storyboardInput(billing));
 
     expect(result.kind).toBe("applied");
     expect(billing.charge).toHaveBeenCalledTimes(1);
@@ -77,6 +102,39 @@ describe("StoryboardPreviewRepo.createStoryboardPreview 计费（IKR60U）", () 
       },
     });
     expect(billing.release).not.toHaveBeenCalled();
+  });
+
+  it("唯一键重试：先释放上一笔，再按新任务扣一次", async () => {
+    const firstTx = storyboardTx(9001n);
+    const secondTx = storyboardTx(9002n);
+    let attempt = 0;
+    const transaction = vi.fn(
+      async (callback: (tx: unknown) => Promise<unknown>) => {
+        attempt += 1;
+        const result = await callback(attempt === 1 ? firstTx : secondTx);
+        if (attempt === 1) {
+          throw Object.assign(new Error("unique clash"), { code: "P2002" });
+        }
+        return result;
+      },
+    );
+    const prisma = {
+      $transaction: transaction,
+      generation_jobs: { findUnique: vi.fn().mockResolvedValue(null) },
+    } as unknown as PrismaClient;
+    const repo = createStoryboardPreviewRepo(prisma);
+    const billing = billingStub();
+
+    const result = await repo.createStoryboardPreview(storyboardInput(billing));
+
+    expect(result.kind).toBe("applied");
+    expect(billing.charge.mock.calls.map((call) => call[0].jobId)).toEqual([
+      9001, 9002,
+    ]);
+    expect(billing.release).toHaveBeenCalledTimes(1);
+    expect(billing.release).toHaveBeenCalledWith(
+      expect.objectContaining({ jobId: 9001 }),
+    );
   });
 });
 

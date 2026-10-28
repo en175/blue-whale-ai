@@ -417,26 +417,32 @@ export function createStoryboardPreviewRepo(
   return {
     createStoryboardPreview(input) {
       const charged: number[] = [];
-      const releaseCharged = async () => {
+      const releaseCharged = async (reason: string) => {
         for (const jobId of charged.splice(0)) {
           await releaseUnlessJobCommitted({
             release: input.billing
-              ? (id, reason) =>
-                  input.billing!.release({ userId: input.userId, jobId: id, reason })
+              ? (id, releaseReason) =>
+                  input.billing!.release({
+                    userId: input.userId,
+                    jobId: id,
+                    reason: releaseReason,
+                  })
               : undefined,
             jobId,
             probe: jobExistenceProbe(prisma),
-            reason: "事务重试或失败前释放上一笔扣款",
+            reason,
           });
         }
       };
       return transactionWithUniqueRetry(prisma, async (tx) => {
-        await releaseCharged();
+        await releaseCharged("事务重试前释放上一笔扣款");
         return createStoryboardPreviewInTransaction(tx, input, (jobId) =>
           charged.push(jobId),
         );
       }).catch(async (error: unknown) => {
-        await releaseCharged();
+        await releaseCharged(
+          error instanceof Error ? error.message : String(error),
+        );
         throw error;
       });
     },

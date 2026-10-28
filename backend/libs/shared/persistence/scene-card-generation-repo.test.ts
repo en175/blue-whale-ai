@@ -1251,7 +1251,7 @@ describe("SceneCardGenerationRepo.regenerateSceneCard 计费（IKR60U）", () =>
 
   it("参考视频缺时长 → 拒绝提交，不按缺参考秒的价格扣费", async () => {
     const tx = buildTx({
-      ...capabilityWith({ first_frame: true }),
+      ...capabilityWith({ video_reference: true, video_reference_max: 3 }),
       generation_output_slots: {
         findMany: vi.fn().mockResolvedValue([
           {
@@ -1278,9 +1278,9 @@ describe("SceneCardGenerationRepo.regenerateSceneCard 计费（IKR60U）", () =>
 
     const result = await repo.regenerateSceneCard({
       ...baseInput,
-      reference_mode: "first_frame",
+      reference_mode: "text_to_video",
       reference_assets: [
-        { slot_id: "9101", type: "storyboard_frame", role: "first_frame" },
+        { slot_id: "9101", type: "storyboard_frame", role: "reference" },
       ],
     });
 

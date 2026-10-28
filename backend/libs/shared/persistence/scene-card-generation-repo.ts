@@ -551,7 +551,7 @@ async function regenerateSceneCardInTransaction(
   ) {
     return {
       kind: "validation_failed",
-      reason: "参考视频时长读取失败，请稍后重试或更换素材",
+      reason: "参考视频时长未知，请更换素材后再提交",
     };
   }
 
@@ -686,30 +686,36 @@ export function createSceneCardGenerationRepo(
   return {
     regenerateSceneCard(input) {
       const charged: number[] = [];
-      const releaseCharged = async () => {
+      const releaseCharged = async (reason: string) => {
         for (const jobId of charged.splice(0)) {
           await releaseUnlessJobCommitted({
             release: input.billing
-              ? (id, reason) =>
-                  input.billing!.release({ userId: input.userId, jobId: id, reason })
+              ? (id, releaseReason) =>
+                  input.billing!.release({
+                    userId: input.userId,
+                    jobId: id,
+                    reason: releaseReason,
+                  })
               : undefined,
             jobId,
             probe: jobExistenceProbe(prisma),
-            reason: "事务重试或失败前释放上一笔扣款",
+            reason,
           });
         }
       };
       return transactionWithUniqueRetry(
         prisma,
         async (tx) => {
-          await releaseCharged();
+          await releaseCharged("事务重试前释放上一笔扣款");
           return regenerateSceneCardInTransaction(tx, input, (jobId) =>
             charged.push(jobId),
           );
         },
         { maxWait: 10_000, timeout: 30_000 },
       ).catch(async (error: unknown) => {
-        await releaseCharged();
+        await releaseCharged(
+          error instanceof Error ? error.message : String(error),
+        );
         throw error;
       });
     },
