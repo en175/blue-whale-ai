@@ -91,7 +91,7 @@ spec:
         - name: GENERATION_WORKER_PORT
           value: "4002"
         - name: NEW_API_BASE_URL
-          value: "http://blue-whale-api-svc:3000"
+          value: "https://yunjizi.cn"
         - name: NODE_ENV
           value: "production"
         resources:
