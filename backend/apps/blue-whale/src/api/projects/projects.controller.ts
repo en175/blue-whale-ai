@@ -11,7 +11,6 @@ import {
 import {
   DATA_NOT_EXIST_CODE,
   FAILURE_CODE,
-  RESOURCE_NOT_FOUND_CODE,
   fail,
   ok,
 } from "@lib/contracts";

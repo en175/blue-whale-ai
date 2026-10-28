@@ -86,7 +86,11 @@ describe("createFinalizeJob（IKIZQC）", () => {
 
     const result = await createFinalizeJob(prisma, INPUT, { billing: { charge, release: vi.fn() } });
 
-    expect(result).toEqual({ generation_job_id: "305", cursor: expect.any(Number) });
+    expect(result).toEqual({
+      generation_job_id: "305",
+      cursor: expect.any(Number),
+    });
+    expect(result.cursor).toBeGreaterThan(0);
     expect(create.mock.calls[0]![0].data).toMatchObject({
       type: "video",
       status: "queued",

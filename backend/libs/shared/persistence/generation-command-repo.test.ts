@@ -319,7 +319,9 @@ describe("generation command repo retry", () => {
     };
     const repo = createGenerationCommandRepo(prisma as never);
 
-    await repo.retryJob("300", "55", "9", "retry-300", "hash-300");
+    const result = (await repo.retryJob("300", "55", "9", "retry-300", "hash-300")) as {
+      cursor: number;
+    };
 
     expect(tx.generation_jobs.findFirst).toHaveBeenCalledWith({
       where: {
@@ -340,6 +342,8 @@ describe("generation command repo retry", () => {
     expect(tx.project_command_receipts.create).toHaveBeenCalledWith({
       data: expect.objectContaining({ accepted_cursor: expect.any(BigInt) }),
     });
+    const accepted = tx.command_idempotency.create.mock.calls[0]![0].data.accepted_cursor;
+    expect(accepted).toBe(BigInt(result.cursor));
   });
 
   it("★ 重试是新建任务 → 对新 job 扣一次费（提交即扣）", async () => {

@@ -89,20 +89,6 @@ export function sceneCardAsset(
 export function buildTx(
   overrides: Record<string, Record<string, ReturnType<typeof vi.fn>>>,
 ) {
-  const projectEventsCreate = vi.fn().mockImplementation(({ data }) => ({
-    id: 1n,
-    event_id: "evt_x",
-    event_type: data.event_type,
-    cursor: 100n,
-    project_id: data.project_id,
-    aggregate_type: data.aggregate_type,
-    aggregate_id: data.aggregate_id,
-    aggregate_version: data.aggregate_version,
-    correlation_id: data.correlation_id ?? null,
-    causation_id: data.causation_id ?? null,
-    occurred_at: new Date(),
-    payload: data.payload,
-  }));
   return {
     project: {
       findFirst: vi.fn().mockResolvedValue({ id: 42n }),

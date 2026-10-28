@@ -23,7 +23,7 @@ class JobFinalizerStatusChangedConvergenceTest {
     private static final int EXPECTED_CALL_SITES = 9;
 
     @Test
-    @DisplayName("★ status_changed 只准由 enqueueTerminalEvent 一处进入发件箱")
+    @DisplayName("★ 终态只准由 enqueueTerminalEvent 一处进入发件箱")
     void 发布点唯一() throws IOException {
         List<String> lines = readSource();
         int[] helper = helperRange(lines);
@@ -33,14 +33,14 @@ class JobFinalizerStatusChangedConvergenceTest {
             if (i >= helper[0] && i <= helper[1]) continue;
             String line = lines.get(i);
             if (isComment(line)) continue;
-            if (line.contains("eventPublisher.publish(") && line.contains("status_changed")) {
+            if (line.contains("outbox.enqueue(")) {
                 bareSites.add(i + 1);
             }
         }
 
         assertThat(bareSites)
                 .withFailMessage("""
-                        这些行绕过了 %s 直接发 status_changed：%s
+                        这些行绕过了 %s 直接写发件箱：%s
                         后果不是显示问题——那条路径上的 billing 结算事件不会发出，
                         该 job 的预扣永远冻着，且没有任何自动补偿会来救。
                         改法：换成 %s)。""", HELPER, bareSites, CALL)
