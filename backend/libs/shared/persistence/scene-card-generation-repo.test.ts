@@ -107,7 +107,11 @@ function frameOverrides(
       status: "succeeded",
       generation_job_id: 9001n,
     });
-    assetRows.push({ id: assetId, type, duration_ms: durationsMs[index] ?? null });
+    assetRows.push({
+      id: assetId,
+      type,
+      duration_ms: durationsMs[index] ?? (type === "video" ? 1000 : null),
+    });
   });
   return {
     frames,
@@ -1110,5 +1114,177 @@ describe("SceneCardGenerationRepo.regenerateSceneCard 素材门（IKFYHJ）", ()
       kind: "capability_limit",
       reason: "参考素材总时长超过 15 秒，请减少素材",
     });
+  });
+});
+
+function repoWithProbe(tx: ReturnType<typeof buildTx>) {
+  const transaction = vi.fn(
+    async (callback: (tx: unknown) => Promise<unknown>) => callback(tx),
+  );
+  const findUnique = vi.fn().mockResolvedValue(null);
+  const prisma = {
+    $transaction: transaction,
+    generation_jobs: { findUnique },
+  } as unknown as PrismaClient;
+  return { repo: createSceneCardGenerationRepo(prisma), transaction, findUnique };
+}
+
+function billingStub() {
+  return {
+    charge: vi.fn().mockResolvedValue(undefined),
+    release: vi.fn().mockResolvedValue(undefined),
+  };
+}
+
+describe("SceneCardGenerationRepo.regenerateSceneCard 计费（IKR60U）", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("成功建单后在事务内扣费一次，计价键按视频口径", async () => {
+    const tx = buildTx({});
+    const billing = billingStub();
+    const { repo } = repoWith(tx);
+
+    const result = await repo.regenerateSceneCard({ ...baseInput, billing });
+
+    expect(result.kind).toBe("applied");
+    expect(billing.charge).toHaveBeenCalledTimes(1);
+    expect(billing.charge.mock.calls[0]![0]).toMatchObject({
+      userId: "100",
+      jobId: 9001,
+      commandId: "cmd-1",
+      modelId: "doubao-seedance-1.0",
+      taskType: "video",
+      input: {
+        resolution: "1280x720",
+        aspect_ratio: "16:9",
+        duration: 5,
+        expected_output_count: 1,
+      },
+    });
+    expect(billing.release).not.toHaveBeenCalled();
+  });
+
+  it("幂等重放不重复扣费", async () => {
+    const tx = buildTx({
+      project_command_receipts: {
+        findUnique: vi.fn().mockResolvedValue({
+          request_hash: baseInput.requestHash,
+          resource_id: 7001n,
+          generation_job_id: 9001n,
+        }),
+      },
+    });
+    const billing = billingStub();
+    const { repo } = repoWith(tx);
+
+    const result = await repo.regenerateSceneCard({ ...baseInput, billing });
+
+    expect(result).toMatchObject({ kind: "replayed", generation_job_id: "9001" });
+    expect(billing.charge).not.toHaveBeenCalled();
+  });
+
+  it("扣费后事务失败 → 释放这笔扣款", async () => {
+    const tx = buildTx({
+      scene_card_generation_records: {
+        create: vi.fn().mockRejectedValue(new Error("commit failed")),
+      },
+    });
+    const billing = billingStub();
+    const { repo } = repoWithProbe(tx);
+
+    await expect(
+      repo.regenerateSceneCard({ ...baseInput, billing }),
+    ).rejects.toThrow("commit failed");
+
+    expect(billing.charge).toHaveBeenCalledTimes(1);
+    expect(billing.release).toHaveBeenCalledTimes(1);
+    expect(billing.release).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: "100", jobId: 9001 }),
+    );
+  });
+
+  it("唯一键重试：先释放上一笔，再按新任务扣一次", async () => {
+    const firstTx = buildTx({});
+    const secondTx = buildTx({
+      generation_jobs: {
+        create: vi.fn().mockResolvedValue({
+          id: 9002n,
+          type: "video",
+          source: "scene_card",
+          status: "queued",
+          progress: 0,
+          version: 0,
+        }),
+      },
+    });
+    let attempt = 0;
+    const transaction = vi.fn(
+      async (callback: (tx: unknown) => Promise<unknown>) => {
+        attempt += 1;
+        const result = await callback(attempt === 1 ? firstTx : secondTx);
+        if (attempt === 1) {
+          throw Object.assign(new Error("unique clash"), { code: "P2002" });
+        }
+        return result;
+      },
+    );
+    const prisma = {
+      $transaction: transaction,
+      generation_jobs: { findUnique: vi.fn().mockResolvedValue(null) },
+    } as unknown as PrismaClient;
+    const repo = createSceneCardGenerationRepo(prisma);
+    const billing = billingStub();
+
+    const result = await repo.regenerateSceneCard({ ...baseInput, billing });
+
+    expect(result).toMatchObject({ kind: "applied", generation_job_id: "9002" });
+    expect(billing.charge.mock.calls.map((call) => call[0].jobId)).toEqual([
+      9001, 9002,
+    ]);
+    expect(billing.release).toHaveBeenCalledTimes(1);
+    expect(billing.release).toHaveBeenCalledWith(
+      expect.objectContaining({ jobId: 9001 }),
+    );
+  });
+
+  it("参考视频缺时长 → 拒绝提交，不按缺参考秒的价格扣费", async () => {
+    const tx = buildTx({
+      ...capabilityWith({ video_reference: true, video_reference_max: 3 }),
+      generation_output_slots: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            id: 9101n,
+            asset_id: 3001n,
+            status: "succeeded",
+            generation_job_id: 8001n,
+          },
+        ]),
+      },
+      storyboard_previews: {
+        findMany: vi
+          .fn()
+          .mockResolvedValue([{ first_generation_job_id: 8001n }]),
+      },
+      user_assets: {
+        findMany: vi
+          .fn()
+          .mockResolvedValue([{ id: 3001n, type: "video", duration_ms: null }]),
+      },
+    });
+    const billing = billingStub();
+    const { repo } = repoWith(tx);
+
+    const result = await repo.regenerateSceneCard({
+      ...baseInput,
+      reference_mode: "text_to_video",
+      reference_assets: [
+        { slot_id: "9101", type: "storyboard_frame", role: "reference" },
+      ],
+    });
+
+    expect(result).toMatchObject({ kind: "validation_failed" });
+    expect(billing.charge).not.toHaveBeenCalled();
   });
 });

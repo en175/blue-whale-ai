@@ -9,6 +9,9 @@ import type {
 import { aspectRatioIds } from "@lib/contracts";
 
 import { createJobWithinTx } from "./generation-command-repo.js";
+import type { JobBilling, JobBillingSource } from "./job-billing.js";
+import { jobExistenceProbe, releaseUnlessJobCommitted } from "./job-billing.js";
+import { serializePricingRule } from "./model-capability-repo.js";
 import {
   canvasBindingView,
   lockCanvasRecoveryForAcceptance,
@@ -32,6 +35,7 @@ export interface CreateStoryboardPreviewInput {
   parameters: StoryboardPreviewParameters;
   capability_snapshot_version: CapabilitySnapshotVersion;
   quotaCheck?: () => Promise<{ sufficient: boolean }>;
+  billing?: JobBillingSource;
   canvasRecovery?: CanvasRecoveryAcceptance;
 }
 
@@ -90,6 +94,7 @@ function checkImageCapabilityLimit(
 async function createStoryboardPreviewInTransaction(
   tx: Prisma.TransactionClient,
   input: CreateStoryboardPreviewInput,
+  onCharged: (jobId: number) => void,
 ): Promise<CreateStoryboardPreviewResult> {
   const projectId = BigInt(input.projectId);
   const userId = BigInt(input.userId);
@@ -163,6 +168,7 @@ async function createStoryboardPreviewInTransaction(
       default_aspect_ratio: true,
       default_duration: true,
       features: true,
+      pricing: true,
     },
   });
   if (!capability || !capability.enabled || capability.is_delete)
@@ -215,26 +221,53 @@ async function createStoryboardPreviewInTransaction(
       `${input.projectId}\0storyboard_preview\0${sceneCardId}\0${input.idempotencyKey}`,
     )
     .digest("hex");
-  const createdJob = await createJobWithinTx(tx, {
-    projectId: input.projectId,
-    userId: input.userId,
-    type: "image",
-    expectedOutputCount: input.parameters.count,
-    source: "storyboard_preview",
-    actionIdentity,
-    actionType: OPERATION,
-    sceneCardId: sceneCardId.toString(),
-    input: {
-      prompt: sceneCard.content_markdown,
-      model_id: input.parameters.model_id,
-      size: input.parameters.size,
-      aspect_ratio: input.parameters.aspect_ratio,
-      web_search: false,
-      sequential_image_generation: false,
-      storyboard_preview: true,
-      scene_card_id: sceneCardId.toString(),
+  const jobInput = {
+    prompt: sceneCard.content_markdown,
+    model_id: input.parameters.model_id,
+    size: input.parameters.size,
+    aspect_ratio: input.parameters.aspect_ratio,
+    web_search: false,
+    sequential_image_generation: false,
+    storyboard_preview: true,
+    scene_card_id: sceneCardId.toString(),
+  };
+  const ruleSnapshot = serializePricingRule({ pricing: capability.pricing });
+  const jobBilling: JobBilling | undefined = input.billing
+    ? {
+        charge: async (jobId) => {
+          await input.billing!.charge({
+            userId: input.userId,
+            jobId,
+            commandId: actionIdentity,
+            modelId: input.parameters.model_id,
+            taskType: "image",
+            input: {
+              ...jobInput,
+              expected_output_count: input.parameters.count,
+            },
+            ...(ruleSnapshot !== undefined ? { ruleSnapshot } : {}),
+          });
+          onCharged(jobId);
+        },
+        release: (jobId, reason) =>
+          input.billing!.release({ userId: input.userId, jobId, reason }),
+      }
+    : undefined;
+  const createdJob = await createJobWithinTx(
+    tx,
+    {
+      projectId: input.projectId,
+      userId: input.userId,
+      type: "image",
+      expectedOutputCount: input.parameters.count,
+      source: "storyboard_preview",
+      actionIdentity,
+      actionType: OPERATION,
+      sceneCardId: sceneCardId.toString(),
+      input: jobInput,
     },
-  });
+    jobBilling,
+  );
   if ("kind" in createdJob) throw new Error("unreachable: storyboard job creation never conflicts idempotency");
   if (recoveryPlan) {
     await writeCanvasRecoveryRows(tx, recoveryPlan, BigInt(createdJob.generation_job_id));
@@ -383,9 +416,35 @@ export function createStoryboardPreviewRepo(
 ): StoryboardPreviewRepo {
   return {
     createStoryboardPreview(input) {
-      return transactionWithUniqueRetry(prisma, (tx) =>
-        createStoryboardPreviewInTransaction(tx, input),
-      );
+      const charged: number[] = [];
+      const releaseCharged = async (reason: string) => {
+        for (const jobId of charged.splice(0)) {
+          await releaseUnlessJobCommitted({
+            release: input.billing
+              ? (id, releaseReason) =>
+                  input.billing!.release({
+                    userId: input.userId,
+                    jobId: id,
+                    reason: releaseReason,
+                  })
+              : undefined,
+            jobId,
+            probe: jobExistenceProbe(prisma),
+            reason,
+          });
+        }
+      };
+      return transactionWithUniqueRetry(prisma, async (tx) => {
+        await releaseCharged("事务重试前释放上一笔扣款");
+        return createStoryboardPreviewInTransaction(tx, input, (jobId) =>
+          charged.push(jobId),
+        );
+      }).catch(async (error: unknown) => {
+        await releaseCharged(
+          error instanceof Error ? error.message : String(error),
+        );
+        throw error;
+      });
     },
     canvasBindingView(projectId, submissionId) {
       return canvasBindingView(prisma, projectId, submissionId);

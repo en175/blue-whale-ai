@@ -85,7 +85,7 @@ export class VideoFrameInterpolationsService {
     });
     if (projectError) return projectError;
 
-    const { recovery, replayed } = await replayAcceptedMediaTool(this.prisma.client, {
+    const { recovery, legacy, replayed } = await replayAcceptedMediaTool(this.prisma.client, {
       projectId,
       userId,
       binding,
@@ -93,6 +93,7 @@ export class VideoFrameInterpolationsService {
       operation: IDEMPOTENCY_OPERATION,
       requestPath: REQUEST_PATH,
       body: body ?? {},
+      idempotencyKey,
     });
     if (replayed) return replayed;
 
@@ -118,6 +119,7 @@ export class VideoFrameInterpolationsService {
       userId,
       input: frozenInput,
       recovery,
+      legacy,
       createJob: async (db) => {
         const job = await db.generation_jobs.create({
           data: {

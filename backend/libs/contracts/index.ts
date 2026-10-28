@@ -1,6 +1,7 @@
 export {
   checkGenerationParamLimit,
   toGenerationParamCheckInput,
+  canonicalSizeValue,
   resolveVideoMode,
   VIDEO_MODES,
   EDIT_MODE_VIDEO_REFERENCE_MAX,

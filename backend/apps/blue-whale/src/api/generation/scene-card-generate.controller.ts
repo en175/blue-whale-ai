@@ -18,6 +18,14 @@ import {
 import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
 import { wireInteger } from "@lib/shared/wire-integer.js";
 import { sharedBillingClient } from "@lib/shared/billing/billing-client.js";
+import { createBillingCharge, type BillingCharge } from "@lib/shared/billing/billing-charge.js";
+import {
+  createBillingRelease,
+  createOutboxTerminalEnqueue,
+  type BillingRelease,
+} from "@lib/shared/billing/billing-release.js";
+import { AccountDirectoryService } from "@lib/shared/identity/index.js";
+import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 import { SceneCardGenerationService } from "@lib/shared/generation/scene-card-generation.service.js";
 import { createRequestMaterialGate } from "@lib/shared/generation/material-gate-wiring.js";
 import { MaterialService } from "@lib/shared/material/material.service.js";
@@ -45,7 +53,28 @@ export class SceneCardGenerateController {
     private readonly storyboard: StoryboardPreviewService,
     private readonly material: MaterialService,
     private readonly assets: AssetService,
+    private readonly directory: AccountDirectoryService,
+    private readonly prisma: PrismaService,
   ) {}
+
+  private billingDep?: { charge: BillingCharge; release: BillingRelease };
+
+  private billing() {
+    if (this.billingDep === undefined) {
+      this.billingDep = {
+        charge: createBillingCharge({
+          client: sharedBillingClient(),
+          resolveTier: (userId) => this.directory.resolveTier(userId),
+          logger,
+        }),
+        release: createBillingRelease({
+          enqueue: createOutboxTerminalEnqueue(this.prisma.client),
+          logger,
+        }),
+      };
+    }
+    return this.billingDep;
+  }
 
   @Post("generate")
   async generate(
@@ -64,6 +93,7 @@ export class SceneCardGenerateController {
       bodyString(body),
       this.sceneCard.repo,
       {
+        billing: this.billing(),
         materialGate: createRequestMaterialGate({
           repo: this.material.materialStatusRepo,
           callAction: (action, body) =>
@@ -165,6 +195,7 @@ export class SceneCardGenerateController {
       this.storyboard.repo,
       {
         quotaCheck,
+        billing: this.billing(),
       },
     );
 
