@@ -155,6 +155,23 @@ describe("存量画布 JSON 导入行表", () => {
     });
   });
 
+  it("含无法落行的顶层字段或超长字段时整项目失败", async () => {
+    const topLevel = fakeTx({
+      nodes_json: [{ id: "r1", type: "reference", cardType: "style", references: [{ asset_id: 1 }] }],
+      edges_json: [],
+    });
+    await expect(importCanvasJsonToRows(topLevel.tx, 9n, canvasOf({
+      nodes_json: [{ id: "r1", type: "reference", cardType: "style", references: [{ asset_id: 1 }] }],
+      edges_json: [],
+    }))).rejects.toMatchObject({ reason: "parse_failure" });
+
+    const tooLong = fakeTx({ nodes_json: [{ id: "n".repeat(129), type: "textNode" }], edges_json: [] });
+    await expect(importCanvasJsonToRows(tooLong.tx, 9n, canvasOf({
+      nodes_json: [{ id: "n".repeat(129), type: "textNode" }],
+      edges_json: [],
+    }))).rejects.toMatchObject({ reason: "parse_failure" });
+  });
+
   it("已开启标记时幂等跳过", async () => {
     const seed: Seed = { nodes_json: [{ id: "n1", type: "textNode" }], edges_json: [], rows_authoritative: 1 };
     const { tx, created } = fakeTx(seed);
@@ -206,9 +223,9 @@ describe("行表与旧 JSON 比对", () => {
     );
   });
 
-  it("迁移过的卡片跳过 data 比对，但仍比对类型与位置", () => {
+  it("迁移过的卡片跳过类型与 data 比对，仍比对位置", () => {
     const comparison = compareCanvasJson(
-      [{ id: "n1", type: "textNode", position: { x: 0, y: 0 }, data: { legacy: true } }],
+      [{ id: "n1", type: "assetNode", position: { x: 0, y: 0 }, data: { legacy: true } }],
       [],
       [viewNodes[0]],
       [],
@@ -216,13 +233,13 @@ describe("行表与旧 JSON 比对", () => {
     );
     expect(comparison.consistent).toBe(true);
 
-    const typeDiff = compareCanvasJson(
-      [{ id: "n1", type: "assetNode", position: { x: 0, y: 0 }, data: { legacy: true } }],
+    const positionDiff = compareCanvasJson(
+      [{ id: "n1", type: "assetNode", position: { x: 5, y: 0 }, data: { legacy: true } }],
       [],
       [viewNodes[0]],
       [],
       new Set(["n1"]),
     );
-    expect(typeDiff.differences).toEqual(["node:n1:type"]);
+    expect(positionDiff.differences).toEqual(["node:n1:position"]);
   });
 });

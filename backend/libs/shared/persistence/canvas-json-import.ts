@@ -103,6 +103,16 @@ function parseLegacyNodes(raw: Prisma.JsonValue | null): {
     if (typeof node.type !== "string" || node.type.length === 0) {
       throw new CanvasRowsImportError("parse_failure", `nodes_json[${index}] 缺少 type`);
     }
+    if (node.id.length > 128 || node.type.length > 32) {
+      throw new CanvasRowsImportError("parse_failure", `nodes_json[${index}] 的 id 或 type 超长`);
+    }
+    const extraKeys = Object.keys(node).filter((key) => !["id", "type", "position", "data"].includes(key));
+    if (extraKeys.length > 0) {
+      throw new CanvasRowsImportError(
+        "parse_failure",
+        `nodes_json[${index}] 含无法落行的顶层字段：${extraKeys.join(",")}`,
+      );
+    }
     const data = node.data == null ? {} : asObject(node.data);
     if (!data) throw new CanvasRowsImportError("parse_failure", `nodes_json[${index}] 的 data 不是对象`);
     if (seen.has(node.id)) {
@@ -135,6 +145,9 @@ function parseLegacyEdges(raw: Prisma.JsonValue | null): {
     }
     if (typeof edge.source !== "string" || typeof edge.target !== "string") {
       throw new CanvasRowsImportError("parse_failure", `edges_json[${index}] 缺少端点`);
+    }
+    if (edge.id.length > 128 || edge.source.length > 128 || edge.target.length > 128) {
+      throw new CanvasRowsImportError("parse_failure", `edges_json[${index}] 的 id 或端点超长`);
     }
     const data = edge.data == null ? {} : asObject(edge.data);
     if (!data) throw new CanvasRowsImportError("parse_failure", `edges_json[${index}] 的 data 不是对象`);
@@ -330,11 +343,11 @@ function normalizePosition(position: unknown): { x: number; y: number } {
   return { x: coordinate(record?.x) ?? 0, y: coordinate(record?.y) ?? 0 };
 }
 
-function normalizeNode(node: Record<string, unknown>, skipData: boolean): Record<string, unknown> {
+function normalizeNode(node: Record<string, unknown>, skipMigrationFields: boolean): Record<string, unknown> {
   return {
-    type: node.type,
+    ...(skipMigrationFields ? {} : { type: node.type }),
     position: normalizePosition(node.position),
-    ...(skipData ? {} : { data: stableJson(asObject(node.data) ?? {}) }),
+    ...(skipMigrationFields ? {} : { data: stableJson(asObject(node.data) ?? {}) }),
   };
 }
 

@@ -446,7 +446,7 @@ export class CanvasService {
     return new ConflictException(
       error.reason === "parse_failure"
         ? "画布存量数据无法自动转换，请联系管理员处理"
-        : "画布数据正在迁移，请稍后重试",
+        : "画布行数据与迁移标记不一致，请联系管理员处理",
     );
   }
 
