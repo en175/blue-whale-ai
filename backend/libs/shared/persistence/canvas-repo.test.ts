@@ -351,6 +351,7 @@ describe("canvas 读取行表与旧 JSON 兜底（IKQY36）", () => {
     viewport_json: { x: 1, y: 2, zoom: 1 },
     nodes_json: null,
     edges_json: null,
+    rows_authoritative: 1,
   };
 
   it("行表有数据时按行还原节点与连线", async () => {
@@ -394,6 +395,7 @@ describe("canvas 读取行表与旧 JSON 兜底（IKQY36）", () => {
       project_canvas: {
         findFirst: vi.fn().mockResolvedValue({
           ...canvasRow,
+          rows_authoritative: 0,
           nodes_json: [
             { id: "t1", type: "text", data: { text: "旧文本" } },
             { id: "r1", type: "reference", data: { assetId: "7" } },
@@ -407,13 +409,13 @@ describe("canvas 读取行表与旧 JSON 兜底（IKQY36）", () => {
 
     const view = await repo.getByProject("55");
     expect(JSON.parse(view.nodes!)).toEqual([
-      { id: "t1", type: "textNode", data: { text: "旧文本" } },
-      { id: "r1", type: "assetNode", data: { assetId: "7" } },
+      { id: "t1", type: "text", data: { text: "旧文本" } },
+      { id: "r1", type: "reference", data: { assetId: "7" } },
     ]);
     expect(JSON.parse(view.edges!)).toEqual([{ id: "e1", source: "t1", target: "r1" }]);
   });
 
-  it("空画布返回 null 节点，与缺失项目可区分", async () => {
+  it("空画布返回空数组，与缺失项目可区分", async () => {
     const repo = createCanvasRepo({
       project_canvas: { findFirst: vi.fn().mockResolvedValue({ ...canvasRow, version: 0 }) },
       project_nodes: { findMany: vi.fn().mockResolvedValue([]) },
@@ -421,7 +423,7 @@ describe("canvas 读取行表与旧 JSON 兜底（IKQY36）", () => {
     } as never);
 
     const empty = await repo.getByProject("55");
-    expect(empty).toMatchObject({ id: "9", version: 0, nodes: null, edges: null });
+    expect(empty).toMatchObject({ id: "9", version: 0, nodes: "[]", edges: "[]" });
 
     const missingScene = createCanvasRepo({
       project_canvas: { findFirst: vi.fn().mockResolvedValue(null) },

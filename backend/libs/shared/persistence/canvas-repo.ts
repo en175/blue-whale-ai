@@ -19,6 +19,7 @@ export interface CanvasRepo {
   rememberPromptSnapshot(projectId: string, source: PromptPreviewSource, content: PromptPreviewContent): Promise<PromptPreviewContent>;
 
   getByProject(projectId: string): Promise<CanvasView>;
+  isRowsAuthoritative(projectId: string): Promise<boolean>;
   save(
     projectId: string,
     viewport: string | null,
@@ -46,14 +47,6 @@ export async function linkPromptMaterials(tx: Prisma.TransactionClient, projectI
     const key = { user_id: BigInt(context.ownerId), project_id: projectId, asset_id: BigInt(material.assetId) };
     await tx.project_asset.upsert({ where: { user_id_asset_id_project_id: key }, create: { ...key, is_delete: 0 }, update: { is_delete: 0 } });
   }
-}
-
-function mapLegacyNodeType(node: unknown): unknown {
-  if (!node || typeof node !== "object" || Array.isArray(node)) return node;
-  const record = node as Record<string, unknown>;
-  if (record.type === "text") return { ...record, type: "textNode" };
-  if (record.type === "reference") return { ...record, type: "assetNode" };
-  return node;
 }
 
 function nodeFromRow(row: {
@@ -230,6 +223,7 @@ export function createCanvasRepo(prisma: PrismaClient): CanvasRepo {
         where: { project_id: pid },
       });
       if (!row) return emptyView(projectId);
+      if (row.rows_authoritative !== 1) return toView(row);
       const [nodes, edges] = await Promise.all([
         prisma.project_nodes.findMany({
           where: { project_id: pid, is_delete: 0 },
@@ -240,24 +234,22 @@ export function createCanvasRepo(prisma: PrismaClient): CanvasRepo {
           orderBy: { id: "asc" },
         }),
       ]);
-      if (nodes.length > 0) {
-        return {
-          id: row.id.toString(),
-          project_id: projectId,
-          version: row.version,
-          viewport:
-            row.viewport_json == null ? null : JSON.stringify(row.viewport_json),
-          nodes: JSON.stringify(nodes.map(nodeFromRow)),
-          edges: JSON.stringify(edges.map(edgeFromRow)),
-        };
-      }
       return {
-        ...toView(row),
-        nodes:
-          row.nodes_json == null
-            ? null
-            : JSON.stringify((row.nodes_json as unknown[]).map(mapLegacyNodeType)),
+        id: row.id.toString(),
+        project_id: projectId,
+        version: row.version,
+        viewport:
+          row.viewport_json == null ? null : JSON.stringify(row.viewport_json),
+        nodes: JSON.stringify(nodes.map(nodeFromRow)),
+        edges: JSON.stringify(edges.map(edgeFromRow)),
       };
+    },
+    async isRowsAuthoritative(projectId) {
+      const row = await prisma.project_canvas.findFirst({
+        where: { project_id: BigInt(projectId) },
+        select: { rows_authoritative: true },
+      });
+      return row?.rows_authoritative === 1;
     },
     async save(projectId, viewport, nodes) {
       const pid = BigInt(projectId);
