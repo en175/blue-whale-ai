@@ -2,7 +2,7 @@ import { useRef, type ReactNode } from 'react';
 import { useStore } from '@xyflow/react';
 import { computeFollowAnchorAbove } from '../../agent/followDialog';
 import { useSoloNodeSelected } from '../../hooks/chrome/useSoloNodeSelected';
-import { shouldSuppressCanvasSelection } from '../Canvas/chromeHitGuard';
+import { hideToolbarForChromeLock } from '../Canvas/chromeHitGuard';
 import { useOverlayWheelPassthrough } from '../Canvas/canvasWheelPassthrough';
 import styles from './index.module.css';
 
@@ -34,7 +34,7 @@ export default function NodeFollowToolbar({
   const position = node?.internals?.positionAbsolute;
   const nodeWidth = node?.measured?.width;
   if (!show) return null;
-  if (shouldSuppressCanvasSelection()) return null;
+  if (hideToolbarForChromeLock()) return null;
   if (!soloSelected && !hovered) return null;
   if (!position || nodeWidth == null || containerWidth <= 0) return null;
 
