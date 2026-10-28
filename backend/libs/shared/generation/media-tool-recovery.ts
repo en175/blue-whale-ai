@@ -168,30 +168,45 @@ export async function replayAcceptedMediaTool(
     operation: string;
     requestPath: string;
     body: Record<string, unknown>;
+    idempotencyKey?: string | null | undefined;
   },
 ): Promise<{
   recovery: MediaToolRecovery | null;
+  legacy: MediaToolLegacyIdempotency | null;
   replayed: ReturnType<typeof renderMediaToolReplay> | null;
 }> {
+  const requestHash = mediaToolRequestHash(
+    identity.operation,
+    identity.projectId,
+    identity.requestPath,
+    identity.body,
+  );
   const recovery: MediaToolRecovery | null = identity.binding
     ? {
         projectId: identity.projectId,
         userId: identity.userId,
         taskType: identity.taskType,
         operation: identity.operation,
-        requestHash: mediaToolRequestHash(
-          identity.operation,
-          identity.projectId,
-          identity.requestPath,
-          identity.body,
-        ),
+        requestHash,
         binding: identity.binding,
       }
     : null;
+  const key = (identity.idempotencyKey ?? "").trim();
+  const legacy: MediaToolLegacyIdempotency | null =
+    recovery === null && key.length > 0
+      ? {
+          projectId: identity.projectId,
+          operation: identity.operation,
+          requestHash,
+          key,
+        }
+      : null;
   const replay = recovery
     ? await readAcceptedMediaToolReplay(prisma, recovery)
-    : null;
-  return { recovery, replayed: replay ? renderMediaToolReplay(replay) : null };
+    : legacy
+      ? await readAcceptedMediaToolReplay(prisma, legacy)
+      : null;
+  return { recovery, legacy, replayed: replay ? renderMediaToolReplay(replay) : null };
 }
 
 export async function createMediaToolJobWithRecovery(
@@ -200,7 +215,7 @@ export async function createMediaToolJobWithRecovery(
   createJob: (
     db: PrismaClient | Prisma.TransactionClient,
   ) => Promise<{ jobId: string; status: string }>,
-  legacy?: MediaToolLegacyIdempotency,
+  legacy?: MediaToolLegacyIdempotency | null,
   billing?: JobBilling,
 ): Promise<MediaToolCreateOutcome> {
   if (!recovery && !legacy) {

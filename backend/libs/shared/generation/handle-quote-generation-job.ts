@@ -12,12 +12,13 @@ import {
 import type { BillingQuote } from "../billing/billing-quote.js";
 import type { AssetProbe } from "../assets/ports.js";
 import {
+  localAssetReferenceIds,
   resolveReferenceDurations,
-  videoAssetIdsForDuration,
 } from "./resolve-reference-durations.js";
 import {
   applyEditSourceDurationBasis,
   canonicalJson,
+  parseReferences,
   projectQuoteInput,
   resolveReferenceAssets,
   resolveTextIndexReferences,
@@ -31,8 +32,10 @@ export interface QuoteGenerationJobDeps {
   projects: Pick<ProjectRepo, "findOwnedById">;
   models: Pick<ModelCapabilityRepo, "listEnabledByType">;
   canvas: Pick<CanvasRepo, "getByProject">;
-  assets: Pick<AssetOwnershipOps, "resolveInputAssets"> &
-    Partial<Pick<AssetOwnershipOps, "findStorageKeys" | "saveMediaInfo">>;
+  assets?:
+    | (Pick<AssetOwnershipOps, "resolveInputAssets"> &
+        Partial<Pick<AssetOwnershipOps, "findStorageKeys" | "saveMediaInfo">>)
+    | undefined;
   probe?: AssetProbe;
   quote: BillingQuote;
 }
@@ -106,19 +109,26 @@ export async function handleQuoteGenerationJob(
     });
     if (!textIndexRefs.ok) return ok(EMPTY_QUOTE);
     if (textIndexRefs.value.videoReferences) {
-      const merged = textIndexRefs.value.videoReferences;
+      effectiveBody = { ...body, references: textIndexRefs.value.videoReferences };
+    }
+  }
+
+  const assetsDep = deps.assets;
+  if ((type === "video" || type === "audio") && assetsDep !== undefined) {
+    const parsedRefs = parseReferences(effectiveBody.references);
+    const items = parsedRefs.kind === "ok" ? parsedRefs.items : [];
+    if (localAssetReferenceIds(items).length > 0) {
       const ruling = await resolveReferenceDurations({
-        references: merged,
-        assetIdsOf: videoAssetIdsForDuration,
+        references: items,
+        assetIdsOf: localAssetReferenceIds,
         userId,
         projectId,
-        assets: deps.assets,
+        assets: assetsDep,
         ...(deps.probe ? { probe: deps.probe } : {}),
       });
-      effectiveBody = {
-        ...body,
-        references: ruling.kind === "resolved" ? ruling.references : merged,
-      };
+      if (ruling.kind === "resolved") {
+        effectiveBody = { ...effectiveBody, references: ruling.references };
+      }
     }
   }
 

@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   aspectRatioIds,
+  canonicalSizeValue,
   checkGenerationParamLimit,
   frozenVideoModeOf,
   parsePixels,
@@ -678,5 +679,24 @@ describe("aspectRatioIds（ADR-0123）", () => {
     expect(aspectRatioIds([null, 42, {}, { label: "无 id" }, { id: "" }])).toEqual(
       [],
     );
+  });
+});
+
+describe("canonicalSizeValue（IKR4OO 大小写归一）", () => {
+  const SIZES = [{ id: "4K", api_value: "4K" }, { id: "1080p", api_value: "1080p" }];
+
+  it("已精确命中的原样返回", () => {
+    expect(canonicalSizeValue("4K", SIZES)).toBe("4K");
+    expect(canonicalSizeValue("1080p", SIZES)).toBe("1080p");
+  });
+
+  it("大小写不同的折算到配置里的写法", () => {
+    expect(canonicalSizeValue("4k", SIZES)).toBe("4K");
+    expect(canonicalSizeValue("1080P", SIZES)).toBe("1080p");
+  });
+
+  it("不认识的取值原样返回，交由校验报错", () => {
+    expect(canonicalSizeValue("8k", SIZES)).toBe("8k");
+    expect(canonicalSizeValue("4k", [])).toBe("4k");
   });
 });

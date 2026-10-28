@@ -44,6 +44,7 @@ import {
   createMediaToolJobWithRecovery,
   mediaToolRequestHash,
   readAcceptedMediaToolReplay,
+  replayAcceptedMediaTool,
   renderMediaToolReplay,
   stripCanvasBinding,
   takeCanvasBinding,
@@ -261,8 +262,7 @@ describe("createMediaToolJobWithRecovery：受理主体编排", () => {
     expect(writeRowsMock).not.toHaveBeenCalled();
   });
 
-  it("keeps the legacy client_token idempotency shape without recovery", async () => {
-    const prisma = makePrisma();
+  it("keeps the legacy client_token idempotency shape without recovery", async () => {    const prisma = makePrisma();
     readIdemMock.mockResolvedValue(null);
     const createJob = vi.fn().mockResolvedValue({ jobId: "401", status: "queued" });
     const out = await createMediaToolJobWithRecovery(prisma, null, createJob, {
@@ -446,5 +446,60 @@ describe("createMediaToolJobWithRecovery：计费补偿", () => {
     expect(createJob).not.toHaveBeenCalled();
     expect(charge).not.toHaveBeenCalled();
     expect(release).not.toHaveBeenCalled();
+  });
+});
+
+describe("replayAcceptedMediaTool：无 canvas_binding 时用 Idempotency-Key 去重（IKR4OA）", () => {
+  const IDENTITY = {
+    projectId: "55",
+    userId: "9",
+    binding: null,
+    taskType: "media_extract",
+    operation: "media_extract.create",
+    requestPath: "/media-extractions",
+    body: { source_asset_id: "8422" },
+    idempotencyKey: " key-1 ",
+  };
+
+  it("builds a legacy identity from the header key when no binding is present", async () => {
+    const prisma = makePrisma();
+    readIdemMock.mockResolvedValue(null);
+    const out = await replayAcceptedMediaTool(prisma, IDENTITY);
+    expect(out.recovery).toBeNull();
+    expect(out.legacy).toEqual({
+      projectId: "55",
+      operation: "media_extract.create",
+      requestHash: mediaToolRequestHash("media_extract.create", "55", "/media-extractions", {
+        source_asset_id: "8422",
+      }),
+      key: "key-1",
+    });
+    expect(out.replayed).toBeNull();
+    expect(readIdemMock).toHaveBeenCalledWith(
+      prisma,
+      "55",
+      { key: "key-1", requestHash: expect.any(String) },
+      "media_extract.create",
+    );
+  });
+
+  it("replays the accepted job for a repeated key without a binding", async () => {
+    const prisma = makePrisma("processing");
+    readIdemMock.mockResolvedValue({ generation_job_id: "400", cursor: 0 });
+    const out = await replayAcceptedMediaTool(prisma, IDENTITY);
+    expect(out.legacy?.key).toBe("key-1");
+    expect(out.replayed).toMatchObject({
+      code: 200,
+      data: { job_id: "400", status: "processing" },
+    });
+  });
+
+  it("does not open the legacy path when no key is supplied", async () => {
+    const prisma = makePrisma();
+    readIdemMock.mockResolvedValue(null);
+    const out = await replayAcceptedMediaTool(prisma, { ...IDENTITY, idempotencyKey: "  " });
+    expect(out.legacy).toBeNull();
+    expect(out.replayed).toBeNull();
+    expect(readIdemMock).not.toHaveBeenCalled();
   });
 });

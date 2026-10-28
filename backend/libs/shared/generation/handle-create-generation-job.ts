@@ -40,6 +40,7 @@ import {
   errorCodeToNumeric,
   checkGenerationParamLimit,
   toGenerationParamCheckInput,
+  canonicalSizeValue,
   resolveVideoMode,
   normalizeVideoMode,
   frozenVideoModeOf,
@@ -223,7 +224,7 @@ function uniqueMaterialRefs(
 
 
 
-function parseReferences(
+export function parseReferences(
   v: unknown,
 ): { kind: "absent" } | { kind: "ok"; items: ReferenceItemInput[] } | { kind: "invalid" } {
   if (v === undefined || v === null) return { kind: "absent" };
@@ -1781,6 +1782,18 @@ export async function handleCreateGenerationJob(
 
 
   const capability = whitelist.find((m) => m.model_id === resolvedModelId);
+
+  if (capability) {
+    const supportedSizes = Array.isArray(capability.supported_sizes)
+      ? capability.supported_sizes
+      : [];
+    if (typeof params.resolution === "string") {
+      params.resolution = canonicalSizeValue(params.resolution, supportedSizes);
+    }
+    if (typeof params.size === "string") {
+      params.size = canonicalSizeValue(params.size, supportedSizes);
+    }
+  }
 
 
 
