@@ -22,14 +22,16 @@ spec:
       - name: ccr-secret
       affinity:
         podAntiAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
-          - labelSelector:
-              matchExpressions:
-              - key: app
-                operator: In
-                values:
-                - blue-whale-web
-            topologyKey: kubernetes.io/hostname
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - blue-whale-web
+              topologyKey: kubernetes.io/hostname
       containers:
       - name: blue-whale-web
         image: "xf-bluewhale-cn-beijing.cr.volces.com/bluewhale/bluewhale-web:$(tag)"
