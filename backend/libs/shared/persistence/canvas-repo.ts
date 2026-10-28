@@ -48,6 +48,50 @@ export async function linkPromptMaterials(tx: Prisma.TransactionClient, projectI
   }
 }
 
+function mapLegacyNodeType(node: unknown): unknown {
+  if (!node || typeof node !== "object" || Array.isArray(node)) return node;
+  const record = node as Record<string, unknown>;
+  if (record.type === "text") return { ...record, type: "textNode" };
+  if (record.type === "reference") return { ...record, type: "assetNode" };
+  return node;
+}
+
+function nodeFromRow(row: {
+  node_id: string;
+  type: string;
+  pos_x: number | null;
+  pos_y: number | null;
+  data_json: unknown;
+}): Record<string, unknown> {
+  return {
+    id: row.node_id,
+    type: row.type,
+    position: { x: row.pos_x ?? 0, y: row.pos_y ?? 0 },
+    data: row.data_json ?? {},
+  };
+}
+
+function edgeFromRow(row: {
+  edge_id: string;
+  source_node_id: string;
+  target_node_id: string;
+  ref_role: string | null;
+  data_json: unknown;
+}): Record<string, unknown> {
+  const data =
+    row.data_json && typeof row.data_json === "object" && !Array.isArray(row.data_json)
+      ? (row.data_json as Record<string, unknown>)
+      : {};
+  return {
+    id: row.edge_id,
+    source: row.source_node_id,
+    target: row.target_node_id,
+    ...(Object.keys(data).length > 0 || row.ref_role
+      ? { data: { ...data, ...(row.ref_role ? { refRole: row.ref_role } : {}) } }
+      : {}),
+  };
+}
+
 function emptyView(projectId: string): CanvasView {
   return {
     id: null,
@@ -181,10 +225,39 @@ export function createCanvasRepo(prisma: PrismaClient): CanvasRepo {
       return (row.content_json as unknown as PromptPreviewContent | null) ?? { title: row.title, text: row.text };
     },
     async getByProject(projectId) {
+      const pid = BigInt(projectId);
       const row = await prisma.project_canvas.findFirst({
-        where: { project_id: BigInt(projectId) },
+        where: { project_id: pid },
       });
-      return row ? toView(row) : emptyView(projectId);
+      if (!row) return emptyView(projectId);
+      const [nodes, edges] = await Promise.all([
+        prisma.project_nodes.findMany({
+          where: { project_id: pid, is_delete: 0 },
+          orderBy: { id: "asc" },
+        }),
+        prisma.project_edges.findMany({
+          where: { project_id: pid, is_delete: 0 },
+          orderBy: { id: "asc" },
+        }),
+      ]);
+      if (nodes.length > 0) {
+        return {
+          id: row.id.toString(),
+          project_id: projectId,
+          version: row.version,
+          viewport:
+            row.viewport_json == null ? null : JSON.stringify(row.viewport_json),
+          nodes: JSON.stringify(nodes.map(nodeFromRow)),
+          edges: JSON.stringify(edges.map(edgeFromRow)),
+        };
+      }
+      return {
+        ...toView(row),
+        nodes:
+          row.nodes_json == null
+            ? null
+            : JSON.stringify((row.nodes_json as unknown[]).map(mapLegacyNodeType)),
+      };
     },
     async save(projectId, viewport, nodes) {
       const pid = BigInt(projectId);
