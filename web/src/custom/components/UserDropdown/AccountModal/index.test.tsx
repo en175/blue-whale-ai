@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { fetchCaptcha, sendCode, updateNickname } from '@/custom/api/auth';
+import { fetchCaptcha, fetchMe, sendCode, updateNickname } from '@/custom/api/auth';
 import { toast } from '@/shared/components/Toast';
 
 vi.mock('@/shared/components/Toast', () => ({
@@ -26,7 +26,7 @@ const profile = {
 
 vi.mock('@/custom/api/auth', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/custom/api/auth')>();
-  const fetchMe = vi.fn(async () => profile);
+  const fetchMe = vi.fn(async (): Promise<typeof profile> => profile);
   return {
     ...actual,
     fetchMe,
@@ -51,7 +51,7 @@ vi.mock('../AccountRecordsModal', () => ({
 let root: Root;
 let mountNode: HTMLDivElement;
 
-async function renderAccountModal(onClose = vi.fn(), onRequireLogin = vi.fn()) {
+async function renderAccountModal(onClose = vi.fn(), onRequireLogin = vi.fn(), phone = '') {
   mountNode = document.createElement('div');
   document.body.appendChild(mountNode);
   root = createRoot(mountNode);
@@ -64,7 +64,7 @@ async function renderAccountModal(onClose = vi.fn(), onRequireLogin = vi.fn()) {
         createElement(AccountModal, {
           userId: 1,
           nickname: 'alice',
-          phone: '',
+          phone,
           hasPassword: true,
           balance: 0,
           onClose,
@@ -77,6 +77,16 @@ async function renderAccountModal(onClose = vi.fn(), onRequireLogin = vi.fn()) {
     await Promise.resolve();
   });
   return { onClose, onRequireLogin };
+}
+
+async function renderAccountModalWhileProfileFails() {
+  vi.mocked(fetchMe).mockRejectedValueOnce(new Error('network down'));
+  await renderAccountModal(vi.fn(), vi.fn(), '13900000009');
+  await act(async () => {
+    await vi.waitFor(() => {
+      if (!document.body.textContent?.includes('加载失败，请重试')) throw new Error('失败态尚未渲染');
+    });
+  });
 }
 
 function buttonByText(text: string) {
@@ -311,5 +321,47 @@ describe('AccountModal', () => {
     expect(smsCode).not.toBeNull();
     await act(async () => setInputValue(smsCode!, '123456'));
     expect(buttonByText('下一步')?.className).toContain(rebindStyles.submitReady);
+  });
+
+  it('资料加载失败时只展示重试，不提供修改和更换', async () => {
+    await renderAccountModalWhileProfileFails();
+
+    const retry = buttonByText('重试');
+    expect(retry).toBeTruthy();
+    expect(document.body.textContent).toContain('加载失败，请重试');
+    expect(buttonByText('修改')).toBeUndefined();
+    expect(buttonByText('更换')).toBeUndefined();
+
+    await act(async () => retry?.click());
+    await act(async () => {
+      await vi.waitFor(() => expect(document.body.textContent).toContain('蓝鲸用户_NACRQX'));
+    });
+    expect(document.body.textContent).not.toContain('加载失败，请重试');
+    expect(buttonByText('修改')?.disabled).toBe(false);
+    expect(buttonByText('更换')?.disabled).toBe(false);
+  });
+
+  it('换绑改号后清空发给旧号的验证码和倒计时', async () => {
+    await renderAccountModal();
+    await waitForProfile();
+    await act(async () => buttonByText('更换')?.click());
+    await act(async () => buttonByText('获取验证码')?.click());
+    await act(async () => setInputValue(inputByPlaceholder('请输入图中字符')!, 'ab2c'));
+    await act(async () => setInputValue(inputByPlaceholder('请输入验证码')!, '123456'));
+    await act(async () => buttonByText('下一步')?.click());
+    await act(async () => {
+      await vi.waitFor(() => expect(inputByPlaceholder('请输入新手机号')).not.toBeNull());
+    });
+
+    await act(async () => setInputValue(inputByPlaceholder('请输入新手机号')!, '13900000010'));
+    await act(async () => buttonByText('获取验证码')?.click());
+    await act(async () => setInputValue(inputByPlaceholder('请输入图中字符')!, 'ab2c'));
+    expect(sendCode).toHaveBeenLastCalledWith(expect.objectContaining({ phone: '13900000010', purpose: 'rebind_new' }));
+    await act(async () => setInputValue(inputByPlaceholder('请输入验证码')!, '654321'));
+    expect(buttonByText('60秒后重发')).toBeTruthy();
+
+    await act(async () => setInputValue(inputByPlaceholder('请输入新手机号')!, '13900000011'));
+    expect(inputByPlaceholder('请输入验证码')?.value).toBe('');
+    expect(buttonByText('获取验证码')).toBeTruthy();
   });
 });

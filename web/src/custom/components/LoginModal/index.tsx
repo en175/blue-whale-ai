@@ -137,10 +137,12 @@ function AgreementRow({
 function PhoneField({
   value,
   onChange,
+  onBlur,
   readOnly = false,
 }: {
   value: string;
   onChange: (value: string) => void;
+  onBlur?: () => void;
   readOnly?: boolean;
 }) {
   return (
@@ -153,6 +155,7 @@ function PhoneField({
         autoComplete="tel"
         placeholder="请输入手机号"
         onChange={(event) => onChange(event.target.value)}
+        onBlur={onBlur}
       />
     </label>
   );
@@ -186,6 +189,10 @@ export default function LoginModal({ onClose, onSuccess, notice }: LoginModalPro
   const resetCaptcha = () => {
     setCaptcha(null);
     setCaptchaAnswer('');
+  };
+
+  const flagPhoneFormat = () => {
+    if (phone.trim() && !phoneValid) setError(PHONE_FORMAT_MESSAGE);
   };
 
   const applyAuth = async (login: LoginData) => {
@@ -418,6 +425,7 @@ export default function LoginModal({ onClose, onSuccess, notice }: LoginModalPro
               </div>
               <PhoneField
                 value={phone}
+                onBlur={flagPhoneFormat}
                 onChange={(value) => {
                   setPhone(value);
                   setError((current) => (current === PHONE_FORMAT_MESSAGE ? '' : current));
@@ -541,6 +549,7 @@ export default function LoginModal({ onClose, onSuccess, notice }: LoginModalPro
               </div>
               <PhoneField
                 value={phone}
+                onBlur={flagPhoneFormat}
                 onChange={(value) => {
                   setPhone(value);
                   setError((current) => (current === PHONE_FORMAT_MESSAGE ? '' : current));

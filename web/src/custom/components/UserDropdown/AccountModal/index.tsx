@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import Modal from '@/custom/components/Modal';
+import Empty from '@/custom/components/Empty';
 import {
   accountProfileKeys,
   accountProfileOptions,
@@ -67,6 +68,7 @@ export default function AccountModal({
 
   const draftIssue = nicknameValidationMessage(draft);
   const saving = saveNickname.isPending;
+  const profileFailed = profile.isError;
   const nicknameInvalid = Boolean(nicknameError) || Boolean(draftIssue);
   const canSave = !nicknameInvalid && !nicknameComposing && draft.trim() !== savedNickname && !saving;
 
@@ -113,7 +115,24 @@ export default function AccountModal({
           title: styles.title,
         }}
       >
-        {profile.isError && <p className={styles.profileError}>账号信息加载失败，当前展示登录时的缓存</p>}
+        {profileFailed ? (
+          <Empty
+            className={styles.profileError}
+            role="alert"
+            title="加载失败，请重试"
+            action={(
+              <button
+                type="button"
+                className={styles.retryButton}
+                disabled={profile.isFetching}
+                onClick={() => void profile.refetch()}
+              >
+                {profile.isFetching ? '重试中…' : '重试'}
+              </button>
+            )}
+          />
+        ) : (
+        <>
         <div className={styles.row}>
           <span className={styles.label}>用户ID</span>
           <span className={styles.value}>{profile.data?.id || userId}</span>
@@ -161,6 +180,7 @@ export default function AccountModal({
               <button
                 type="button"
                 className={styles.link}
+                disabled={profileFailed || saving}
                 onClick={() => {
                   setNicknameDraft(savedNickname);
                   setNicknameError('');
@@ -177,7 +197,12 @@ export default function AccountModal({
           <div className={styles.rowRight}>
             <span className={styles.value}>{savedPhone ? maskPhone(savedPhone) : '未绑定'}</span>
             {savedPhone && (
-              <button type="button" className={styles.link} onClick={() => setShowRebind(true)}>
+              <button
+                type="button"
+                className={styles.link}
+                disabled={profileFailed}
+                onClick={() => setShowRebind(true)}
+              >
                 更换
               </button>
             )}
@@ -194,6 +219,8 @@ export default function AccountModal({
             </button>
           </div>
         </div>
+        </>
+        )}
       </Modal>
       {showRebind && savedPhone && (
         <RebindPhoneModal
