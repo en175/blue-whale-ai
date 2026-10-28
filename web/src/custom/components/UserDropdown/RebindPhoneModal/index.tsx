@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import CharacterCaptchaPanel from '@/custom/components/CharacterCaptchaPanel';
 import Modal from '@/custom/components/Modal';
 import {
@@ -12,6 +12,7 @@ import {
 import { isApiError } from '@/shared/api/http';
 import { showToast, toast } from '@/shared/components/Toast';
 import { isMainlandPhone, PHONE_FORMAT_MESSAGE, SMS_SENT_MESSAGE } from '@/custom/utils/mainlandPhone';
+import { SMS_COOLDOWN_SECONDS, useSmsCooldown } from '@/custom/api/smsCooldown';
 import { clearSessionToken } from '@/shared/api/sessionToken';
 import { setSession } from '@/shared/utils/auth';
 import styles from './index.module.css';
@@ -23,7 +24,8 @@ interface RebindPhoneModalProps {
   onBindingChanged: () => void;
 }
 
-const COOLDOWN_SECONDS = 60;
+const isSmsDeliveryUnknown = (error: unknown) => !isApiError(error) || error.status === 408;
+type SmsSendState = 'idle' | 'failed' | 'unknown';
 
 function messageOf(error: unknown, fallback: string) {
   return isApiError(error) ? error.message : fallback;
@@ -60,17 +62,13 @@ export default function RebindPhoneModal({
   const [error, setError] = useState('');
   const [sendingCode, setSendingCode] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [cooldown, setCooldown] = useState(0);
-
-  useEffect(() => {
-    if (cooldown <= 0) return undefined;
-    const timer = window.setInterval(() => setCooldown((current) => Math.max(0, current - 1)), 1000);
-    return () => window.clearInterval(timer);
-  }, [cooldown]);
+  const [sendState, setSendState] = useState<SmsSendState>('idle');
+  const [checkingDelivery, setCheckingDelivery] = useState(false);
 
   const purpose: SmsPurpose = step === 'old' ? 'rebind_old' : 'rebind_new';
   const currentPhone = nationalPhone(phone);
   const targetPhone = step === 'old' ? currentPhone : newPhone.trim();
+  const [cooldown, startCooldown] = useSmsCooldown(purpose, targetPhone);
   const phoneValid = isMainlandPhone(targetPhone);
   const sameAsCurrent = step === 'new' && targetPhone === currentPhone;
   const codeReady = code.trim().length > 0;
@@ -87,7 +85,8 @@ export default function RebindPhoneModal({
   const changeNewPhone = (value: string) => {
     setNewPhone(value);
     setCode('');
-    setCooldown(0);
+    setSendState('idle');
+    setCheckingDelivery(false);
     setError('');
     resetCaptcha();
   };
@@ -109,6 +108,7 @@ export default function RebindPhoneModal({
       return;
     }
     setSendingCode(true);
+    setCheckingDelivery(false);
     setError('');
     try {
       await loadCaptcha();
@@ -131,17 +131,18 @@ export default function RebindPhoneModal({
         captchaId: captcha.id,
         captchaAnswer: normalized,
       });
-      setCooldown(COOLDOWN_SECONDS);
+      startCooldown(SMS_COOLDOWN_SECONDS);
+      setSendState('idle');
       resetCaptcha();
       toast(SMS_SENT_MESSAGE);
     } catch (sendError) {
-      setError(messageOf(sendError, '验证码发送失败，请稍后重试'));
-      setCaptchaAnswer('');
-      try {
-        await loadCaptcha();
-      } catch (captchaError) {
-        setError(messageOf(captchaError, '验证码图片获取失败，请稍后重试'));
-        resetCaptcha();
+      resetCaptcha();
+      if (isSmsDeliveryUnknown(sendError)) {
+        setSendState('unknown');
+      } else {
+        setSendState('failed');
+        setError(messageOf(sendError, '验证码发送失败，请稍后重试'));
+        void openCaptcha();
       }
     } finally {
       setSendingCode(false);
@@ -156,7 +157,7 @@ export default function RebindPhoneModal({
       const result = await verifyCurrentPhoneForRebind(code.trim());
       setRebindToken(result.rebind_token);
       setCode('');
-      setCooldown(0);
+      setSendState('idle');
       setStep('new');
     } catch (verifyError) {
       setError(messageOf(verifyError, '原手机号验证失败，请稍后重试'));
@@ -169,7 +170,8 @@ export default function RebindPhoneModal({
     setStep('old');
     setRebindToken('');
     setCode('');
-    setCooldown(0);
+    setSendState('idle');
+    setCheckingDelivery(false);
     resetCaptcha();
   };
 
@@ -212,7 +214,28 @@ export default function RebindPhoneModal({
     }
   };
 
-  const sendLabel = cooldown > 0 ? `${cooldown}秒后重发` : sendingCode ? '发送中…' : '获取验证码';
+  const markSmsReceived = () => {
+    startCooldown(SMS_COOLDOWN_SECONDS);
+    setSendState('idle');
+    setCheckingDelivery(false);
+    setError('');
+  };
+
+  const toggleDeliveryCheck = () => {
+    setCheckingDelivery((checking) => !checking);
+    setError('');
+  };
+
+  const smsActionLocked = cooldown > 0 || sendingCode;
+  const sendLabel = sendState === 'unknown'
+    ? '核对该短信是否送达'
+    : cooldown > 0
+      ? `${cooldown}秒后重发`
+      : sendingCode
+        ? '发送中…'
+        : sendState === 'failed'
+          ? '重试'
+          : '获取验证码';
   const codeActionClass = cooldown > 0
     ? styles.codeCooldown
     : phoneValid
@@ -296,12 +319,28 @@ export default function RebindPhoneModal({
             <button
               type="button"
               className={codeActionClass}
-              disabled={cooldown > 0 || sendingCode}
-              onClick={() => void openCaptcha()}
+              disabled={smsActionLocked}
+              onClick={() => {
+                if (sendState === 'unknown') toggleDeliveryCheck();
+                else void openCaptcha();
+              }}
             >
               {sendLabel}
             </button>
           </label>
+          {sendState === 'unknown' && checkingDelivery && (
+            <div className={styles.deliveryCheck}>
+              <p>短信可能已发出。收到验证码请点「我已收到」；未收到请点「重新发送」。</p>
+              <div className={styles.deliveryActions}>
+                <button type="button" onClick={markSmsReceived}>
+                  我已收到
+                </button>
+                <button type="button" onClick={() => void openCaptcha()}>
+                  重新发送
+                </button>
+              </div>
+            </div>
+          )}
           {error && !captcha && <p className={styles.error}>{error}</p>}
           <button
             type="submit"

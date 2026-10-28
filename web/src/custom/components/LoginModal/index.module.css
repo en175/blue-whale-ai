@@ -386,6 +386,41 @@
   padding-top: 16px;
 }
 
+.deliveryCheck {
+  margin: -4px 0 8px;
+  padding: 12px 14px;
+  border: 1px solid #ececec;
+  border-radius: 10px;
+  background: #fafafa;
+  color: #63636b;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.deliveryCheck p {
+  margin: 0;
+}
+
+.deliveryActions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.deliveryActions button {
+  padding: 6px 12px;
+  border: 1px solid #d8d8dd;
+  border-radius: 8px;
+  background: #fff;
+  color: #242426;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.deliveryActions button:hover {
+  background: #f2f2f4;
+}
+
 @media (max-width: 720px) {
   .shell {
     grid-template-columns: 1fr;
