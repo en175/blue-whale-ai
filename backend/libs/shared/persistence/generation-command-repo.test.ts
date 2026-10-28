@@ -342,7 +342,7 @@ describe("generation command repo retry", () => {
     expect(tx.project_command_receipts.create).toHaveBeenCalledWith({
       data: expect.objectContaining({ accepted_cursor: expect.any(BigInt) }),
     });
-    const accepted = tx.command_idempotency.create.mock.calls[0]![0].data.accepted_cursor;
+    const accepted = tx.project_command_receipts.create.mock.calls[0]![0].data.accepted_cursor;
     expect(accepted).toBe(BigInt(result.cursor));
   });
 
