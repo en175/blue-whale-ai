@@ -231,6 +231,32 @@ describe('LoginModal 短信冷却与发码重试', () => {
     expect(buttonByText('获取验证码')).toBeNull();
   });
 
+  it('发码后刷新，手机号与冷却自动回填（验证码留空）', async () => {
+    await renderLoginModal();
+    await typePhone('13800001234');
+    await sendLoginCode();
+    await act(async () => setInputValue(inputByPlaceholder('请输入验证码')!, '123456'));
+
+    await act(async () => root.unmount());
+    mountNode.remove();
+    mountNode = document.createElement('div');
+    document.body.appendChild(mountNode);
+    root = createRoot(mountNode);
+    await act(async () => {
+      root.render(
+        createElement(
+          QueryClientProvider,
+          { client: new QueryClient({ defaultOptions: { queries: { retry: false } } }) },
+          createElement(LoginModal, { onClose: vi.fn() }),
+        ),
+      );
+    });
+
+    expect(inputByPlaceholder('请输入手机号')?.value).toBe('13800001234');
+    expect(inputByPlaceholder('请输入验证码')?.value).toBe('');
+    expect(buttonByText('60秒后重发')).not.toBeNull();
+  });
+
   it('冷却中换手机号，新号码重新可获取（SMS_048）', async () => {
     await renderLoginModal();
     await typePhone('13800001234');

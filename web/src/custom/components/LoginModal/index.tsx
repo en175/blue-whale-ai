@@ -23,7 +23,7 @@ import {
 import { resolveMediaSrc } from '@/shared/utils/remoteImageCors';
 import { isApiError } from '@/shared/api/http';
 import { toast } from '@/shared/components/Toast';
-import { SMS_COOLDOWN_SECONDS, useSmsCooldown } from '@/custom/api/smsCooldown';
+import { readSmsLastPhone, SMS_COOLDOWN_SECONDS, useSmsCooldown, writeSmsLastPhone } from '@/custom/api/smsCooldown';
 import { isMainlandPhone, PHONE_FORMAT_MESSAGE, SMS_SENT_MESSAGE } from '@/custom/utils/mainlandPhone';
 import Modal from '@/custom/components/Modal';
 import { useAuthStore, type SessionUser } from '@/shared/stores/auth';
@@ -191,7 +191,7 @@ function PhoneField({  value,
 
 export default function LoginModal({ onClose, onSuccess, notice }: LoginModalProps) {
   const [view, setView] = useState<LoginView>('phone');
-  const [phone, setPhone] = useState('');
+  const [phone, setPhone] = useState(() => readSmsLastPhone('login'));
   const [code, setCode] = useState('');
   const [agreed, setAgreed] = useState(false);
   const [username, setUsername] = useState('');
@@ -279,6 +279,7 @@ export default function LoginModal({ onClose, onSuccess, notice }: LoginModalPro
         captchaAnswer: normalized,
       });
       startCooldown(SMS_COOLDOWN_SECONDS);
+      writeSmsLastPhone(purpose, phone.trim());
       setSendState('idle');
       resetCaptcha();
       toast(SMS_SENT_MESSAGE);

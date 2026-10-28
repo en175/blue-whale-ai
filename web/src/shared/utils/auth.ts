@@ -1,4 +1,4 @@
-import { clearSessionToken } from '@/shared/api/sessionToken';
+import { clearSessionToken, getSessionToken } from '@/shared/api/sessionToken';
 import { showToast } from '@/shared/components/Toast';
 import { useAuthStore, type SessionUser } from '@/shared/stores/auth';
 import { useAuthPromptStore } from '@/shared/stores/authPrompt';
@@ -43,11 +43,12 @@ export function handleAccountDisabled() {
   publishSessionSync({ kind: 'disabled' });
 }
 
-export function handleUnauthorized(errorCode?: string) {
+export function handleUnauthorized(errorCode?: string, requestToken?: string | null) {
   if (errorCode === 'account_disabled') {
     handleAccountDisabled();
     return;
   }
+  if (requestToken !== undefined && getSessionToken() !== requestToken) return;
   clearSessionToken();
   if (useAuthStore.getState().user) {
     useAuthPromptStore.getState().notifyExpired(loginPromptFor(errorCode));

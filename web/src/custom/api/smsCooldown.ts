@@ -71,3 +71,20 @@ export function useSmsCooldown(
 
   return [remaining, startCooldown];
 }
+
+const LAST_PHONE_PREFIX = 'bw_sms_last_phone';
+
+export function readSmsLastPhone(purpose: SmsPurpose): string {
+  try {
+    return window.localStorage.getItem(`${LAST_PHONE_PREFIX}:${purpose}`) ?? '';
+  } catch {
+    return '';
+  }
+}
+
+export function writeSmsLastPhone(purpose: SmsPurpose, phone: string): void {
+  try {
+    window.localStorage.setItem(`${LAST_PHONE_PREFIX}:${purpose}`, phone);
+  } catch {
+  }
+}
