@@ -205,18 +205,6 @@ CREATE TABLE `project_asset` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
-CREATE TABLE `conversations` (
-    `id` BIGINT NOT NULL AUTO_INCREMENT,
-    `project_id` BIGINT NOT NULL,
-    `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
-    `gmt_modified` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
-    `version` INTEGER NOT NULL DEFAULT 0,
-    `is_delete` TINYINT NOT NULL DEFAULT 0,
-
-    INDEX `idx_conversation_project`(`project_id`),
-    PRIMARY KEY (`id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-
 CREATE TABLE `conversation_messages` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `conversation_id` BIGINT NOT NULL,
