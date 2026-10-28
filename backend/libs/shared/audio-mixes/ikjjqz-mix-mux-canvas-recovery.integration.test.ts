@@ -1,3 +1,4 @@
+import { clearEffectiveRecoveryOwners, requireEffectiveRecoveryOwner } from "../persistence/recovery-owner-test-helpers.js";
 
 
 
@@ -162,7 +163,7 @@ describe.skipIf(!databaseUrl)("混合/合成提交归属真库验证（IKJJQZ）
   });
 
   beforeEach(async () => {
-    await prisma.generation_canvas_node_owners.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
+    await clearEffectiveRecoveryOwners(prisma, BigInt(PROJECT_ID));
     await prisma.generation_canvas_outputs.deleteMany({});
     await prisma.generation_canvas_submissions.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
     await prisma.project_command_receipts.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
@@ -211,9 +212,7 @@ describe.skipIf(!databaseUrl)("混合/合成提交归属真库验证（IKJJQZ）
       data: { status: "queued", replayed: false, canvas_binding: { submission_id: S4, binding_revision: 2, is_current: true } },
     });
 
-    const owner = await prisma.generation_canvas_node_owners.findUniqueOrThrow({
-      where: { project_id_node_id: { project_id: BigInt(PROJECT_ID), node_id: "mix-node" } },
-    });
+    const owner = await requireEffectiveRecoveryOwner(prisma, BigInt(PROJECT_ID), "mix-node");
     const newSubmission = await prisma.generation_canvas_submissions.findUniqueOrThrow({
       where: { project_id_submission_id: { project_id: BigInt(PROJECT_ID), submission_id: S4 } },
     });
@@ -264,9 +263,7 @@ describe.skipIf(!databaseUrl)("混合/合成提交归属真库验证（IKJJQZ）
       code: 200,
       data: { status: "queued", canvas_binding: { submission_id: S6, binding_revision: 2, is_current: true } },
     });
-    const owner = await prisma.generation_canvas_node_owners.findUniqueOrThrow({
-      where: { project_id_node_id: { project_id: BigInt(PROJECT_ID), node_id: "mux-node" } },
-    });
+    const owner = await requireEffectiveRecoveryOwner(prisma, BigInt(PROJECT_ID), "mux-node");
     expect(Number(owner.binding_revision)).toBe(2);
     const oldSubmission = await prisma.generation_canvas_submissions.findUniqueOrThrow({
       where: { project_id_submission_id: { project_id: BigInt(PROJECT_ID), submission_id: S5 } },
@@ -294,9 +291,7 @@ describe.skipIf(!databaseUrl)("混合/合成提交归属真库验证（IKJJQZ）
     });
 
     expect(await prisma.generation_canvas_submissions.count({ where: { project_id: BigInt(PROJECT_ID) } })).toBe(1);
-    const owner = await prisma.generation_canvas_node_owners.findUniqueOrThrow({
-      where: { project_id_node_id: { project_id: BigInt(PROJECT_ID), node_id: "mix-node" } },
-    });
+    const owner = await requireEffectiveRecoveryOwner(prisma, BigInt(PROJECT_ID), "mix-node");
     expect(Number(owner.binding_revision)).toBe(1);
     const job = await prisma.generation_jobs.findUniqueOrThrow({ where: { id: BigInt(jobId) } });
     expect(job).toMatchObject({ status: "failed", retry_count: 0 });
@@ -353,9 +348,7 @@ describe.skipIf(!databaseUrl)("混合/合成提交归属真库验证（IKJJQZ）
     const retryJob = await prisma.generation_jobs.findUniqueOrThrow({ where: { id: BigInt(winnerJobId) } });
     expect(retryJob).toMatchObject({ status: "queued", retry_of_job_id: BigInt(jobId) });
     expect(await prisma.generation_canvas_submissions.count({ where: { project_id: BigInt(PROJECT_ID) } })).toBe(2);
-    const owner = await prisma.generation_canvas_node_owners.findUniqueOrThrow({
-      where: { project_id_node_id: { project_id: BigInt(PROJECT_ID), node_id: "mix-node" } },
-    });
+    const owner = await requireEffectiveRecoveryOwner(prisma, BigInt(PROJECT_ID), "mix-node");
     expect(Number(owner.binding_revision)).toBe(2);
 
     expect(await prisma.project_command_receipts.count({
@@ -404,17 +397,13 @@ describe.skipIf(!databaseUrl)("混合/合成提交归属真库验证（IKJJQZ）
     });
     expect(settled.recoveryReceipt.changes[0]).toMatchObject({ state: "present", revision: 2 });
 
-    const owner = await prisma.generation_canvas_node_owners.findUniqueOrThrow({
-      where: { project_id_node_id: { project_id: BigInt(PROJECT_ID), node_id: "settle-node" } },
-    });
+    const owner = await requireEffectiveRecoveryOwner(prisma, BigInt(PROJECT_ID), "settle-node");
     expect(Number(owner.binding_revision)).toBe(1);
 
     await markJobFailed(jobId);
     const again = await mixes.retry(USER_ID, PROJECT_ID, jobId, S7, undefined, binding(S7, "settle-node", 1));
     expect(again).toMatchObject({ code: 200, data: { canvas_binding: { submission_id: S7, binding_revision: 2, is_current: true } } });
-    const ownerAfter = await prisma.generation_canvas_node_owners.findUniqueOrThrow({
-      where: { project_id_node_id: { project_id: BigInt(PROJECT_ID), node_id: "settle-node" } },
-    });
+    const ownerAfter = await requireEffectiveRecoveryOwner(prisma, BigInt(PROJECT_ID), "settle-node");
     expect(Number(ownerAfter.binding_revision)).toBe(2);
     const settledSubmission = await prisma.generation_canvas_submissions.findUniqueOrThrow({
       where: { project_id_submission_id: { project_id: BigInt(PROJECT_ID), submission_id: S6 } },
@@ -438,9 +427,7 @@ describe.skipIf(!databaseUrl)("混合/合成提交归属真库验证（IKJJQZ）
     const retryJob = await prisma.generation_jobs.findUniqueOrThrow({ where: { id: BigInt(firstRetryJobId) } });
     expect(retryJob).toMatchObject({ status: "queued", retry_count: 0, retry_of_job_id: BigInt(jobId) });
     expect(await prisma.generation_canvas_submissions.count({ where: { project_id: BigInt(PROJECT_ID) } })).toBe(2);
-    const owner = await prisma.generation_canvas_node_owners.findUniqueOrThrow({
-      where: { project_id_node_id: { project_id: BigInt(PROJECT_ID), node_id: "mix-node" } },
-    });
+    const owner = await requireEffectiveRecoveryOwner(prisma, BigInt(PROJECT_ID), "mix-node");
     expect(Number(owner.binding_revision)).toBe(2);
   });
 

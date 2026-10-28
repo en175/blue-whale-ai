@@ -1,3 +1,4 @@
+import { clearEffectiveRecoveryOwners, countEffectiveRecoveryOwners } from "./recovery-owner-test-helpers.js";
 import { PrismaMariaDb } from "@prisma/adapter-mariadb";
 import type { Pool } from "mariadb";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -177,7 +178,7 @@ describe.skipIf(!databaseUrl)("新协议保存反向脱节守护（IKJLPC）", (
   }
 
   async function ownerCount(): Promise<number> {
-    return prisma.generation_canvas_node_owners.count({ where: { project_id: BigInt(PROJECT_ID) } });
+    return countEffectiveRecoveryOwners(prisma, BigInt(PROJECT_ID));
   }
 
   async function outputState(submissionId: string, outputKey: string) {
@@ -244,7 +245,7 @@ describe.skipIf(!databaseUrl)("新协议保存反向脱节守护（IKJLPC）", (
   });
 
   beforeEach(async () => {
-    await prisma.generation_canvas_node_owners.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
+    await clearEffectiveRecoveryOwners(prisma, BigInt(PROJECT_ID));
     await prisma.generation_canvas_outputs.deleteMany({});
     await prisma.generation_canvas_submissions.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
     await prisma.project_command_receipts.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });

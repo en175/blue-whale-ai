@@ -1,3 +1,4 @@
+import { clearEffectiveRecoveryOwners, findEffectiveRecoveryOwner } from "./recovery-owner-test-helpers.js";
 
 
 
@@ -201,9 +202,7 @@ describe.skipIf(!databaseUrl)("旧 primary 不得改动新受理归属（IKJLTT�
   }
 
   async function ownerRow(node: string) {
-    return prisma.generation_canvas_node_owners.findUnique({
-      where: { project_id_node_id: { project_id: BigInt(PROJECT_ID), node_id: node } },
-    });
+    return findEffectiveRecoveryOwner(prisma, BigInt(PROJECT_ID), node);
   }
 
   beforeAll(async () => {
@@ -221,7 +220,7 @@ describe.skipIf(!databaseUrl)("旧 primary 不得改动新受理归属（IKJLTT�
   });
 
   beforeEach(async () => {
-    await prisma.generation_canvas_node_owners.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
+    await clearEffectiveRecoveryOwners(prisma, BigInt(PROJECT_ID));
     await prisma.generation_canvas_outputs.deleteMany({});
     await prisma.generation_canvas_submissions.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
     await prisma.project_command_receipts.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
@@ -410,9 +409,7 @@ describe.skipIf(!databaseUrl)("旧 primary 不得改动新受理归属（IKJLTT�
 
     const submissionA = await submissionRow(UUID_A);
     const submissionB = await submissionRow(UUID_B);
-    expect(await prisma.generation_canvas_node_owners.findUnique({
-      where: { project_id_node_id: { project_id: BigInt(PROJECT_ID), node_id: seg1 } },
-    })).toMatchObject({ generation_canvas_submission_id: submissionA!.id, output_key: "segment:1" });
+    expect(await findEffectiveRecoveryOwner(prisma, BigInt(PROJECT_ID), seg1)).toMatchObject({ generation_canvas_submission_id: submissionA!.id, output_key: "segment:1" });
     expect(await ownerRow(NODE)).toMatchObject({
       generation_canvas_submission_id: submissionB!.id,
       output_key: TARGET_OUTPUT_KEY,

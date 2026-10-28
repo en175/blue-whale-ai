@@ -752,20 +752,6 @@ CREATE TABLE `generation_canvas_outputs` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
-CREATE TABLE `generation_canvas_node_owners` (
-    `id` BIGINT NOT NULL AUTO_INCREMENT,
-    `project_id` BIGINT NOT NULL,
-    `node_id` VARCHAR(128) NOT NULL,
-    `generation_canvas_submission_id` BIGINT NOT NULL,
-    `output_key` VARCHAR(128) NOT NULL,
-    `binding_revision` INTEGER NOT NULL,
-    `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
-    `gmt_modified` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
-
-    UNIQUE INDEX `uk_generation_canvas_node_owners__node`(`project_id`, `node_id`),
-    PRIMARY KEY (`id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-
 CREATE TABLE `generation_outbox` (
     `id`              BIGINT       NOT NULL AUTO_INCREMENT,
     `job_id`          BIGINT       NOT NULL,
@@ -797,6 +783,9 @@ CREATE TABLE `project_nodes` (
     `gmt_modified` DATETIME(0)  NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
     `version`      INT          NOT NULL DEFAULT 0,
     `is_delete`    TINYINT      NOT NULL DEFAULT 0,
+    `owner_submission_id`    BIGINT       NULL,
+    `owner_output_key`       VARCHAR(128) NULL,
+    `owner_binding_revision` INT          NOT NULL DEFAULT 0,
     UNIQUE INDEX `uk_project_nodes__node`(`project_id`, `node_id`),
     INDEX `idx_project_nodes__type`(`project_id`, `type`, `is_delete`),
     PRIMARY KEY (`id`)

@@ -1,3 +1,4 @@
+import { clearEffectiveRecoveryOwners } from "./recovery-owner-test-helpers.js";
 
 
 
@@ -202,7 +203,7 @@ describe.skipIf(!databaseUrl)("恢复保存回执丢失可安全重放（IKJKU8�
   });
 
   beforeEach(async () => {
-    await prisma.generation_canvas_node_owners.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
+    await clearEffectiveRecoveryOwners(prisma, BigInt(PROJECT_ID));
     await prisma.generation_canvas_outputs.deleteMany({});
     await prisma.generation_canvas_submissions.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
     await prisma.project_command_receipts.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });

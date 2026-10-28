@@ -1,3 +1,4 @@
+import { clearEffectiveRecoveryOwners } from "./recovery-owner-test-helpers.js";
 
 
 
@@ -237,7 +238,7 @@ describe.skipIf(!databaseUrl)("新协议保存守护未声明受保护卡（IKJK
   });
 
   beforeEach(async () => {
-    await prisma.generation_canvas_node_owners.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
+    await clearEffectiveRecoveryOwners(prisma, BigInt(PROJECT_ID));
     await prisma.generation_canvas_outputs.deleteMany({});
     await prisma.generation_canvas_submissions.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
     await prisma.project_command_receipts.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });

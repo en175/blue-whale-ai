@@ -16,6 +16,18 @@ type CanvasRow = {
 };
 
 function buildService(current: CanvasRow | null = null) {
+  const nodeRows: Array<Record<string, unknown>> = [];
+  const edgeRows: Array<Record<string, unknown>> = [];
+  const applyUpdate = (row: Record<string, unknown> | undefined, data: Record<string, unknown>) => {
+    if (!row) return;
+    for (const [key, value] of Object.entries(data)) {
+      if (key === "version" && typeof value === "object" && value !== null && "increment" in value) {
+        row.version = Number(row.version ?? 0) + Number((value as { increment: number }).increment);
+      } else {
+        row[key] = value;
+      }
+    }
+  };
   const tx = {
     project_canvas: {
       create: vi.fn().mockImplementation(async ({ data }: { data: Record<string, unknown> }) => ({
@@ -25,13 +37,40 @@ function buildService(current: CanvasRow | null = null) {
         viewport_json: data.viewport_json ?? null,
         nodes_json: data.nodes_json ?? null,
         edges_json: data.edges_json ?? null,
+        rows_authoritative: data.rows_authoritative ?? 0,
       })),
       updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       findFirst: vi.fn().mockResolvedValue(current),
       upsert: vi.fn(),
     },
-    project_nodes: { findMany: vi.fn().mockResolvedValue([]) },
-    project_edges: { findMany: vi.fn().mockResolvedValue([]) },
+    project_nodes: {
+      findMany: vi.fn(async () => nodeRows.filter((row) => row.is_delete === 0).map((row) => ({ ...row }))),
+      create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+        const row = { version: 0, is_delete: 0, ...data };
+        nodeRows.push(row);
+        return row;
+      }),
+      update: vi.fn(async ({ where, data }: { where: { project_id_node_id: { project_id: bigint; node_id: string } }; data: Record<string, unknown> }) => {
+        const key = where.project_id_node_id;
+        const row = nodeRows.find((item) => item.project_id === key.project_id && item.node_id === key.node_id);
+        applyUpdate(row, data);
+        return row;
+      }),
+    },
+    project_edges: {
+      findMany: vi.fn(async () => edgeRows.filter((row) => row.is_delete === 0).map((row) => ({ ...row }))),
+      create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+        const row = { version: 0, is_delete: 0, ...data };
+        edgeRows.push(row);
+        return row;
+      }),
+      update: vi.fn(async ({ where, data }: { where: { project_id_edge_id: { project_id: bigint; edge_id: string } }; data: Record<string, unknown> }) => {
+        const key = where.project_id_edge_id;
+        const row = edgeRows.find((item) => item.project_id === key.project_id && item.edge_id === key.edge_id);
+        applyUpdate(row, data);
+        return row;
+      }),
+    },
     generation_output_slots: { updateMany: vi.fn() },
   };
   const client = {
@@ -39,7 +78,6 @@ function buildService(current: CanvasRow | null = null) {
     project_nodes: { findMany: vi.fn().mockResolvedValue([]) },
     project_edges: { findMany: vi.fn().mockResolvedValue([]) },
     generation_canvas_submissions: { findFirst: vi.fn().mockResolvedValue(null), findMany: vi.fn().mockResolvedValue([]) },
-    generation_canvas_node_owners: { findMany: vi.fn().mockResolvedValue([]) },
     $transaction: vi.fn(
       async (callback: (client: typeof tx) => Promise<unknown>) =>
         callback(tx),
@@ -49,7 +87,7 @@ function buildService(current: CanvasRow | null = null) {
     { client } as never,
     { findOwnedById: vi.fn().mockResolvedValue({ id: "1" }) } as never,
   );
-  return { service, client, tx };
+  return { service, client, tx, nodeRows, edgeRows };
 }
 
 function buildProtectedService(current: CanvasRow | null = null) {
@@ -79,10 +117,12 @@ describe("CanvasService.save edges 校验（IKDLQF）", () => {
     const result = await service.save("u1", "1", saveBody(edges));
 
     expect(result.code).toBe(200);
-    expect(tx.project_canvas.create).toHaveBeenCalledWith({
+    expect(tx.project_edges.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         project_id: 1n,
-        edges_json: edges,
+        edge_id: "e1",
+        source_node_id: "text-1",
+        target_node_id: "media-1",
       }),
     });
     expect(result.data?.edges).toBe(JSON.stringify(edges));
@@ -104,9 +144,12 @@ describe("CanvasService.save edges 校验（IKDLQF）", () => {
     expect(result.code).toBe(200);
     expect(tx.project_canvas.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({ edges_json: existingEdges }),
+        data: expect.objectContaining({ rows_authoritative: 1 }),
       }),
     );
+    expect(tx.project_edges.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ edge_id: "e1", source_node_id: "text-1", target_node_id: "media-1" }),
+    });
     expect(tx.project_canvas.create).not.toHaveBeenCalled();
   });
 
@@ -117,7 +160,7 @@ describe("CanvasService.save edges 校验（IKDLQF）", () => {
 
     expect(result.code).toBe(200);
     expect(tx.project_canvas.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({ edges_json: null }),
+      data: expect.objectContaining({ project_id: 1n, rows_authoritative: 1 }),
     });
   });
 
@@ -155,8 +198,8 @@ describe("CanvasService.save edges 校验（IKDLQF）", () => {
     const result = await service.save("u1", "1", saveBody(edges));
 
     expect(result.code).toBe(200);
-    expect(tx.project_canvas.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({ project_id: 1n, edges_json: edges }),
+    expect(tx.project_edges.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ project_id: 1n, edge_id: "e1", source_node_id: edge.source, target_node_id: edge.target }),
     });
     expect(result.data?.edges).toBe(JSON.stringify(edges));
   });
@@ -432,7 +475,7 @@ describe("CanvasService.save 空覆盖防护（IKIIWN）", () => {
     expect(tx.project_canvas.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { project_id: 1n, version: 3 },
-        data: expect.objectContaining({ nodes_json: [] }),
+        data: expect.objectContaining({ rows_authoritative: 1 }),
       }),
     );
   });
@@ -523,7 +566,13 @@ describe("CanvasService.save 旧协议受保护标记严格比较", () => {
 
     expect(result.code).toBe(200);
     expect(tx.project_canvas.updateMany).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ nodes_json: incoming }) }),
+      expect.objectContaining({ data: expect.objectContaining({ rows_authoritative: 1 }) }),
     );
+    expect(tx.project_nodes.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        node_id: "media-1",
+        data_json: expect.objectContaining({ fileName: "改名", assetId: "7" }),
+      }),
+    });
   });
 });

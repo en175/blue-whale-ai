@@ -1,3 +1,4 @@
+import { clearEffectiveRecoveryOwners, countEffectiveRecoveryOwners, findEffectiveRecoveryOwner } from "./recovery-owner-test-helpers.js";
 
 
 
@@ -217,7 +218,7 @@ describe.skipIf(!databaseUrl)("成片与重生样片恢复契约 v1 真库验证
 
   beforeEach(async () => {
     const pid = BigInt(PROJECT_ID);
-    await prisma.generation_canvas_node_owners.deleteMany({ where: { project_id: pid } });
+    await clearEffectiveRecoveryOwners(prisma, pid);
     await prisma.generation_canvas_outputs.deleteMany({});
     await prisma.generation_canvas_submissions.deleteMany({ where: { project_id: pid } });
     await prisma.project_command_receipts.deleteMany({ where: { project_id: pid } });
@@ -272,9 +273,7 @@ describe.skipIf(!databaseUrl)("成片与重生样片恢复契约 v1 真库验证
       request_hash: requestHash,
     });
 
-    const owner = await prisma.generation_canvas_node_owners.findUnique({
-      where: { project_id_node_id: { project_id: BigInt(PROJECT_ID), node_id: "scene-node-1" } },
-    });
+    const owner = await findEffectiveRecoveryOwner(prisma, BigInt(PROJECT_ID), "scene-node-1");
     expect(owner).toMatchObject({ binding_revision: 1, output_key: "$target" });
     expect(await prisma.generation_jobs.count({ where: { project_id: BigInt(PROJECT_ID) } })).toBe(1);
 
@@ -502,7 +501,7 @@ describe.skipIf(!databaseUrl)("成片与重生样片恢复契约 v1 真库验证
 
     expect(await prisma.generation_jobs.count({ where: { project_id: BigInt(PROJECT_ID) } })).toBe(0);
     expect(await prisma.generation_canvas_submissions.count({ where: { project_id: BigInt(PROJECT_ID) } })).toBe(0);
-    expect(await prisma.generation_canvas_node_owners.count({ where: { project_id: BigInt(PROJECT_ID) } })).toBe(0);
+    expect(await countEffectiveRecoveryOwners(prisma, BigInt(PROJECT_ID))).toBe(0);
     expect(await prisma.project_command_receipts.count({ where: { project_id: BigInt(PROJECT_ID) } })).toBe(0);
     expect(await prisma.billing_cost_reservations.count({})).toBe(0);
   });
@@ -542,7 +541,7 @@ describe.skipIf(!databaseUrl)("成片与重生样片恢复契约 v1 真库验证
 
     expect(await prisma.generation_jobs.count({ where: { project_id: BigInt(PROJECT_ID) } })).toBe(0);
     expect(await prisma.project_command_receipts.count({ where: { project_id: BigInt(PROJECT_ID) } })).toBe(0);
-    expect(await prisma.generation_canvas_node_owners.count({ where: { project_id: BigInt(PROJECT_ID) } })).toBe(0);
+    expect(await countEffectiveRecoveryOwners(prisma, BigInt(PROJECT_ID))).toBe(0);
   });
 
   it("★ R5 旧承接版本抢占旧成片节点 → 409，不覆盖旧承接（AC4）", async () => {
@@ -558,9 +557,7 @@ describe.skipIf(!databaseUrl)("成片与重生样片恢复契约 v1 真库验证
       code: 409,
       data: { reason: RECOVERY_REASONS.bindingConflict, currentBindingRevision: 1 },
     });
-    const owner = await prisma.generation_canvas_node_owners.findUnique({
-      where: { project_id_node_id: { project_id: BigInt(PROJECT_ID), node_id: "node-old-final" } },
-    });
+    const owner = await findEffectiveRecoveryOwner(prisma, BigInt(PROJECT_ID), "node-old-final");
     const ownerSubmission = await prisma.generation_canvas_submissions.findUnique({
       where: { id: owner!.generation_canvas_submission_id },
     });

@@ -1,3 +1,4 @@
+import { clearEffectiveRecoveryOwner, clearEffectiveRecoveryOwners, findEffectiveRecoveryOwner, findEffectiveRecoveryOwners } from "./recovery-owner-test-helpers.js";
 
 
 
@@ -124,7 +125,7 @@ describe.skipIf(!databaseUrl)("恢复契约 v1 真库验证（IKJJQU）", () => 
   });
 
   beforeEach(async () => {
-    await prisma.generation_canvas_node_owners.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
+    await clearEffectiveRecoveryOwners(prisma, BigInt(PROJECT_ID));
     await prisma.generation_canvas_outputs.deleteMany({});
     await prisma.generation_canvas_submissions.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
     await prisma.project_command_receipts.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
@@ -164,9 +165,7 @@ describe.skipIf(!databaseUrl)("恢复契约 v1 真库验证（IKJJQU）", () => 
 
     expect(await prisma.generation_jobs.count({ where: { project_id: BigInt(PROJECT_ID) } })).toBe(1);
     expect(await prisma.generation_canvas_submissions.count({ where: { project_id: BigInt(PROJECT_ID) } })).toBe(1);
-    const owner = await prisma.generation_canvas_node_owners.findUnique({
-      where: { project_id_node_id: { project_id: BigInt(PROJECT_ID), node_id: "node-race" } },
-    });
+    const owner = await findEffectiveRecoveryOwner(prisma, BigInt(PROJECT_ID), "node-race");
     expect(owner?.binding_revision).toBe(1);
   });
 
@@ -186,9 +185,7 @@ describe.skipIf(!databaseUrl)("恢复契约 v1 真库验证（IKJJQU）", () => 
     });
 
     await accept(acceptance(UUID_B, "node-own", 1));
-    const owners = await prisma.generation_canvas_node_owners.findMany({
-      where: { project_id: BigInt(PROJECT_ID), node_id: "node-own" },
-    });
+    const owners = await (await findEffectiveRecoveryOwners(prisma, BigInt(PROJECT_ID))).filter(owner => owner.node_id === "node-own");
     expect(owners).toHaveLength(1);
     expect(Number(owners[0]!.binding_revision)).toBe(2);
     const old = await prisma.generation_canvas_submissions.findUnique({
@@ -342,9 +339,7 @@ describe.skipIf(!databaseUrl)("恢复契约 v1 真库验证（IKJJQU）", () => 
       expect.objectContaining({ state: "present", revision: 1, nodeBindingRevision: 1 }),
     ]));
 
-    const owner = await prisma.generation_canvas_node_owners.findUnique({
-      where: { project_id_node_id: { project_id: BigInt(PROJECT_ID), node_id: "node-actions" } },
-    });
+    const owner = await findEffectiveRecoveryOwner(prisma, BigInt(PROJECT_ID), "node-actions");
     expect(owner?.output_key).toBe(PRIMARY_OUTPUT_KEY);
     expect(Number(owner?.binding_revision)).toBe(1);
 
@@ -360,7 +355,7 @@ describe.skipIf(!databaseUrl)("恢复契约 v1 真库验证（IKJJQU）", () => 
     await raw.query("UPDATE generation_jobs SET status='cancelled' WHERE id = ?", [Number(subB!.generation_job_id)]);
 
     await prisma.generation_canvas_submissions.deleteMany({ where: { submission_id: UUID_B } });
-    await prisma.generation_canvas_node_owners.deleteMany({ where: { node_id: "node-settle" } });
+    await clearEffectiveRecoveryOwner(prisma, PROJECT_ID, "node-settle");
     await prisma.project_canvas.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
 
     await prisma.project_canvas.create({
@@ -382,9 +377,7 @@ describe.skipIf(!databaseUrl)("恢复契约 v1 真库验证（IKJJQU）", () => 
     ]));
     expect(settledSave.recoveryReceipt.changes[0]).toMatchObject({ state: "present", revision: 2 });
 
-    const ownerAfter = await prisma.generation_canvas_node_owners.findUnique({
-      where: { project_id_node_id: { project_id: BigInt(PROJECT_ID), node_id: "node-settle" } },
-    });
+    const ownerAfter = await findEffectiveRecoveryOwner(prisma, BigInt(PROJECT_ID), "node-settle");
     expect(ownerAfter?.output_key).toBe(TARGET_OUTPUT_KEY);
   });
 
