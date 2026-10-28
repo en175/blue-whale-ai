@@ -7,7 +7,11 @@ import {
 import type { ReferenceItemInput } from "./reference-item-input.js";
 import { freezePromptPlans } from "./prompt-plan-snapshot.js";
 import { checkReferenceLimits } from "../generation-runtime/reference-limits.js";
-import { freezeReferenceLimits } from "../generation-runtime/video-reference-validation.js";
+import {
+  freezeReferenceLimits,
+  validateReferences,
+} from "../generation-runtime/video-reference-validation.js";
+import { VideoInputError } from "../generation-runtime/material-reference.js";
 import type { CanvasEdge } from "@lib/contracts";
 import {
   type PromptTargetNode,
@@ -1996,6 +2000,10 @@ export async function handleCreateGenerationJob(
 
 
 
+  let resolvedReferenceAssets: Awaited<
+    ReturnType<typeof deps.assets.resolveInputAssets>
+  > = [];
+
   if (type !== "audio" && referenceAssetIds.length > 0) {
     const ids = referenceAssetIds.map(String);
     const resolved = await deps.assets.resolveInputAssets(ids, userId, projectId);
@@ -2005,6 +2013,7 @@ export async function handleCreateGenerationJob(
         code: ERROR_INVALID_REFERENCE,
       });
     }
+    resolvedReferenceAssets = resolved;
 
 
     if (type === "image" && resolved.some((a) => a.type !== "image")) {
@@ -2096,6 +2105,64 @@ export async function handleCreateGenerationJob(
       return fail(errorCodeToNumeric(ERROR_INVALID_REFERENCE_TYPE), "参考素材类型与声明不符", {
         code: ERROR_INVALID_REFERENCE_TYPE,
       });
+    }
+
+    if (type === "video" && capability?.features) {
+      const referenceItems = ruling.references.filter((item) => item.role === "reference");
+      const probedDurations = new Map(
+        referenceItems
+          .filter((item) => item.asset_id !== undefined && item.duration !== undefined)
+          .map((item) => [String(item.asset_id), item.duration!]),
+      );
+      const itemAssets = referenceItems
+        .map((item) =>
+          item.asset_id !== undefined
+            ? ruling.assetsById.get(String(item.asset_id))
+            : undefined,
+        )
+        .filter((asset): asset is NonNullable<typeof asset> => asset !== undefined)
+        .map((asset) =>
+          probedDurations.has(asset.id)
+            ? { ...asset, duration: probedDurations.get(asset.id)! }
+            : asset,
+        );
+      const parsedBodyRefs = parseReferences(body.references);
+      const referencesProvided =
+        parsedBodyRefs.kind === "ok" && parsedBodyRefs.items.length > 0;
+      const legacyIds = referencesProvided
+        ? []
+        : uniqueAssetIds(referenceAssetIds.map(String)).filter(
+            (id) => !ruling.assetsById.has(id),
+          );
+      const legacyAssets =
+        legacyIds.length > 0
+          ? resolvedReferenceAssets.filter((asset) => legacyIds.includes(asset.id))
+          : [];
+      const referenceAssets = [
+        ...itemAssets,
+        ...legacyAssets.filter((asset) => !itemAssets.some((item) => item.id === asset.id)),
+      ];
+      const materialReferences = uniqueMaterialRefs([
+        ...referenceItems
+          .filter((item) => item.material_id !== undefined)
+          .map((item) => ({ id: item.material_id!, type: item.type })),
+        ...(materialRefs(body.reference_materials) ?? []),
+      ]);
+      try {
+        validateReferences(
+          capability.features,
+          referenceAssets,
+          materialReferences,
+          videoMode ?? null,
+        );
+      } catch (error) {
+        const code = error instanceof VideoInputError ? error.code : ERROR_UNSUPPORTED_INPUT;
+        return fail(
+          errorCodeToNumeric(code),
+          error instanceof Error ? error.message : "参考素材不受支持",
+          { code },
+        );
+      }
     }
 
 

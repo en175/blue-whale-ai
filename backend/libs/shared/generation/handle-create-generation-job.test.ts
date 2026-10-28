@@ -1970,12 +1970,15 @@ describe("handleCreateGenerationJob target_node_id 文本附件（IKDLQF）", ()
 
 
 
-function buildVideoTargetDeps(canvasView: { nodes: string | null; edges: string | null }) {
+function buildVideoTargetDeps(
+  canvasView: { nodes: string | null; edges: string | null },
+  modelRow: Record<string, unknown> = {},
+) {
   const { deps, createJob, getByProject } = buildTargetDeps(canvasView);
 
   (deps as { models: { listEnabledByType: unknown } }).models.listEnabledByType = vi
     .fn()
-    .mockResolvedValue([{ model_id: "doubao-seedance-2-0-260128" }]);
+    .mockResolvedValue([{ model_id: "doubao-seedance-2-0-260128", ...modelRow }]);
   return { deps, createJob, getByProject };
 }
 
@@ -3971,5 +3974,114 @@ describe("handleCreateGenerationJob 样片 × 其余三模式（IKIZQ9）", () =
     expect(cmdArg.videoStage).toBeUndefined();
     expect(cmdArg.input.sample_mode).toBeUndefined();
     expect(cmdArg.input.resolution).toBe("720p");
+  });
+});
+
+describe("handleCreateGenerationJob 参考视频提交前物理校验（IKQYED）", () => {
+  const FEATURES = {
+    video_reference: true,
+    video_reference_max: 3,
+    audio_reference: true,
+    audio_reference_max: 3,
+    image_reference_max: 10,
+    max_reference_duration_sec: null,
+  };
+
+  function bodyWithVideoRef() {
+    return {
+      ...VIDEO_BODY,
+      references: [{ role: "reference", asset_id: "1", type: "video" }],
+    };
+  }
+
+  function videoAsset(overrides: Record<string, unknown> = {}) {
+    return {
+      id: "1",
+      type: "video",
+      url: "https://tos.test/1.mp4",
+      mime: "video/mp4",
+      size: 1_000_000,
+      width: 1280,
+      height: 720,
+      duration: 5,
+      material_id: null,
+      ...overrides,
+    };
+  }
+
+  it("底部输入区参考视频为 WebM → 400 invalid_reference_media，不建任务", async () => {
+    const { deps, createJob } = buildVideoDeps({ features: FEATURES });
+    vi.mocked(deps.assets.resolveInputAssets).mockResolvedValue([
+      videoAsset({ mime: "video/webm" }),
+    ]);
+    const result = await handleCreateGenerationJob("u1", "p1", bodyWithVideoRef(), null, deps);
+    expect(result.code).toBe(1036);
+    expect(result.data?.code).toBe("invalid_reference_media");
+    expect(result.msg).toBe("参考视频只支持 MP4 或 MOV");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("底部输入区参考视频短于 2 秒 → 400 invalid_reference_media，不建任务", async () => {
+    const { deps, createJob } = buildVideoDeps({ features: FEATURES });
+    vi.mocked(deps.assets.resolveInputAssets).mockResolvedValue([
+      videoAsset({ duration: 1 }),
+    ]);
+    const result = await handleCreateGenerationJob("u1", "p1", bodyWithVideoRef(), null, deps);
+    expect(result.code).toBe(1036);
+    expect(result.data?.code).toBe("invalid_reference_media");
+    expect(result.msg).toBe("单个参考视频时长不能少于 2 秒");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("底部输入区参考视频总像素超上限 → 400 invalid_reference_media，不建任务", async () => {
+    const { deps, createJob } = buildVideoDeps({ features: FEATURES });
+    vi.mocked(deps.assets.resolveInputAssets).mockResolvedValue([
+      videoAsset({ width: 4096, height: 2160 }),
+    ]);
+    const result = await handleCreateGenerationJob("u1", "p1", bodyWithVideoRef(), null, deps);
+    expect(result.code).toBe(1036);
+    expect(result.data?.code).toBe("invalid_reference_media");
+    expect(result.msg).toBe("参考视频宽高比或总像素不满足要求");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("合规参考视频 → 200 建任务", async () => {
+    const { deps, createJob } = buildVideoDeps({ features: FEATURES });
+    vi.mocked(deps.assets.resolveInputAssets).mockResolvedValue([videoAsset()]);
+    const result = await handleCreateGenerationJob("u1", "p1", bodyWithVideoRef(), null, deps);
+    expect(result.code).toBe(200);
+    expect(createJob).toHaveBeenCalled();
+  });
+
+  it("画布旧字段 reference_asset_ids 提交不合规参考视频 → 400，不建任务", async () => {
+    const { deps, createJob } = buildVideoTargetDeps(TARGET_CANVAS, { features: FEATURES });
+    vi.mocked(deps.assets.resolveInputAssets).mockResolvedValue([
+      videoAsset({ mime: "video/webm" }),
+    ]);
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      { ...VIDEO_BODY, target_node_id: "media-2", reference_asset_ids: ["1"] },
+      null,
+      deps,
+    );
+    expect(result.code).toBe(1036);
+    expect(result.data?.code).toBe("invalid_reference_media");
+    expect(result.msg).toBe("参考视频只支持 MP4 或 MOV");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("画布旧字段 reference_asset_ids 提交合规参考视频 → 200 建任务", async () => {
+    const { deps, createJob } = buildVideoTargetDeps(TARGET_CANVAS, { features: FEATURES });
+    vi.mocked(deps.assets.resolveInputAssets).mockResolvedValue([videoAsset()]);
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      { ...VIDEO_BODY, target_node_id: "media-2", reference_asset_ids: ["1"] },
+      null,
+      deps,
+    );
+    expect(result.code).toBe(200);
+    expect(createJob).toHaveBeenCalled();
   });
 });
