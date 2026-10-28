@@ -57,21 +57,6 @@ function buildPrisma(
     generation_output_slots: { create: vi.fn().mockResolvedValue({}) },
     billing_cost_reservations: { create: vi.fn().mockResolvedValue({}) },
     generation_job_logs: { create: vi.fn().mockResolvedValue({}) },
-    project_events: {
-      create: vi.fn().mockResolvedValue({
-        event_id: "e1",
-        event_type: "generation_job.created",
-        cursor: 7n,
-        project_id: 1n,
-        aggregate_type: "generation_job",
-        aggregate_id: "305",
-        aggregate_version: 0,
-        correlation_id: null,
-        causation_id: null,
-        occurred_at: new Date(0),
-        payload: null,
-      }),
-    },
     project_command_receipts: { create: idemCreate },
   };
   const findFirst = vi.fn().mockResolvedValue(row);
@@ -101,7 +86,11 @@ describe("createFinalizeJob（IKIZQC）", () => {
 
     const result = await createFinalizeJob(prisma, INPUT, { billing: { charge, release: vi.fn() } });
 
-    expect(result).toEqual({ generation_job_id: "305", cursor: 7 });
+    expect(result).toEqual({
+      generation_job_id: "305",
+      cursor: expect.any(Number),
+    });
+    expect(result.cursor).toBeGreaterThan(0);
     expect(create.mock.calls[0]![0].data).toMatchObject({
       type: "video",
       status: "queued",
@@ -154,7 +143,7 @@ describe("createFinalizeJob（IKIZQC）", () => {
     expect(findFirst).not.toHaveBeenCalled();
   });
 
-  it("★ 幂等分域：command_idempotency 行以 operation=generation.finalize 写入（与建任务互不重放）", async () => {
+  it("★ 幂等分域：project_command_receipts 行以 operation=generation.finalize 写入（与建任务互不重放）", async () => {
     const { prisma, idemCreate } = buildPrisma(jobRow());
 
     await createFinalizeJob(

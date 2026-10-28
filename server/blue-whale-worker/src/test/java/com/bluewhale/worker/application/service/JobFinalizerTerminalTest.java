@@ -11,7 +11,6 @@ import com.bluewhale.worker.infrastructure.persistence.mapper.GenerationJobExtra
 import com.bluewhale.worker.infrastructure.persistence.mapper.GenerationJobMapper;
 import com.bluewhale.worker.infrastructure.persistence.mapper.GenerationOutboxMapper;
 import com.bluewhale.worker.infrastructure.persistence.mapper.GenerationOutputSlotMapper;
-import com.bluewhale.worker.infrastructure.persistence.mapper.ProjectEventMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -49,7 +48,6 @@ class JobFinalizerTerminalTest {
             mock(GenerationJobExtraMapper.class),
             mock(SceneCardGenerationRecordSync.class),
             mock(StoryboardPreviewSync.class),
-            new ProjectEventPublisher(mock(ProjectEventMapper.class)),
             new TerminalEventOutbox(outboxMapper, jobMapper, BillingEventPublisher.noop(),
                     new MockEnvironment()));
 

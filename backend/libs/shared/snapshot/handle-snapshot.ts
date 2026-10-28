@@ -57,7 +57,6 @@ export interface SnapshotData {
   storyboard_previews: readonly unknown[];
   generation_jobs: SnapshotGenerationJob[];
   assets: Record<string, SnapshotAssetSummary>;
-  high_watermark_cursor: WireInteger;
   legacy_migration?: LegacyMigrationReport;
 }
 
@@ -165,6 +164,5 @@ export async function handleGetSnapshot(
     })),
     generation_jobs: generation_jobs.map(toWireJob),
     assets: assetMap,
-    high_watermark_cursor: wireInteger(conversation.high_watermark_cursor),
   });
 }

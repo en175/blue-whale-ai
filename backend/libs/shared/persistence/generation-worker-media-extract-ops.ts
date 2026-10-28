@@ -1,6 +1,5 @@
 import type { PrismaClient } from "@prisma/client";
 
-import { appendProjectEvent } from "./product-event-repo.js";
 import { imageJobLeaseSeconds } from "./generation-worker-internals.js";
 import type { WorkerRepo } from "./generation-worker-types.js";
 
@@ -84,41 +83,6 @@ export function createWorkerMediaExtractOps(
           } as never,
         });
 
-        const job = await tx.generation_jobs.findUnique({
-          where: { id: BigInt(input.jobId) },
-        });
-        if (job?.project_id !== null && job?.project_id !== undefined) {
-          await appendProjectEvent(tx, {
-            projectId: job.project_id.toString(),
-            eventType: "asset.created",
-            aggregateType: "asset",
-            aggregateId: asset.id.toString(),
-            aggregateVersion: asset.version,
-            correlationId: `job_${job.id.toString()}`,
-            payload: {
-              asset_id: asset.id.toString(),
-              generation_job_id: job.id.toString(),
-              type: asset.type,
-              access_url: asset.url,
-            },
-          });
-          await appendProjectEvent(tx, {
-            projectId: job.project_id.toString(),
-            eventType: "generation_job.status_changed",
-            aggregateType: "generation_job",
-            aggregateId: job.id.toString(),
-            aggregateVersion: job.version,
-            correlationId: `job_${job.id.toString()}`,
-            payload: {
-              job_id: job.id.toString(),
-              type: job.type,
-              source: job.source,
-              status: job.status,
-              progress: job.progress,
-              output_asset_ids: [asset.id.toString()],
-            },
-          });
-        }
         return true;
       });
     },
@@ -146,9 +110,6 @@ export function createWorkerMediaExtractOps(
           },
         });
         if (updated.count !== 1) return false;
-        const job = await tx.generation_jobs.findUnique({
-          where: { id: BigInt(input.jobId) },
-        });
         await tx.generation_job_logs.create({
           data: {
             generation_job_id: BigInt(input.jobId),
@@ -157,24 +118,6 @@ export function createWorkerMediaExtractOps(
             message: `${input.code}: ${input.message}`,
           },
         });
-        if (job?.project_id !== null && job?.project_id !== undefined) {
-          await appendProjectEvent(tx, {
-            projectId: job.project_id.toString(),
-            eventType: "generation_job.status_changed",
-            aggregateType: "generation_job",
-            aggregateId: job.id.toString(),
-            aggregateVersion: job.version,
-            correlationId: `job_${job.id.toString()}`,
-            payload: {
-              job_id: job.id.toString(),
-              type: job.type,
-              source: job.source,
-              status: job.status,
-              progress: job.progress,
-              error: { code: input.code, message: input.message },
-            },
-          });
-        }
         return true;
       });
     },

@@ -435,23 +435,10 @@ describe("§3.3 completeJob CAS data 完整字段", () => {
       progress: 100,
       version: 2,
     });
-    const eventRow = {
-      event_id: "evt_g",
-      cursor: 1n,
-      project_id: 55n,
-      aggregate_type: "asset",
-      aggregate_id: "901",
-      aggregate_version: 1,
-      correlation_id: "job_300",
-      causation_id: null,
-      occurred_at: FROZEN_NOW,
-      payload: null,
-    };
     const transaction = vi.fn(async (cb: (tx: unknown) => unknown) =>
       cb({
         generation_jobs: { updateMany, findUnique },
         generation_output_slots: { findMany: vi.fn().mockResolvedValue([]) },
-        project_events: { create: vi.fn().mockResolvedValue(eventRow) },
         storyboard_previews: { findFirst: vi.fn().mockResolvedValue(null) },
       }),
     );

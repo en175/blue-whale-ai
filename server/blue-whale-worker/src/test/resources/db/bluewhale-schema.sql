@@ -306,37 +306,6 @@ CREATE TABLE `project_command_receipts` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
-CREATE TABLE `project_event_stream` (
-    `project_id` BIGINT NOT NULL,
-    `high_watermark` BIGINT NOT NULL DEFAULT 0,
-
-    PRIMARY KEY (`project_id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-
-CREATE TABLE `project_events` (
-    `id` BIGINT NOT NULL AUTO_INCREMENT,
-    `project_id` BIGINT NOT NULL,
-    `cursor` BIGINT NOT NULL,
-    `event_id` VARCHAR(64) NOT NULL,
-    `event_type` VARCHAR(64) NOT NULL,
-    `aggregate_type` VARCHAR(32) NOT NULL,
-    `aggregate_id` VARCHAR(64) NOT NULL,
-    `aggregate_version` INTEGER NOT NULL DEFAULT 0,
-    `correlation_id` VARCHAR(128) NULL,
-    `causation_id` VARCHAR(128) NULL,
-    `occurred_at` DATETIME(0) NOT NULL,
-    `payload` JSON NULL,
-    `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
-    `gmt_modified` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
-    `version` INTEGER NOT NULL DEFAULT 0,
-    `is_delete` TINYINT NOT NULL DEFAULT 0,
-
-    UNIQUE INDEX `uk_event_id`(`event_id`),
-    INDEX `idx_project_occurred`(`project_id`, `occurred_at`),
-    UNIQUE INDEX `uk_project_cursor`(`project_id`, `cursor`),
-    PRIMARY KEY (`id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-
 CREATE TABLE `catalog_skills` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `name` VARCHAR(255) NOT NULL,

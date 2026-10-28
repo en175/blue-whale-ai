@@ -119,7 +119,7 @@ worker/
 - [x] 工程骨架 / 配置绑定 / `/ready` / 消息契约测试（IKEL4L）
 - [x] **Job 状态机 extract 子集**（IKENZZZ）：
   - [x] `DataSourceConfig`：DATABASE_URL 解析（mysql:// → jdbc:mysql://，含特殊字符）+ HikariCP 保守池（max 20）
-  - [x] persistence 包：`GenerationJob` / `Asset` / `GenerationJobLog` / `ProjectEvent` + 对应 Mapper
+  - [x] persistence 包：`GenerationJob` / `Asset` / `GenerationJobLog` + 对应 Mapper
     - SQL 逐字移植自 TS Prisma 调用，注释标注 TS 源码行号
     - CAS updates 返回 int，service 层映射 0→false
   - [x] service `JobStateMachineService`（@Service，单例权威）：

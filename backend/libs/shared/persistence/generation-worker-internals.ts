@@ -1,6 +1,5 @@
 import type { Prisma } from "@prisma/client";
 
-import { appendProjectEvent } from "./product-event-repo.js";
 import {
   aggregateSlotStatus,
   resolveLogicalSlots,
@@ -39,21 +38,10 @@ export async function syncRecordSummary(
         : summary === "success"
           ? "success"
           : "failed";
-  const record = await tx.scene_card_generation_records.update({
+  await tx.scene_card_generation_records.update({
     where: { id: recordId },
     data: { summary_status: mapped, version: { increment: 1 } },
   });
-  if (record.project_id != null) {
-    await appendProjectEvent(tx, {
-      projectId: record.project_id.toString(),
-      eventType: "scene_card_generation_record.summary_changed",
-      aggregateType: "scene_card_generation_record",
-      aggregateId: recordId.toString(),
-      aggregateVersion: record.version,
-      correlationId: `record_${recordId.toString()}`,
-      payload: { record_id: recordId.toString(), summary_status: mapped },
-    });
-  }
 }
 
 export async function syncStoryboardPreviewSummary(
@@ -62,7 +50,7 @@ export async function syncStoryboardPreviewSummary(
 ): Promise<void> {
   const preview = await tx.storyboard_previews.findFirst({
     where: { first_generation_job_id: jobId, is_delete: 0 },
-    select: { id: true, project_id: true },
+    select: { id: true },
   });
   if (!preview) return;
   const slots = await tx.generation_output_slots.findMany({
@@ -87,21 +75,10 @@ export async function syncStoryboardPreviewSummary(
         : summary === "success"
           ? "success"
           : "failed";
-  const updated = await tx.storyboard_previews.update({
+  await tx.storyboard_previews.update({
     where: { id: preview.id },
     data: { summary_status: mapped, version: { increment: 1 } },
   });
-  if (preview.project_id != null) {
-    await appendProjectEvent(tx, {
-      projectId: preview.project_id.toString(),
-      eventType: "storyboard_preview.summary_changed",
-      aggregateType: "storyboard_preview",
-      aggregateId: preview.id.toString(),
-      aggregateVersion: updated.version,
-      correlationId: `preview_${preview.id.toString()}`,
-      payload: { preview_id: preview.id.toString(), summary_status: mapped },
-    });
-  }
 }
 
 

@@ -1,11 +1,13 @@
 # ADR-0016：Project 公开 API 与可重放产品事件流
 
-- **状态**：Accepted
+- **状态**：Accepted（事件流部分已退役，见下方 IKQY3J 说明）
 - **日期**：2026-07-14
 
 > **IK3UUX 范围状态**：Limited — 只保留 Product API 是唯一控制面，以及页面刷新/重连后能恢复
 > 已接纳状态；Snapshot、SSE、路径、状态码和分页形状由后续实施 Spec 按最小需要定义，见
 > [ADR-0055](0055-prelaunch-typescript-unification-scope.md)。
+
+> **IKQY3J 范围状态**（2026-10-27）：`project_events` / `project_event_stream` 两张表、`GET /api/projects/{projectId}/events` 与快照里的 `high_watermark_cursor` 已删除；本文关于 SSE 与可重放事件游标的条款不再实施，快照是唯一恢复面。
 
 ## 背景
 

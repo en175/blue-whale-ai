@@ -63,7 +63,7 @@ class CancelBeforeDispatchMySqlIntegrationTest {
     @MapperScan("com.bluewhale.worker.infrastructure.persistence.mapper")
     @Import({JobStateMachineService.class, JobClaimService.class, JobFinalizer.class,
             SceneCardGenerationRecordSync.class, StoryboardPreviewSync.class,
-            ProjectEventPublisher.class, TerminalEventOutbox.class})
+            TerminalEventOutbox.class})
     static class Config {
         @Bean
         DataSource dataSource() {
@@ -124,8 +124,7 @@ class CancelBeforeDispatchMySqlIntegrationTest {
     @BeforeEach
     void clean() {
         jdbc.execute("DROP TRIGGER IF EXISTS ikm09u_reject_outbox");
-        jdbc.execute("DROP TRIGGER IF EXISTS ikp602_reject_project_event");
-        for (String table : List.of("generation_outbox", "project_events", "generation_job_logs",
+        for (String table : List.of("generation_outbox", "generation_job_logs",
                 "generation_output_slots", "generation_jobs", "project")) {
             jdbc.update("DELETE FROM " + table);
         }
@@ -149,7 +148,6 @@ class CancelBeforeDispatchMySqlIntegrationTest {
         assertThat(jdbc.queryForObject("SELECT status FROM generation_output_slots WHERE generation_job_id=900901",
                 String.class)).isEqualTo("pending");
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM generation_outbox", Integer.class)).isZero();
-        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM project_events", Integer.class)).isZero();
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM generation_job_logs", Integer.class)).isZero();
 
         jdbc.execute("DROP TRIGGER ikm09u_reject_outbox");
@@ -241,32 +239,8 @@ class CancelBeforeDispatchMySqlIntegrationTest {
     }
 
     @Test
-    @DisplayName("音频取消：项目事件写入失败时整笔回滚，恢复后可再次取消并写入退款 outbox")
-    void audioCancelRollsBackWhenProjectEventWriteFails() {
-        seedAudioMix(900905L, "owner", 1L);
-        jdbc.execute("""
-                CREATE TRIGGER ikp602_reject_project_event BEFORE INSERT ON project_events
-                FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'IKP602 injected project event failure'
-                """);
-
-        assertThatThrownBy(() -> service.cancelAudioMixIfRequested("900905", "owner", 1L))
-                .hasStackTraceContaining("IKP602 injected project event failure");
-        assertThat(jobs.selectById(900905L).getStatus()).isEqualTo("processing");
-        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM generation_outbox", Integer.class)).isZero();
-        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM project_events", Integer.class)).isZero();
-
-        jdbc.execute("DROP TRIGGER ikp602_reject_project_event");
-        assertThat(service.cancelAudioMixIfRequested("900905", "owner", 1L)).isTrue();
-        assertThat(jobs.selectById(900905L).getStatus()).isEqualTo("cancelled");
-        assertThat(jdbc.queryForObject("""
-                SELECT COUNT(*) FROM generation_outbox WHERE job_id=900905 AND send_state='pending'
-                """, Integer.class)).isEqualTo(1);
-        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM project_events", Integer.class)).isEqualTo(1);
-    }
-
-    @Test
-    @DisplayName("音频取消：同项目并发取消各自写入终态事件且游标不冲突")
-    void concurrentAudioCancelsKeepDistinctProjectEventCursors() throws Exception {
+    @DisplayName("音频取消：同项目并发取消各自写入终态 outbox")
+    void concurrentAudioCancelsWriteDistinctTerminalOutbox() throws Exception {
         seedAudioMix(900906L, "owner", 1L);
         seedAudioMix(900907L, "owner", 1L);
         CountDownLatch start = new CountDownLatch(1);
@@ -283,8 +257,6 @@ class CancelBeforeDispatchMySqlIntegrationTest {
         assertThat(jobs.selectById(900906L).getStatus()).isEqualTo("cancelled");
         assertThat(jobs.selectById(900907L).getStatus()).isEqualTo("cancelled");
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM generation_outbox", Integer.class)).isEqualTo(2);
-        assertThat(jdbc.queryForObject("SELECT COUNT(DISTINCT `cursor`) FROM project_events", Integer.class))
-                .isEqualTo(2);
     }
 
     private void seedProject() {
