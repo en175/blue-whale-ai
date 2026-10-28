@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 import { API_REQUEST_TIMEOUT_MS, ApiError, apiRequest, envelopeErrorCode, readApiErrorMessage } from './http';
 import { useAuthStore } from '@/shared/stores/auth';
 import { useAuthPromptStore } from '@/shared/stores/authPrompt';
+import { getSessionToken, setSessionToken } from './sessionToken';
 import {
   ACCOUNT_DISABLED_MESSAGE,
   SESSION_EVICTED_MESSAGE,
@@ -246,6 +247,39 @@ describe('apiRequest 401', () => {
     await expect(
       apiRequest('/api/auth/login', { method: 'POST', silent: true }),
     ).rejects.toMatchObject({ status: 401 });
+    expect(useAuthPromptStore.getState().open).toBe(false);
+    expect(useAuthStore.getState().user).toEqual(sampleUser);
+  });
+
+  it('旧 token 的 401 在重新登录后到达，不清掉新登录态', async () => {
+    useAuthStore.setState({ user: sampleUser });
+    setSessionToken('old-token');
+    let rejectOld: (value: Response) => void = () => undefined;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(
+        () => new Promise<Response>((resolve) => {
+          rejectOld = resolve;
+        }),
+      ),
+    );
+
+    const inFlight = apiRequest('/api/projects/p1', { silent: true });
+    setSessionToken('new-token');
+    rejectOld(
+      new Response(JSON.stringify({
+        code: 401,
+        msg: SESSION_EVICTED_MESSAGE,
+        error_code: 'session_evicted',
+        data: null,
+      }), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    await expect(inFlight).rejects.toMatchObject({ status: 401 });
+    expect(getSessionToken()).toBe('new-token');
     expect(useAuthPromptStore.getState().open).toBe(false);
     expect(useAuthStore.getState().user).toEqual(sampleUser);
   });

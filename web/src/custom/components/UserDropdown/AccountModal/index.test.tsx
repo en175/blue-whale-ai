@@ -126,6 +126,7 @@ async function enterNicknameEdit() {
 
 beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  localStorage.clear();
   vi.mocked(fetchCaptcha).mockClear();
   vi.mocked(sendCode).mockClear();
   vi.mocked(updateNickname).mockClear();
@@ -135,6 +136,7 @@ beforeEach(() => {
 afterEach(async () => {
   if (root) await act(async () => root.unmount());
   mountNode?.remove();
+  localStorage.clear();
 });
 
 function nicknameInput() {
@@ -363,5 +365,26 @@ describe('AccountModal', () => {
     await act(async () => setInputValue(inputByPlaceholder('请输入新手机号')!, '13900000011'));
     expect(inputByPlaceholder('请输入验证码')?.value).toBe('');
     expect(buttonByText('获取验证码')).toBeTruthy();
+  });
+
+  it('换绑弹窗关闭重开后，原号冷却仍在', async () => {
+    await renderAccountModal();
+    await waitForProfile();
+    await act(async () => buttonByText('更换')?.click());
+    await act(async () => buttonByText('获取验证码')?.click());
+    await act(async () => setInputValue(inputByPlaceholder('请输入图中字符')!, 'ab2c'));
+    expect(buttonByText('60秒后重发')).toBeTruthy();
+
+    await act(async () => {
+      const closers = document.body.querySelectorAll<HTMLButtonElement>('[aria-label="关闭"]');
+      closers[closers.length - 1]?.click();
+    });
+    await act(async () => {
+      await vi.waitFor(() => expect(inputByPlaceholder('请输入验证码')).toBeNull());
+    });
+
+    await act(async () => buttonByText('更换')?.click());
+    expect(buttonByText('60秒后重发')).toBeTruthy();
+    expect(buttonByText('获取验证码')).toBeFalsy();
   });
 });
