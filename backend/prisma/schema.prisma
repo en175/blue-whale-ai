@@ -362,17 +362,6 @@ model project_asset {
   @@index([project_id], map: "idx_pa_project")
 }
 
-model conversations {
-  id           BigInt   @id @default(autoincrement())
-  project_id   BigInt
-  gmt_create   DateTime @default(now()) @db.DateTime(0)
-  gmt_modified DateTime @default(now()) @db.DateTime(0)
-  version      Int      @default(0)
-  is_delete    Int      @default(0) @db.TinyInt
-
-  @@index([project_id], map: "idx_conversation_project")
-}
-
 model conversation_messages {
   id                BigInt   @id @default(autoincrement())
   conversation_id   BigInt
