@@ -104,7 +104,8 @@ class RemindIssueStateTest(unittest.TestCase):
             'tool_response': {'exit_code': 0}})
         context = json.loads(result.stdout)['hookSpecificOutput']['additionalContext']
         self.assertIn('gitee-workflow-agent.md', context)
-        self.assertIn('交接不明', context)
+        self.assertIn('已有执行者', context)
+        self.assertIn('负责人相同不能证明可以恢复', context)
         self.assertNotIn('已完成', context)
         self.assertNotIn('已修复', context)
 
