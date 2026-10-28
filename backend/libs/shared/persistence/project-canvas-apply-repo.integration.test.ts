@@ -2,8 +2,10 @@ import "reflect-metadata";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
+import { CanvasService } from "@lib/shared/canvas/canvas.service.js";
 import {
   CanvasApplyConflictError,
+  CanvasApplyVersionError,
   applyCanvasChanges,
 } from "./project-canvas-apply-repo.js";
 
@@ -50,6 +52,7 @@ describe.skipIf(!process.env.IKQY35_DATABASE_URL)("画布按节点 apply（真�
     edges?: Array<{ id: string; source: string; target: string; [key: string]: unknown }>;
     deleteEdgeIds?: string[];
     viewport?: unknown;
+    expectedVersion?: number | null;
   }) =>
     applyCanvasChanges(prisma.client, {
       projectId: projectId.toString(),
@@ -58,6 +61,7 @@ describe.skipIf(!process.env.IKQY35_DATABASE_URL)("画布按节点 apply（真�
       edges: input.edges ?? [],
       deleteEdgeIds: input.deleteEdgeIds ?? [],
       viewport: input.viewport,
+      ...(input.expectedVersion !== undefined ? { expectedVersion: input.expectedVersion } : {}),
       actorId: OWNER_ID.toString(),
     });
 
@@ -74,6 +78,92 @@ describe.skipIf(!process.env.IKQY35_DATABASE_URL)("画布按节点 apply（真�
     expect(await prisma.client.project_nodes.count({ where: { project_id: projectId } })).toBe(2);
     expect(await prisma.client.project_edges.count({ where: { project_id: projectId } })).toBe(1);
     expect(await prisma.client.project_node_revisions.count({ where: { project_id: projectId } })).toBe(2);
+  });
+
+  it("版本前置：匹配时应用并把画布版本 +1", async () => {
+    await apply({ nodes: [{ id: "n1", type: "textNode", position: { x: 0, y: 0 }, data: { text: "甲" } }] });
+    const before = await prisma.client.project_canvas.findFirstOrThrow({ where: { project_id: projectId } });
+    expect(before.version).toBeGreaterThan(0);
+    const result = await apply({
+      nodes: [{ id: "n2", type: "textNode", position: { x: 1, y: 1 }, data: {} }],
+      expectedVersion: before.version,
+    });
+    expect(result.version).toBe(before.version + 1);
+  });
+
+  it("版本前置：过期版本拒绝且零写入", async () => {
+    await apply({ nodes: [{ id: "n1", type: "textNode", position: { x: 0, y: 0 }, data: { text: "甲" } }] });
+    const before = await prisma.client.project_canvas.findFirstOrThrow({ where: { project_id: projectId } });
+    const revisionsBefore = await prisma.client.project_node_revisions.count({ where: { project_id: projectId } });
+    await expect(apply({
+      nodes: [{ id: "n2", type: "textNode", position: { x: 1, y: 1 }, data: {} }],
+      expectedVersion: 0,
+    })).rejects.toBeInstanceOf(CanvasApplyVersionError);
+    expect(await prisma.client.project_nodes.count({ where: { project_id: projectId } })).toBe(1);
+    expect(await prisma.client.project_nodes.count({ where: { project_id: projectId, node_id: "n2" } })).toBe(0);
+    expect(await prisma.client.project_edges.count({ where: { project_id: projectId } })).toBe(0);
+    expect(await prisma.client.project_node_revisions.count({ where: { project_id: projectId } })).toBe(revisionsBefore);
+    const after = await prisma.client.project_canvas.findFirstOrThrow({ where: { project_id: projectId } });
+    expect(after.version).toBe(before.version);
+  });
+
+  it("服务层：版本冲突返回真实当前版本，旧 JSON 画布首次带版本可保存", async () => {
+    const service = new CanvasService(
+      { client: prisma.client } as never,
+      { findOwnedById: async () => ({ id: OWNER_ID }) } as never,
+    );
+    await prisma.client.project_canvas.create({
+      data: {
+        project_id: projectId,
+        version: 5,
+        edges_json: [],
+        nodes_json: [{ id: "legacy-1", type: "textNode", position: { x: 1, y: 2 }, data: { text: "旧" } }],
+        rows_authoritative: 0,
+      },
+    });
+
+    const stale = await service.apply(OWNER_ID.toString(), projectId.toString(), {
+      upsert_nodes: [{ id: "n2", type: "textNode", position: { x: 0, y: 0 }, data: {} }],
+      expectedVersion: 4,
+    });
+    expect(stale).toMatchObject({ code: 412, data: { version: 5 } });
+    expect(await prisma.client.project_nodes.count({ where: { project_id: projectId } })).toBe(1);
+    expect(await prisma.client.project_nodes.findFirstOrThrow({ where: { project_id: projectId } }).then(
+      (row) => row.node_id,
+    )).toBe("legacy-1");
+
+    const saved = await service.apply(OWNER_ID.toString(), projectId.toString(), {
+      upsert_nodes: [{ id: "n2", type: "textNode", position: { x: 0, y: 0 }, data: {} }],
+      expectedVersion: 5,
+    });
+    expect(saved).toMatchObject({ code: 200, data: { version: 6 } });
+    expect(await prisma.client.project_nodes.count({ where: { project_id: projectId } })).toBe(2);
+  });
+
+  it("版本前置：missing 哨兵在已有画布上拒绝，新画布上放行", async () => {
+    await apply({ nodes: [{ id: "n1", type: "textNode", position: { x: 0, y: 0 }, data: {} }] });
+    await expect(apply({ expectedVersion: null })).rejects.toBeInstanceOf(CanvasApplyVersionError);
+
+    const fresh = await prisma.client.project.create({
+      data: { owner_id: OWNER_ID, name: `ikraev-${Date.now()}`, purpose: "canvas" },
+      select: { id: true },
+    });
+    try {
+      const result = await applyCanvasChanges(prisma.client, {
+        projectId: fresh.id.toString(),
+        nodes: [{ id: "x", type: "textNode", position: { x: 0, y: 0 }, data: {} }],
+        deleteNodeIds: [],
+        edges: [],
+        deleteEdgeIds: [],
+        expectedVersion: null,
+        actorId: OWNER_ID.toString(),
+      });
+      expect(result.version).toBeGreaterThan(0);
+    } finally {
+      await prisma.client.project_nodes.deleteMany({ where: { project_id: fresh.id } });
+      await prisma.client.project_canvas.deleteMany({ where: { project_id: fresh.id } });
+      await prisma.client.project.delete({ where: { id: fresh.id } });
+    }
   });
 
   it("无差异重放：跳过、不涨版本、不写 revision", async () => {

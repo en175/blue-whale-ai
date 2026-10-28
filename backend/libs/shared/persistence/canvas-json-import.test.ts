@@ -86,7 +86,7 @@ describe("存量画布 JSON 导入行表", () => {
       ref_role: "reference",
     });
     expect(created.edges[0]!.data_json).toEqual({ refRole: "reference" });
-    expect(created.canvas).toEqual({ rows_authoritative: 1, version: { increment: 1 } });
+    expect(created.canvas).toEqual({ rows_authoritative: 1 });
   });
 
   it("重复节点 id 保留第一条；重复连线 id 与端点对分别只留第一条", async () => {

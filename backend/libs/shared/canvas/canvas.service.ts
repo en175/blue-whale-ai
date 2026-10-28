@@ -32,6 +32,7 @@ import { PromptMaterialUnavailableError } from "@lib/shared/persistence/canvas-r
 import { CanvasRowsWriteError } from "@lib/shared/persistence/canvas-rows-replace.js";
 import {
   CanvasApplyConflictError,
+  CanvasApplyVersionError,
   applyCanvasChanges,
 } from "@lib/shared/persistence/project-canvas-apply-repo.js";
 import {
@@ -356,6 +357,7 @@ export class CanvasService {
       upsert_edges?: unknown;
       delete_edge_ids?: unknown;
       viewport?: unknown;
+      expectedVersion?: number | null;
     },
   ) {
     const owned = await this.project.findOwnedById(projectId, ownerId);
@@ -428,10 +430,14 @@ export class CanvasService {
         edges,
         deleteEdgeIds,
         ...(viewport !== undefined ? { viewport } : {}),
+        ...(body.expectedVersion !== undefined ? { expectedVersion: body.expectedVersion } : {}),
         actorId: ownerId,
         ...(materials.length > 0 ? { materials: { ownerId, items: materials } } : {}),
       });
     } catch (error) {
+      if (error instanceof CanvasApplyVersionError) {
+        return canvasVersionConflict(error.version);
+      }
       if (error instanceof CanvasApplyConflictError) {
         if (error.reason === "duplicate_edge_pair") {
           throw new BadRequestException("同一对节点之间只允许一条连线，原内容未改动");
