@@ -155,7 +155,7 @@ describe("SnapshotRepo.loadJobsAndAssets", () => {
     });
   });
 
-  it("没有任何 asset 关联素材库时不发 material_assets 查询", async () => {
+  it("没有任何 asset 关联素材库时不发 catalog_material_states 查询", async () => {
     const findMaterialAssets = vi.fn();
     const prisma = {
       generation_jobs: { findMany: vi.fn().mockResolvedValue([]) },

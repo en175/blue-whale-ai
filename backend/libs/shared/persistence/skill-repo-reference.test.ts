@@ -118,7 +118,7 @@ describe("SkillRepo — 引用注册与 auto 开关", () => {
     );
   });
 
-  it("removeReferenceByCreativeSkillId resolve 命中后逻辑删对应 user_skill 行", async () => {
+  it("removeReferenceByCreativeSkillId resolve 命中后逻辑删对应 user_skills 行", async () => {
     const updateMany = vi.fn().mockResolvedValue({ count: 1 });
     const prisma = {
       catalog_skills: { count: vi.fn().mockResolvedValue(1) },

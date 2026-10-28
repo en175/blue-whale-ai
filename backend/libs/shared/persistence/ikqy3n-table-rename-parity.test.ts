@@ -38,6 +38,7 @@ const seedSql = readFileSync(
 );
 
 const BACKEND_ROOT = new URL("../../..", import.meta.url).pathname;
+const REPO_ROOT = new URL("../../../..", import.meta.url).pathname;
 
 function productionSources(dir: string, acc: string[] = []): string[] {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -45,7 +46,23 @@ function productionSources(dir: string, acc: string[] = []): string[] {
     if (entry.isDirectory()) {
       if (entry.name === "gen" || entry.name === "node_modules") continue;
       productionSources(path, acc);
-    } else if (entry.name.endsWith(".ts") && !entry.name.includes(".test.")) {
+    } else if (
+      (entry.name.endsWith(".ts") || entry.name.endsWith(".mjs")) &&
+      !entry.name.includes(".test.")
+    ) {
+      acc.push(path);
+    }
+  }
+  return acc;
+}
+
+function javaSources(dir: string, acc: string[] = []): string[] {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      if (entry.name === "node_modules") continue;
+      javaSources(path, acc);
+    } else if (entry.name.endsWith(".java")) {
       acc.push(path);
     }
   }
@@ -141,19 +158,38 @@ describe("IKQY3N 三轨迁移（目录/素材/技能与模板表改名）", () =
     expect(seedSql).not.toContain("INSERT INTO catalog_models");
   });
 
-  it("后端生产代码不再访问旧表名", () => {
-    const accessor =
-      /\b(prisma|tx|client)\.(assets|skill|user_skill|creative_skill|creative_skill_version|template_card|template_card_image|template_tag|material_groups|material_assets|shared_assets|homepage_hero|generation_model_capability|media_tool_pricing)\b/;
-    const rawSql =
-      /\b(FROM|INTO|JOIN|UPDATE)\s+`?(assets|skill|user_skill|creative_skill|creative_skill_version|template_card|template_card_image|template_tag|material_groups|material_assets|shared_assets|homepage_hero|generation_model_capability|media_tool_pricing)`?\b/i;
-    const offenders: string[] = [];
+  it("后端生产代码与运维脚本不再访问旧表名", () => {
+    const names =
+      "assets|skill|user_skill|creative_skill|creative_skill_version|template_card|template_card_image|template_tag|material_groups|material_assets|shared_assets|homepage_hero|generation_model_capability|media_tool_pricing";
+    const accessor = new RegExp("\\b(prisma|tx|client)\\.(" + names + ")\\b");
+    const rawSql = new RegExp("\\b(FROM|INTO|JOIN|UPDATE)\\s+`?(" + names + ")`?\\b", "i");
     const files = [
       ...productionSources(join(BACKEND_ROOT, "libs")),
       ...productionSources(join(BACKEND_ROOT, "apps")),
+      ...productionSources(join(BACKEND_ROOT, "scripts")),
+      ...productionSources(join(REPO_ROOT, "scripts")),
     ];
+    expect(files.length).toBeGreaterThan(0);
+    const offenders: string[] = [];
     for (const file of files) {
       const text = readFileSync(file, "utf8");
       if (accessor.test(text) || rawSql.test(text)) offenders.push(file);
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it("Java 生产代码不再引用旧表名", () => {
+    const names =
+      "assets|shared_assets|material_groups|material_assets|generation_model_capability|media_tool_pricing|skill|user_skill|creative_skill|creative_skill_version|template_card|template_card_image|template_tag|homepage_hero";
+    const reference = new RegExp(
+      "(?:@TableName\\(\\\"|\\b(?:FROM|INTO|JOIN|UPDATE|DELETE FROM)\\s+`?)(" + names + ")\\b",
+      "i",
+    );
+    const files = javaSources(join(REPO_ROOT, "server/blue-whale-worker/src/main"));
+    expect(files.length).toBeGreaterThan(0);
+    const offenders: string[] = [];
+    for (const file of files) {
+      if (reference.test(readFileSync(file, "utf8"))) offenders.push(file);
     }
     expect(offenders).toEqual([]);
   });

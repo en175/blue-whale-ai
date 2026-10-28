@@ -48,7 +48,7 @@ function repoOf(prisma: ReturnType<typeof mockPrisma>): HomepageHeroRepo {
   return createHomepageHeroRepo(prisma as never);
 }
 
-describe("homepage_hero repo — 首页/登录弹窗背景配置", () => {
+describe("content_homepage_heroes repo — 首页/登录弹窗背景配置", () => {
   it("listAll 只取指定场景的存活条目并按 sort_order 升序", async () => {
     const prisma = mockPrisma({
       content_homepage_heroes: {

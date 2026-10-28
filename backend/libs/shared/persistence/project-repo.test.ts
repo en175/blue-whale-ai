@@ -88,7 +88,7 @@ describe("ProjectRepo GenerationInbox isolation", () => {
     expect(views[1].previews).toEqual(["other.png"]);
   });
 
-  it("attaches project_asset-linked images to the listing project, not assets.project_id", async () => {
+  it("attaches project_asset-linked images to the listing project, not user_assets.project_id", async () => {
     const projectFindMany = vi.fn().mockResolvedValue([
       { id: 1n, name: "A", thumb: null, gmt_create: new Date("2026-08-25T00:00:00Z") },
       { id: 2n, name: "B", thumb: null, gmt_create: new Date("2026-08-24T00:00:00Z") },

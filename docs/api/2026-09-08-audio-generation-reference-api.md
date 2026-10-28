@@ -48,7 +48,7 @@
 |---|---|---|---|
 | `role` | ✅ | **`reference`**（仅此值） | 音频/图片生成**无首尾帧**概念，`first_frame` / `last_frame` → 400 |
 | `type` | ✅ | `audio` / `image` | 参考介质；`video` 对音频生成无意义 → 400 |
-| `asset_id` | ✅ | 纯数字字符串 | **本地** `assets` 表 id（生成走本地 url） |
+| `asset_id` | ✅ | 纯数字字符串 | **本地** `user_assets` 表 id（生成走本地 url） |
 | `material_id` | ❌ | —— | **音频生成禁止素材库引用**，传了 → 400 `音频生成不支持素材库引用` |
 
 **数量硬约束**（seed-audio 官方限制）：
