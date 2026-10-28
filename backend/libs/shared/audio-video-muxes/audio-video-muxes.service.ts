@@ -355,7 +355,7 @@ export class AudioVideoMuxesService {
     if (retryResolution === null) {
       const videoAssetId = frozenOwned?.video?.assetId;
       const video = typeof videoAssetId === "string"
-        ? await this.prisma.client.assets.findUnique({
+        ? await this.prisma.client.user_assets.findUnique({
             where: { id: BigInt(videoAssetId) },
             select: { width: true, height: true },
           })
@@ -458,7 +458,7 @@ export class AudioVideoMuxesService {
           && typeof videoAssetId === "string" && /^[1-9][0-9]*$/.test(videoAssetId)
           && typeof attempt === "number" && Number.isInteger(attempt) && attempt >= 1;
         if (!frozen || !snapshotUsable) throw new DomainError(409, "冻结快照缺失，无法重试音视频合成");
-        const living = await tx.assets.findMany({
+        const living = await tx.user_assets.findMany({
           where: { id: { in: [BigInt(audioAssetId), BigInt(videoAssetId)] }, is_delete: false },
           select: { id: true },
         });

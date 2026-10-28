@@ -81,7 +81,7 @@ describe.skipIf(!databaseUrl)("成片与重生样片恢复契约 v1 真库验证
   };
 
   async function seedCapability(version = 5) {
-    await prisma.generation_model_capability.create({
+    await prisma.catalog_models.create({
       data: {
         provider_id: "volc",
         model_id: "seedream-4",
@@ -192,7 +192,7 @@ describe.skipIf(!databaseUrl)("成片与重生样片恢复契约 v1 真库验证
 
     await prisma.project.deleteMany({ where: { id: BigInt(PROJECT_ID) } });
     await prisma.scene_cards.deleteMany({ where: { id: BigInt(SCENE_CARD_ID) } });
-    await prisma.generation_model_capability.deleteMany({ where: { provider_id: "volc", model_id: "seedream-4" } });
+    await prisma.catalog_models.deleteMany({ where: { provider_id: "volc", model_id: "seedream-4" } });
     await prisma.project.create({ data: { id: BigInt(PROJECT_ID), owner_id: BigInt(USER_ID), name: "ikjjr0" } });
     await prisma.scene_cards.create({
       data: {
@@ -210,7 +210,7 @@ describe.skipIf(!databaseUrl)("成片与重生样片恢复契约 v1 真库验证
     if (!prisma) return;
     await prisma.project.deleteMany({ where: { id: BigInt(PROJECT_ID) } });
     await prisma.scene_cards.deleteMany({ where: { id: BigInt(SCENE_CARD_ID) } });
-    await prisma.generation_model_capability.deleteMany({ where: { provider_id: "volc", model_id: "seedream-4" } });
+    await prisma.catalog_models.deleteMany({ where: { provider_id: "volc", model_id: "seedream-4" } });
     await raw.end();
     await prisma.$disconnect();
   });
@@ -234,7 +234,7 @@ describe.skipIf(!databaseUrl)("成片与重生样片恢复契约 v1 真库验证
       where: { id: BigInt(SCENE_CARD_ID) },
       data: { version: 1 },
     });
-    await prisma.generation_model_capability.updateMany({
+    await prisma.catalog_models.updateMany({
       where: { provider_id: "volc", model_id: "seedream-4" },
       data: { version: currentSnapshot.row_version },
     });
@@ -296,7 +296,7 @@ describe.skipIf(!databaseUrl)("成片与重生样片恢复契约 v1 真库验证
     expect(first.kind).toBe("applied");
 
 
-    await prisma.generation_model_capability.updateMany({
+    await prisma.catalog_models.updateMany({
       where: { provider_id: "volc", model_id: "seedream-4" },
       data: { version: { increment: 1 } },
     });

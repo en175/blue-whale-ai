@@ -72,7 +72,7 @@ export function createWorkerVideoOps(prisma: PrismaClient): Pick<WorkerRepo, "ma
         });
         if (owned.count !== 1) return false;
 
-        const asset = await tx.assets.create({
+        const asset = await tx.user_assets.create({
           data: {
             user_id: BigInt(input.userId),
             project_id: BigInt(input.projectId),

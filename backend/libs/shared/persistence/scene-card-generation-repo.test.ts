@@ -116,14 +116,14 @@ function frameOverrides(
       storyboard_previews: {
         findMany: vi.fn().mockResolvedValue([{ first_generation_job_id: 9001n }]),
       },
-      assets: { findMany: vi.fn().mockResolvedValue(assetRows) },
+      user_assets: { findMany: vi.fn().mockResolvedValue(assetRows) },
     },
   };
 }
 
 function capabilityWith(features: Record<string, unknown>, base = CAP_FIELDS) {
   return {
-    generation_model_capability: {
+    catalog_models: {
       findUnique: vi.fn().mockResolvedValue({
         version: 3,
         enabled: true,
@@ -183,9 +183,9 @@ function buildTx(
       create: vi.fn().mockResolvedValue({ id: 8001n }),
       ...overrides.scene_card_generation_records,
     },
-    generation_model_capability: {
+    catalog_models: {
       findUnique: vi.fn().mockResolvedValue(buildCapabilityRow()),
-      ...overrides.generation_model_capability,
+      ...overrides.catalog_models,
     },
     project_canvas: {
       findFirst: vi.fn().mockResolvedValue({
@@ -231,9 +231,9 @@ function buildTx(
       findMany: vi.fn().mockResolvedValue([]),
       ...overrides.generation_output_slots,
     },
-    assets: {
+    user_assets: {
       findMany: vi.fn().mockResolvedValue([]),
-      ...overrides.assets,
+      ...overrides.user_assets,
     },
     storyboard_previews: {
       findMany: vi.fn().mockResolvedValue([]),
@@ -439,7 +439,7 @@ describe("SceneCardGenerationRepo.regenerateSceneCard", () => {
 
   it("能力漂移（行版本变化）零写入（AC#4）", async () => {
     const tx = buildTx({
-      generation_model_capability: {
+      catalog_models: {
         findUnique: vi.fn().mockResolvedValue(buildCapabilityRow(99)),
       },
     });
@@ -455,7 +455,7 @@ describe("SceneCardGenerationRepo.regenerateSceneCard", () => {
   it("参数越界（aspect_ratio 不在能力支持）返回 capability_limit 零写入（AC#1）", async () => {
     const limitCapFields = { ...CAP_FIELDS, supported_aspect_ratios: ["9:16"] };
     const tx = buildTx({
-      generation_model_capability: {
+      catalog_models: {
         findUnique: vi.fn().mockResolvedValue({
           version: 3,
           enabled: true,
@@ -485,7 +485,7 @@ describe("SceneCardGenerationRepo.regenerateSceneCard", () => {
       supported_aspect_ratios: [{ id: "16:9", label: "横屏 16:9" }],
     };
     const tx = buildTx({
-      generation_model_capability: {
+      catalog_models: {
         findUnique: vi.fn().mockResolvedValue({
           version: 3,
           enabled: true,
@@ -522,7 +522,7 @@ describe("SceneCardGenerationRepo.regenerateSceneCard", () => {
       scene_card_generation_presets: {
         findFirst: vi.fn().mockResolvedValue({ id: 6001n, version: 1, reference_assets: frames }),
       },
-      generation_model_capability: {
+      catalog_models: {
         findUnique: vi.fn().mockResolvedValue({
           version: 3,
           enabled: true,
@@ -562,7 +562,7 @@ describe("SceneCardGenerationRepo.regenerateSceneCard", () => {
       scene_card_generation_presets: {
         findFirst: vi.fn().mockResolvedValue({ id: 6001n, version: 1, reference_assets: frames }),
       },
-      generation_model_capability: {
+      catalog_models: {
         findUnique: vi.fn().mockResolvedValue({
           version: 3,
           enabled: true,
@@ -590,7 +590,7 @@ describe("SceneCardGenerationRepo.regenerateSceneCard", () => {
   it("参数越界（duration 不在档位数组）返回 capability_limit 零写入（AC#1）", async () => {
     const limitCapFields = { ...CAP_FIELDS, supported_durations: [3, 5, 10] };
     const tx = buildTx({
-      generation_model_capability: {
+      catalog_models: {
         findUnique: vi.fn().mockResolvedValue({
           version: 3,
           enabled: true,
@@ -617,7 +617,7 @@ describe("SceneCardGenerationRepo.regenerateSceneCard", () => {
   it("duration 在档位数组内放行（数组形态不误拒）", async () => {
     const capFields = { ...CAP_FIELDS, supported_durations: [3, 5, 10] };
     const tx = buildTx({
-      generation_model_capability: {
+      catalog_models: {
         findUnique: vi.fn().mockResolvedValue({
           version: 3,
           enabled: true,
@@ -700,7 +700,7 @@ describe("SceneCardGenerationRepo.regenerateSceneCard", () => {
   it("场景卡素材声明为首帧时前置拒绝并零写入（AC#4 不静默降级）", async () => {
     const capFields = { ...CAP_FIELDS, features: { first_frame: true } };
     const tx = buildTx({
-      generation_model_capability: {
+      catalog_models: {
         findUnique: vi.fn().mockResolvedValue({
           version: 3,
           enabled: true,
@@ -791,7 +791,7 @@ describe("SceneCardGenerationRepo.regenerateSceneCard", () => {
   it("模型声明 camelCase 首尾帧能力时通过能力校验，但 mention 引用 fail-closed 零写入（IKEEFV）", async () => {
     const capFields = { ...CAP_FIELDS, features: { firstLastFrame: true } };
     const tx = buildTx({
-      generation_model_capability: {
+      catalog_models: {
         findUnique: vi.fn().mockResolvedValue({
           version: 3,
           enabled: true,
@@ -875,7 +875,7 @@ describe("SceneCardGenerationRepo.regenerateSceneCard", () => {
       kind: "validation_failed",
       reason: "参考素材列表只能修改角色",
     });
-    expect(tx.generation_model_capability.findUnique).not.toHaveBeenCalled();
+    expect(tx.catalog_models.findUnique).not.toHaveBeenCalled();
     expect(tx.scene_card_generation_presets.updateMany).not.toHaveBeenCalled();
   });
 
@@ -906,7 +906,7 @@ describe("SceneCardGenerationRepo.regenerateSceneCard", () => {
       kind: "validation_failed",
       reason: "参考素材列表只能修改角色",
     });
-    expect(tx.generation_model_capability.findUnique).not.toHaveBeenCalled();
+    expect(tx.catalog_models.findUnique).not.toHaveBeenCalled();
     expect(tx.scene_card_generation_presets.updateMany).not.toHaveBeenCalled();
   });
 
@@ -920,7 +920,7 @@ describe("SceneCardGenerationRepo.regenerateSceneCard", () => {
     });
 
     expect(result).toEqual({ kind: "capability_drift" });
-    expect(tx.generation_model_capability.findUnique).not.toHaveBeenCalled();
+    expect(tx.catalog_models.findUnique).not.toHaveBeenCalled();
     expect(tx.scene_card_generation_presets.updateMany).not.toHaveBeenCalled();
   });
 

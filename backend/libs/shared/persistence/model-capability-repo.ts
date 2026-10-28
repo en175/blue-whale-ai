@@ -287,7 +287,7 @@ export function createModelCapabilityRepo(prisma: PrismaClient): ModelCapability
           supported_aspect_ratios: toAspectRatios(view.supported_aspect_ratios),
         }));
       }
-      const rows = await prisma.generation_model_capability.findMany({
+      const rows = await prisma.catalog_models.findMany({
         where: { capability_type: capabilityType, enabled: true, is_delete: false },
         orderBy: { sort_order: "asc" },
       });

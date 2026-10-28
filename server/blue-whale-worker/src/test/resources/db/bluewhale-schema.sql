@@ -1,4 +1,4 @@
-CREATE TABLE `assets` (
+CREATE TABLE `user_assets` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `user_id` BIGINT NOT NULL,
     `project_id` BIGINT NOT NULL DEFAULT 0,
@@ -35,7 +35,7 @@ CREATE TABLE `assets` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
-CREATE TABLE `material_groups` (
+CREATE TABLE `catalog_material_groups` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `user_id` BIGINT NOT NULL,
     `material_group_id` VARCHAR(128) NOT NULL,
@@ -56,7 +56,7 @@ CREATE TABLE `material_groups` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
-CREATE TABLE `shared_assets` (
+CREATE TABLE `user_shared_asset_snapshots` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `user_id` BIGINT NOT NULL,
     `asset_type` VARCHAR(16) NOT NULL,
@@ -142,7 +142,7 @@ CREATE TABLE `generation_job_extras` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
-CREATE TABLE `generation_model_capability` (
+CREATE TABLE `catalog_models` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `provider_id` VARCHAR(32) NOT NULL,
     `model_id` VARCHAR(128) NOT NULL,
@@ -337,7 +337,7 @@ CREATE TABLE `project_events` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
-CREATE TABLE `skill` (
+CREATE TABLE `catalog_skills` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `name` VARCHAR(255) NOT NULL,
     `skill_code` VARCHAR(32) NULL,
@@ -363,7 +363,7 @@ CREATE TABLE `skill` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
-CREATE TABLE `template_card` (
+CREATE TABLE `catalog_templates` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `tag_code` VARCHAR(64) NOT NULL,
     `title` VARCHAR(255) NOT NULL,
@@ -381,7 +381,7 @@ CREATE TABLE `template_card` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
-CREATE TABLE `template_card_image` (
+CREATE TABLE `catalog_template_images` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `card_id` BIGINT NOT NULL,
     `image_url` VARCHAR(512) NOT NULL,
@@ -396,7 +396,7 @@ CREATE TABLE `template_card_image` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
-CREATE TABLE `template_tag` (
+CREATE TABLE `catalog_template_tags` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `tag_code` VARCHAR(64) NOT NULL,
     `label` VARCHAR(128) NOT NULL,
@@ -410,7 +410,7 @@ CREATE TABLE `template_tag` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
-CREATE TABLE `user_skill` (
+CREATE TABLE `user_skills` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `user_id` BIGINT NOT NULL,
     `skill_id` BIGINT NOT NULL,
@@ -422,11 +422,11 @@ CREATE TABLE `user_skill` (
 
     INDEX `idx_skill`(`skill_id`),
     INDEX `idx_user`(`user_id`),
-    UNIQUE INDEX `uk_user_skill`(`user_id`, `skill_id`),
+    UNIQUE INDEX `uk_user_skills__user_skill`(`user_id`, `skill_id`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
-CREATE TABLE `homepage_hero` (
+CREATE TABLE `content_homepage_heroes` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `media_type` VARCHAR(16) NOT NULL DEFAULT 'video',
     `media_url` VARCHAR(512) NOT NULL,
@@ -443,7 +443,7 @@ CREATE TABLE `homepage_hero` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
-CREATE TABLE `creative_skill` (
+CREATE TABLE `catalog_creative_skills` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `creative_skill_id` VARCHAR(80) NOT NULL,
     `name` VARCHAR(255) NOT NULL,
@@ -457,13 +457,13 @@ CREATE TABLE `creative_skill` (
     `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
     `gmt_modified` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
 
-    UNIQUE INDEX `uk_creative_skill_id`(`creative_skill_id`),
+    UNIQUE INDEX `uk_catalog_creative_skills__creative_skill_id`(`creative_skill_id`),
     INDEX `idx_owner_domain`(`owner_user_id`, `asset_domain`),
     INDEX `idx_owner_name_key`(`owner_user_id`, `name_key`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
-CREATE TABLE `creative_skill_version` (
+CREATE TABLE `catalog_creative_skill_versions` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `creative_skill_version_id` VARCHAR(80) NOT NULL,
     `creative_skill_id` VARCHAR(80) NOT NULL,
@@ -475,8 +475,8 @@ CREATE TABLE `creative_skill_version` (
     `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
     `gmt_modified` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
 
-    UNIQUE INDEX `uk_creative_skill_version_id`(`creative_skill_version_id`),
-    UNIQUE INDEX `uk_creative_skill_version_semver`(`creative_skill_id`, `display_version`),
+    UNIQUE INDEX `uk_catalog_creative_skill_versions__creative_skill_version_id`(`creative_skill_version_id`),
+    UNIQUE INDEX `uk_catalog_creative_skill_versions__semver`(`creative_skill_id`, `display_version`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
@@ -729,7 +729,7 @@ CREATE TABLE `legacy_card_history` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
-CREATE TABLE `material_assets` (
+CREATE TABLE `catalog_material_states` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `material_id` VARCHAR(128) NOT NULL,
     `user_id` BIGINT NOT NULL,
@@ -742,9 +742,9 @@ CREATE TABLE `material_assets` (
     `gmt_modified` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
     `version` INTEGER NOT NULL DEFAULT 0,
 
-    INDEX `idx_material_assets_poll`(`status`, `gmt_create`),
-    INDEX `idx_material_assets_group`(`material_group_id`),
-    UNIQUE INDEX `uk_material_assets_material`(`material_id`),
+    INDEX `idx_catalog_material_states__poll`(`status`, `gmt_create`),
+    INDEX `idx_catalog_material_states__group`(`material_group_id`),
+    UNIQUE INDEX `uk_catalog_material_states__material`(`material_id`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 

@@ -427,7 +427,7 @@ async function attachAssetDeleted(
     .flatMap(record => record.items)
     .filter(item => item.asset_id !== null)
     .map(item => BigInt(item.asset_id!)))];
-  const rows = assetIds.length === 0 ? [] : await tx.assets.findMany({
+  const rows = assetIds.length === 0 ? [] : await tx.user_assets.findMany({
     where: { id: { in: assetIds } },
     select: { id: true, user_id: true, is_delete: true },
   });

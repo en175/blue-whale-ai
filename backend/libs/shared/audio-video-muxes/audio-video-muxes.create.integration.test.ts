@@ -59,16 +59,16 @@ describe.skipIf(!databaseUrl)("audio video mux create idempotency in an isolated
         : originalFetch(input, init));
     const project = await prisma.client.project.create({ data: { owner_id: 9n, name: "IKILVF create idempotency" } });
     projectId = String(project.id);
-    const audio = await prisma.client.assets.create({ data: {
+    const audio = await prisma.client.user_assets.create({ data: {
       user_id: 9n, project_id: project.id, type: "audio", source: "uploaded", status: "normal",
       storage_key: "uploads/9/audio/source.mp3", url: "https://mux.test/audio.mp3", duration_ms: 7_200_000,
     } });
-    const video = await prisma.client.assets.create({ data: {
+    const video = await prisma.client.user_assets.create({ data: {
       user_id: 9n, project_id: project.id, type: "video", source: "uploaded", status: "normal",
       storage_key: "uploads/9/video/source.mp4", url: "https://mux.test/video.mp4", duration_ms: 7_200_000,
       width: 1920, height: 1080,
     } });
-    const foreign = await prisma.client.assets.create({ data: {
+    const foreign = await prisma.client.user_assets.create({ data: {
       user_id: 9n, project_id: 999_999n, type: "video", source: "uploaded", status: "normal",
       storage_key: "uploads/9/video/foreign.mp4", url: "https://mux.test/foreign.mp4", duration_ms: 33_000,
       width: 1920, height: 1080,
@@ -84,7 +84,7 @@ describe.skipIf(!databaseUrl)("audio video mux create idempotency in an isolated
     if (prisma && projectId) {
       await prisma.client.command_idempotency.deleteMany({ where: { project_id: BigInt(projectId) } });
       await prisma.client.generation_jobs.deleteMany({ where: { project_id: BigInt(projectId), type: "audio_video_mux" } });
-      await prisma.client.assets.deleteMany({ where: { id: { in: [audioId, videoId, foreignVideoId] } } });
+      await prisma.client.user_assets.deleteMany({ where: { id: { in: [audioId, videoId, foreignVideoId] } } });
       await prisma.client.project.delete({ where: { id: BigInt(projectId) } });
       await prisma.client.$disconnect();
     }

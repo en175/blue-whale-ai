@@ -23,7 +23,7 @@ describe("ProjectRepo GenerationInbox isolation", () => {
     const assetFindMany = vi.fn();
     const prisma = {
       project: { findMany: projectFindMany },
-      assets: { findMany: assetFindMany },
+      user_assets: { findMany: assetFindMany },
     } as unknown as PrismaClient;
 
     await createProjectRepo(prisma).listByOwner("100");
@@ -55,7 +55,7 @@ describe("ProjectRepo GenerationInbox isolation", () => {
     const prisma = {
       project: { findMany: projectFindMany },
       project_asset: { findMany: linkFindMany },
-      assets: { findMany: assetFindMany },
+      user_assets: { findMany: assetFindMany },
       project_canvas: {
         findMany: canvasFindMany([
           {
@@ -88,7 +88,7 @@ describe("ProjectRepo GenerationInbox isolation", () => {
     expect(views[1].previews).toEqual(["other.png"]);
   });
 
-  it("attaches project_asset-linked images to the listing project, not assets.project_id", async () => {
+  it("attaches project_asset-linked images to the listing project, not user_assets.project_id", async () => {
     const projectFindMany = vi.fn().mockResolvedValue([
       { id: 1n, name: "A", thumb: null, gmt_create: new Date("2026-08-25T00:00:00Z") },
       { id: 2n, name: "B", thumb: null, gmt_create: new Date("2026-08-24T00:00:00Z") },
@@ -103,7 +103,7 @@ describe("ProjectRepo GenerationInbox isolation", () => {
     const prisma = {
       project: { findMany: projectFindMany },
       project_asset: { findMany: linkFindMany },
-      assets: { findMany: assetFindMany },
+      user_assets: { findMany: assetFindMany },
       project_canvas: {
         findMany: canvasFindMany([
           { project_id: 1n, nodes_json: [mediaNode(11)] },
@@ -137,7 +137,7 @@ describe("ProjectRepo GenerationInbox isolation", () => {
     const prisma = {
       project: { findMany: projectFindMany },
       project_asset: { findMany: vi.fn().mockResolvedValue([{ project_id: 2n, asset_id: 11n }]) },
-      assets: {
+      user_assets: {
         findMany: vi.fn().mockResolvedValue([
           { id: 11n, project_id: 1n, url: "reused.png" },
         ]),
@@ -163,7 +163,7 @@ describe("ProjectRepo GenerationInbox isolation", () => {
     const prisma = {
       project: { findMany: projectFindMany },
       project_asset: { findMany: vi.fn().mockResolvedValue([]) },
-      assets: { findMany: vi.fn().mockResolvedValue([]) },
+      user_assets: { findMany: vi.fn().mockResolvedValue([]) },
       project_canvas: { findMany: canvasFindMany([{ project_id: 1n, nodes_json: [] }]) },
     } as unknown as PrismaClient;
 
@@ -179,7 +179,7 @@ describe("ProjectRepo GenerationInbox isolation", () => {
     const prisma = {
       project: { findMany: projectFindMany },
       project_asset: { findMany: vi.fn().mockResolvedValue([]) },
-      assets: {
+      user_assets: {
         findMany: vi.fn().mockResolvedValue([
           { id: 11n, project_id: 1n, url: "kept.png" },
           { id: 12n, project_id: 1n, url: "deleted-from-canvas.png" },
@@ -202,7 +202,7 @@ describe("ProjectRepo GenerationInbox isolation", () => {
     const prisma = {
       project: { findMany: projectFindMany },
       project_asset: { findMany: vi.fn().mockResolvedValue([]) },
-      assets: {
+      user_assets: {
         findMany: vi.fn().mockResolvedValue([
           { id: 11n, project_id: 1n, url: "orphan.png" },
         ]),
@@ -224,7 +224,7 @@ describe("ProjectRepo GenerationInbox isolation", () => {
     const prisma = {
       project: { findMany: projectFindMany },
       project_asset: { findMany: vi.fn().mockResolvedValue([]) },
-      assets: {
+      user_assets: {
         findMany: vi.fn().mockResolvedValue([
           { id: 11n, project_id: 1n, url: "product.png" },
         ]),
@@ -262,7 +262,7 @@ describe("ProjectRepo GenerationInbox isolation", () => {
     const prisma = {
       project: { findMany: projectFindMany },
       project_asset: { findMany: vi.fn().mockResolvedValue([{ project_id: 2n, asset_id: 11n }]) },
-      assets: {
+      user_assets: {
         findMany: vi.fn().mockResolvedValue([
           { id: 11n, project_id: 1n, url: "reused.png" },
         ]),
@@ -299,7 +299,7 @@ describe("ProjectRepo GenerationInbox isolation", () => {
     const prisma = {
       project: { count: projectCount, findMany: projectFindMany },
       project_asset: { findMany: vi.fn().mockResolvedValue([]) },
-      assets: { findMany: assetFindMany },
+      user_assets: { findMany: assetFindMany },
       project_canvas: { findMany: canvasFindMany([{ project_id: 3n, nodes_json: [mediaNode(31)] }]) },
     } as unknown as PrismaClient;
 
@@ -346,13 +346,13 @@ describe("ProjectRepo GenerationInbox isolation", () => {
         count: vi.fn().mockResolvedValue(1),
         findMany: vi.fn().mockResolvedValue([]),
       },
-      assets: { findMany: vi.fn() },
+      user_assets: { findMany: vi.fn() },
     } as unknown as PrismaClient;
 
     const page = await createProjectRepo(prisma).listByOwnerPaged("100", 3, 10);
 
     expect(page).toEqual({ records: [], total: 1, size: 10, current: 3 });
-    expect(prisma.assets.findMany).not.toHaveBeenCalled();
+    expect(prisma.user_assets.findMany).not.toHaveBeenCalled();
   });
 
   it("checks owner and canvas purpose in the update predicate before renaming", async () => {
@@ -463,7 +463,7 @@ describe("ProjectRepo GenerationInbox isolation", () => {
     });
     const prisma = {
       project: { findFirst, update: projectUpdate },
-      assets: { updateMany: assetsUpdateMany },
+      user_assets: { updateMany: assetsUpdateMany },
       $transaction: tx,
     } as unknown as PrismaClient;
 
@@ -486,7 +486,7 @@ describe("ProjectRepo GenerationInbox isolation", () => {
     const projectUpdate = vi.fn();
     const prisma = {
       project: { findFirst, update: projectUpdate },
-      assets: { updateMany: assetsUpdateMany },
+      user_assets: { updateMany: assetsUpdateMany },
       $transaction: vi.fn(),
     } as unknown as PrismaClient;
 
@@ -506,7 +506,7 @@ describe("ProjectRepo GenerationInbox isolation", () => {
     });
     const prisma = {
       project: { findMany, updateMany: projectUpdateMany },
-      assets: { updateMany: assetsUpdateMany },
+      user_assets: { updateMany: assetsUpdateMany },
       $transaction: tx,
     } as unknown as PrismaClient;
 
@@ -533,7 +533,7 @@ describe("ProjectRepo GenerationInbox isolation", () => {
     const projectUpdateMany = vi.fn();
     const prisma = {
       project: { findMany, updateMany: projectUpdateMany },
-      assets: { updateMany: assetsUpdateMany },
+      user_assets: { updateMany: assetsUpdateMany },
       $transaction: vi.fn(),
     } as unknown as PrismaClient;
 
@@ -676,7 +676,7 @@ describe("ProjectRepo last_opened_at / pinned_at (IKH1YI)", () => {
     const prisma = {
       project: { findMany: projectFindMany },
       project_asset: { findMany: vi.fn().mockResolvedValue([]) },
-      assets: { findMany: vi.fn().mockResolvedValue([]) },
+      user_assets: { findMany: vi.fn().mockResolvedValue([]) },
       project_canvas: { findMany: canvasFindMany([]) },
     } as unknown as PrismaClient;
 

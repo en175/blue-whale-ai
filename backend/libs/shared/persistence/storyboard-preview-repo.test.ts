@@ -17,9 +17,9 @@ function buildPrisma(overrides: Record<string, Record<string, ReturnType<typeof 
       findMany: vi.fn().mockResolvedValue([]),
       ...overrides.generation_output_slots,
     },
-    assets: {
+    user_assets: {
       findMany: vi.fn().mockResolvedValue([]),
-      ...overrides.assets,
+      ...overrides.user_assets,
     },
   } as unknown as PrismaClient;
 }
@@ -42,7 +42,7 @@ describe("StoryboardPreviewRepo.listStoryboardFrames", () => {
           { id: 110n, asset_id: 301n, slot_index: 1 },
         ]),
       },
-      assets: {
+      user_assets: {
         findMany: vi.fn().mockResolvedValue([{ id: 300n }, { id: 301n }]),
       },
     });
@@ -72,7 +72,7 @@ describe("StoryboardPreviewRepo.listStoryboardFrames", () => {
           { id: 110n, asset_id: 301n, slot_index: 1 },
         ]),
       },
-      assets: {
+      user_assets: {
         findMany: vi.fn().mockResolvedValue([{ id: 300n }]),
       },
     });

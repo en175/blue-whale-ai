@@ -1,6 +1,6 @@
 # ADR-0117：数据表命名规范与模块前缀收敛
 
-- **状态**：部分被取代（§2 的 `identity_` 前缀已由 [ADR-0118](0118-identity-tables-prefix-bw.md) 收敛为 `bw_`；§5 的 `canvas` / `prompt_preview_snapshots` 已由 [ADR-0134](0134-project-prefix-and-canvas-node-tables.md) 改为 `project_canvas` / `project_prompt_preview_snapshots`；其余条款有效）
+- **状态**：部分被取代（§2 的 `identity_` 前缀已由 [ADR-0118](0118-identity-tables-prefix-bw.md) 收敛为 `bw_`；§5 的 `canvas` / `prompt_preview_snapshots` 已由 [ADR-0134](0134-project-prefix-and-canvas-node-tables.md) 改为 `project_canvas` / `project_prompt_preview_snapshots`；§6 的同名词表、§4 的 `generation_model_capability` 与 §5 的模板表/首页表已由 [ADR-0135](0135-catalog-material-content-prefixes.md) 改名；其余条款有效）
 - **日期**：2026-09-24
 - **决策者**：lixq（架构讨论会话）
 - **关联**：[ADR-0115](0113-self-built-identity-and-billing-supersede-0062.md)、[ADR-0116](0114-java-module-aggregation-and-billing-runtime.md)
@@ -8,7 +8,7 @@
 
 > **部分取代**（2026-09-28）：§2 的前缀空间 `identity_ / billing_ / generation_` 里，`identity_` 已由 [ADR-0118](0118-identity-tables-prefix-bw.md) 改为 `bw_`（六张表 + 其上九个索引）。本 ADR 的「表名一律复数」「外键 = 单数表名_id」「关联表用 `_` 连接」「`uk_{表}__{列}` / `idx_{表}__{列}`」「不改其余约 30 张业务表」「同名词分裂靠注释划边界」等条款**继续有效**。下方正文保留提出时的原貌，其中 `identity_*` 请按 `bw_*` 阅读。
 
-> **部分取代**（2026-10-27）：§5 的免改名单里，`canvas` 与 `prompt_preview_snapshots` 已由 [ADR-0134](0134-project-prefix-and-canvas-node-tables.md) 改为 `project_canvas` / `project_prompt_preview_snapshots`。这是随画布节点行表落地的一次性收敛，不改变「其余业务表不为整齐改名」的结论。
+> **部分取代**（2026-10-27）：§2 的前缀空间扩展为按归属域划分；§5 的 `canvas` 与 `prompt_preview_snapshots` 已由 [ADR-0134](0134-project-prefix-and-canvas-node-tables.md) 改为 `project_canvas` / `project_prompt_preview_snapshots`，§6 的「三个 skill / 三个 asset 不改名」以及 §4/§5 的相关表已由 [ADR-0135](0135-catalog-material-content-prefixes.md) 取代。复数、索引命名、审计列与「不设 `@@map`」继续有效。
 
 ## 背景
 

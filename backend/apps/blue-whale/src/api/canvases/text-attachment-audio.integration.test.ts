@@ -61,7 +61,7 @@ describe.skipIf(!process.env.IKFCXE_DATABASE_URL)("Text attachment audio public 
   const previousDatabase = process.env.DATABASE_URL;
   beforeAll(async () => {
     process.env.DATABASE_URL = process.env.IKFCXE_DATABASE_URL;
-    await prisma.client.generation_model_capability.upsert({
+    await prisma.client.catalog_models.upsert({
       where: { provider_id_model_id: { provider_id: "ikfcxe-test", model_id: MODEL_ID } },
       create: {
         provider_id: "ikfcxe-test",

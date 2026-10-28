@@ -146,7 +146,7 @@ export function createSnapshotRepo(prisma: PrismaClient): SnapshotRepo {
         })
       ).map((r) => r.asset_id);
 
-      const assetRows = await prisma.assets.findMany({
+      const assetRows = await prisma.user_assets.findMany({
         where: {
           user_id: uid,
           status: "normal",
@@ -191,7 +191,7 @@ export function createSnapshotRepo(prisma: PrismaClient): SnapshotRepo {
         ),
       ];
       if (materialIds.length > 0) {
-        const statusRows = await prisma.material_assets.findMany({
+        const statusRows = await prisma.catalog_material_states.findMany({
           where: { user_id: uid, material_id: { in: materialIds } },
           select: {
             material_id: true,
@@ -346,7 +346,7 @@ export function createSnapshotRepo(prisma: PrismaClient): SnapshotRepo {
       const [assets, sceneCards] = await Promise.all([
         assetIds.length === 0
           ? []
-          : prisma.assets.findMany({
+          : prisma.user_assets.findMany({
               where: { id: { in: assetIds } },
               select: {
                 id: true,

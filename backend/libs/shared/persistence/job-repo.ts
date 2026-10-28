@@ -315,7 +315,7 @@ async function loadModelLabels(
   modelIds: readonly string[],
 ): Promise<Map<string, string>> {
   if (modelIds.length === 0) return new Map();
-  const caps = await prisma.generation_model_capability.findMany({
+  const caps = await prisma.catalog_models.findMany({
     where: { model_id: { in: [...modelIds] } },
     select: { model_id: true, model_label: true },
     orderBy: { id: "asc" },
@@ -330,7 +330,7 @@ async function loadModelLabels(
 export function createJobRepo(prisma: PrismaClient): JobRepo {
   async function loadAssets(ids: bigint[]): Promise<Map<string, AssetRow>> {
     if (ids.length === 0) return new Map();
-    const rows: AssetRow[] = await prisma.assets.findMany({
+    const rows: AssetRow[] = await prisma.user_assets.findMany({
       where: { id: { in: ids }, is_delete: false },
     });
     return new Map(rows.map((r) => [r.id.toString(), r]));

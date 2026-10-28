@@ -4,7 +4,7 @@ import { createSkillAdminRepo } from "./skill-admin-repo.js";
 
 function mockPrisma(overrides: Record<string, unknown> = {}) {
   return {
-    skill: {
+    catalog_skills: {
       findMany: vi.fn().mockResolvedValue([]),
       groupBy: vi.fn().mockResolvedValue([]),
       updateMany: vi.fn().mockResolvedValue({ count: 0 }),
@@ -18,7 +18,7 @@ describe("SkillAdminRepo — 官方技能分类管理", () => {
     const prisma = mockPrisma({ updateMany: vi.fn().mockResolvedValue({ count: 1 }) });
     const ok = await createSkillAdminRepo(prisma).setCategory(3n, "short_video");
     expect(ok).toBe(true);
-    expect(prisma.skill.updateMany).toHaveBeenCalledWith({
+    expect(prisma.catalog_skills.updateMany).toHaveBeenCalledWith({
       where: { id: 3n, source: "official", is_delete: 0 },
       data: { category: "short_video" },
     });
@@ -33,7 +33,7 @@ describe("SkillAdminRepo — 官方技能分类管理", () => {
     const prisma = mockPrisma({ updateMany: vi.fn().mockResolvedValue({ count: 2 }) });
     const n = await createSkillAdminRepo(prisma).assignCategory([1n, 2n], "short_video");
     expect(n).toBe(2);
-    expect(prisma.skill.updateMany).toHaveBeenCalledWith({
+    expect(prisma.catalog_skills.updateMany).toHaveBeenCalledWith({
       where: { id: { in: [1n, 2n] }, source: "official", is_delete: 0 },
       data: { category: "short_video" },
     });
@@ -43,7 +43,7 @@ describe("SkillAdminRepo — 官方技能分类管理", () => {
     const prisma = mockPrisma({ updateMany: vi.fn().mockResolvedValue({ count: 2 }) });
     const n = await createSkillAdminRepo(prisma).renameCategory("film", "film_tv");
     expect(n).toBe(2);
-    expect(prisma.skill.updateMany).toHaveBeenCalledWith({
+    expect(prisma.catalog_skills.updateMany).toHaveBeenCalledWith({
       where: { source: "official", is_delete: 0, category: "film" },
       data: { category: "film_tv" },
     });
@@ -52,7 +52,7 @@ describe("SkillAdminRepo — 官方技能分类管理", () => {
   it("clearCategory 置 ''（未分类）", async () => {
     const prisma = mockPrisma({ updateMany: vi.fn().mockResolvedValue({ count: 1 }) });
     await createSkillAdminRepo(prisma).clearCategory("marketing");
-    expect(prisma.skill.updateMany).toHaveBeenCalledWith({
+    expect(prisma.catalog_skills.updateMany).toHaveBeenCalledWith({
       where: { source: "official", is_delete: 0, category: "marketing" },
       data: { category: "" },
     });
@@ -70,7 +70,7 @@ describe("SkillAdminRepo — 官方技能分类管理", () => {
       { name: "film", count: 3 },
       { name: "marketing", count: 5 },
     ]);
-    expect(prisma.skill.groupBy).toHaveBeenCalledWith(
+    expect(prisma.catalog_skills.groupBy).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { source: "official", is_delete: 0, category: { not: "" } },
       }),
@@ -87,7 +87,7 @@ describe("SkillAdminRepo — 官方技能分类管理", () => {
     expect(rows).toEqual([
       { id: "3", name: "深度写作", cover_url: null, category: "other", sort_order: 1 },
     ]);
-    expect(prisma.skill.findMany).toHaveBeenCalledWith(
+    expect(prisma.catalog_skills.findMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: { source: "official", is_delete: 0 } }),
     );
   });

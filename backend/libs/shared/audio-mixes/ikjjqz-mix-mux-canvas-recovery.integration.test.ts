@@ -171,7 +171,7 @@ describe.skipIf(!databaseUrl)("混合/合成提交归属真库验证（IKJJQZ）
     await prisma.generation_job_logs.deleteMany({});
     await prisma.cost_reservations.deleteMany({});
     await prisma.generation_jobs.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
-    await prisma.assets.deleteMany({ where: { user_id: BigInt(USER_ID) } });
+    await prisma.user_assets.deleteMany({ where: { user_id: BigInt(USER_ID) } });
     await prisma.project_asset.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
     await seedCanvas(["mix-node", "mux-node", "legacy-mix-node", "legacy-mux-node", "settle-node", "other-node"]);
   });
@@ -248,7 +248,7 @@ describe.skipIf(!databaseUrl)("混合/合成提交归属真库验证（IKJJQZ）
 
   it("★3 专属重试（mux）：新 job 接管归属；原 job 保持 failed", async () => {
 
-    await prisma.assets.createMany({
+    await prisma.user_assets.createMany({
       data: [
         { id: 21n, user_id: BigInt(USER_ID), project_id: BigInt(PROJECT_ID), type: "audio", url: "https://store.test/21.mp4" },
         { id: 22n, user_id: BigInt(USER_ID), project_id: BigInt(PROJECT_ID), type: "video", url: "https://store.test/22.mp4" },

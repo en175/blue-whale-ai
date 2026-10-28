@@ -115,7 +115,7 @@ class AudioMixCrossRuntimeMySqlIntegrationTest {
     }
 
     private static int countAssets(long jobId) {
-        return jdbc.queryForObject("SELECT COUNT(*) FROM assets WHERE generation_job_id=?", Integer.class, jobId);
+        return jdbc.queryForObject("SELECT COUNT(*) FROM user_assets WHERE generation_job_id=?", Integer.class, jobId);
     }
 
     @Test
@@ -227,9 +227,9 @@ class AudioMixCrossRuntimeMySqlIntegrationTest {
                 return;
             }
             assertThat(countAssets(Long.parseLong(jobId))).isEqualTo(1);
-            assertThat(jdbc.queryForObject("SELECT url FROM assets WHERE generation_job_id=?", String.class,
+            assertThat(jdbc.queryForObject("SELECT url FROM user_assets WHERE generation_job_id=?", String.class,
                     Long.parseLong(jobId))).isEqualTo(storagePublicUrl);
-            assertThat(jdbc.queryForObject("SELECT duration_ms FROM assets WHERE generation_job_id=?", Integer.class,
+            assertThat(jdbc.queryForObject("SELECT duration_ms FROM user_assets WHERE generation_job_id=?", Integer.class,
                     Long.parseLong(jobId))).isEqualTo(37_250);
         } finally {
             gateway.stop(0);

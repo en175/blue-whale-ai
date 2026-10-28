@@ -124,10 +124,10 @@ describe.skipIf(process.env.IKIHPJ_CROSS_RUNTIME !== "1")("audio_video_mux cross
       const base = await app.getUrl();
 
       const project = await prisma.client.project.create({ data: { owner_id: 9n, name: "IKIHPJ cross runtime" } });
-      const audio = await prisma.client.assets.create({ data: { user_id: 9n, project_id: project.id,
+      const audio = await prisma.client.user_assets.create({ data: { user_id: 9n, project_id: project.id,
         type: "audio", source: "uploaded", status: "normal", storage_key: "uploads/9/audio/source.mp3",
         url: `${inputBase}/uploads/9/audio/source.mp3`, duration_ms: 10_000 } });
-      const video = await prisma.client.assets.create({ data: { user_id: 9n, project_id: project.id,
+      const video = await prisma.client.user_assets.create({ data: { user_id: 9n, project_id: project.id,
         type: "video", source: "uploaded", status: "normal", storage_key: "uploads/9/video/my_vlog.mp4",
         url: `${inputBase}/uploads/9/video/my_vlog.mp4`, duration_ms: 33_000,
         width: 1280, height: 720, name: "my_vlog.mp4" } });
@@ -191,14 +191,14 @@ describe.skipIf(process.env.IKIHPJ_CROSS_RUNTIME !== "1")("audio_video_mux cross
       expect(rejected.exitCode).not.toBe(0);
       expect(rejected.output).toContain("隔离库标记不匹配");
       expect((await prisma.client.generation_jobs.findUniqueOrThrow({ where: { id: BigInt(failJobId) } })).status).toBe("queued");
-      expect(await prisma.client.assets.count({ where: { generation_job_id: BigInt(failJobId) } })).toBe(0);
+      expect(await prisma.client.user_assets.count({ where: { generation_job_id: BigInt(failJobId) } })).toBe(0);
 
       const failedRun = await runWorker(guardToken, "fail", failJobId);
       expect(failedRun.exitCode, failedRun.output).toBe(0);
       const failedJob = await prisma.client.generation_jobs.findUniqueOrThrow({ where: { id: BigInt(failJobId) } });
       expect(failedJob.status).toBe("failed");
       expect(failedJob.error).toMatchObject({ code: "audio_video_mux_failed", message: expect.stringContaining("request-cross-fail") });
-      expect(await prisma.client.assets.count({ where: { generation_job_id: BigInt(failJobId) } })).toBe(0);
+      expect(await prisma.client.user_assets.count({ where: { generation_job_id: BigInt(failJobId) } })).toBe(0);
       const failedResponse = await originalFetch(`${base}/api/jobs/${failJobId}`);
       const failedView = await failedResponse.json() as { code: number; msg: string; data: { status: string } };
       expect(failedView.data.status).toBe("failed");
@@ -218,7 +218,7 @@ describe.skipIf(process.env.IKIHPJ_CROSS_RUNTIME !== "1")("audio_video_mux cross
       expect(assetView.code).toBe(200);
       expect(assetView.data.url).toBe(`http://127.0.0.1:${outputPort}/stored/out.mp4`);
       expect(assetView.data.duration).toBe(227);
-      expect(await prisma.client.assets.findUniqueOrThrow({ where: { id: BigInt(assetId) } }))
+      expect(await prisma.client.user_assets.findUniqueOrThrow({ where: { id: BigInt(assetId) } }))
         .toMatchObject({ name: "my_vlog(音视频合成).mp4", width: 1920, height: 1080, duration_ms: 227_000 });
       const playable = await originalFetch(assetView.data.url);
       expect(playable.status).toBe(200);

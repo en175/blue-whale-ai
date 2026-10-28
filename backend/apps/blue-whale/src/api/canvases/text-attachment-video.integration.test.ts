@@ -43,7 +43,7 @@ describe.skipIf(!process.env.IKDLQG_DATABASE_URL)("Text attachment video public 
   beforeAll(async () => {
     process.env.DATABASE_URL = process.env.IKDLQG_DATABASE_URL;
     const sizes = [{ id: "720p", label: "720P", api_value: "720p" }];
-    await prisma.client.generation_model_capability.upsert({
+    await prisma.client.catalog_models.upsert({
       where: { provider_id_model_id: { provider_id: "ikdlqg-test", model_id: MODEL_ID } },
       create: {
         provider_id: "ikdlqg-test",
@@ -172,7 +172,7 @@ describe.skipIf(!process.env.IKDLQG_DATABASE_URL)("Text attachment video public 
 
   it("目标缺失 / 图片 mediaNode / 音频类型携带 / 他人项目 → 明确失败不建任务", async () => {
     const projectId = (await projects.create("987654", "IKDLQG bad target")).id;
-    await prisma.client.generation_model_capability.upsert({
+    await prisma.client.catalog_models.upsert({
       where: { provider_id_model_id: { provider_id: "ikdlqg-test", model_id: "any-audio-model" } },
       create: {
         provider_id: "ikdlqg-test",
@@ -304,7 +304,7 @@ describe.skipIf(!process.env.IKDLQG_DATABASE_URL)("Text attachment video public 
     const { chromium } = await import("playwright");
     const { createServer: createVite } = await import("../../../../../../web/node_modules/vite/dist/node/index.js");
     const projectId = (await projects.create("987654", "IKDLQG browser")).id;
-    const asset = await prisma.client.assets.create({
+    const asset = await prisma.client.user_assets.create({
       data: {
         user_id: BigInt(987654),
         project_id: BigInt(projectId),

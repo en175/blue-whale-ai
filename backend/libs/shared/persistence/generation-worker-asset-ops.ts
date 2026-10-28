@@ -26,7 +26,7 @@ export function createWorkerAssetOps(prisma: PrismaClient): Pick<WorkerRepo, "re
     async resolveInputAssets(assetIds, userId, projectId) {
       if (assetIds.length === 0) return [];
       const linkedAssetIds = await findLinkedAssetIds(prisma, userId, projectId);
-      const rows = await prisma.assets.findMany({
+      const rows = await prisma.user_assets.findMany({
         where: {
           id: { in: assetIds.map((id) => BigInt(id)) },
           user_id: BigInt(userId),
@@ -74,7 +74,7 @@ export function createWorkerAssetOps(prisma: PrismaClient): Pick<WorkerRepo, "re
 
     async resolveMediaExtractSource(assetId, userId, projectId) {
       const linkedAssetIds = await findLinkedAssetIds(prisma, userId, projectId);
-      const row = await prisma.assets.findFirst({
+      const row = await prisma.user_assets.findFirst({
         where: {
           id: BigInt(assetId),
           user_id: BigInt(userId),
@@ -93,7 +93,7 @@ export function createWorkerAssetOps(prisma: PrismaClient): Pick<WorkerRepo, "re
     },
 
     async findImageCapability(modelId, sizeId) {
-      const cap = await prisma.generation_model_capability.findFirst({
+      const cap = await prisma.catalog_models.findFirst({
         where: { model_id: modelId, enabled: true, is_delete: false },
       });
       if (!cap) return null;
@@ -142,7 +142,7 @@ export function createWorkerAssetOps(prisma: PrismaClient): Pick<WorkerRepo, "re
           data: { version: { increment: 1 } },
         });
         if (owned.count !== 1) return null;
-        const asset = await tx.assets.create({
+        const asset = await tx.user_assets.create({
           data: {
             user_id: BigInt(input.user_id),
             project_id: BigInt(input.project_id),

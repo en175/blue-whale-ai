@@ -22,7 +22,7 @@ describe.skipIf(!process.env.IKFCX4_DATABASE_URL)("Text attachment preview consi
   beforeAll(async () => {
     process.env.DATABASE_URL = process.env.IKFCX4_DATABASE_URL;
     const sizes = [{ id: "1024x1024", label: "1024x1024" }];
-    await prisma.client.generation_model_capability.upsert({
+    await prisma.client.catalog_models.upsert({
       where: { provider_id_model_id: { provider_id: "ikfcx4-test", model_id: MODEL_ID } },
       create: {
         provider_id: "ikfcx4-test",
@@ -111,7 +111,7 @@ describe.skipIf(!process.env.IKFCX4_DATABASE_URL)("Text attachment preview consi
     const projectId = (await projects.create("987654", "IKFCX4 browser")).id;
     const longBody = Array.from({ length: 24 }, (_, i) => `第${i + 1}段落：蓝鲸在深海里缓慢游动，霓虹灯映在浪尖。`).join("\n");
     const LONG_TAIL_MARK = "末尾标记-XY7";
-    const asset = await prisma.client.assets.create({
+    const asset = await prisma.client.user_assets.create({
       data: {
         user_id: BigInt(987654),
         project_id: BigInt(projectId),

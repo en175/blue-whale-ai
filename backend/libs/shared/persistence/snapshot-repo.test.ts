@@ -24,7 +24,7 @@ describe("SnapshotRepo.loadJobsAndAssets", () => {
           },
         ]),
       },
-      assets: { findMany: vi.fn().mockResolvedValue([]) },
+      user_assets: { findMany: vi.fn().mockResolvedValue([]) },
       project_asset: { findMany: vi.fn().mockResolvedValue([]) },
       generation_output_slots: {
         findMany: vi.fn().mockResolvedValue([]),
@@ -59,7 +59,7 @@ describe("SnapshotRepo.loadJobsAndAssets", () => {
     ]);
     const prisma = {
       generation_jobs: { findMany: findJobs },
-      assets: { findMany: findAssets },
+      user_assets: { findMany: findAssets },
       project_asset: { findMany: vi.fn().mockResolvedValue([{ asset_id: 200n }]) },
       generation_output_slots: {
         findMany: vi.fn().mockResolvedValue([]),
@@ -112,7 +112,7 @@ describe("SnapshotRepo.loadJobsAndAssets", () => {
     ]);
     const prisma = {
       generation_jobs: { findMany: vi.fn().mockResolvedValue([]) },
-      assets: {
+      user_assets: {
         findMany: vi.fn().mockResolvedValue([
           { id: 200n, project_id: 55n, type: "image", url: "u-200", material_id: "asset-a" },
           { id: 201n, project_id: 55n, type: "image", url: "u-201", material_id: "asset-b" },
@@ -122,7 +122,7 @@ describe("SnapshotRepo.loadJobsAndAssets", () => {
       },
       project_asset: { findMany: vi.fn().mockResolvedValue([]) },
       generation_output_slots: { findMany: vi.fn().mockResolvedValue([]) },
-      material_assets: { findMany: findMaterialAssets },
+      catalog_material_states: { findMany: findMaterialAssets },
     } as unknown as PrismaClient;
 
     const result = await createSnapshotRepo(prisma).loadJobsAndAssets("55", "100");
@@ -155,18 +155,18 @@ describe("SnapshotRepo.loadJobsAndAssets", () => {
     });
   });
 
-  it("没有任何 asset 关联素材库时不发 material_assets 查询", async () => {
+  it("没有任何 asset 关联素材库时不发 catalog_material_states 查询", async () => {
     const findMaterialAssets = vi.fn();
     const prisma = {
       generation_jobs: { findMany: vi.fn().mockResolvedValue([]) },
-      assets: {
+      user_assets: {
         findMany: vi.fn().mockResolvedValue([
           { id: 200n, project_id: 55n, type: "image", url: "u", material_id: null },
         ]),
       },
       project_asset: { findMany: vi.fn().mockResolvedValue([]) },
       generation_output_slots: { findMany: vi.fn().mockResolvedValue([]) },
-      material_assets: { findMany: findMaterialAssets },
+      catalog_material_states: { findMany: findMaterialAssets },
     } as unknown as PrismaClient;
 
     await createSnapshotRepo(prisma).loadJobsAndAssets("55", "100");
@@ -182,7 +182,7 @@ describe("SnapshotRepo.loadJobsAndAssets", () => {
     ]);
     const prisma = {
       generation_jobs: { findMany: findJobs },
-      assets: { findMany: findAssets },
+      user_assets: { findMany: findAssets },
       project_asset: { findMany: vi.fn().mockResolvedValue([{ asset_id: 999n }]) },
       generation_output_slots: { findMany: vi.fn().mockResolvedValue([]) },
     } as unknown as PrismaClient;
@@ -203,7 +203,7 @@ describe("SnapshotRepo.loadJobsAndAssets", () => {
     ]);
     const prisma = {
       generation_jobs: { findMany: findJobs },
-      assets: { findMany: findAssets },
+      user_assets: { findMany: findAssets },
       project_asset: { findMany: vi.fn().mockResolvedValue([{ asset_id: 300n }]) },
       generation_output_slots: { findMany: vi.fn().mockResolvedValue([]) },
     } as unknown as PrismaClient;
@@ -224,7 +224,7 @@ describe("SnapshotRepo.loadJobsAndAssets", () => {
     ]);
     const prisma = {
       generation_jobs: { findMany: findJobs },
-      assets: { findMany: findAssets },
+      user_assets: { findMany: findAssets },
       project_asset: { findMany: vi.fn().mockResolvedValue([]) },
       generation_output_slots: { findMany: vi.fn().mockResolvedValue([]) },
     } as unknown as PrismaClient;
@@ -280,7 +280,7 @@ describe("SnapshotRepo.loadConversationState", () => {
       generation_output_slots: {
         findMany: vi.fn().mockResolvedValue([]),
       },
-      assets: { findMany: vi.fn().mockResolvedValue([]) },
+      user_assets: { findMany: vi.fn().mockResolvedValue([]) },
     } as unknown as PrismaClient;
 
     await expect(
@@ -312,7 +312,7 @@ describe("SnapshotRepo.loadConversationState", () => {
           },
         ]),
       },
-      assets: { findMany: assetsFindMany },
+      user_assets: { findMany: assetsFindMany },
       scene_cards: { findMany: vi.fn().mockResolvedValue([]) },
       project_events: {
         aggregate: vi.fn().mockResolvedValue({ _max: { cursor: 12n } }),

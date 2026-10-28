@@ -78,7 +78,7 @@ describe("generation_model_capability 删列 channel_parser 三轨迁移", () =>
   });
 
   it("schema.prisma 已不再声明该列", () => {
-    const model = schemaPrisma.slice(schemaPrisma.indexOf("model generation_model_capability {"));
+    const model = schemaPrisma.slice(schemaPrisma.indexOf("model catalog_models {"));
     const body = model.slice(0, model.indexOf("\n}"));
     const fields = body
       .split("\n")

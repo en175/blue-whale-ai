@@ -124,10 +124,10 @@ describe.skipIf(process.env.IKI68N_CROSS_RUNTIME !== "1")("audio_mix cross runti
       const base = await app.getUrl();
 
       const project = await prisma.client.project.create({ data: { owner_id: 9n, name: "IKI68N cross runtime" } });
-      const source = await prisma.client.assets.create({ data: { user_id: 9n, project_id: project.id,
+      const source = await prisma.client.user_assets.create({ data: { user_id: 9n, project_id: project.id,
         type: "audio", source: "uploaded", status: "normal", storage_key: "uploads/9/audio/source.mp3",
         url: `${inputBase}/uploads/9/audio/source.mp3`, duration_ms: 10_000 } });
-      const other = await prisma.client.assets.create({ data: { user_id: 9n, project_id: 0n,
+      const other = await prisma.client.user_assets.create({ data: { user_id: 9n, project_id: 0n,
         type: "audio", source: "generated", status: "normal", storage_key: "generated/9/audio/other.mp3",
         url: `${inputBase}/generated/9/audio/other.mp3`, duration_ms: 12_500 } });
       const createdResponse = await originalFetch(`${base}/api/projects/${project.id}/audio-mixes`, {
@@ -175,14 +175,14 @@ describe.skipIf(process.env.IKI68N_CROSS_RUNTIME !== "1")("audio_mix cross runti
       expect(rejected.exitCode).not.toBe(0);
       expect(rejected.output).toContain("隔离库标记不匹配");
       expect((await prisma.client.generation_jobs.findUniqueOrThrow({ where: { id: job.id } })).status).toBe("queued");
-      expect(await prisma.client.assets.count({ where: { generation_job_id: job.id } })).toBe(0);
+      expect(await prisma.client.user_assets.count({ where: { generation_job_id: job.id } })).toBe(0);
 
       const failedRun = await runWorker(guardToken, "fail");
       expect(failedRun.exitCode, failedRun.output).toBe(0);
       const failedJob = await prisma.client.generation_jobs.findUniqueOrThrow({ where: { id: job.id } });
       expect(failedJob.status).toBe("failed");
       expect(failedJob.error).toMatchObject({ code: "audio_mix_failed", message: expect.stringContaining("request-cross-fail") });
-      expect(await prisma.client.assets.count({ where: { generation_job_id: job.id } })).toBe(0);
+      expect(await prisma.client.user_assets.count({ where: { generation_job_id: job.id } })).toBe(0);
       const failedResponse = await originalFetch(`${base}/api/jobs/${created.data.job_id}`);
       const failedView = await failedResponse.json() as { code: number; msg: string; data: { status: string } };
       expect(failedView.data.status).toBe("failed");

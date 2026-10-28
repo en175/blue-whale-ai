@@ -96,7 +96,7 @@ describe.skipIf(!process.env.IKNCL3_DATABASE_URL)("本地恢复画布公开 API"
     const before = await (await fetch(`${base}/api/projects`)).json();
     const jobs = await prisma.client.generation_jobs.count();
     const reservations = await prisma.client.cost_reservations.count();
-    const asset = await prisma.client.assets.create({ data: { user_id: 983003n, project_id: BigInt(sourceId), type: "video", url: `https://assets.invalid/main-${sourceId}.mp4` } });
+    const asset = await prisma.client.user_assets.create({ data: { user_id: 983003n, project_id: BigInt(sourceId), type: "video", url: `https://assets.invalid/main-${sourceId}.mp4` } });
     const response = await request("PUT", "04e0b9cc-04dd-45ad-930b-3c0000000012", {
       ...payload, nodes: JSON.stringify([{ id: "video-fallback", type: "mediaNode", data: { assetId: asset.id.toString(), mediaType: "video", src: asset.url, srcH264: "blob:expired-fallback" } }]),
     });
@@ -129,7 +129,7 @@ describe.skipIf(!process.env.IKNCL3_DATABASE_URL)("本地恢复画布公开 API"
   });
 
   it("保留合法备用视频、各工具来源和正文链接，关联后重读并逐项复核权限", async () => {
-    const assets = await Promise.all(["image", "video", "audio", "image", "video"].map((type, i) => prisma.client.assets.create({ data: {
+    const assets = await Promise.all(["image", "video", "audio", "image", "video"].map((type, i) => prisma.client.user_assets.create({ data: {
       user_id: 983003n, project_id: BigInt(sourceId), type, url: `https://assets.invalid/control-${sourceId}-${i}?download=1&token=fixture`,
     } })));
     const [image, video, audio, mask, fallback] = assets;
@@ -168,7 +168,7 @@ describe.skipIf(!process.env.IKNCL3_DATABASE_URL)("本地恢复画布公开 API"
     expect(JSON.parse(snapshot.data.canvas.nodes)).toEqual(nodes);
     for (const asset of assets) expect(snapshot.data.assets[asset.id.toString()].access_url).toBe(asset.url);
     for (const asset of assets) {
-      await prisma.client.assets.update({ where: { id: asset.id }, data: { user_id: 983004n } });
+      await prisma.client.user_assets.update({ where: { id: asset.id }, data: { user_id: 983004n } });
       try {
         const revoked = await request("GET", id);
         expect(revoked.status).toBe(422);
@@ -177,7 +177,7 @@ describe.skipIf(!process.env.IKNCL3_DATABASE_URL)("本地恢复画布公开 API"
         expect(JSON.stringify(error)).not.toContain(asset.url);
         expect((await request("PUT", id, body)).status).toBe(422);
       } finally {
-        await prisma.client.assets.update({ where: { id: asset.id }, data: { user_id: 983003n } });
+        await prisma.client.user_assets.update({ where: { id: asset.id }, data: { user_id: 983003n } });
       }
     }
     expect((await (await request("GET", id)).json()).data.stage).toBe("complete");
@@ -187,8 +187,8 @@ describe.skipIf(!process.env.IKNCL3_DATABASE_URL)("本地恢复画布公开 API"
 
   it("角色库原身份恢复后保留全文、关联资产并可幂等重读", async () => {
     const materialId = `asset-recovery-${sourceId}`;
-    const asset = await prisma.client.assets.create({ data: { user_id: 983003n, project_id: BigInt(sourceId), type: "image", url: `https://assets.invalid/material-${sourceId}.png`, material_id: materialId } });
-    await prisma.client.material_assets.create({ data: { material_id: materialId, user_id: 983003n, material_group_id: `group-recovery-${sourceId}`, status: "Active" } });
+    const asset = await prisma.client.user_assets.create({ data: { user_id: 983003n, project_id: BigInt(sourceId), type: "image", url: `https://assets.invalid/material-${sourceId}.png`, material_id: materialId } });
+    await prisma.client.catalog_material_states.create({ data: { material_id: materialId, user_id: 983003n, material_group_id: `group-recovery-${sourceId}`, status: "Active" } });
     const nodes = [{ id: "role-card", type: "assetNode", position: { x: 10, y: 20 }, data: { kind: "custom", initialRefs: [{ id: "role-reference", src: asset.url, type: "image", assetId: materialId }] } }];
     const body = { ...payload, nodes: JSON.stringify(nodes) };
     const id = "04e0b9cc-04dd-45ad-930b-3c0000000015";
@@ -213,9 +213,9 @@ describe.skipIf(!process.env.IKNCL3_DATABASE_URL)("本地恢复画布公开 API"
 
   it("角色库未知、他人、失效或变更映射在恢复与回读时明确缺项", async () => {
     const materialId = `asset-20261019-${sourceId}-A_1`;
-    const asset = await prisma.client.assets.create({ data: { user_id: 983003n, project_id: BigInt(sourceId), type: "image", url: `https://assets.invalid/material-state-${sourceId}.png`, material_id: materialId } });
+    const asset = await prisma.client.user_assets.create({ data: { user_id: 983003n, project_id: BigInt(sourceId), type: "image", url: `https://assets.invalid/material-state-${sourceId}.png`, material_id: materialId } });
     const material = { material_id: materialId, user_id: 983003n, material_group_id: `group-state-${sourceId}`, status: "Active" };
-    await prisma.client.material_assets.create({ data: material });
+    await prisma.client.catalog_material_states.create({ data: material });
     const nodes = [{ id: "role-state", type: "assetNode", data: { initialRefs: [{ id: "role-state-ref", src: asset.url, type: "image", assetId: materialId }] } }];
     const body = { ...payload, nodes: JSON.stringify(nodes) };
     const id = "04e0b9cc-04dd-45ad-930b-3c0000000016";
@@ -226,16 +226,16 @@ describe.skipIf(!process.env.IKNCL3_DATABASE_URL)("本地恢复画布公开 API"
     const beforeJobs = await prisma.client.generation_jobs.count();
     const beforeReservations = await prisma.client.cost_reservations.count();
     const cases = [
-      async () => { await prisma.client.material_assets.update({ where: { material_id: materialId }, data: { user_id: 983004n } }); },
-      async () => { await prisma.client.material_assets.update({ where: { material_id: materialId }, data: { status: "Processing" } }); },
-      async () => { await prisma.client.material_assets.update({ where: { material_id: materialId }, data: { status: "Failed" } }); },
-      async () => { await prisma.client.material_assets.delete({ where: { material_id: materialId } }); },
-      async () => { await prisma.client.assets.update({ where: { id: asset.id }, data: { user_id: 983004n } }); },
-      async () => { await prisma.client.assets.update({ where: { id: asset.id }, data: { is_delete: true } }); },
-      async () => { await prisma.client.assets.update({ where: { id: asset.id }, data: { status: "disabled" } }); },
-      async () => { await prisma.client.assets.update({ where: { id: asset.id }, data: { material_id: null } }); },
-      async () => { await prisma.client.assets.update({ where: { id: asset.id }, data: { url: `https://foreign.invalid/private-${sourceId}.png` } }); },
-      async () => { await prisma.client.assets.update({ where: { id: asset.id }, data: { type: "video" } }); },
+      async () => { await prisma.client.catalog_material_states.update({ where: { material_id: materialId }, data: { user_id: 983004n } }); },
+      async () => { await prisma.client.catalog_material_states.update({ where: { material_id: materialId }, data: { status: "Processing" } }); },
+      async () => { await prisma.client.catalog_material_states.update({ where: { material_id: materialId }, data: { status: "Failed" } }); },
+      async () => { await prisma.client.catalog_material_states.delete({ where: { material_id: materialId } }); },
+      async () => { await prisma.client.user_assets.update({ where: { id: asset.id }, data: { user_id: 983004n } }); },
+      async () => { await prisma.client.user_assets.update({ where: { id: asset.id }, data: { is_delete: true } }); },
+      async () => { await prisma.client.user_assets.update({ where: { id: asset.id }, data: { status: "disabled" } }); },
+      async () => { await prisma.client.user_assets.update({ where: { id: asset.id }, data: { material_id: null } }); },
+      async () => { await prisma.client.user_assets.update({ where: { id: asset.id }, data: { url: `https://foreign.invalid/private-${sourceId}.png` } }); },
+      async () => { await prisma.client.user_assets.update({ where: { id: asset.id }, data: { type: "video" } }); },
     ];
     for (const mutate of cases) {
       await mutate();
@@ -248,21 +248,21 @@ describe.skipIf(!process.env.IKNCL3_DATABASE_URL)("本地恢复画布公开 API"
           expect(JSON.stringify(error)).not.toContain("https://");
         }
       } finally {
-        await prisma.client.assets.update({ where: { id: asset.id }, data: { user_id: 983003n, is_delete: false, status: "normal", material_id: materialId, url: asset.url, type: "image" } });
-        await prisma.client.material_assets.upsert({ where: { material_id: materialId }, create: material, update: { user_id: 983003n, status: "Active" } });
+        await prisma.client.user_assets.update({ where: { id: asset.id }, data: { user_id: 983003n, is_delete: false, status: "normal", material_id: materialId, url: asset.url, type: "image" } });
+        await prisma.client.catalog_material_states.upsert({ where: { material_id: materialId }, create: material, update: { user_id: 983003n, status: "Active" } });
       }
       expect((await (await request("GET", id)).json()).data).toEqual(complete.data);
     }
     const unknown = { ...body, nodes: JSON.stringify([{ ...nodes[0], data: { initialRefs: [{ ...nodes[0].data.initialRefs[0], assetId: "asset-unknown-recovery" }] } }]) };
     expect((await request("PUT", "04e0b9cc-04dd-45ad-930b-3c0000000017", unknown)).status).toBe(422);
-    await prisma.client.assets.update({ where: { id: asset.id }, data: { material_id: null } });
-    const replacement = await prisma.client.assets.create({ data: { user_id: 983003n, type: "image", url: asset.url, material_id: materialId } });
+    await prisma.client.user_assets.update({ where: { id: asset.id }, data: { material_id: null } });
+    const replacement = await prisma.client.user_assets.create({ data: { user_id: 983003n, type: "image", url: asset.url, material_id: materialId } });
     try {
       expect((await request("GET", id)).status).toBe(422);
       expect((await request("PUT", id, body)).status).toBe(422);
     } finally {
-      await prisma.client.assets.update({ where: { id: replacement.id }, data: { material_id: null } });
-      await prisma.client.assets.update({ where: { id: asset.id }, data: { material_id: materialId } });
+      await prisma.client.user_assets.update({ where: { id: replacement.id }, data: { material_id: null } });
+      await prisma.client.user_assets.update({ where: { id: asset.id }, data: { material_id: materialId } });
     }
     expect((await request("GET", "04e0b9cc-04dd-45ad-930b-3c0000000017")).status).toBe(404);
     expect((await (await fetch(`${base}/api/projects`)).json()).data).toHaveLength(before.data.length);
@@ -381,7 +381,7 @@ describe.skipIf(!process.env.IKNCL3_DATABASE_URL)("本地恢复画布公开 API"
 
   it("同账号跨项目作品合法关联，删除或撤权后查询不再报告完整恢复", async () => {
     const id = "04e0b9cc-04dd-45ad-930b-3c0000000008";
-    const asset = await prisma.client.assets.create({ data: { user_id: 983003n, project_id: BigInt(sourceId), type: "image", url: `https://assets.invalid/${sourceId}.png` } });
+    const asset = await prisma.client.user_assets.create({ data: { user_id: 983003n, project_id: BigInt(sourceId), type: "image", url: `https://assets.invalid/${sourceId}.png` } });
     const nodes = [{ id: "restored-media", type: "mediaNode", position: { x: 14, y: 18 }, data: {
       assetId: asset.id.toString(), mediaType: "image", src: asset.url,
       localRecoveryProvenance: { sourceProjectId: sourceId, sourceNodeId: "source-result", sourceJobId: "123" },
@@ -394,18 +394,18 @@ describe.skipIf(!process.env.IKNCL3_DATABASE_URL)("本地恢复画布公开 API"
     const snapshot = await (await fetch(`${base}/api/projects/${targetId}/snapshot`)).json();
     expect(snapshot.data.assets[asset.id.toString()].access_url).toBe(asset.url);
     expect(JSON.parse(snapshot.data.canvas.nodes)[0].data.localRecoveryProvenance).toEqual(nodes[0].data.localRecoveryProvenance);
-    await prisma.client.assets.update({ where: { id: asset.id }, data: { user_id: 983004n } });
+    await prisma.client.user_assets.update({ where: { id: asset.id }, data: { user_id: 983004n } });
     try {
       expect((await request("GET", id)).status).toBe(422);
       expect((await request("PUT", id, body)).status).toBe(422);
     } finally {
-      await prisma.client.assets.update({ where: { id: asset.id }, data: { user_id: 983003n } });
+      await prisma.client.user_assets.update({ where: { id: asset.id }, data: { user_id: 983003n } });
     }
-    await prisma.client.assets.update({ where: { id: asset.id }, data: { is_delete: true } });
+    await prisma.client.user_assets.update({ where: { id: asset.id }, data: { is_delete: true } });
     try {
       expect((await request("GET", id)).status).toBe(422);
     } finally {
-      await prisma.client.assets.update({ where: { id: asset.id }, data: { is_delete: false } });
+      await prisma.client.user_assets.update({ where: { id: asset.id }, data: { is_delete: false } });
     }
     await prisma.client.project.update({ where: { id: BigInt(sourceId) }, data: { owner_id: 983004n } });
     try {
@@ -439,7 +439,7 @@ describe.skipIf(!process.env.IKNCL3_DATABASE_URL)("本地恢复画布公开 API"
   });
 
   it("不允许借合法 src 掩盖未授权的 url 别名", async () => {
-    const asset = await prisma.client.assets.create({ data: { user_id: 983003n, project_id: BigInt(sourceId), type: "image", url: `https://assets.invalid/alias-${sourceId}.png` } });
+    const asset = await prisma.client.user_assets.create({ data: { user_id: 983003n, project_id: BigInt(sourceId), type: "image", url: `https://assets.invalid/alias-${sourceId}.png` } });
     const response = await request("PUT", "04e0b9cc-04dd-45ad-930b-3c0000000010", {
       ...payload, nodes: JSON.stringify([{ id: "alias-media", type: "mediaNode", data: { assetId: asset.id.toString(), mediaType: "image", src: asset.url, url: "https://other-account.invalid/private.png" } }]),
     });
@@ -448,7 +448,7 @@ describe.skipIf(!process.env.IKNCL3_DATABASE_URL)("本地恢复画布公开 API"
   });
 
   it("拒绝临时文件地址、他人素材、非法来源说明及方案受保护身份", async () => {
-    const foreign = await prisma.client.assets.create({ data: { user_id: 983004n, type: "image", url: `https://assets.invalid/foreign-${sourceId}.png` } });
+    const foreign = await prisma.client.user_assets.create({ data: { user_id: 983004n, type: "image", url: `https://assets.invalid/foreign-${sourceId}.png` } });
     const variants = [
       { data: { src: "blob:expired-object-url" }, reason: "local_recovery_assets_unavailable" },
       { data: { assetId: foreign.id.toString(), src: foreign.url }, reason: "local_recovery_assets_unavailable" },
@@ -478,13 +478,13 @@ describe.skipIf(!process.env.IKNCL3_DATABASE_URL)("本地恢复画布公开 API"
   )))("首次恢复按 $field 的 $mediaType 类型选择同 URL 资产，另一类型=$otherType，匹配资产后创建=$matchingLast", async ({ field, mediaType, otherType, matchingLast }) => {
     const url = `https://assets.invalid/first-type-${crypto.randomUUID()}`;
     const types = matchingLast ? [otherType, mediaType] : [mediaType, otherType];
-    const first = await prisma.client.assets.create({ data: { user_id: 983003n, project_id: BigInt(sourceId), type: types[0]!, url } });
-    const second = await prisma.client.assets.create({ data: { user_id: 983003n, project_id: BigInt(sourceId), type: types[1]!, url } });
+    const first = await prisma.client.user_assets.create({ data: { user_id: 983003n, project_id: BigInt(sourceId), type: types[0]!, url } });
+    const second = await prisma.client.user_assets.create({ data: { user_id: 983003n, project_id: BigInt(sourceId), type: types[1]!, url } });
     const original = matchingLast ? second : first;
     let data: Record<string, unknown> = { src: url, mediaType };
     const expectedIds = [original.id.toString()];
     if (field === "srcH264") {
-      const main = await prisma.client.assets.create({ data: { user_id: 983003n, project_id: BigInt(sourceId), type: "video", url: `${url}-main` } });
+      const main = await prisma.client.user_assets.create({ data: { user_id: 983003n, project_id: BigInt(sourceId), type: "video", url: `${url}-main` } });
       data = { assetId: main.id.toString(), src: main.url, srcH264: url, mediaType };
       expectedIds.push(main.id.toString());
     } else if (field === "voice.src") {
@@ -510,7 +510,7 @@ describe.skipIf(!process.env.IKNCL3_DATABASE_URL)("本地恢复画布公开 API"
       path: field === "srcH264" ? "nodes.0.data.srcH264" : field === "voice.src" ? "nodes.0.data.voice" : "nodes.0.data",
       url, mediaType, resolvedAssetId: original.id.toString(),
     }]) });
-    const substitute = await prisma.client.assets.create({ data: { user_id: 983003n, project_id: BigInt(sourceId), type: mediaType, url } });
+    const substitute = await prisma.client.user_assets.create({ data: { user_id: 983003n, project_id: BigInt(sourceId), type: mediaType, url } });
     await app.close();
     await start();
     expect((await (await request("GET", id)).json()).data).toEqual(complete.data);
@@ -531,7 +531,7 @@ describe.skipIf(!process.env.IKNCL3_DATABASE_URL)("本地恢复画布公开 API"
     const url = `https://assets.invalid/first-multi-${crypto.randomUUID()}`;
     const types = reverse ? ["audio", "video", "image"] : ["image", "video", "audio"];
     const assets = [];
-    for (const type of types) assets.push(await prisma.client.assets.create({ data: { user_id: 983003n, project_id: BigInt(sourceId), type, url } }));
+    for (const type of types) assets.push(await prisma.client.user_assets.create({ data: { user_id: 983003n, project_id: BigInt(sourceId), type, url } }));
     const nodes = ["image", "video", "audio"].map(mediaType => ({ id: `first-${mediaType}`, type: "mediaNode", data: { src: url, mediaType } }));
     const body = { ...payload, nodes: JSON.stringify(nodes) };
     const id = crypto.randomUUID();
@@ -557,8 +557,8 @@ describe.skipIf(!process.env.IKNCL3_DATABASE_URL)("本地恢复画布公开 API"
 
   it.each([false, true])("首次恢复拒绝同 URL 的类型不匹配，显式数字身份=%s", async explicitId => {
     const url = `https://assets.invalid/first-reject-${crypto.randomUUID()}`;
-    const image = await prisma.client.assets.create({ data: { user_id: 983003n, project_id: BigInt(sourceId), type: "image", url } });
-    if (explicitId) await prisma.client.assets.create({ data: { user_id: 983003n, project_id: BigInt(sourceId), type: "video", url } });
+    const image = await prisma.client.user_assets.create({ data: { user_id: 983003n, project_id: BigInt(sourceId), type: "image", url } });
+    if (explicitId) await prisma.client.user_assets.create({ data: { user_id: 983003n, project_id: BigInt(sourceId), type: "video", url } });
     const id = crypto.randomUUID();
     const before = await prisma.client.project.count();
     const canvases = await prisma.client.project_canvas.count();
@@ -592,8 +592,8 @@ describe.skipIf(!process.env.IKNCL3_DATABASE_URL)("本地恢复画布公开 API"
     const beforeReservations = await prisma.client.cost_reservations.count();
     for (const [index, item] of cases.entries()) {
       const url = `https://assets.invalid/substitute-${item.suffix}-${sourceId}.bin`;
-      const original = await prisma.client.assets.create({ data: { user_id: 983003n, project_id: BigInt(sourceId), type: item.type, url } });
-      if (item.suffix === "h264") await prisma.client.assets.create({ data: { user_id: 983003n, project_id: BigInt(sourceId), type: "video", url: `https://assets.invalid/substitute-main-${sourceId}.mp4` } });
+      const original = await prisma.client.user_assets.create({ data: { user_id: 983003n, project_id: BigInt(sourceId), type: item.type, url } });
+      if (item.suffix === "h264") await prisma.client.user_assets.create({ data: { user_id: 983003n, project_id: BigInt(sourceId), type: "video", url: `https://assets.invalid/substitute-main-${sourceId}.mp4` } });
       const body = { ...payload, nodes: JSON.stringify([item.node(url)]) };
       const id = `04e0b9cc-04dd-45ad-930b-3c000000002${index + 1}`;
       const created = await request("PUT", id, body);
@@ -603,8 +603,8 @@ describe.skipIf(!process.env.IKNCL3_DATABASE_URL)("本地恢复画布公开 API"
       const targetId = complete.data.targetProjectId;
       const links = await prisma.client.project_asset.findMany({ where: { project_id: BigInt(targetId), is_delete: 0 }, select: { asset_id: true } });
       expect(links.map(link => link.asset_id.toString())).toContain(original.id.toString());
-      const substitute = await prisma.client.assets.create({ data: { user_id: 983003n, project_id: BigInt(sourceId), type: item.type, url } });
-      await prisma.client.assets.update({ where: { id: original.id }, data: { is_delete: true } });
+      const substitute = await prisma.client.user_assets.create({ data: { user_id: 983003n, project_id: BigInt(sourceId), type: item.type, url } });
+      await prisma.client.user_assets.update({ where: { id: original.id }, data: { is_delete: true } });
       try {
         for (const response of [await request("GET", id), await request("PUT", id, body)]) {
           expect(response.status).toBe(422);
@@ -621,7 +621,7 @@ describe.skipIf(!process.env.IKNCL3_DATABASE_URL)("本地恢复画布公开 API"
         const target = await (await fetch(`${base}/api/canvases?projectId=${targetId}`)).json();
         expect(target.data.version).toBe(complete.data.version);
       } finally {
-        await prisma.client.assets.update({ where: { id: original.id }, data: { is_delete: false } });
+        await prisma.client.user_assets.update({ where: { id: original.id }, data: { is_delete: false } });
       }
     }
     expect((await (await fetch(`${base}/api/projects`)).json()).data).toHaveLength(before.data.length + cases.length);
@@ -632,7 +632,7 @@ describe.skipIf(!process.env.IKNCL3_DATABASE_URL)("本地恢复画布公开 API"
 
   it("原资产仍合法时同 URL 的其他素材不误报缺项，数字资产身份仍拒绝替换", async () => {
     const url = `https://assets.invalid/dual-${sourceId}.png`;
-    const original = await prisma.client.assets.create({ data: { user_id: 983003n, project_id: BigInt(sourceId), type: "image", url } });
+    const original = await prisma.client.user_assets.create({ data: { user_id: 983003n, project_id: BigInt(sourceId), type: "image", url } });
     const body = { ...payload, nodes: JSON.stringify([{ id: "dual-url", type: "mediaNode", data: { src: url, mediaType: "image" } }]) };
     const id = "04e0b9cc-04dd-45ad-930b-3c0000000031";
     const created = await request("PUT", id, body);
@@ -644,7 +644,7 @@ describe.skipIf(!process.env.IKNCL3_DATABASE_URL)("本地恢复画布公开 API"
     expect(numeric.status).toBe(200);
     const numericComplete = await numeric.json();
     for (const [changed, restore] of [[{ url: `https://foreign.invalid/dual-${sourceId}.png` }, { url }], [{ type: "video" }, { type: "image" }]] as const) {
-      await prisma.client.assets.update({ where: { id: original.id }, data: changed });
+      await prisma.client.user_assets.update({ where: { id: original.id }, data: changed });
       try {
         const response = await request("GET", id);
         expect(response.status).toBe(422);
@@ -652,15 +652,15 @@ describe.skipIf(!process.env.IKNCL3_DATABASE_URL)("本地恢复画布公开 API"
         expect(error.data.reason).toBe("local_recovery_assets_unavailable");
         expect(error.data.missing).toEqual([{ path: "nodes.0.data" }]);
       } finally {
-        await prisma.client.assets.update({ where: { id: original.id }, data: restore });
+        await prisma.client.user_assets.update({ where: { id: original.id }, data: restore });
       }
     }
-    const substitute = await prisma.client.assets.create({ data: { user_id: 983003n, project_id: BigInt(sourceId), type: "image", url } });
+    const substitute = await prisma.client.user_assets.create({ data: { user_id: 983003n, project_id: BigInt(sourceId), type: "image", url } });
     expect((await (await request("GET", id)).json()).data).toEqual(complete.data);
     expect((await (await request("PUT", id, body)).json()).data).toEqual(complete.data);
     const links = await prisma.client.project_asset.findMany({ where: { project_id: BigInt(complete.data.targetProjectId), is_delete: 0 }, select: { asset_id: true } });
     expect(links.map(link => link.asset_id.toString())).toEqual([original.id.toString()]);
-    await prisma.client.assets.update({ where: { id: original.id }, data: { is_delete: true } });
+    await prisma.client.user_assets.update({ where: { id: original.id }, data: { is_delete: true } });
     try {
       for (const [requestId, requestBody, requestComplete] of [[id, body, complete], [numericId, numericBody, numericComplete]] as const) {
         for (const response of [await request("GET", requestId), await request("PUT", requestId, requestBody)]) {
@@ -673,7 +673,7 @@ describe.skipIf(!process.env.IKNCL3_DATABASE_URL)("本地恢复画布公开 API"
       }
       expect(await prisma.client.project_asset.count({ where: { project_id: BigInt(complete.data.targetProjectId), asset_id: substitute.id } })).toBe(0);
     } finally {
-      await prisma.client.assets.update({ where: { id: original.id }, data: { is_delete: false } });
+      await prisma.client.user_assets.update({ where: { id: original.id }, data: { is_delete: false } });
     }
     expect((await (await request("GET", id)).json()).data).toEqual(complete.data);
     expect((await (await request("GET", numericId)).json()).data).toEqual(numericComplete.data);
@@ -681,7 +681,7 @@ describe.skipIf(!process.env.IKNCL3_DATABASE_URL)("本地恢复画布公开 API"
 
   it("缺少固定资产身份的旧回执只在能证明原关联时继续核验", async () => {
     const url = `https://assets.invalid/legacy-${sourceId}.png`;
-    const original = await prisma.client.assets.create({ data: { user_id: 983003n, project_id: BigInt(sourceId), type: "image", url } });
+    const original = await prisma.client.user_assets.create({ data: { user_id: 983003n, project_id: BigInt(sourceId), type: "image", url } });
     const body = { ...payload, nodes: JSON.stringify([{ id: "legacy-url", type: "mediaNode", data: { src: url, mediaType: "image" } }]) };
     const id = "04e0b9cc-04dd-45ad-930b-3c0000000033";
     const created = await request("PUT", id, body);
@@ -693,7 +693,7 @@ describe.skipIf(!process.env.IKNCL3_DATABASE_URL)("本地恢复画布公开 API"
     const legacyAssets = receipt.assets.map(asset => { const copy = { ...asset }; delete copy.resolvedAssetId; return copy; });
     await prisma.client.command_idempotency.update({ where: key, data: { result_payload: { ...receipt, assets: legacyAssets } } });
     const targetId = complete.data.targetProjectId;
-    const substitute = await prisma.client.assets.create({ data: { user_id: 983003n, project_id: BigInt(sourceId), type: "image", url } });
+    const substitute = await prisma.client.user_assets.create({ data: { user_id: 983003n, project_id: BigInt(sourceId), type: "image", url } });
     expect((await (await request("GET", id)).json()).data).toEqual(complete.data);
     expect((await (await request("PUT", id, body)).json()).data).toEqual(complete.data);
     await prisma.client.project_asset.deleteMany({ where: { project_id: BigInt(targetId), asset_id: original.id } });
@@ -710,7 +710,7 @@ describe.skipIf(!process.env.IKNCL3_DATABASE_URL)("本地恢复画布公开 API"
     } finally {
       await prisma.client.project_asset.create({ data: { user_id: 983003n, project_id: BigInt(targetId), asset_id: original.id } });
     }
-    await prisma.client.assets.update({ where: { id: original.id }, data: { is_delete: true } });
+    await prisma.client.user_assets.update({ where: { id: original.id }, data: { is_delete: true } });
     try {
       for (const response of [await request("GET", id), await request("PUT", id, body)]) {
         expect(response.status).toBe(422);
@@ -718,7 +718,7 @@ describe.skipIf(!process.env.IKNCL3_DATABASE_URL)("本地恢复画布公开 API"
       }
       expect(await prisma.client.project_asset.count({ where: { project_id: BigInt(targetId), asset_id: substitute.id } })).toBe(0);
     } finally {
-      await prisma.client.assets.update({ where: { id: original.id }, data: { is_delete: false } });
+      await prisma.client.user_assets.update({ where: { id: original.id }, data: { is_delete: false } });
     }
     const stored = await prisma.client.command_idempotency.findUnique({ where: key });
     expect((stored!.result_payload as { assets: Array<Record<string, unknown>> }).assets.every(asset => asset.resolvedAssetId === undefined)).toBe(true);
@@ -727,7 +727,7 @@ describe.skipIf(!process.env.IKNCL3_DATABASE_URL)("本地恢复画布公开 API"
 
   it("首次保存中断后出现同 URL 替代素材时，续作仍按原回执身份建立目标关联", async () => {
     const url = `https://assets.invalid/resume-${sourceId}.png`;
-    const original = await prisma.client.assets.create({ data: { user_id: 983003n, project_id: BigInt(sourceId), type: "image", url } });
+    const original = await prisma.client.user_assets.create({ data: { user_id: 983003n, project_id: BigInt(sourceId), type: "image", url } });
     const body = { ...payload, nodes: JSON.stringify([{ id: "resume-url", type: "mediaNode", data: { src: url, mediaType: "image" } }]) };
     const id = "04e0b9cc-04dd-45ad-930b-3c0000000034";
     await fixtureSql.query("CREATE TRIGGER ikotvx_fail_canvas BEFORE INSERT ON canvas FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'isolated save interruption'");
@@ -740,7 +740,7 @@ describe.skipIf(!process.env.IKNCL3_DATABASE_URL)("本地恢复画布公开 API"
     } finally {
       await fixtureSql.query("DROP TRIGGER ikotvx_fail_canvas");
     }
-    const substitute = await prisma.client.assets.create({ data: { user_id: 983003n, project_id: BigInt(sourceId), type: "image", url } });
+    const substitute = await prisma.client.user_assets.create({ data: { user_id: 983003n, project_id: BigInt(sourceId), type: "image", url } });
     const resumed = await request("PUT", id, body);
     expect(resumed.status).toBe(200);
     expect((await resumed.json()).data.stage).toBe("complete");
@@ -762,10 +762,10 @@ describe.skipIf(!process.env.IKNCL3_DATABASE_URL)("本地恢复画布公开 API"
   ])("同 URL 异类型素材不阻断原 $field 引用重放，保存中断=$interrupted", async ({ field, interrupted }) => {
     const url = `https://assets.invalid/replay-${sourceId}-${field}-${interrupted}`;
     const type = field === "srcH264" ? "video" : field === "voice.src" ? "audio" : "image";
-    const original = await prisma.client.assets.create({ data: { user_id: 983003n, project_id: BigInt(sourceId), type, url } });
+    const original = await prisma.client.user_assets.create({ data: { user_id: 983003n, project_id: BigInt(sourceId), type, url } });
     let data: Record<string, unknown> = { src: url, mediaType: type };
     if (field === "srcH264") {
-      const main = await prisma.client.assets.create({ data: { user_id: 983003n, project_id: BigInt(sourceId), type: "video", url: `${url}-main` } });
+      const main = await prisma.client.user_assets.create({ data: { user_id: 983003n, project_id: BigInt(sourceId), type: "video", url: `${url}-main` } });
       data = { assetId: main.id.toString(), src: main.url, srcH264: url, mediaType: "video" };
     } else if (field === "voice.src") {
       data = { voice: { name: "音色", src: url, type: "audio" } };
@@ -784,7 +784,7 @@ describe.skipIf(!process.env.IKNCL3_DATABASE_URL)("本地恢复画布公开 API"
     const sourceBefore = await (await fetch(`${base}/api/canvases?projectId=${sourceId}`)).json();
     const jobs = await prisma.client.generation_jobs.count();
     const reservations = await prisma.client.cost_reservations.count();
-    const substitute = await prisma.client.assets.create({ data: { user_id: 983003n, project_id: BigInt(sourceId), type: type === "image" ? "video" : "image", url } });
+    const substitute = await prisma.client.user_assets.create({ data: { user_id: 983003n, project_id: BigInt(sourceId), type: type === "image" ? "video" : "image", url } });
     await app.close();
     await start();
     const queried = await request("GET", id);
@@ -810,8 +810,8 @@ describe.skipIf(!process.env.IKNCL3_DATABASE_URL)("本地恢复画布公开 API"
     { field: "voice", type: "audio", otherType: "video" },
   ].flatMap(item => [false, true].map(matching => ({ ...item, matching }))))("空 mediaType 沿用 $field 的 $type 声明，存在匹配资产=$matching", async ({ field, type, otherType, matching }) => {
     const url = `https://assets.invalid/type-fallback-${crypto.randomUUID()}`;
-    const original = matching ? await prisma.client.assets.create({ data: { user_id: 983003n, project_id: BigInt(sourceId), type, url } }) : undefined;
-    const other = await prisma.client.assets.create({ data: { user_id: 983003n, project_id: BigInt(sourceId), type: otherType, url } });
+    const original = matching ? await prisma.client.user_assets.create({ data: { user_id: 983003n, project_id: BigInt(sourceId), type, url } }) : undefined;
+    const other = await prisma.client.user_assets.create({ data: { user_id: 983003n, project_id: BigInt(sourceId), type: otherType, url } });
     const jobs = await prisma.client.generation_jobs.count();
     const reservations = await prisma.client.cost_reservations.count();
     const sourceBefore = await (await fetch(`${base}/api/canvases?projectId=${sourceId}`)).json();
@@ -851,7 +851,7 @@ describe.skipIf(!process.env.IKNCL3_DATABASE_URL)("本地恢复画布公开 API"
   it.each(["src", "voice.src", "assetId"].flatMap(field =>
     ["invalid", "audio"].map(mediaType => ({ field, mediaType })),
   ).concat({ field: "srcH264", mediaType: "" }))("$field 拒绝非法或不匹配类型 $mediaType，空值不放宽备用视频", async ({ field, mediaType }) => {
-    const asset = await prisma.client.assets.create({ data: { user_id: 983003n, project_id: BigInt(sourceId), type: "image", url: `https://assets.invalid/type-rejection-${crypto.randomUUID()}` } });
+    const asset = await prisma.client.user_assets.create({ data: { user_id: 983003n, project_id: BigInt(sourceId), type: "image", url: `https://assets.invalid/type-rejection-${crypto.randomUUID()}` } });
     const reference = { src: asset.url, mediaType, ...(field === "assetId" ? { assetId: asset.id.toString() } : {}) };
     const data = field === "srcH264" ? { src: asset.url, mediaType: "", srcH264: asset.url } : field === "voice.src" ? { voice: reference } : reference;
     const id = crypto.randomUUID();
@@ -867,7 +867,7 @@ describe.skipIf(!process.env.IKNCL3_DATABASE_URL)("本地恢复画布公开 API"
   ))("旧回执 $field 缺少首次类型时拒绝补认，保存中断=$interrupted，类型=$mediaType", async ({ field, interrupted, mediaType }) => {
     const url = `https://assets.invalid/legacy-type-${crypto.randomUUID()}`;
     const type = field === "voice.src" ? "audio" : "image";
-    const asset = await prisma.client.assets.create({ data: { user_id: 983003n, project_id: BigInt(sourceId), type, url } });
+    const asset = await prisma.client.user_assets.create({ data: { user_id: 983003n, project_id: BigInt(sourceId), type, url } });
     const reference = { src: url, mediaType: "", ...(field === "assetId" ? { assetId: asset.id.toString() } : {}) };
     const data = field === "voice.src" ? { voice: reference } : reference;
     const body = { ...payload, nodes: JSON.stringify([{ id: "legacy-type", type: "mediaNode", data }]) };
@@ -892,11 +892,11 @@ describe.skipIf(!process.env.IKNCL3_DATABASE_URL)("本地恢复画布公开 API"
     const sourceBefore = await (await fetch(`${base}/api/canvases?projectId=${sourceId}`)).json();
     const targetBefore = await (await fetch(`${base}/api/canvases?projectId=${row.resource_id}`)).json();
     const before = [await prisma.client.project.count(), await prisma.client.command_idempotency.count(), await prisma.client.generation_jobs.count(), await prisma.client.cost_reservations.count()];
-    await prisma.client.assets.update({ where: { id: asset.id }, data: { type: "video" } });
+    await prisma.client.user_assets.update({ where: { id: asset.id }, data: { type: "video" } });
     await app.close();
     await start();
     for (const restored of [false, true]) {
-      if (restored) await prisma.client.assets.update({ where: { id: asset.id }, data: { type } });
+      if (restored) await prisma.client.user_assets.update({ where: { id: asset.id }, data: { type } });
       for (const response of [await request("GET", id), await request("PUT", id, body)]) {
         expect.soft(response.status).toBe(422);
         expect.soft((await response.json()).data).toEqual({ reason: "local_recovery_assets_unavailable", missing: [{ path: field === "voice.src" ? "nodes.0.data.voice" : "nodes.0.data", ...(field === "assetId" ? { assetId: asset.id.toString() } : {}) }] });
@@ -912,7 +912,7 @@ describe.skipIf(!process.env.IKNCL3_DATABASE_URL)("本地恢复画布公开 API"
   ))("$field 首次固定实际类型，声明=$declaration，保存中断=$interrupted", async ({ field, interrupted, declaration }) => {
     const url = `https://assets.invalid/original-type-${crypto.randomUUID()}`;
     const type = field === "voice.src" ? "audio" : field === "assetId" ? "video" : "image";
-    const asset = await prisma.client.assets.create({ data: { user_id: 983003n, project_id: BigInt(sourceId), type, url } });
+    const asset = await prisma.client.user_assets.create({ data: { user_id: 983003n, project_id: BigInt(sourceId), type, url } });
     const reference = {
       ...(field === "assetId" ? { assetId: asset.id.toString() } : { src: url }),
       ...(declaration === "omitted" ? {} : { mediaType: declaration === "empty" ? "" : type }),
@@ -940,7 +940,7 @@ describe.skipIf(!process.env.IKNCL3_DATABASE_URL)("本地恢复画布公开 API"
     const receipt = await prisma.client.command_idempotency.findUniqueOrThrow({ where: key });
     expect(receipt.result_payload).toMatchObject({ assets: [{ mediaType: type, ...(field === "assetId" ? { assetId: asset.id.toString() } : { resolvedAssetId: asset.id.toString() }) }] });
     const targetBefore = await (await fetch(`${base}/api/canvases?projectId=${targetId}`)).json();
-    await prisma.client.assets.update({ where: { id: asset.id }, data: { type: type === "image" ? "video" : "image" } });
+    await prisma.client.user_assets.update({ where: { id: asset.id }, data: { type: type === "image" ? "video" : "image" } });
     await app.close();
     await start();
     try {
@@ -951,7 +951,7 @@ describe.skipIf(!process.env.IKNCL3_DATABASE_URL)("本地恢复画布公开 API"
       expect(await prisma.client.command_idempotency.findUniqueOrThrow({ where: key })).toEqual(receipt);
       expect(await (await fetch(`${base}/api/canvases?projectId=${targetId}`)).json()).toEqual(targetBefore);
     } finally {
-      await prisma.client.assets.update({ where: { id: asset.id }, data: { type } });
+      await prisma.client.user_assets.update({ where: { id: asset.id }, data: { type } });
     }
     expect((await (await request("GET", id)).json()).data).toEqual(previous.data);
     const resumed = await request("PUT", id, body);

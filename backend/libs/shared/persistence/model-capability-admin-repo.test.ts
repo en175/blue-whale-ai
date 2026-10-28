@@ -32,7 +32,7 @@ function makeRow(overrides: Record<string, unknown> = {}) {
 describe("ModelCapabilityAdminRepo.listAll", () => {
   it("返回全部未软删行，id 转字符串、时间转 ISO、JSON 列原样往返", async () => {
     const prisma = {
-      generation_model_capability: {
+      catalog_models: {
         findMany: vi.fn().mockResolvedValue([
           makeRow(),
           makeRow({
@@ -67,7 +67,7 @@ describe("ModelCapabilityAdminRepo.listAll", () => {
   it("过滤 is_delete=true 的行，按 capability_type + sort_order 排序", async () => {
     const findMany = vi.fn().mockResolvedValue([]);
     const prisma = {
-      generation_model_capability: { findMany },
+      catalog_models: { findMany },
     } as unknown as PrismaClient;
 
     await createModelCapabilityAdminRepo(prisma).listAll();
@@ -85,7 +85,7 @@ describe("ModelCapabilityAdminRepo.getById", () => {
   it("id 非法 → null，不查库", async () => {
     const findFirst = vi.fn();
     const prisma = {
-      generation_model_capability: { findFirst },
+      catalog_models: { findFirst },
     } as unknown as PrismaClient;
 
     const row = await createModelCapabilityAdminRepo(prisma).getById("abc");
@@ -95,14 +95,14 @@ describe("ModelCapabilityAdminRepo.getById", () => {
 
   it("命中返回单行，过滤已软删", async () => {
     const prisma = {
-      generation_model_capability: {
+      catalog_models: {
         findFirst: vi.fn().mockResolvedValue(makeRow({ id: 2n })),
       },
     } as unknown as PrismaClient;
 
     const row = await createModelCapabilityAdminRepo(prisma).getById("2");
     expect(row).toMatchObject({ id: "2", model_id: "doubao-seedream-4-0-250828" });
-    expect(prisma.generation_model_capability.findFirst).toHaveBeenCalledWith(
+    expect(prisma.catalog_models.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({ where: { id: 2n, is_delete: false } }),
     );
   });
@@ -111,7 +111,7 @@ describe("ModelCapabilityAdminRepo.getById", () => {
 describe("ModelCapabilityAdminRepo.create", () => {
   it("sort_order 取 max+1，default_size 派生自 supported_sizes 首项", async () => {
     const prisma = {
-      generation_model_capability: {
+      catalog_models: {
         aggregate: vi.fn().mockResolvedValue({ _max: { sort_order: 2 } }),
         create: vi.fn().mockResolvedValue(
           makeRow({ id: 3n, model_id: "new-model", sort_order: 3 }),
@@ -128,7 +128,7 @@ describe("ModelCapabilityAdminRepo.create", () => {
     });
 
     expect(result).toEqual({ ok: true, row: expect.objectContaining({ id: "3" }) });
-    expect(prisma.generation_model_capability.create).toHaveBeenCalledWith(
+    expect(prisma.catalog_models.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
           sort_order: 3,
@@ -144,7 +144,7 @@ describe("ModelCapabilityAdminRepo.create", () => {
 
   it("同 (provider_id, model_id) 已存在 → conflict（P2002）", async () => {
     const prisma = {
-      generation_model_capability: {
+      catalog_models: {
         aggregate: vi.fn().mockResolvedValue({ _max: { sort_order: null } }),
         create: vi.fn().mockRejectedValue({ code: "P2002" }),
       },
@@ -164,7 +164,7 @@ describe("ModelCapabilityAdminRepo.create", () => {
 describe("ModelCapabilityAdminRepo.update", () => {
   it("更新可编辑字段，身份字段不受入参影响", async () => {
     const prisma = {
-      generation_model_capability: {
+      catalog_models: {
         findFirst: vi.fn().mockResolvedValue(makeRow({ id: 1n })),
         update: vi.fn().mockResolvedValue(
           makeRow({ id: 1n, model_label: "新名字", enabled: false }),
@@ -178,7 +178,7 @@ describe("ModelCapabilityAdminRepo.update", () => {
     });
 
     expect(row).toMatchObject({ id: "1", model_label: "新名字", enabled: false });
-    expect(prisma.generation_model_capability.update).toHaveBeenCalledWith(
+    expect(prisma.catalog_models.update).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({ model_label: "新名字", enabled: false }),
       }),
@@ -187,7 +187,7 @@ describe("ModelCapabilityAdminRepo.update", () => {
 
   it("id 非法 / 不存在 / 已软删 → null", async () => {
     const prisma = {
-      generation_model_capability: {
+      catalog_models: {
         findFirst: vi.fn().mockResolvedValue(null),
         update: vi.fn(),
       },
@@ -196,7 +196,7 @@ describe("ModelCapabilityAdminRepo.update", () => {
     const repo = createModelCapabilityAdminRepo(prisma);
     expect(await repo.update("abc", { model_label: "x" })).toBeNull();
     expect(await repo.update("1", { model_label: "x" })).toBeNull();
-    expect(prisma.generation_model_capability.update).not.toHaveBeenCalled();
+    expect(prisma.catalog_models.update).not.toHaveBeenCalled();
   });
 });
 
@@ -207,7 +207,7 @@ describe("ModelCapabilityAdminRepo.toggleEnabled", () => {
       makeRow({ id: 1n, enabled: false }),
     );
     const prisma = {
-      generation_model_capability: { findFirst },
+      catalog_models: { findFirst },
       $executeRaw: executeRaw,
     } as unknown as PrismaClient;
 
@@ -223,7 +223,7 @@ describe("ModelCapabilityAdminRepo.toggleEnabled", () => {
     const executeRaw = vi.fn().mockResolvedValue(0);
     const findFirst = vi.fn();
     const prisma = {
-      generation_model_capability: { findFirst },
+      catalog_models: { findFirst },
       $executeRaw: executeRaw,
     } as unknown as PrismaClient;
 
@@ -239,7 +239,7 @@ describe("ModelCapabilityAdminRepo.remove", () => {
   it("软删除：is_delete=true，只命中未软删行", async () => {
     const updateMany = vi.fn().mockResolvedValue({ count: 1 });
     const prisma = {
-      generation_model_capability: { updateMany },
+      catalog_models: { updateMany },
     } as unknown as PrismaClient;
 
     const ok = await createModelCapabilityAdminRepo(prisma).remove("1");
@@ -254,7 +254,7 @@ describe("ModelCapabilityAdminRepo.remove", () => {
 
   it("id 非法 / 未命中 → false", async () => {
     const prisma = {
-      generation_model_capability: {
+      catalog_models: {
         updateMany: vi.fn().mockResolvedValue({ count: 0 }),
       },
     } as unknown as PrismaClient;
@@ -270,7 +270,7 @@ describe("ModelCapabilityAdminRepo.updateSortOrder", () => {
     const update = vi.fn().mockResolvedValue({});
     const findMany = vi.fn().mockResolvedValue([{ id: 1n }, { id: 2n }]);
     const prisma = {
-      generation_model_capability: { update, findMany },
+      catalog_models: { update, findMany },
       $transaction: vi.fn(),
     } as unknown as PrismaClient;
 
@@ -291,7 +291,7 @@ describe("ModelCapabilityAdminRepo.updateSortOrder", () => {
 
   it("id 非法 → 抛错，不查库不事务", async () => {
     const prisma = {
-      generation_model_capability: { findMany: vi.fn() },
+      catalog_models: { findMany: vi.fn() },
       $transaction: vi.fn(),
     } as unknown as PrismaClient;
 
@@ -299,14 +299,14 @@ describe("ModelCapabilityAdminRepo.updateSortOrder", () => {
     await expect(
       repo.updateSortOrder([{ id: "abc", sortOrder: 1 }]),
     ).rejects.toThrow("非法模型 id");
-    expect(prisma.generation_model_capability.findMany).not.toHaveBeenCalled();
+    expect(prisma.catalog_models.findMany).not.toHaveBeenCalled();
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 
   it("任一 id 不存在/已软删 → not-found，不产生部分更新", async () => {
     const findMany = vi.fn().mockResolvedValue([{ id: 1n }]);
     const prisma = {
-      generation_model_capability: { findMany },
+      catalog_models: { findMany },
       $transaction: vi.fn(),
     } as unknown as PrismaClient;
 
@@ -331,7 +331,7 @@ describe("ModelCapabilityAdminRepo.setDefault（IKE0VX）", () => {
     const updateMany = vi.fn().mockResolvedValue({ count: 1 });
     const update = vi.fn().mockResolvedValue({});
     const prisma = {
-      generation_model_capability: { findFirst, updateMany, update },
+      catalog_models: { findFirst, updateMany, update },
       $transaction: vi.fn().mockResolvedValue([]),
     } as unknown as PrismaClient;
 
@@ -359,14 +359,14 @@ describe("ModelCapabilityAdminRepo.setDefault（IKE0VX）", () => {
 
   it("id 非法 → null 不查库；不存在/已软删 → null 不写库", async () => {
     const notQueried = {
-      generation_model_capability: { findFirst: vi.fn() },
+      catalog_models: { findFirst: vi.fn() },
       $transaction: vi.fn(),
     } as unknown as PrismaClient;
     expect(await createModelCapabilityAdminRepo(notQueried).setDefault("abc")).toBeNull();
-    expect(notQueried.generation_model_capability.findFirst).not.toHaveBeenCalled();
+    expect(notQueried.catalog_models.findFirst).not.toHaveBeenCalled();
 
     const missing = {
-      generation_model_capability: {
+      catalog_models: {
         findFirst: vi.fn().mockResolvedValue(null),
         updateMany: vi.fn(),
         update: vi.fn(),
@@ -384,7 +384,7 @@ describe("ModelCapabilityAdminRepo.setDefault（IKE0VX）", () => {
       .mockResolvedValueOnce(makeRow({ id: 3n, capability_type: "text", is_default: true }));
     const updateMany = vi.fn().mockResolvedValue({ count: 1 });
     const prisma = {
-      generation_model_capability: { findFirst, updateMany, update: vi.fn() },
+      catalog_models: { findFirst, updateMany, update: vi.fn() },
       $transaction: vi.fn().mockResolvedValue([]),
     } as unknown as PrismaClient;
 

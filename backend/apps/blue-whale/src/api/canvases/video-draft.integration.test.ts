@@ -44,7 +44,7 @@ describe.skipIf(!process.env.IKDMQS_DATABASE_URL)("Video draft & explicit ref ro
   const previousDatabase = process.env.DATABASE_URL;
   beforeAll(async () => {
     process.env.DATABASE_URL = process.env.IKDMQS_DATABASE_URL;
-    await prisma.client.generation_model_capability.upsert({
+    await prisma.client.catalog_models.upsert({
       where: { provider_id_model_id: { provider_id: "ikdmqs-test", model_id: MODEL_ID } },
       create: {
         provider_id: "ikdmqs-test",
@@ -142,7 +142,7 @@ describe.skipIf(!process.env.IKDMQS_DATABASE_URL)("Video draft & explicit ref ro
     return { id, type: "textNode", position: { x, y }, data: { title, text } };
   }
   async function createAsset(projectId: string, type: "image" | "video", url: string) {
-    const row = await prisma.client.assets.create({
+    const row = await prisma.client.user_assets.create({
       data: {
         user_id: BigInt(987654),
         project_id: BigInt(projectId),
@@ -451,7 +451,7 @@ describe.skipIf(!process.env.IKDMQS_DATABASE_URL)("Video draft & explicit ref ro
       const jobRow = await prisma.client.generation_jobs.findFirst({
         where: { project_id: BigInt(projectId) }, orderBy: { id: "desc" },
       });
-      const outputAsset = await prisma.client.assets.create({
+      const outputAsset = await prisma.client.user_assets.create({
         data: {
           user_id: BigInt(987654),
           project_id: BigInt(projectId),
@@ -487,7 +487,7 @@ describe.skipIf(!process.env.IKDMQS_DATABASE_URL)("Video draft & explicit ref ro
     const { chromium } = await import("playwright");
     const { createServer: createVite } = await import("../../../../../../web/node_modules/vite/dist/node/index.js");
     const SEEDANCE_MODEL_ID = "doubao-seedance-2-0-260128";
-    await prisma.client.generation_model_capability.upsert({
+    await prisma.client.catalog_models.upsert({
       where: { provider_id_model_id: { provider_id: "ikdmqs-test", model_id: SEEDANCE_MODEL_ID } },
       create: {
         provider_id: "ikdmqs-test",

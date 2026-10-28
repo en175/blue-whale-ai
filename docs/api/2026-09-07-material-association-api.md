@@ -10,7 +10,7 @@
 
 | 痛点 | 现状 | 本次改造后 |
 |---|---|---|
-| 原始素材与素材库素材无关联 | 本地 `assets` 素材与素材库（虚拟/真人人像库）素材是两套孤立数据，互相找不到 | 上传素材库素材时**携带原始素材 id**，后端落关联字段；删除素材库素材/组时自动清关联 |
+| 原始素材与素材库素材无关联 | 本地 `user_assets` 素材与素材库（虚拟/真人人像库）素材是两套孤立数据，互相找不到 | 上传素材库素材时**携带原始素材 id**，后端落关联字段；删除素材库素材/组时自动清关联 |
 | 生成时参考素材**顺序丢失** | 前端把参考拆成 `reference_asset_ids` + `reference_materials` 两个数组传给后端，拆分两次丢前端拖拽顺序 | 改**单个有序数组 `references`**，数组顺序 = 上游顺序 |
 | 关联素材走本地 url 而非素材库 id | 已关联素材库的本地素材生成时仍走本地 TOS url | worker 自动识别关联 → 走素材库 `asset://<素材id>`（不走 url），重复 id 去重 |
 
@@ -24,7 +24,7 @@
 
 `POST /api/material/CreateAsset`（透传镜像，见 `material-library.md` §3.1）
 
-**请求体新增字段 `SourceAssetId`**（原始素材 id，即本地 `assets` 表 id，纯数字字符串）：
+**请求体新增字段 `SourceAssetId`**（原始素材 id，即本地 `user_assets` 表 id，纯数字字符串）：
 
 ```ts
 // 前端两段式上传第 2 步：uploadAssetFile 拿公网 URL 后调 CreateAsset
@@ -41,8 +41,8 @@
 
 1. 透传前**剥离 `SourceAssetId`**，上游收到的请求体保持原样（不含该字段）。
 2. 上游 `CreateAsset` 成功后，后端用 `SourceAssetId` + 上游返回的素材 id + 请求 `GroupId` 落库关联：
-   - `assets.material_id` = 上游返回的素材 id（`asset-...`）
-   - `assets.material_group_id` = 请求 `GroupId`（`group-...`）
+   - `user_assets.material_id` = 上游返回的素材 id（`asset-...`）
+   - `user_assets.material_group_id` = 请求 `GroupId`（`group-...`）
 3. 关联覆盖写：同一原始素材重复上传素材库素材 → 以后一次为准。
 4. `SourceAssetId` 非纯数字 / 素材 id 或组 id 非 `asset-...`/`group-...` 格式 → 跳过绑定（不影响素材库上传本身）。
 
@@ -66,7 +66,7 @@ await createMaterialAsset({
 
 ### 1.4 删除同步清关联（后端自动，前端无感知）
 
-- `DeleteAsset` 成功 → 后端清所有 `assets.material_id` 等于该素材 id 的关联。
+- `DeleteAsset` 成功 → 后端清所有 `user_assets.material_id` 等于该素材 id 的关联。
 - `DeleteAssetGroup` 成功 → 后端按组 id 批量清 `material_id` + `material_group_id`。
 
 前端不需要额外调用清理接口。
@@ -120,7 +120,7 @@ references: RefItem[];
 |---|---|---|---|
 | `role` | ✅ | `first_frame` / `last_frame` / `reference` | 引用角色 |
 | `type` | ✅ | `image` / `video` / `audio` | 媒体类型；**首尾帧只能 `image`**（`audio` 只能作普通参考） |
-| `asset_id` | 二选一 | 纯数字字符串 | 本地 `assets` 表 id |
+| `asset_id` | 二选一 | 纯数字字符串 | 本地 `user_assets` 表 id |
 | `material_id` | 二选一 | `asset-` 前缀字符串 | 素材库素材 id |
 
 > **参考音频**（`type: "audio"`，IKDJNZ）：与图片/视频参考同数组、同结构，`role` 必须为 `reference`。上游 Seedance 以 `audio_url` + `role: reference_audio` 提交（后端组装，前端只传 id）。

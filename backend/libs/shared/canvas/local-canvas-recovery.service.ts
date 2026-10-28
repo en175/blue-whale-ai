@@ -121,17 +121,17 @@ export class LocalCanvasRecoveryService {
     ownerId: string,
     references: AssetReference[],
     targetProjectId?: string,
-    client: Pick<PrismaService["client"], "assets" | "material_assets"> = this.prisma.client,
+    client: Pick<PrismaService["client"], "user_assets" | "catalog_material_states"> = this.prisma.client,
   ): Promise<PromptMaterial[]> {
     if (references.length === 0) return [];
     const ids = references.flatMap(ref => [ref.assetId, ref.resolvedAssetId].flatMap(id => id && /^[1-9][0-9]{0,18}$/.test(id) ? [BigInt(id)] : []));
     const materialIds = references.flatMap(ref => ref.assetId && /^asset-.{1,128}$/i.test(ref.assetId) ? [ref.assetId] : []);
-    const activeMaterials = materialIds.length === 0 ? [] : await client.material_assets.findMany({ where: {
+    const activeMaterials = materialIds.length === 0 ? [] : await client.catalog_material_states.findMany({ where: {
       user_id: BigInt(ownerId), material_id: { in: materialIds }, status: "Active",
     }, select: { material_id: true } });
     const activeMaterialIds = new Set(activeMaterials.map(material => material.material_id));
     const urls = references.flatMap(ref => ref.url ? [ref.url] : []);
-    const assets = await client.assets.findMany({ where: {
+    const assets = await client.user_assets.findMany({ where: {
       user_id: BigInt(ownerId), is_delete: false, status: "normal", type: { in: ["image", "video", "audio"] },
       OR: [{ id: { in: ids } }, { url: { in: urls } }, { material_id: { in: [...activeMaterialIds] } }],
     }, select: { id: true, url: true, type: true, material_id: true } });
@@ -167,7 +167,7 @@ export class LocalCanvasRecoveryService {
       where: { user_id: BigInt(ownerId), project_id: BigInt(targetProjectId), is_delete: 0 }, select: { asset_id: true },
     });
     if (links.length === 0) return new Map();
-    const linked = await this.prisma.client.assets.findMany({ where: { id: { in: links.map(link => link.asset_id) }, url: { in: urls } }, select: { id: true, url: true } });
+    const linked = await this.prisma.client.user_assets.findMany({ where: { id: { in: links.map(link => link.asset_id) }, url: { in: urls } }, select: { id: true, url: true } });
     const byUrl = new Map<string, Set<string>>();
     for (const asset of linked) byUrl.set(asset.url, (byUrl.get(asset.url) ?? new Set()).add(asset.id.toString()));
     const proven = new Map<string, string>();

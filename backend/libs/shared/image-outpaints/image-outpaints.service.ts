@@ -77,7 +77,7 @@ export class ImageOutpaintsService {
     const probed = await probeImageDimensions(uploads, storageKey);
     if (!probed) return null;
     try {
-      await this.prisma.client.assets.update({
+      await this.prisma.client.user_assets.update({
         where: { id: BigInt(assetId) },
         data: { width: probed.width, height: probed.height },
       });

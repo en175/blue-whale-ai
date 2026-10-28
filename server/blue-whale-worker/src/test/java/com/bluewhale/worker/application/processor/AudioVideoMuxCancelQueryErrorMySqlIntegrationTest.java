@@ -264,7 +264,7 @@ class AudioVideoMuxCancelQueryErrorMySqlIntegrationTest {
 
     private int countAssets(long jobId, String storageKey) {
         Integer count = jdbc.queryForObject(
-                "SELECT COUNT(*) FROM assets WHERE generation_job_id=? AND storage_key=?",
+                "SELECT COUNT(*) FROM user_assets WHERE generation_job_id=? AND storage_key=?",
                 Integer.class, jobId, storageKey);
         return count != null ? count : 0;
     }
