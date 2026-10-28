@@ -164,7 +164,7 @@ spec:
         - name: PORT
           value: "3100"
         - name: NEW_API_BASE_URL
-          value: "http://blue-whale-api-svc:3000"
+          value: "https://yunjizi.cn"
         - name: AGENT_SERVICE_BASE_URL
           value: "http://blue-whale-agent-svc:4112"
         - name: BILLING_GRPC_URL
