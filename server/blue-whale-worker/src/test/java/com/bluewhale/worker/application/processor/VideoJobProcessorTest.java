@@ -1080,6 +1080,58 @@ class VideoJobProcessorTest {
     }
 
     @Test
+    @DisplayName("IKQYI7: 探测只回时长的对象 → 宽高仍留空，时长取探测值")
+    void publishDurationOnlyProbe_keepsNullDims() {
+        Map<String, Object> input = baseInput();
+        input.remove("output_width");
+        input.remove("output_height");
+        ClaimedVideoJobDto claim = videoClaim("165", false, null, 0, 0, "parent-task-duration-only", input);
+        doReturn(Optional.of(claim)).when(stateMachine)
+                .claimVideoJobById(eq("165"), anyString());
+        doReturn("token").when(upstreamCredential).requireKey();
+        doReturn(new VideoTaskObservation("succeeded", 100, "http://parent-video.mp4", null, null, null))
+                .when(videoClient).poll(eq("token"), eq("parent-task-duration-only"));
+        doReturn(new StoredVideo("http://tos/video.mp4", "key", "video/mp4", 100L, "0123456789abcdef0123456789abcdef"))
+                .when(mediaRelay).persist(anyString(), anyString());
+        doReturn(new TosVideoMediaRelay.ProbedMediaInfo(null, null, 6.5))
+                .when(mediaRelay).probeMediaInfo("key");
+        doReturn(true).when(finalizer)
+                .publishVideoResult(anyString(), anyString(), anyString(),
+                        anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(), anyInt(), anyInt(), anyDouble(), any(), any());
+
+        processor.handle("165");
+
+        verify(finalizer).publishVideoResult(eq("165"), anyString(), anyString(),
+                anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(),
+                isNull(), isNull(), eq(6.5), any(), any());
+    }
+
+    @Test
+    @DisplayName("IKQYI7: duration=-1 且探测失败 → 时长留空，发布照常")
+    void publishAutoDurationWithProbeFailure_leavesDurationNull() {
+        Map<String, Object> input = baseInput();
+        input.put("duration", -1);
+        ClaimedVideoJobDto claim = videoClaim("166", false, null, 0, 0, "parent-task-auto-fail", input);
+        doReturn(Optional.of(claim)).when(stateMachine)
+                .claimVideoJobById(eq("166"), anyString());
+        doReturn("token").when(upstreamCredential).requireKey();
+        doReturn(new VideoTaskObservation("succeeded", 100, "http://parent-video.mp4", null, null, null))
+                .when(videoClient).poll(eq("token"), eq("parent-task-auto-fail"));
+        doReturn(new StoredVideo("http://tos/video.mp4", "key", "video/mp4", 100L, "0123456789abcdef0123456789abcdef"))
+                .when(mediaRelay).persist(anyString(), anyString());
+        doReturn(null).when(mediaRelay).probeMediaInfo("key");
+        doReturn(true).when(finalizer)
+                .publishVideoResult(anyString(), anyString(), anyString(),
+                        anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(), anyInt(), anyInt(), anyDouble(), any(), any());
+
+        processor.handle("166");
+
+        verify(finalizer).publishVideoResult(eq("166"), anyString(), anyString(),
+                anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(),
+                eq(1280), eq(720), eq(-1.0), any(), any());
+    }
+
+    @Test
     @DisplayName("IKQYI7: TOS 探测失败 → 宽高留空、时长回落请求值，发布照常")
     void publishProbeFails_publishesWithNullDims() {
         Map<String, Object> input = baseInput();

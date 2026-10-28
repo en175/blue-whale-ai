@@ -1142,6 +1142,34 @@ class TosVideoMediaRelayTest {
     }
 
     @Test
+    @DisplayName("video/info 首条视频流无宽高 → 继续扫描后续视频流")
+    void parseMediaInfo_scansPastUnusableVideoStream() {
+        String body = "{\"streams\":["
+                + "{\"codec_type\":\"video\",\"width\":0,\"height\":0},"
+                + "{\"codec_type\":\"video\",\"width\":720,\"height\":1280}]}";
+
+        TosVideoMediaRelay.ProbedMediaInfo info = TosVideoMediaRelay.parseMediaInfo(body);
+
+        assertThat(info.width()).isEqualTo(720);
+        assertThat(info.height()).isEqualTo(1280);
+    }
+
+    @Test
+    @DisplayName("video/info duration 为数值或非法文本 → 按数值解析，非法值留空")
+    void parseMediaInfo_durationFormats() {
+        String numeric = "{\"format\":{\"duration\":5.056},\"streams\":[{\"codec_type\":\"video\",\"width\":720,\"height\":1280}]}";
+        assertThat(TosVideoMediaRelay.parseMediaInfo(numeric).durationSec()).isEqualTo(5.056);
+
+        for (String invalid : new String[]{"", "NaN", "Infinity", "-1"}) {
+            String body = "{\"format\":{\"duration\":\"" + invalid + "\"},"
+                    + "\"streams\":[{\"codec_type\":\"video\",\"width\":720,\"height\":1280}]}";
+            TosVideoMediaRelay.ProbedMediaInfo info = TosVideoMediaRelay.parseMediaInfo(body);
+            assertThat(info.durationSec()).as("duration=%s", invalid).isNull();
+            assertThat(info.width()).isEqualTo(720);
+        }
+    }
+
+    @Test
     @DisplayName("video/info 无视频流或非法 JSON → 留空")
     void parseMediaInfo_missingVideoStream() {
         assertThat(TosVideoMediaRelay.parseMediaInfo(
