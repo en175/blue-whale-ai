@@ -135,6 +135,56 @@ describe.skipIf(!process.env.IKQY3H_DATABASE_URL)("节点承接归属并入行�
     if (next.kind === "plan") expect(next.plan.bindingRevision).toBe(2);
   });
 
+  it("节点行存在时写归属列；整份保存删除节点保留归属，旧重放仍冲突，复活后归属仍在", async () => {
+    const pid = projectId.toString();
+    const repo = createCanvasRepo(prisma.client);
+    const node = { id: "target-3", type: "mediaNode", position: { x: 1, y: 2 }, data: { mediaType: "image" } };
+    await repo.saveIfVersion(pid, null, null, JSON.stringify([node]), "[]");
+
+    const first = await prisma.client.$transaction((tx) =>
+      lockCanvasRecoveryForAcceptance(tx, acceptance(pid, "0a1b2c3d-0000-4000-8000-000000000021", "target-3", 0)),
+    );
+    if (first.kind !== "plan") throw new Error("应生成受理计划");
+    await prisma.client.$transaction((tx) => writeCanvasRecoveryRows(tx, first.plan, 90003n));
+
+    const owned = await prisma.client.project_nodes.findUniqueOrThrow({
+      where: { project_id_node_id: { project_id: projectId, node_id: "target-3" } },
+    });
+    expect(owned.owner_submission_id).not.toBeNull();
+    expect(owned.owner_output_key).toBe(TARGET_OUTPUT_KEY);
+    expect(owned.owner_binding_revision).toBe(1);
+
+    const beforeDelete = await prisma.client.project_canvas.findUniqueOrThrow({ where: { project_id: projectId } });
+    await repo.saveIfVersion(pid, beforeDelete.version, null, "[]", "[]");
+    const deleted = await prisma.client.project_nodes.findUniqueOrThrow({
+      where: { project_id_node_id: { project_id: projectId, node_id: "target-3" } },
+    });
+    expect(deleted.is_delete).toBe(1);
+    expect(deleted.owner_submission_id).toBe(owned.owner_submission_id);
+    expect(deleted.owner_binding_revision).toBe(1);
+
+    await expect(
+      prisma.client.$transaction((tx) =>
+        lockCanvasRecoveryForAcceptance(tx, acceptance(pid, "0a1b2c3d-0000-4000-8000-000000000022", "target-3", 0)),
+      ),
+    ).rejects.toMatchObject({ envelope: { code: 409, data: { currentBindingRevision: 1 } } });
+
+    const next = await prisma.client.$transaction((tx) =>
+      lockCanvasRecoveryForAcceptance(tx, acceptance(pid, "0a1b2c3d-0000-4000-8000-000000000023", "target-3", 1)),
+    );
+    expect(next.kind).toBe("plan");
+    if (next.kind === "plan") expect(next.plan.bindingRevision).toBe(2);
+
+    const beforeRevive = await prisma.client.project_canvas.findUniqueOrThrow({ where: { project_id: projectId } });
+    await repo.saveIfVersion(pid, beforeRevive.version, null, JSON.stringify([node]), "[]");
+    const revived = await prisma.client.project_nodes.findUniqueOrThrow({
+      where: { project_id_node_id: { project_id: projectId, node_id: "target-3" } },
+    });
+    expect(revived.is_delete).toBe(0);
+    expect(revived.owner_submission_id).toBe(owned.owner_submission_id);
+    expect(revived.owner_binding_revision).toBe(1);
+  });
+
   it("整份保存改写行表并打开行表权威标记，读取不再回退 JSON", async () => {
     const repo = createCanvasRepo(prisma.client);
     const nodes = [

@@ -1,6 +1,8 @@
 import { wallClockRfc3339, wallClockRfc3339OrNull } from "@lib/core";
 import type { PrismaClient } from "@prisma/client";
 
+import { nodeFromRow } from "./canvas-repo.js";
+
 
 export interface ProjectView {
   id: string;
@@ -185,11 +187,33 @@ export function createProjectRepo(prisma: PrismaClient): ProjectRepo {
     for (const link of links) addMember(link.asset_id, link.project_id);
     const canvases = await prisma.project_canvas.findMany({
       where: { project_id: { in: projectIds }, is_delete: 0 },
-      select: { project_id: true, nodes_json: true },
+      select: { project_id: true, nodes_json: true, rows_authoritative: true },
     });
+    const rowProjectIds = canvases
+      .filter((row) => row.rows_authoritative === 1)
+      .map((row) => row.project_id);
+    const rowNodes = rowProjectIds.length === 0
+      ? []
+      : await prisma.project_nodes.findMany({
+          where: { project_id: { in: rowProjectIds }, is_delete: 0 },
+          orderBy: { id: "asc" },
+        });
+    const rowNodesByProject = new Map<bigint, Array<Record<string, unknown>>>();
+    for (const row of rowNodes) {
+      const bucket = rowNodesByProject.get(row.project_id) ?? [];
+      bucket.push(nodeFromRow(row));
+      rowNodesByProject.set(row.project_id, bucket);
+    }
     const onCanvas = new Map<bigint, { ids: Set<string>; urls: Set<string> }>();
     for (const row of canvases) {
-      onCanvas.set(row.project_id, collectCanvasImageRefs(row.nodes_json));
+      onCanvas.set(
+        row.project_id,
+        collectCanvasImageRefs(
+          row.rows_authoritative === 1
+            ? rowNodesByProject.get(row.project_id) ?? []
+            : row.nodes_json,
+        ),
+      );
     }
     const byProject = new Map<bigint, string[]>();
     for (const asset of imageAssets) {

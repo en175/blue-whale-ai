@@ -7,6 +7,7 @@ import {
 import type { Prisma } from "@prisma/client";
 
 import type { CreateJobInput } from "./generation-command-repo.js";
+import { nodeFromRow } from "./canvas-repo.js";
 
 function validAnchor(value: unknown): value is {
   x: number;
@@ -34,14 +35,24 @@ export async function freezePlacementAnchor(
       findFirst(args: unknown): Promise<{
         viewport_json: unknown;
         nodes_json: unknown;
+        rows_authoritative: number;
       } | null>;
+    };
+    project_nodes?: {
+      findMany(args: unknown): Promise<Array<{
+        node_id: string;
+        type: string;
+        pos_x: number | null;
+        pos_y: number | null;
+        data_json: unknown;
+      }>>;
     };
   };
   if (!ports.project_canvas?.findFirst) return input.input;
 
   const canvas = await ports.project_canvas.findFirst({
     where: { project_id: BigInt(input.projectId) },
-    select: { viewport_json: true, nodes_json: true },
+    select: { viewport_json: true, nodes_json: true, rows_authoritative: true },
   });
   const viewport =
     canvas?.viewport_json &&
@@ -59,7 +70,12 @@ export async function freezePlacementAnchor(
   };
 
   if (input.sceneCardId) {
-    const nodes = Array.isArray(canvas?.nodes_json) ? canvas.nodes_json : [];
+    const nodes = canvas?.rows_authoritative === 1 && ports.project_nodes?.findMany
+      ? (await ports.project_nodes.findMany({
+          where: { project_id: BigInt(input.projectId), is_delete: 0 },
+          orderBy: { id: "asc" },
+        })).map((row) => nodeFromRow(row))
+      : Array.isArray(canvas?.nodes_json) ? canvas.nodes_json : [];
     const sceneCardNode = nodes.find((node) => {
       if (!node || typeof node !== "object" || Array.isArray(node)) {
         return false;

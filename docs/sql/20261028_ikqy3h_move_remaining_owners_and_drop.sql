@@ -13,6 +13,8 @@ INSERT INTO `project_nodes`
 SELECT `o`.`project_id`, `o`.`node_id`, 'mediaNode', 'user', 1, 0,
        `o`.`generation_canvas_submission_id`, `o`.`output_key`, `o`.`binding_revision`
 FROM `generation_canvas_node_owners` `o`
+JOIN `project_canvas` `c`
+    ON `c`.`project_id` = `o`.`project_id` AND `c`.`rows_authoritative` = 1
 LEFT JOIN `project_nodes` `n`
     ON `n`.`project_id` = `o`.`project_id` AND `n`.`node_id` = `o`.`node_id`
 WHERE `n`.`id` IS NULL;

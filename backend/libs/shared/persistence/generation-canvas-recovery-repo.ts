@@ -72,6 +72,7 @@ export async function loadRecoveryOwners(
   tx: Prisma.TransactionClient,
   projectId: bigint,
   nodeIds?: readonly string[],
+  deriveNodeIds?: readonly string[],
 ): Promise<Map<string, RecoveryNodeOwner>> {
   const owners = new Map<string, RecoveryNodeOwner>();
   const rows = await tx.project_nodes.findMany({
@@ -90,11 +91,12 @@ export async function loadRecoveryOwners(
       bindingRevision: row.owner_binding_revision,
     });
   }
-  if (nodeIds !== undefined && nodeIds.every((id) => owners.has(id))) return owners;
+  const deriveIds = deriveNodeIds ?? nodeIds;
+  if (deriveIds !== undefined && deriveIds.every((id) => owners.has(id))) return owners;
   const submissions = await tx.generation_canvas_submissions.findMany({
     where: {
       project_id: projectId,
-      ...(nodeIds === undefined ? {} : { target_node_id: { in: [...nodeIds] } }),
+      ...(deriveIds === undefined ? {} : { target_node_id: { in: [...deriveIds] } }),
     },
     orderBy: { id: "asc" },
     select: { id: true, target_node_id: true, binding_revision: true },
@@ -526,7 +528,7 @@ export async function listCanvasRecoveryPage(
     const hasMore = rows.length > limit;
     const page = rows.slice(0, limit);
     if (page.length === 0) return { records: [], nextCursor: null, canvasVersion: canvasRows?.version ?? null };
-    const ownerByNode = await loadRecoveryOwners(tx, pid);
+    const ownerByNode = await loadRecoveryOwners(tx, pid, undefined, page.map(row => row.target_node_id));
     const submissionIds = page.map(row => row.id);
     const outputs = await tx.generation_canvas_outputs.findMany({
       where: { generation_canvas_submission_id: { in: submissionIds } },
@@ -590,7 +592,7 @@ export async function resolveCanvasRecoveryItems(
     if (submissions.length !== submissionIds.size) {
       throw new RecoveryContractError(recoveryError(404, "恢复项不存在", RECOVERY_REASONS.resourceNotFound));
     }
-    const ownerByNode = await loadRecoveryOwners(tx, pid);
+    const ownerByNode = await loadRecoveryOwners(tx, pid, undefined, submissions.map(row => row.target_node_id));
     const ids = submissions.map(row => row.id);
     const outputs = await tx.generation_canvas_outputs.findMany({
       where: { generation_canvas_submission_id: { in: ids } },

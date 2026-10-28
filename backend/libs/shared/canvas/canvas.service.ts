@@ -321,7 +321,16 @@ export class CanvasService {
       guardLegacyCanvasWrite(nodes as Array<Record<string, unknown>>, [...nodes, ...additions, node] as Array<Record<string, unknown>>);
       if (Buffer.byteLength(serialized, "utf8") > limits.canvasBytes) throw new BadRequestException("画布内容超过 4 MiB，原内容未改动");
       try {
-        const saved = await this.repo.saveIfVersion(projectId, canvas.version, canvas.viewport, serialized, serializedEdges, { ownerId, items: content.promptMaterials ?? [] });
+        const saved = await this.saveRows(
+          projectId,
+          { expectedVersion: canvas.version },
+          canvas,
+          canvas.viewport,
+          serialized,
+          serializedEdges,
+          ownerId,
+          content.promptMaterials ?? [],
+        );
         if (saved) return ok({ node, canvas: saved, reused: false });
       } catch (error) {
         if (error instanceof PromptMaterialUnavailableError) {
