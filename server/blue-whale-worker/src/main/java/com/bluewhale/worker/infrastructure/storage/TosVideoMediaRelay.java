@@ -324,7 +324,7 @@ public class TosVideoMediaRelay {
         }
     }
 
-    public int[] probeVideoDimensions(String storageKey) {
+    public ProbedMediaInfo probeMediaInfo(String storageKey) {
         if (isBlank(storageKey)) return null;
         try {
             var signed = client.preSignedURL(new PreSignedURLInput()
@@ -346,10 +346,10 @@ public class TosVideoMediaRelay {
                 }
                 byte[] bytes = body.readNBytes(MAX_MEDIA_INFO_BYTES + 1);
                 if (bytes.length > MAX_MEDIA_INFO_BYTES) {
-                    log.warn("TOS media info 响应超限，资产宽高留空 storageKey={}", storageKey);
+                    log.warn("TOS media info 响应超限，按探测失败处理 storageKey={}", storageKey);
                     return null;
                 }
-                return parseVideoDimensions(new String(bytes, java.nio.charset.StandardCharsets.UTF_8));
+                return parseMediaInfo(new String(bytes, java.nio.charset.StandardCharsets.UTF_8));
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -361,21 +361,45 @@ public class TosVideoMediaRelay {
         }
     }
 
-    static int[] parseVideoDimensions(String body) {
+    static ProbedMediaInfo parseMediaInfo(String body) {
         try {
-            JsonNode streams = JSON.readTree(body).path("streams");
-            if (!streams.isArray()) return null;
-            for (JsonNode stream : streams) {
-                if (!"video".equals(stream.path("codec_type").asText())) continue;
-                if (stream.path("disposition").path("attached_pic").asInt(0) == 1) continue;
-                int width = stream.path("width").asInt(0);
-                int height = stream.path("height").asInt(0);
-                if (width > 0 && height > 0) return new int[]{width, height};
+            JsonNode root = JSON.readTree(body);
+            Double durationSec = positiveDouble(root.path("format").path("duration"));
+            JsonNode streams = root.path("streams");
+            Integer width = null;
+            Integer height = null;
+            if (streams.isArray()) {
+                for (JsonNode stream : streams) {
+                    if (!"video".equals(stream.path("codec_type").asText())) continue;
+                    if (stream.path("disposition").path("attached_pic").asInt(0) == 1) continue;
+                    if (width == null) {
+                        int streamWidth = stream.path("width").asInt(0);
+                        int streamHeight = stream.path("height").asInt(0);
+                        if (streamWidth > 0 && streamHeight > 0) {
+                            width = streamWidth;
+                            height = streamHeight;
+                        }
+                    }
+                    if (durationSec == null) durationSec = positiveDouble(stream.path("duration"));
+                    if (width != null && durationSec != null) break;
+                }
             }
+            if (width == null && height == null && durationSec == null) return null;
+            return new ProbedMediaInfo(width, height, durationSec);
         } catch (Exception e) {
             log.warn("TOS media info 解析失败 err={}", e.getMessage());
         }
         return null;
+    }
+
+    private static Double positiveDouble(JsonNode node) {
+        if (node == null || node.isMissingNode() || node.isNull()) return null;
+        try {
+            double value = node.isNumber() ? node.asDouble() : Double.parseDouble(node.asText());
+            return Double.isFinite(value) && value > 0 ? value : null;
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     static String videoExtension(String mime) {
@@ -385,6 +409,8 @@ public class TosVideoMediaRelay {
     }
 
     public record StoredVideo(String url, String storageKey, String mime, Long size, String md5) {}
+
+    public record ProbedMediaInfo(Integer width, Integer height, Double durationSec) {}
 
     public static final class TransferAbortHandle {
         private volatile Runnable action;

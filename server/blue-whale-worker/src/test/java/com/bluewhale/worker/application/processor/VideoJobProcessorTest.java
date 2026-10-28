@@ -970,8 +970,8 @@ class VideoJobProcessorTest {
     }
 
     @Test
-    @DisplayName("IKQYI7: 固定比例发布取快照宽高，不调 TOS 探测")
-    void publishFixedRatio_usesSnapshotDims() {
+    @DisplayName("IKQYI7: 固定比例宽高取快照，时长取 TOS 探测的真实值")
+    void publishFixedRatio_usesSnapshotDimsAndProbedDuration() {
         Map<String, Object> input = baseInput();
         input.put("aspect_ratio", "9:16");
         input.put("output_width", 720);
@@ -984,20 +984,21 @@ class VideoJobProcessorTest {
                 .when(videoClient).poll(eq("token"), eq("parent-task-dims"));
         doReturn(new StoredVideo("http://tos/video.mp4", "key", "video/mp4", 100L, "0123456789abcdef0123456789abcdef"))
                 .when(mediaRelay).persist(anyString(), anyString());
+        doReturn(new TosVideoMediaRelay.ProbedMediaInfo(100, 100, 5.056))
+                .when(mediaRelay).probeMediaInfo("key");
         doReturn(true).when(finalizer)
                 .publishVideoResult(anyString(), anyString(), anyString(),
                         anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(), anyInt(), anyInt(), anyDouble(), any(), any());
 
         processor.handle("160");
 
-        verify(mediaRelay, never()).probeVideoDimensions(anyString());
         verify(finalizer).publishVideoResult(eq("160"), anyString(), anyString(),
                 anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(),
-                eq(720), eq(1280), anyDouble(), any(), any());
+                eq(720), eq(1280), eq(5.056), any(), any());
     }
 
     @Test
-    @DisplayName("IKQYI7: adaptive 不采信快照近似值，发布取 TOS 探测的真实宽高")
+    @DisplayName("IKQYI7: adaptive 不采信快照近似值，发布取 TOS 探测的真实宽高与时长")
     void publishAdaptive_usesProbedDims() {
         Map<String, Object> input = baseInput();
         input.put("aspect_ratio", "adaptive");
@@ -1011,7 +1012,8 @@ class VideoJobProcessorTest {
                 .when(videoClient).poll(eq("token"), eq("parent-task-adaptive"));
         doReturn(new StoredVideo("http://tos/video.mp4", "key", "video/mp4", 100L, "0123456789abcdef0123456789abcdef"))
                 .when(mediaRelay).persist(anyString(), anyString());
-        doReturn(new int[]{1900, 1090}).when(mediaRelay).probeVideoDimensions("key");
+        doReturn(new TosVideoMediaRelay.ProbedMediaInfo(1900, 1090, 5.2))
+                .when(mediaRelay).probeMediaInfo("key");
         doReturn(true).when(finalizer)
                 .publishVideoResult(anyString(), anyString(), anyString(),
                         anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(), anyInt(), anyInt(), anyDouble(), any(), any());
@@ -1020,7 +1022,7 @@ class VideoJobProcessorTest {
 
         verify(finalizer).publishVideoResult(eq("161"), anyString(), anyString(),
                 anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(),
-                eq(1900), eq(1090), anyDouble(), any(), any());
+                eq(1900), eq(1090), eq(5.2), any(), any());
     }
 
     @Test
@@ -1037,21 +1039,100 @@ class VideoJobProcessorTest {
                 .when(videoClient).poll(eq("token"), eq("parent-task-missing-dims"));
         doReturn(new StoredVideo("http://tos/video.mp4", "key", "video/mp4", 100L, "0123456789abcdef0123456789abcdef"))
                 .when(mediaRelay).persist(anyString(), anyString());
-        doReturn(new int[]{1280, 720}).when(mediaRelay).probeVideoDimensions("key");
+        doReturn(new TosVideoMediaRelay.ProbedMediaInfo(1280, 720, 5.1))
+                .when(mediaRelay).probeMediaInfo("key");
         doReturn(true).when(finalizer)
                 .publishVideoResult(anyString(), anyString(), anyString(),
                         anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(), anyInt(), anyInt(), anyDouble(), any(), any());
 
         processor.handle("163");
 
-        verify(mediaRelay).probeVideoDimensions("key");
+        verify(mediaRelay).probeMediaInfo("key");
         verify(finalizer).publishVideoResult(eq("163"), anyString(), anyString(),
                 anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(),
-                eq(1280), eq(720), anyDouble(), any(), any());
+                eq(1280), eq(720), eq(5.1), any(), any());
     }
 
     @Test
-    @DisplayName("IKQYI7: TOS 探测失败 → 宽高留空且发布照常")
+    @DisplayName("IKQYI7: duration=-1（自动时长）→ 资产时长取 TOS 探测的真实值")
+    void publishAutoDuration_usesProbedDuration() {
+        Map<String, Object> input = baseInput();
+        input.put("duration", -1);
+        ClaimedVideoJobDto claim = videoClaim("164", false, null, 0, 0, "parent-task-auto-duration", input);
+        doReturn(Optional.of(claim)).when(stateMachine)
+                .claimVideoJobById(eq("164"), anyString());
+        doReturn("token").when(upstreamCredential).requireKey();
+        doReturn(new VideoTaskObservation("succeeded", 100, "http://parent-video.mp4", null, null, null))
+                .when(videoClient).poll(eq("token"), eq("parent-task-auto-duration"));
+        doReturn(new StoredVideo("http://tos/video.mp4", "key", "video/mp4", 100L, "0123456789abcdef0123456789abcdef"))
+                .when(mediaRelay).persist(anyString(), anyString());
+        doReturn(new TosVideoMediaRelay.ProbedMediaInfo(720, 1280, 5.056))
+                .when(mediaRelay).probeMediaInfo("key");
+        doReturn(true).when(finalizer)
+                .publishVideoResult(anyString(), anyString(), anyString(),
+                        anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(), anyInt(), anyInt(), anyDouble(), any(), any());
+
+        processor.handle("164");
+
+        verify(finalizer).publishVideoResult(eq("164"), anyString(), anyString(),
+                anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(),
+                eq(1280), eq(720), eq(5.056), any(), any());
+    }
+
+    @Test
+    @DisplayName("IKQYI7: 探测只回时长的对象 → 宽高仍留空，时长取探测值")
+    void publishDurationOnlyProbe_keepsNullDims() {
+        Map<String, Object> input = baseInput();
+        input.remove("output_width");
+        input.remove("output_height");
+        ClaimedVideoJobDto claim = videoClaim("165", false, null, 0, 0, "parent-task-duration-only", input);
+        doReturn(Optional.of(claim)).when(stateMachine)
+                .claimVideoJobById(eq("165"), anyString());
+        doReturn("token").when(upstreamCredential).requireKey();
+        doReturn(new VideoTaskObservation("succeeded", 100, "http://parent-video.mp4", null, null, null))
+                .when(videoClient).poll(eq("token"), eq("parent-task-duration-only"));
+        doReturn(new StoredVideo("http://tos/video.mp4", "key", "video/mp4", 100L, "0123456789abcdef0123456789abcdef"))
+                .when(mediaRelay).persist(anyString(), anyString());
+        doReturn(new TosVideoMediaRelay.ProbedMediaInfo(null, null, 6.5))
+                .when(mediaRelay).probeMediaInfo("key");
+        doReturn(true).when(finalizer)
+                .publishVideoResult(anyString(), anyString(), anyString(),
+                        anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(), anyInt(), anyInt(), anyDouble(), any(), any());
+
+        processor.handle("165");
+
+        verify(finalizer).publishVideoResult(eq("165"), anyString(), anyString(),
+                anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(),
+                isNull(), isNull(), eq(6.5), any(), any());
+    }
+
+    @Test
+    @DisplayName("IKQYI7: duration=-1 且探测失败 → 时长留空，发布照常")
+    void publishAutoDurationWithProbeFailure_leavesDurationNull() {
+        Map<String, Object> input = baseInput();
+        input.put("duration", -1);
+        ClaimedVideoJobDto claim = videoClaim("166", false, null, 0, 0, "parent-task-auto-fail", input);
+        doReturn(Optional.of(claim)).when(stateMachine)
+                .claimVideoJobById(eq("166"), anyString());
+        doReturn("token").when(upstreamCredential).requireKey();
+        doReturn(new VideoTaskObservation("succeeded", 100, "http://parent-video.mp4", null, null, null))
+                .when(videoClient).poll(eq("token"), eq("parent-task-auto-fail"));
+        doReturn(new StoredVideo("http://tos/video.mp4", "key", "video/mp4", 100L, "0123456789abcdef0123456789abcdef"))
+                .when(mediaRelay).persist(anyString(), anyString());
+        doReturn(null).when(mediaRelay).probeMediaInfo("key");
+        doReturn(true).when(finalizer)
+                .publishVideoResult(anyString(), anyString(), anyString(),
+                        anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(), anyInt(), anyInt(), anyDouble(), any(), any());
+
+        processor.handle("166");
+
+        verify(finalizer).publishVideoResult(eq("166"), anyString(), anyString(),
+                anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(),
+                eq(1280), eq(720), eq(-1.0), any(), any());
+    }
+
+    @Test
+    @DisplayName("IKQYI7: TOS 探测失败 → 宽高留空、时长回落请求值，发布照常")
     void publishProbeFails_publishesWithNullDims() {
         Map<String, Object> input = baseInput();
         input.put("aspect_ratio", "adaptive");
@@ -1063,7 +1144,7 @@ class VideoJobProcessorTest {
                 .when(videoClient).poll(eq("token"), eq("parent-task-probe-fail"));
         doReturn(new StoredVideo("http://tos/video.mp4", "key", "video/mp4", 100L, "0123456789abcdef0123456789abcdef"))
                 .when(mediaRelay).persist(anyString(), anyString());
-        doReturn(null).when(mediaRelay).probeVideoDimensions("key");
+        doReturn(null).when(mediaRelay).probeMediaInfo("key");
         doReturn(true).when(finalizer)
                 .publishVideoResult(anyString(), anyString(), anyString(),
                         anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(), anyInt(), anyInt(), anyDouble(), any(), any());
@@ -1072,7 +1153,7 @@ class VideoJobProcessorTest {
 
         verify(finalizer).publishVideoResult(eq("162"), anyString(), anyString(),
                 anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(),
-                isNull(), isNull(), anyDouble(), any(), any());
+                isNull(), isNull(), eq(5.0), any(), any());
     }
 
 

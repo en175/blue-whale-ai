@@ -404,19 +404,30 @@ public class VideoJobProcessor implements JobProcessor {
         }
         log.info("[video] 转存完成 jobId={} storageKey={} size={}", claim.id(), stored.storageKey(), stored.size());
 
+        TosVideoMediaRelay.ProbedMediaInfo mediaInfo = null;
+        if (mediaRelay != null && stored.storageKey() != null) {
+            mediaInfo = mediaRelay.probeMediaInfo(stored.storageKey());
+        } else {
+            log.info("[video] 无 TOS 探测条件，宽高/时长按快照与请求值记录 jobId={}", claim.id());
+        }
+
         int[] dimensions = resolveDimensions(claim.input());
-        if (dimensions == null && mediaRelay != null && stored.storageKey() != null) {
-            dimensions = mediaRelay.probeVideoDimensions(stored.storageKey());
-            if (dimensions == null) {
-                log.warn("[video] TOS 探测视频宽高失败，资产宽高留空 jobId={}", claim.id());
-            }
-        } else if (dimensions == null) {
-            log.warn("[video] 缺快照宽高且无 TOS 探测条件，资产宽高留空 jobId={}", claim.id());
+        if (dimensions == null && mediaInfo != null
+                && mediaInfo.width() != null && mediaInfo.height() != null) {
+            dimensions = new int[]{mediaInfo.width(), mediaInfo.height()};
+            log.info("[video] 快照缺宽高，采用 TOS 探测值 jobId={} size={}x{}",
+                    claim.id(), mediaInfo.width(), mediaInfo.height());
         }
         Integer width = dimensions != null ? dimensions[0] : null;
         Integer height = dimensions != null ? dimensions[1] : null;
 
         double duration = resolveDuration(claim.input());
+        if (mediaInfo != null && mediaInfo.durationSec() != null) {
+            duration = mediaInfo.durationSec();
+        } else if (!(duration > 0)) {
+            log.warn("[video] 请求时长为自动或无效且探测不到真实时长，资产时长留空 jobId={} requestDuration={}",
+                    claim.id(), duration);
+        }
 
         Long upstreamCreatedAtMs = sample ? observation.upstreamCreatedAtMs() : null;
         Long finalizeDeadlineMs = sample && upstreamCreatedAtMs != null
