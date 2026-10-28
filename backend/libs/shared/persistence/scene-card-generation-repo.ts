@@ -13,6 +13,9 @@ import {
 } from "@lib/contracts";
 
 import { createJobWithinTx } from "./generation-command-repo.js";
+import type { JobBilling, JobBillingSource } from "./job-billing.js";
+import { jobExistenceProbe, releaseUnlessJobCommitted } from "./job-billing.js";
+import { serializePricingRule } from "./model-capability-repo.js";
 import { capabilityDigestFromModelCapability } from "./capability-digest.js";
 import { toFeatures, type ModelFeatures } from "./model-capability-repo.js";
 import { transactionWithUniqueRetry } from "./conversation-repo.js";
@@ -42,6 +45,7 @@ export interface RegenerateSceneCardInput {
   reference_mode: VideoReferenceMode;
   reference_assets: ProviderPromptAsset[];
   capability_snapshot_version: CapabilitySnapshotVersion;
+  billing?: JobBillingSource;
   guardInput?: (
     jobInput: Record<string, unknown>,
   ) => Promise<string | null>;
@@ -275,13 +279,41 @@ function validateReferenceAssetChanges(
     : { ok: false, reason: "参考素材列表只能修改角色" };
 }
 
+export interface SceneCardChargeReference {
+  role: string;
+  type: string;
+  asset_id: string;
+  duration?: number;
+}
+
+export function sceneCardChargeInput(args: {
+  parameters: FrozenGenerationParameters;
+  prompt: string;
+  references: SceneCardChargeReference[];
+  defaultDuration: number | null;
+}): Record<string, unknown> {
+  const duration = args.parameters.duration ?? args.defaultDuration;
+  return {
+    model_id: args.parameters.model_id,
+    resolution: args.parameters.size,
+    aspect_ratio: args.parameters.aspect_ratio,
+    ...(duration !== null ? { duration } : {}),
+    prompt: args.prompt,
+    expected_output_count: 1,
+    ...(args.references.length > 0 ? { references: args.references } : {}),
+  };
+}
+
 async function resolveReferenceAssetsToFlat(
   tx: Prisma.TransactionClient,
   referenceAssets: ProviderPromptAsset[],
 ): Promise<{
-  first_frame_asset_id?: string;
-  last_frame_asset_id?: string;
-  reference_asset_ids?: string[];
+  flat: {
+    first_frame_asset_id?: string;
+    last_frame_asset_id?: string;
+    reference_asset_ids?: string[];
+  };
+  chargeReferences: SceneCardChargeReference[];
 }> {
   const frameSlotIds = referenceAssets
     .filter(isFrameAsset)
@@ -310,9 +342,11 @@ async function resolveReferenceAssetsToFlat(
   let firstFrameAssetId: string | undefined;
   let lastFrameAssetId: string | undefined;
   const referenceAssetIds: string[] = [];
+  const rolesById: Array<{ id: string; role: string }> = [];
   for (const asset of referenceAssets) {
     const assetId = toAssetId(asset);
     if (assetId === null) continue;
+    rolesById.push({ id: assetId, role: asset.role });
     if (asset.role === "first_frame") firstFrameAssetId = assetId;
     else if (asset.role === "last_frame") lastFrameAssetId = assetId;
     else referenceAssetIds.push(assetId);
@@ -326,13 +360,42 @@ async function resolveReferenceAssetsToFlat(
   if (lastFrameAssetId) flat.last_frame_asset_id = lastFrameAssetId;
   if (referenceAssetIds.length > 0)
     flat.reference_asset_ids = referenceAssetIds;
-  return flat;
+
+  const assetRows =
+    rolesById.length === 0
+      ? []
+      : await tx.user_assets.findMany({
+          where: {
+            id: { in: rolesById.map((entry) => BigInt(entry.id)) },
+            is_delete: false,
+          },
+          select: { id: true, type: true, duration_ms: true },
+        });
+  const assetById = new Map(assetRows.map((row) => [row.id.toString(), row]));
+  const chargeReferences: SceneCardChargeReference[] = rolesById.map(
+    (entry) => {
+      const row = assetById.get(entry.id);
+      const type = row?.type ?? "image";
+      const durationMs = row?.duration_ms ?? null;
+      return {
+        role: entry.role,
+        type,
+        asset_id: entry.id,
+        ...(type === "video" && durationMs !== null && durationMs > 0
+          ? { duration: durationMs / 1000 }
+          : {}),
+      };
+    },
+  );
+  return { flat, chargeReferences };
 }
 
 async function regenerateSceneCardInTransaction(
   tx: Prisma.TransactionClient,
   input: RegenerateSceneCardInput,
+  held: { jobId: number | null },
 ): Promise<RegenerateSceneCardResult> {
+  held.jobId = null;
   const projectId = BigInt(input.projectId);
   const userId = BigInt(input.userId);
   const sceneCardId = BigInt(input.sceneCardId);
@@ -451,6 +514,7 @@ async function regenerateSceneCardInTransaction(
       default_aspect_ratio: true,
       default_duration: true,
       features: true,
+      pricing: true,
     },
   });
   if (!capability || !capability.enabled || capability.is_delete)
@@ -480,10 +544,8 @@ async function regenerateSceneCardInTransaction(
   if (!referenceCheck.ok)
     return { kind: "validation_failed", reason: referenceCheck.reason };
 
-  const flatReferences = await resolveReferenceAssetsToFlat(
-    tx,
-    input.reference_assets,
-  );
+  const { flat: flatReferences, chargeReferences } =
+    await resolveReferenceAssetsToFlat(tx, input.reference_assets);
 
   const referenceCountReason = await checkReferenceCountLimits(
     tx,
@@ -528,6 +590,31 @@ async function regenerateSceneCardInTransaction(
   }
   const newPresetVersion = input.base_preset_version + 1;
 
+  const ruleSnapshot = serializePricingRule({ pricing: capability.pricing });
+  const jobBilling: JobBilling | undefined = input.billing
+    ? {
+        charge: async (jobId) => {
+          await input.billing!.charge({
+            userId: input.userId,
+            jobId,
+            commandId: input.idempotencyKey,
+            modelId: snapshot.model_id,
+            taskType: "video",
+            input: sceneCardChargeInput({
+              parameters: input.parameters,
+              prompt: sceneCard.content_markdown,
+              references: chargeReferences,
+              defaultDuration: capability.default_duration,
+            }),
+            ...(ruleSnapshot !== undefined ? { ruleSnapshot } : {}),
+          });
+          held.jobId = jobId;
+        },
+        release: (jobId, reason) =>
+          input.billing!.release({ userId: input.userId, jobId, reason }),
+      }
+    : undefined;
+
   const createdJob = await createJobWithinTx(tx, {
     projectId: input.projectId,
     userId: input.userId,
@@ -547,7 +634,7 @@ async function regenerateSceneCardInTransaction(
       reference_limits: frozenLimits,
       ...flatReferences,
     },
-  });
+  }, jobBilling);
   if ("kind" in createdJob) throw new Error("unreachable: scene_card job creation never conflicts idempotency");
   const cursor = createdJob.cursor;
 
@@ -591,11 +678,23 @@ export function createSceneCardGenerationRepo(
 ): SceneCardGenerationRepo {
   return {
     regenerateSceneCard(input) {
+      const held: { jobId: number | null } = { jobId: null };
       return transactionWithUniqueRetry(
         prisma,
-        (tx) => regenerateSceneCardInTransaction(tx, input),
+        (tx) => regenerateSceneCardInTransaction(tx, input, held),
         { maxWait: 10_000, timeout: 30_000 },
-      );
+      ).catch(async (error: unknown) => {
+        await releaseUnlessJobCommitted({
+          release: input.billing
+            ? (jobId, reason) =>
+                input.billing!.release({ userId: input.userId, jobId, reason })
+            : undefined,
+          jobId: held.jobId,
+          probe: jobExistenceProbe(prisma),
+          reason: error instanceof Error ? error.message : String(error),
+        });
+        throw error;
+      });
     },
     async getSceneCardGenerationPreset(projectId, sceneCardId, userId) {
       const pid = BigInt(projectId);

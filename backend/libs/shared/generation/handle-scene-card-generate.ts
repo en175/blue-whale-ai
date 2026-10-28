@@ -14,7 +14,7 @@ import {
   ok,
   sceneCardRegenerationRequestSchema,
 } from "@lib/contracts";
-import type { SceneCardGenerationRepo } from "@lib/shared/persistence/index.js";
+import type { JobBillingSource, SceneCardGenerationRepo } from "@lib/shared/persistence/index.js";
 import { wireInteger } from "@lib/shared/wire-integer.js";
 import type { MaterialGate } from "./handle-create-generation-job.js";
 
@@ -43,6 +43,7 @@ export async function handleSceneCardGenerate(
   deps: SceneCardGenerationRepo,
   options?: {
     materialGate?: MaterialGate;
+    billing?: JobBillingSource;
   },
 ) {
   if (!idempotencyKey || idempotencyKey.trim().length === 0) {
@@ -76,6 +77,7 @@ export async function handleSceneCardGenerate(
     reference_mode: parsed.data.reference_mode,
     reference_assets: parsed.data.reference_assets,
     capability_snapshot_version: parsed.data.capability_snapshot_version,
+    ...(options?.billing ? { billing: options.billing } : {}),
     ...(options?.materialGate
       ? {
           guardInput: (jobInput: Record<string, unknown>) =>

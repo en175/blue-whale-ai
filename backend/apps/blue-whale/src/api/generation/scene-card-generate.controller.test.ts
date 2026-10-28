@@ -25,6 +25,13 @@ vi.mock("@lib/shared/generation/generation-queue.js", () => ({
 vi.mock("@lib/infra/logging/blue-whale-logger.js", () => ({
   logger: { error: vi.fn(), warn: vi.fn(), info: vi.fn(), debug: vi.fn() },
 }));
+vi.mock("@lib/shared/billing/billing-client.js", () => ({
+  sharedBillingClient: vi.fn(() => ({
+    charge: vi.fn(),
+    release: vi.fn(),
+    queryBalance: vi.fn().mockResolvedValue({ availableCredits: 100 }),
+  })),
+}));
 
 const { handleSceneCardGenerate } = await import(
   "@lib/shared/generation/handle-scene-card-generate.js"
@@ -45,6 +52,8 @@ function makeController() {
     { repo: {} } as never,
     { repo: {} } as never,
     { materialStatusRepo: {} } as never,
+    {} as never,
+    {} as never,
     {} as never,
   );
   const res = {

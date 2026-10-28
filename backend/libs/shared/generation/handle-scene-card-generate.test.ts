@@ -19,6 +19,31 @@ function makeDeps(result: unknown) {
   return { regenerateSceneCard, deps: { regenerateSceneCard } as never };
 }
 
+describe("handleSceneCardGenerate 计费接线（IKR60U）", () => {
+  it("传入 billing → repo 收到同一份 charge/release 依赖", async () => {
+    const { regenerateSceneCard, deps } = makeDeps({
+      kind: "replayed",
+      scene_card_id: "5001",
+      generation_job_id: "9001",
+      record_id: "8001",
+    });
+    const billing = { charge: vi.fn(), release: vi.fn() };
+
+    const result = await handleSceneCardGenerate(
+      "9",
+      "55",
+      "5001",
+      "idem-3",
+      BODY,
+      deps,
+      { billing },
+    );
+
+    expect(result.code).toBe(200);
+    expect(regenerateSceneCard.mock.calls[0]![0].billing).toBe(billing);
+  });
+});
+
 describe("handleSceneCardGenerate 素材门（IKFYHJ）", () => {
   it("门拒绝 → 1034 invalid_reference，原因原文外显", async () => {
     const { deps } = makeDeps({
