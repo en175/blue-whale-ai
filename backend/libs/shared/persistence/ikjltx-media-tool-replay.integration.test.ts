@@ -159,14 +159,13 @@ async function submit(
   const service = tool.make(prisma, {
     findOwnedSource: async () => (visible() ? assetOf(tool.kind) : null),
   }) as {
-    create: (userId: string, projectId: string, body: Record<string, unknown>, internal?: unknown, key?: string) => Promise<CreateResult>;
+    create: (userId: string, projectId: string, body: Record<string, unknown>, key?: string) => Promise<CreateResult>;
   };
   const body = tool.body(sid);
   return service.create(
     USER_ID,
     PROJECT_ID,
     { ...body, canvas_binding: bindingOf(sid, node, opts.revision ?? 0) },
-    {},
     tool.name === "抠像" ? undefined : sid,
   );
 }
@@ -216,7 +215,7 @@ describe.skipIf(!databaseUrl)("媒体工具已受理意图重放真库验证（I
         };
         const body = tool.body(sid);
         const call = () =>
-          service.create(USER_ID, PROJECT_ID, { ...body, canvas_binding: bindingOf(sid, "node-1", 0) }, {}, tool.name === "抠像" ? undefined : sid);
+          service.create(USER_ID, PROJECT_ID, { ...body, canvas_binding: bindingOf(sid, "node-1", 0) }, tool.name === "抠像" ? undefined : sid);
 
         const first = await call();
         expect(first.code).toBe(200);
@@ -260,7 +259,6 @@ describe.skipIf(!databaseUrl)("媒体工具已受理意图重放真库验证（I
           USER_ID,
           PROJECT_ID,
           { ...body, canvas_binding: bindingOf(sid, "node-2", 3) },
-          {},
           tool.name === "抠像" ? undefined : sid,
         );
         expect(conflict.code).toBe(100409);
@@ -338,12 +336,12 @@ describe.skipIf(!databaseUrl)("媒体工具已受理意图重放真库验证（I
         create: (userId: string, projectId: string, body: Record<string, unknown>, internal?: unknown, key?: string) => Promise<CreateResult>;
       };
       const body = tool.body(sid);
-      const first = await service.create(USER_ID, PROJECT_ID, { ...body, canvas_binding: bindingOf(sid, "node-x", 0) }, {}, sid);
+      const first = await service.create(USER_ID, PROJECT_ID, { ...body, canvas_binding: bindingOf(sid, "node-x", 0) }, sid);
       expect(first.code).toBe(200);
       const jobId = (first.data as { job_id: string }).job_id;
 
 
-      const other = await service.create(USER_ID, OTHER_PROJECT_ID, { ...body, canvas_binding: bindingOf(sid, "node-x", 0) }, {}, sid);
+      const other = await service.create(USER_ID, OTHER_PROJECT_ID, { ...body, canvas_binding: bindingOf(sid, "node-x", 0) }, sid);
       expect(other.code).toBe(200);
       expect((other.data as { job_id: string }).job_id).not.toBe(jobId);
     });
