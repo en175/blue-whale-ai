@@ -46,7 +46,7 @@ export interface CreateOperationLogInput {
 export interface OperationLogRepo {
   list(filter?: OperationLogFilter): Promise<OperationLogView[]>;
   create(input: CreateOperationLogInput): Promise<OperationLogView>;
-  findByRef(ref: string): Promise<OperationLogView | null>;
+  findByRef(ref: string, targetUserId?: string): Promise<OperationLogView | null>;
   finishByRef(
     ref: string,
     input: { status: number; detail?: string },
@@ -122,9 +122,15 @@ export function createOperationLogRepo(prisma: PrismaClient): OperationLogRepo {
       return toView(row);
     },
 
-    async findByRef(ref) {
+    async findByRef(ref, targetUserId) {
       const row = await prisma.bw_operation_logs.findFirst({
-        where: { ref, is_delete: 0 },
+        where: {
+          ref,
+          is_delete: 0,
+          ...(targetUserId != null
+            ? { target_user_id: BigInt(targetUserId) }
+            : {}),
+        },
       });
       return row ? toView(row) : null;
     },

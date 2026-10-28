@@ -71,7 +71,7 @@ vi.mock("ioredis", () => ({
 }));
 
 import { Reflector } from "@nestjs/core";
-import { ApiError } from "@lib/core";
+import { ApiError, SmsSendFailedError } from "@lib/core";
 import {
   ACCOUNT_ERROR_CODE_WRONG,
   ACCOUNT_ERROR_SMS_SEND_FAILED,
@@ -816,7 +816,9 @@ describe("AuthController 发码（验证码通过后）", () => {
       member: "member-1",
     } as never);
     const refund = vi.spyOn(limiter, "refund").mockResolvedValue(undefined);
-    verification.issue.mockRejectedValue(new Error("sms down"));
+    verification.issue.mockRejectedValue(
+      new SmsSendFailedError(new Error("sms down")),
+    );
 
     await expect(
       controller.sendCode(
@@ -835,12 +837,37 @@ describe("AuthController 发码（验证码通过后）", () => {
     expect(refund).toHaveBeenCalledTimes(2);
   });
 
+  it("落库失败而非短信失败 → 同样 502，但不退回额度", async () => {
+    const { controller, verification, limiter } = setup();
+    vi.spyOn(limiter, "take").mockResolvedValue({
+      allowed: true,
+      member: "member-1",
+    } as never);
+    const refund = vi.spyOn(limiter, "refund").mockResolvedValue(undefined);
+    verification.issue.mockRejectedValue(new Error("db down"));
+
+    await expect(
+      controller.sendCode(
+        {
+          phone: "13800001234",
+          purpose: "login",
+          captcha_id: "cap_test",
+          captcha_answer: "AB2C",
+        },
+        "1.2.3.4",
+      ),
+    ).rejects.toMatchObject({ status: 502 });
+    expect(refund).not.toHaveBeenCalled();
+  });
+
   it("短信渠道失败 → 记录上游错误码与脱敏手机号，对外不泄漏原文", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const { controller, verification, limiter } = setup();
     vi.spyOn(limiter, "take").mockResolvedValue({ allowed: true } as never);
     verification.issue.mockRejectedValue(
-      new SmsUpstreamError("InvalidTemplate", "模板不存在", 400),
+      new SmsSendFailedError(
+        new SmsUpstreamError("InvalidTemplate", "模板不存在", 400),
+      ),
     );
 
     const error = await controller

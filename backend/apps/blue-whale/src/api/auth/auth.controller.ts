@@ -9,7 +9,7 @@ import {
   Res,
 } from "@nestjs/common";
 import type { Request, Response } from "express";
-import { ApiError, maskIdentifier, maskPhone } from "@lib/core";
+import { ApiError, maskIdentifier, maskPhone, SmsSendFailedError } from "@lib/core";
 import {
   ACCOUNT_ERROR_BIND_SUCCEEDED_LOGIN_FAILED,
   ACCOUNT_ERROR_CAPTCHA_EXPIRED,
@@ -256,7 +256,9 @@ export class AuthController {
       return ok();
     } catch (error) {
       this.logSendFailure(phone, ip, purpose, error);
-      await this.refundPhoneQuota(phoneDecision.taken);
+      if (error instanceof SmsSendFailedError) {
+        await this.refundPhoneQuota(phoneDecision.taken);
+      }
       throw new ApiError(
         "短信发送失败，请重试",
         502,
@@ -280,17 +282,19 @@ export class AuthController {
     purpose: string,
     error: unknown,
   ): void {
+    const source =
+      error instanceof SmsSendFailedError ? error.failure : error;
     logger.warn("[sms] send failed", {
       stage: "send-code",
       phone: maskPhone(phone),
       ip,
       purpose,
-      error_type: error instanceof Error ? error.name : typeof error,
-      ...(error instanceof SmsUpstreamError
-        ? { upstream_code: error.code, upstream_message: error.upstreamMessage }
+      error_type: source instanceof Error ? source.name : typeof source,
+      ...(source instanceof SmsUpstreamError
+        ? { upstream_code: source.code, upstream_message: source.upstreamMessage }
         : {
             error_message:
-              error instanceof Error ? error.message : String(error),
+              source instanceof Error ? source.message : String(source),
           }),
     });
   }
@@ -606,9 +610,7 @@ export class AuthController {
       }
       await this.operationLog.finish(ref, {
         status: OPERATION_STATUS_FAILED,
-        detail: JSON.stringify({
-          message: error instanceof Error ? error.message : String(error),
-        }),
+        detail: JSON.stringify({ message: "操作未完成，请重新发起" }),
       });
       throw toAuthError(error);
     }
@@ -663,6 +665,16 @@ export class AuthController {
 
   @Public()
   @Post("migration/result")
+  @RateLimit({
+    buckets: [
+      {
+        scope: "migration_result_ip",
+        key: "ip" as const,
+        limit: 20,
+        windowMs: 60_000,
+      },
+    ],
+  })
   async migrationResult(@Body() body: { migration_token?: unknown }) {
     const token =
       typeof body?.migration_token === "string" ? body.migration_token.trim() : "";

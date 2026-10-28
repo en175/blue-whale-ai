@@ -49,7 +49,10 @@ export class OperationLogService {
     input: Parameters<ReturnType<typeof createOperationLogRepo>["finishByRef"]>[1],
   ): Promise<void> {
     try {
-      await this.repo.finishByRef(ref, input);
+      const updated = await this.repo.finishByRef(ref, input);
+      if (!updated) {
+        this.logger.warn(`操作记录收尾未命中：ref=${ref}`);
+      }
     } catch (error) {
       this.logger.error(
         `操作记录收尾失败：${error instanceof Error ? error.message : String(error)}`,
@@ -57,7 +60,7 @@ export class OperationLogService {
     }
   }
 
-  findByRef(ref: string) {
-    return this.repo.findByRef(ref);
+  findByRef(ref: string, targetUserId?: string) {
+    return this.repo.findByRef(ref, targetUserId);
   }
 }

@@ -58,6 +58,7 @@ export {
 } from "./jwt.js";
 export {
   requestSmsCode,
+  SmsSendFailedError,
   type RequestSmsCodeInput,
   type RequestSmsCodeDeps,
   type RequestSmsCodeResult,

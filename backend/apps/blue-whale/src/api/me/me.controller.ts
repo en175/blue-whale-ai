@@ -198,8 +198,13 @@ export class MeController {
         ACCOUNT_ERROR_REBIND_TOKEN_EXPIRED,
       );
     }
+    const ref = operationRef(token);
     const action = await this.phoneActions.resolve("rebind", token);
     if (!action || action.userId !== Number(userId) || !action.phone) {
+      await this.operationLog.finish(ref, {
+        status: OPERATION_STATUS_FAILED,
+        detail: JSON.stringify({ message: "换绑凭证无效，请重新验证原手机号" }),
+      });
       return fail(
         FAILURE_CODE,
         "换绑凭证无效，请重新验证原手机号",
@@ -209,7 +214,6 @@ export class MeController {
     }
 
     let newPhone: string;
-    const ref = operationRef(token);
     try {
       ({ phone: newPhone } = await this.phoneBinding.commitRebind(userId, {
         oldPhone: action.phone,
@@ -237,9 +241,7 @@ export class MeController {
       }
       await this.operationLog.finish(ref, {
         status: OPERATION_STATUS_FAILED,
-        detail: JSON.stringify({
-          message: error instanceof Error ? error.message : String(error),
-        }),
+        detail: JSON.stringify({ message: "操作未完成，请重新发起" }),
       });
       throw error;
     }
@@ -340,7 +342,9 @@ export class MeController {
     if (userId == null) {
       throw new ApiError("缺少登录凭证", 401, "unauthorized");
     }
-    const record = ref ? await this.operationLog.findByRef(ref.trim()) : null;
+    const record = ref
+      ? await this.operationLog.findByRef(ref.trim(), String(userId))
+      : null;
     if (!record) {
       return fail(
         FAILURE_CODE,

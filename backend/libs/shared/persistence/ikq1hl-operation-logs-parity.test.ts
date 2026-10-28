@@ -53,6 +53,7 @@ describe("IKQ1HL 三轨迁移（操作日志表收敛）", () => {
   it("Prisma 模型只剩新表名并包含新列", () => {
     expect(schemaPrisma).toContain("model bw_operation_logs {");
     expect(schemaPrisma).not.toContain("model bw_admin_logs {");
+    expect(schemaPrisma).not.toContain("model admin_operation_logs {");
     expect(schemaPrisma).toContain("status         Int      @default(0) @db.TinyInt");
     expect(schemaPrisma).toContain("ref            String?  @db.VarChar(64)");
   });
