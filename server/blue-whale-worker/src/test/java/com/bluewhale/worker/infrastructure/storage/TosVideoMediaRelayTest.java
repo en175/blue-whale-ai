@@ -1120,27 +1120,40 @@ class TosVideoMediaRelayTest {
     }
 
     @Test
-    @DisplayName("video/info 解析：取真实视频流宽高，跳过封面图流")
-    void parseVideoDimensions_picksRealVideoStream() {
-        String body = "{\"streams\":["
+    @DisplayName("video/info 解析：取真实视频流宽高与总时长，跳过封面图流")
+    void parseMediaInfo_picksRealVideoStream() {
+        String body = "{\"format\":{\"duration\":\"5.056000\"},\"streams\":["
                 + "{\"codec_type\":\"video\",\"disposition\":{\"attached_pic\":1},\"width\":400,\"height\":400},"
-                + "{\"codec_type\":\"video\",\"disposition\":{\"attached_pic\":0},\"width\":720,\"height\":1280}]}";
+                + "{\"codec_type\":\"video\",\"disposition\":{\"attached_pic\":0},\"width\":720,\"height\":1280,\"duration\":\"5.056000\"}]}";
 
-        assertThat(TosVideoMediaRelay.parseVideoDimensions(body)).containsExactly(720, 1280);
+        TosVideoMediaRelay.ProbedMediaInfo info = TosVideoMediaRelay.parseMediaInfo(body);
+
+        assertThat(info.width()).isEqualTo(720);
+        assertThat(info.height()).isEqualTo(1280);
+        assertThat(info.durationSec()).isEqualTo(5.056);
+    }
+
+    @Test
+    @DisplayName("video/info 缺 format.duration → 回落视频流 duration")
+    void parseMediaInfo_fallsBackToStreamDuration() {
+        String body = "{\"streams\":[{\"codec_type\":\"video\",\"width\":720,\"height\":1280,\"duration\":\"7.5\"}]}";
+
+        assertThat(TosVideoMediaRelay.parseMediaInfo(body).durationSec()).isEqualTo(7.5);
     }
 
     @Test
     @DisplayName("video/info 无视频流或非法 JSON → 留空")
-    void parseVideoDimensions_missingVideoStream() {
-        assertThat(TosVideoMediaRelay.parseVideoDimensions(
+    void parseMediaInfo_missingVideoStream() {
+        assertThat(TosVideoMediaRelay.parseMediaInfo(
                 "{\"streams\":[{\"codec_type\":\"audio\",\"width\":0,\"height\":0}]}")).isNull();
-        assertThat(TosVideoMediaRelay.parseVideoDimensions("not-json")).isNull();
+        assertThat(TosVideoMediaRelay.parseMediaInfo("not-json")).isNull();
+        assertThat(TosVideoMediaRelay.parseMediaInfo("{\"format\":{\"duration\":\"-1\"},\"streams\":[]}")).isNull();
     }
 
     @Test
-    @DisplayName("TOS media info 探测：预签名 URL 带 x-tos-process=video/info，返回真实宽高")
-    void probeVideoDimensions_readsMediaInfo() throws Exception {
-        byte[] body = "{\"streams\":[{\"codec_type\":\"video\",\"width\":1900,\"height\":1090}]}"
+    @DisplayName("TOS media info 探测：预签名 URL 带 x-tos-process=video/info，返回真实宽高与时长")
+    void probeMediaInfo_readsMediaInfo() throws Exception {
+        byte[] body = "{\"format\":{\"duration\":\"5.056000\"},\"streams\":[{\"codec_type\":\"video\",\"width\":1900,\"height\":1090}]}"
                 .getBytes(StandardCharsets.UTF_8);
         String url = serve("application/json", 200, body.length, body);
         TOSV2 client = mock(TOSV2.class);
@@ -1151,46 +1164,48 @@ class TosVideoMediaRelayTest {
             return new PreSignedURLOutput(url, java.util.Map.of());
         }).when(client).preSignedURL(any(PreSignedURLInput.class));
 
-        int[] dims = new TosVideoMediaRelay(client, "bkt", "tos.example.com")
-                .probeVideoDimensions("generated/9/video/a.mp4");
+        TosVideoMediaRelay.ProbedMediaInfo info = new TosVideoMediaRelay(client, "bkt", "tos.example.com")
+                .probeMediaInfo("generated/9/video/a.mp4");
 
-        assertThat(dims).containsExactly(1900, 1090);
+        assertThat(info.width()).isEqualTo(1900);
+        assertThat(info.height()).isEqualTo(1090);
+        assertThat(info.durationSec()).isEqualTo(5.056);
         assertThat(captured.get().getBucket()).isEqualTo("bkt");
         assertThat(captured.get().getKey()).isEqualTo("generated/9/video/a.mp4");
         assertThat(captured.get().getQuery()).containsEntry("x-tos-process", "video/info");
     }
 
     @Test
-    @DisplayName("TOS media info 返回非 2xx → 宽高留空，不抛异常")
-    void probeVideoDimensions_httpErrorReturnsNull() throws Exception {
+    @DisplayName("TOS media info 返回非 2xx → 探测失败，不抛异常")
+    void probeMediaInfo_httpErrorReturnsNull() throws Exception {
         String url = serve("text/plain", 404, 0, patternBlock());
         TOSV2 client = mock(TOSV2.class);
         doAnswer(invocation -> new PreSignedURLOutput(url, java.util.Map.of()))
                 .when(client).preSignedURL(any(PreSignedURLInput.class));
 
         assertThat(new TosVideoMediaRelay(client, "bkt", "tos.example.com")
-                .probeVideoDimensions("generated/9/video/a.mp4")).isNull();
+                .probeMediaInfo("generated/9/video/a.mp4")).isNull();
     }
 
     @Test
     @DisplayName("TOS media info 响应超过 256KiB → 视为探测失败，不整段读入内存")
-    void probeVideoDimensions_oversizedResponseReturnsNull() throws Exception {
+    void probeMediaInfo_oversizedResponseReturnsNull() throws Exception {
         String url = serve("application/octet-stream", 200, 300 * 1024, patternBlock());
         TOSV2 client = mock(TOSV2.class);
         doAnswer(invocation -> new PreSignedURLOutput(url, java.util.Map.of()))
                 .when(client).preSignedURL(any(PreSignedURLInput.class));
 
         assertThat(new TosVideoMediaRelay(client, "bkt", "tos.example.com")
-                .probeVideoDimensions("generated/9/video/a.mp4")).isNull();
+                .probeMediaInfo("generated/9/video/a.mp4")).isNull();
     }
 
     @Test
     @DisplayName("空 storageKey → 不请求，直接留空")
-    void probeVideoDimensions_blankKeyReturnsNull() {
+    void probeMediaInfo_blankKeyReturnsNull() {
         TOSV2 client = mock(TOSV2.class);
 
         assertThat(new TosVideoMediaRelay(client, "bkt", "tos.example.com")
-                .probeVideoDimensions(" ")).isNull();
+                .probeMediaInfo(" ")).isNull();
         verify(client, never()).preSignedURL(any(PreSignedURLInput.class));
     }
 }
