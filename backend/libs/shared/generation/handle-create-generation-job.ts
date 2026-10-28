@@ -7,6 +7,7 @@ import {
 import type { ReferenceItemInput } from "./reference-item-input.js";
 import { freezePromptPlans } from "./prompt-plan-snapshot.js";
 import { checkReferenceLimits } from "../generation-runtime/reference-limits.js";
+import { validateReferenceImages } from "../generation-runtime/image-reference-validation.js";
 import {
   freezeReferenceLimits,
   validateReferences,
@@ -2020,6 +2021,16 @@ export async function handleCreateGenerationJob(
       return fail(errorCodeToNumeric(ERROR_INVALID_REFERENCE_TYPE), "参考素材必须是图片", {
         code: ERROR_INVALID_REFERENCE_TYPE,
       });
+    }
+
+    if (type === "image") {
+      const limitErr = validateReferenceImages(resolved, capability?.features ?? null);
+      if (limitErr) {
+        return fail(errorCodeToNumeric(ERROR_INVALID_REFERENCE), limitErr.message, {
+          code: ERROR_INVALID_REFERENCE,
+          params: limitErr.params,
+        });
+      }
     }
   }
 

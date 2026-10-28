@@ -22,6 +22,10 @@ export const MODEL_CAPABILITY_LABELS: Record<ModelCapabilityType, string> = {
   audio: "音频",
 };
 
+export const DEFAULT_MAX_REFERENCE_IMAGE_PIXELS = 36_000_000;
+
+export const DEFAULT_MAX_REFERENCE_IMAGE_RATIO = 16;
+
 export const MODEL_FIELD_LIMITS = {
   provider_id: 32,
   model_id: 128,
@@ -143,6 +147,30 @@ function featuresFieldErr(features: unknown): string | null {
   if (dur !== undefined && dur !== null) {
     if (typeof dur !== "number" || !Number.isFinite(dur) || dur <= 0 || dur > 86_400)
       return `参考素材总时长上限(max_reference_duration_sec)须为正数秒（≤86400）或 null`;
+  }
+
+  const refImagePixels =
+    features.max_reference_image_pixels ?? features.maxReferenceImagePixels;
+  if (refImagePixels !== undefined && refImagePixels !== null) {
+    if (
+      typeof refImagePixels !== "number" ||
+      !Number.isInteger(refImagePixels) ||
+      refImagePixels < 1 ||
+      refImagePixels > 1_000_000_000
+    )
+      return `参考图总像素上限(max_reference_image_pixels)须为 1–10 亿的整数或 null`;
+  }
+
+  const refImageRatio =
+    features.max_reference_image_ratio ?? features.maxReferenceImageRatio;
+  if (refImageRatio !== undefined && refImageRatio !== null) {
+    if (
+      typeof refImageRatio !== "number" ||
+      !Number.isInteger(refImageRatio) ||
+      refImageRatio < 1 ||
+      refImageRatio > 100
+    )
+      return `参考图宽高比上限(max_reference_image_ratio)须为 1–100 的整数或 null`;
   }
 
   const taskTypes = features.task_types ?? features.taskTypes;
