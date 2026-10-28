@@ -278,7 +278,7 @@ export async function importCanvasJsonToRows(
   }
   await tx.project_canvas.update({
     where: { id: canvas.id },
-    data: { rows_authoritative: 1, version: { increment: 1 } },
+    data: { rows_authoritative: 1 },
   });
   return plan.report;
 }

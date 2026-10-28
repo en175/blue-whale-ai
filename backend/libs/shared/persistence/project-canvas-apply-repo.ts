@@ -130,7 +130,7 @@ async function lockCanvas(tx: Tx, projectId: bigint) {
     return { row, created: false };
   }
   const row = await tx.project_canvas.create({
-    data: { project_id: projectId, version: 0 },
+    data: { project_id: projectId, version: 0, rows_authoritative: 1 },
     select: {
       id: true,
       version: true,

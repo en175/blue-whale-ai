@@ -104,8 +104,10 @@ export class CanvasesController {
     @Res() res: Response,
   ) {
     const expectedVersion = parseIfMatch(ifMatch);
+    const payload = { ...((body ?? {}) as Record<string, unknown>) };
+    delete payload.expectedVersion;
     const result = await this.canvas.apply(user.userId, projectId, {
-      ...((body ?? {}) as {
+      ...(payload as {
         upsert_nodes?: unknown;
         delete_node_ids?: unknown;
         upsert_edges?: unknown;

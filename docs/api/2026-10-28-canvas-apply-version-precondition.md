@@ -25,8 +25,10 @@ Content-Type: application/json
 - 节点或连线的任意新增、更新、删除（含级联删边）都会把 `project_canvas.version` +1。
 - 只改 viewport 时同样 +1。
 - 请求内所有对象都无差异（全部 skipped）时不推进版本。
-- 项目首次写入会先做旧 JSON 懒迁移，迁移本身推进一次版本，因此首次写入可能 +2。
+- 旧 JSON 懒迁移不改变画布版本；新建画布的首次写入在一次内容变更后从 0 变为 1。
 - 响应 `data.version` 是本次写入后的版本，可直接用于下一次 `If-Match`。
+
+请求体里的 `expectedVersion` 字段不生效，只认 `If-Match` 头。
 
 ## 与整份保存的关系
 
