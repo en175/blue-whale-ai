@@ -12,7 +12,7 @@ if (!Number.isInteger(RETENTION_DAYS) || RETENTION_DAYS <= 0) {
   process.exit(1);
 }
 if (!process.env.DATABASE_URL) {
-  console.error("✗ 缺少 DATABASE_URL。用法：DATABASE_URL=mysql://... node scripts/cleanup-project-card-migration-history.mjs [--days=180] [--apply]");
+  console.error("✗ 缺少 DATABASE_URL。用法：DATABASE_URL=mysql://... node backend/scripts/cleanup-project-card-migration-history.mjs [--days=180] [--apply]");
   process.exit(1);
 }
 
@@ -27,7 +27,7 @@ const connection = await mysql.createConnection({
   bigNumberStrings: true,
 });
 
-await connection.query("SET time_zone = '+08:00'");
+await connection.query("SET time_zone = ?", [url.searchParams.get("timezone") ?? "+08:00"]);
 
 const mode = APPLY ? "APPLY（写库）" : "DRY-RUN（只读）";
 console.log(`\n=== project_card_migration_history 保留期清理 — ${mode}，保留 ${RETENTION_DAYS} 天 ===\n`);

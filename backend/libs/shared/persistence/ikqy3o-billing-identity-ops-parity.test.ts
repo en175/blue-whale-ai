@@ -131,6 +131,8 @@ describe("IKQY3O 三轨迁移（计费 / 身份 / 运维 / 命令回执表改名
     expect(cleanupScript).toContain("project_card_migration_history");
     expect(cleanupScript).toContain("RETENTION_DAYS");
     expect(cleanupScript).toContain("DELETE FROM project_card_migration_history");
+    expect(cleanupScript).toContain("SET time_zone");
+    expect(cleanupScript).toContain('process.argv.includes("--apply")');
   });
 
   it("Prisma 模型只剩新表名", () => {
@@ -161,6 +163,7 @@ describe("IKQY3O 三轨迁移（计费 / 身份 / 运维 / 命令回执表改名
       "topup_tiers|recharge_orders|cost_reservations|cost_adjustments|admin_operation_logs|system_settings|command_idempotency|legacy_card_history";
     const accessor = new RegExp("\\b(prisma|tx|client)\\.(" + names + ")\\b");
     const rawSql = new RegExp("\\b(FROM|INTO|JOIN|UPDATE)\\s+`?(" + names + ")`?\\b", "i");
+    const bareReference = new RegExp("\\b(" + names + ")\\s*\\.", "i");
     const files = [
       ...productionSources(join(BACKEND_ROOT, "libs")),
       ...productionSources(join(BACKEND_ROOT, "apps")),
@@ -171,7 +174,9 @@ describe("IKQY3O 三轨迁移（计费 / 身份 / 运维 / 命令回执表改名
     const offenders: string[] = [];
     for (const file of files) {
       const text = readFileSync(file, "utf8");
-      if (accessor.test(text) || rawSql.test(text)) offenders.push(file);
+      if (accessor.test(text) || rawSql.test(text) || bareReference.test(text)) {
+        offenders.push(file);
+      }
     }
     expect(offenders).toEqual([]);
   });

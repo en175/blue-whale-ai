@@ -30,6 +30,6 @@
 
 - 破坏性发布：改名后新旧镜像都读不到对侧的表。发布顺序固定为「停旧实例（后端 + worker）→ 执行 079 → 起新镜像」，或先提供过渡视图。
 - `RENAME INDEX` 无 `IF EXISTS`：执行前在目标库 `SHOW INDEX` 核对 7 条索引名；失败按「补完索引改名 → 执行多表 RENAME」恢复。
-- 多表 `RENAME TABLE` 成功但最后写表注释失败时：不要重跑整个文件（索引名已变，第一步就会报错）；手工补执行注释语句即可。
+- 多表 `RENAME TABLE` 成功但最后写表注释失败时：不要重跑整个文件（索引名已变，第一步就会报错）；手工补执行注释语句即可。若该文件是通过 `prisma migrate deploy` 记录的（本仓默认手工执行，不使用它），补完后需 `prisma migrate resolve --applied 20261027230000_ikqy3o_billing_identity_ops_rename`，否则后续 deploy 会因 P3009 拒绝继续。
 - billing 服务自己的库（Flyway）里本来就有 `billing_cost_reservations`，与本库新名字同名但属于不同数据库，不要混用连接。
 - ADR-0117 §4 中计费/运维条目的改名在本票落地；目录与素材条目由同批 IKQY3N（ADR-0135）承接，两票合入后该清单才算全部落地。
