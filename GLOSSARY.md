@@ -977,7 +977,7 @@ _Avoid_: Token 指纹、用户名、邮箱、浏览器本地 ID、客户端自�
 **上游统一 Key（项目级上游凭证）**:
 调用 new-api 的唯一凭证，**全项目共用一把**，以 `sk-` 开头。new-api 已从「我们的用户体系」降级为
 「带一把统一 key 的上游供应商」（[ADR-0114](docs/adr/0114-new-api-as-upstream-identity-and-billing-services.md)），
-所以这把 Key **不绑定任何 User**，与谁登录无关。它住在 `system_settings` 表 `upstream` 行的
+所以这把 Key **不绑定任何 User**，与谁登录无关。它住在 `bw_platform_settings` 表 `upstream` 行的
 `new_api_key`（管理端「系统设置 → 上游凭证」维护，AES-256-GCM 信封由 `SYSTEM_SETTINGS_SECRET` 解），
 **每次调用现查**，因此轮换对全部在线会话与在途任务立即生效。消费方只有一类：需要打上游的执行体
 ——worker 的 18 个 GenerationJob 处理器与素材状态定时跟进，都直连该配置读取，**不冻结进 job**。

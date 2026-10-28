@@ -108,10 +108,10 @@ export function buildTx(
       findFirst: vi.fn().mockResolvedValue({ id: 42n }),
       ...overrides.project,
     },
-    command_idempotency: {
+    project_command_receipts: {
       findUnique: vi.fn().mockResolvedValue(null),
       create: vi.fn().mockResolvedValue({}),
-      ...overrides.command_idempotency,
+      ...overrides.project_command_receipts,
     },
     scene_cards: {
       findFirst: vi.fn().mockResolvedValue({
@@ -178,9 +178,9 @@ export function buildTx(
       deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
       ...overrides.generation_job_extras,
     },
-    cost_reservations: {
+    billing_cost_reservations: {
       create: vi.fn().mockResolvedValue({}),
-      ...overrides.cost_reservations,
+      ...overrides.billing_cost_reservations,
     },
     generation_output_slots: {
       create: vi.fn().mockResolvedValue({}),

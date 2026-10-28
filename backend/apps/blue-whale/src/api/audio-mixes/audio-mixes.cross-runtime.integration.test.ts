@@ -212,7 +212,7 @@ describe.skipIf(process.env.IKI68N_CROSS_RUNTIME !== "1")("audio_mix cross runti
       expect(retriedJob.retry_of_job_id).toBe(job.id);
       expect(retriedJob.fencing_token).toBe(0n);
       expect(await prisma.client.generation_jobs.count({ where: { retry_of_job_id: job.id } })).toBe(1);
-      expect(await prisma.client.cost_reservations.count({ where: { generation_job_id: BigInt(retryJobId) } })).toBe(0);
+      expect(await prisma.client.billing_cost_reservations.count({ where: { generation_job_id: BigInt(retryJobId) } })).toBe(0);
 
       const accepted = await runWorker(guardToken, "succeed", undefined, retryJobId);
       expect(accepted.exitCode, accepted.output).toBe(0);

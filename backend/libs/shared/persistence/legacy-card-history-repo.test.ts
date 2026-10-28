@@ -5,7 +5,7 @@ import { createLegacyCardHistoryRepo } from "./legacy-card-history-repo.js";
 describe("legacy card history repo", () => {
   it("rememberMany 按 (project_id, node_id) 唯一幂等写入，缺省来源/画面描述传 null 语义", async () => {
     const createMany = vi.fn().mockResolvedValue({ count: 1 });
-    const prisma = { legacy_card_history: { createMany } };
+    const prisma = { project_card_migration_history: { createMany } };
     const repo = createLegacyCardHistoryRepo(prisma as never);
 
     await repo.rememberMany("55", [
@@ -39,7 +39,7 @@ describe("legacy card history repo", () => {
 
   it("rememberMany 空数组不触发写入", async () => {
     const createMany = vi.fn();
-    const repo = createLegacyCardHistoryRepo({ legacy_card_history: { createMany } } as never);
+    const repo = createLegacyCardHistoryRepo({ project_card_migration_history: { createMany } } as never);
     await repo.rememberMany("55", []);
     expect(createMany).not.toHaveBeenCalled();
   });
@@ -47,7 +47,7 @@ describe("legacy card history repo", () => {
   it("listByProject 按 id 升序返回本项目全部历史", async () => {
     const rows = [{ id: 1n, node_id: "card-1" }];
     const findMany = vi.fn().mockResolvedValue(rows);
-    const repo = createLegacyCardHistoryRepo({ legacy_card_history: { findMany } } as never);
+    const repo = createLegacyCardHistoryRepo({ project_card_migration_history: { findMany } } as never);
 
     await expect(repo.listByProject("55")).resolves.toBe(rows);
     expect(findMany).toHaveBeenCalledWith({
@@ -64,7 +64,7 @@ it("migration version conflict rolls back history together with canvas", async (
     $transaction: async (run: (tx: any) => Promise<unknown>) => {
       let staged: unknown[] = [];
       const result = await run({
-        legacy_card_history: { createMany: async ({ data }: any) => { staged = data; } },
+        project_card_migration_history: { createMany: async ({ data }: any) => { staged = data; } },
         project_canvas: { updateMany: async () => ({ count: 0 }) },
       });
       persistedHistory = staged;

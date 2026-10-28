@@ -47,14 +47,14 @@ export function createLegacyCardHistoryRepo(prisma: PrismaClient): LegacyCardHis
       }
     },
     async listByProject(projectId) {
-      return prisma.legacy_card_history.findMany({
+      return prisma.project_card_migration_history.findMany({
         where: { project_id: BigInt(projectId) },
         orderBy: { id: "asc" },
       });
     },
     async rememberMany(projectId, rows) {
       if (rows.length === 0) return;
-      await prisma.legacy_card_history.createMany({
+      await prisma.project_card_migration_history.createMany({
         data: rows.map((row) => ({
           project_id: BigInt(projectId),
           node_id: row.nodeId,

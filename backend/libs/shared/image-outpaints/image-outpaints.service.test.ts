@@ -43,7 +43,7 @@ function makeService(overrides: {
     client: {
       generation_jobs: { create },
       user_assets: { update: updateAsset },
-      cost_reservations: { create: costCreate },
+      billing_cost_reservations: { create: costCreate },
     },
   };
   const storage = overrides.storage ?? { uploads: null };

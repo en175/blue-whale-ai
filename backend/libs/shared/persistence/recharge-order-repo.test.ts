@@ -31,7 +31,7 @@ function buildRepo() {
   return {
     count,
     findMany,
-    repo: createRechargeOrderRepo({ recharge_orders: { count, findMany } } as never),
+    repo: createRechargeOrderRepo({ billing_recharge_orders: { count, findMany } } as never),
   };
 }
 
@@ -117,7 +117,7 @@ describe("createRechargeOrderRepo.list", () => {
   it("paid_pending 原样投影：认不出的状态才会回落成 pending", async () => {
     const findMany = vi.fn().mockResolvedValue([{ ...ROW, status: "paid_pending" }]);
     const repo = createRechargeOrderRepo({
-      recharge_orders: { count: vi.fn().mockResolvedValue(1), findMany },
+      billing_recharge_orders: { count: vi.fn().mockResolvedValue(1), findMany },
     } as never);
 
     const page = await repo.list({ page: 1, pageSize: 20 });
@@ -131,7 +131,7 @@ describe("createRechargeOrderRepo — 下单快照与状态机", () => {
     const create = vi.fn(async ({ data }: { data: Record<string, unknown> }) =>
       snapshotRow(data),
     );
-    const repo = createRechargeOrderRepo({ recharge_orders: { create } } as never);
+    const repo = createRechargeOrderRepo({ billing_recharge_orders: { create } } as never);
 
     await repo.create({
       tradeNo: "RC20260926001",
@@ -163,7 +163,7 @@ describe("createRechargeOrderRepo — 下单快照与状态机", () => {
     const create = vi.fn(async ({ data }: { data: Record<string, unknown> }) =>
       snapshotRow(data),
     );
-    const repo = createRechargeOrderRepo({ recharge_orders: { create } } as never);
+    const repo = createRechargeOrderRepo({ billing_recharge_orders: { create } } as never);
 
     const view = await repo.create({
       tradeNo: "RC20260927001",
@@ -188,7 +188,7 @@ describe("createRechargeOrderRepo — 下单快照与状态机", () => {
   it("可空 tier_id 的读回：NULL 原样投影成 null（不是 \"null\" 字符串，也不抛错）", async () => {
     const findMany = vi.fn().mockResolvedValue([{ ...ROW, tier_id: null }]);
     const repo = createRechargeOrderRepo({
-      recharge_orders: { count: vi.fn().mockResolvedValue(1), findMany },
+      billing_recharge_orders: { count: vi.fn().mockResolvedValue(1), findMany },
     } as never);
 
     const page = await repo.list({ page: 1, pageSize: 20 });
@@ -198,7 +198,7 @@ describe("createRechargeOrderRepo — 下单快照与状态机", () => {
 
   it("markPaidPending 只对「钱还没到」的单生效（>= 待到账 的下界判断）", async () => {
     const updateMany = vi.fn().mockResolvedValue({ count: 1 });
-    const repo = createRechargeOrderRepo({ recharge_orders: { updateMany } } as never);
+    const repo = createRechargeOrderRepo({ billing_recharge_orders: { updateMany } } as never);
 
     expect(await repo.markPaidPending("RC20260926001")).toBe(true);
 
@@ -217,7 +217,7 @@ describe("createRechargeOrderRepo — 下单快照与状态机", () => {
 
   it("★ markPaid 把**真实发给 billing 的**到期时刻写进快照（与发放同一处落地）", async () => {
     const updateMany = vi.fn().mockResolvedValue({ count: 1 });
-    const repo = createRechargeOrderRepo({ recharge_orders: { updateMany } } as never);
+    const repo = createRechargeOrderRepo({ billing_recharge_orders: { updateMany } } as never);
     const expiresAt = new Date("2028-09-27T10:00:00.000Z");
 
     await repo.markPaid({ tradeNo: "RC20260926001", creditsExpireAt: expiresAt });
@@ -235,7 +235,7 @@ describe("createRechargeOrderRepo — 下单快照与状态机", () => {
 
   it("markPaid 不传到到期时刻（存量单走 billing 来源策略）时不写那一列", async () => {
     const updateMany = vi.fn().mockResolvedValue({ count: 1 });
-    const repo = createRechargeOrderRepo({ recharge_orders: { updateMany } } as never);
+    const repo = createRechargeOrderRepo({ billing_recharge_orders: { updateMany } } as never);
 
     await repo.markPaid({ tradeNo: "RC20260926001" });
 
@@ -249,7 +249,7 @@ describe("createRechargeOrderRepo — 活跃单的身份（下单防重）", () 
     const findFirst = vi.fn().mockResolvedValue(rows[0] ?? null);
     return {
       findFirst,
-      repo: createRechargeOrderRepo({ recharge_orders: { findFirst } } as never),
+      repo: createRechargeOrderRepo({ billing_recharge_orders: { findFirst } } as never),
     };
   }
 
@@ -314,7 +314,7 @@ describe("createRechargeOrderRepo — 已付未落地的单（重复收款防护
     const findFirst = vi.fn().mockResolvedValue(rows[0] ?? null);
     return {
       findFirst,
-      repo: createRechargeOrderRepo({ recharge_orders: { findFirst } } as never),
+      repo: createRechargeOrderRepo({ billing_recharge_orders: { findFirst } } as never),
     };
   }
 

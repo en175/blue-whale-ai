@@ -129,7 +129,7 @@ describe("generation command placement anchor", () => {
       generation_jobs: { create: createJob },
       generation_job_extras: extrasDelegate(),
       generation_output_slots: { create: vi.fn().mockResolvedValue({}) },
-      cost_reservations: { create: vi.fn().mockResolvedValue({}) },
+      billing_cost_reservations: { create: vi.fn().mockResolvedValue({}) },
       generation_job_logs: { create: vi.fn().mockResolvedValue({}) },
       project_events: {
         create: vi.fn(
@@ -186,7 +186,7 @@ describe("generation command placement anchor", () => {
       generation_jobs: { create: createJob },
       generation_job_extras: extrasDelegate(),
       generation_output_slots: { create: vi.fn().mockResolvedValue({}) },
-      cost_reservations: { create: vi.fn().mockResolvedValue({}) },
+      billing_cost_reservations: { create: vi.fn().mockResolvedValue({}) },
       generation_job_logs: { create: vi.fn().mockResolvedValue({}) },
       project_events: {
         create: vi.fn(
@@ -232,7 +232,7 @@ describe("generation command placement anchor", () => {
       generation_jobs: { create: createJob },
       generation_job_extras: extrasDelegate(),
       generation_output_slots: { create: vi.fn().mockResolvedValue({}) },
-      cost_reservations: { create: vi.fn().mockResolvedValue({}) },
+      billing_cost_reservations: { create: vi.fn().mockResolvedValue({}) },
       generation_job_logs: { create: vi.fn().mockResolvedValue({}) },
       project_events: {
         create: vi.fn(
@@ -309,7 +309,7 @@ describe("generation command repo retry", () => {
       },
       scene_card_generation_records: { update: updateRecord },
       generation_job_extras: extrasDelegate(),
-      cost_reservations: {
+      billing_cost_reservations: {
         findFirst: vi.fn().mockResolvedValue({
           reserved_amount_fen: 1234n,
           price_catalog_version: "v-pricing",
@@ -319,7 +319,7 @@ describe("generation command repo retry", () => {
         }),
         create: vi.fn().mockResolvedValue({}),
       },
-      command_idempotency: {
+      project_command_receipts: {
         findUnique: vi.fn().mockResolvedValue(null),
         create: vi.fn().mockResolvedValue({}),
       },
@@ -374,7 +374,7 @@ describe("generation command repo retry", () => {
         data: { cursor: bigint };
       }
     ).data.cursor;
-    expect(tx.command_idempotency.create).toHaveBeenCalledWith({
+    expect(tx.project_command_receipts.create).toHaveBeenCalledWith({
       data: expect.objectContaining({ accepted_cursor: eventCursor }),
     });
   });
@@ -405,11 +405,11 @@ describe("generation command repo retry", () => {
         create: vi.fn().mockResolvedValue({}),
       },
       generation_job_extras: extrasDelegate(),
-      cost_reservations: {
+      billing_cost_reservations: {
         findFirst: vi.fn().mockResolvedValue(null),
         create: vi.fn().mockResolvedValue({}),
       },
-      command_idempotency: {
+      project_command_receipts: {
         findUnique: vi.fn().mockResolvedValue(null),
         create: vi.fn().mockResolvedValue({}),
       },
@@ -482,11 +482,11 @@ describe("generation command repo retry", () => {
         create: vi.fn().mockResolvedValue({}),
       },
       generation_job_extras: extrasDelegate(),
-      cost_reservations: {
+      billing_cost_reservations: {
         findFirst: vi.fn().mockResolvedValue(null),
         create: vi.fn().mockResolvedValue({}),
       },
-      command_idempotency: {
+      project_command_receipts: {
         findUnique: vi.fn().mockResolvedValue(null),
         create: vi.fn().mockResolvedValue({}),
       },
@@ -592,11 +592,11 @@ describe("generation command repo retry", () => {
         create: createSlot,
       },
       generation_job_extras: extrasDelegate(),
-      command_idempotency: {
+      project_command_receipts: {
         findUnique: vi.fn().mockResolvedValue(null),
         create: vi.fn().mockResolvedValue({}),
       },
-      cost_reservations: {
+      billing_cost_reservations: {
         findFirst: vi.fn().mockResolvedValue({
           reserved_amount_fen: 1234n,
           price_catalog_version: "v-pricing",
@@ -673,7 +673,7 @@ describe("generation command repo retry", () => {
         create: createSlot,
       },
       generation_job_extras: extrasDelegate(),
-      cost_reservations: {
+      billing_cost_reservations: {
         findFirst: vi.fn().mockResolvedValue({
           reserved_amount_fen: 1234n,
           price_catalog_version: "v-pricing",
@@ -683,7 +683,7 @@ describe("generation command repo retry", () => {
         }),
         create: vi.fn().mockResolvedValue({}),
       },
-      command_idempotency: { findUnique: vi.fn().mockResolvedValue(null) },
+      project_command_receipts: { findUnique: vi.fn().mockResolvedValue(null) },
     };
     const prisma = {
       $transaction: vi.fn(
@@ -723,8 +723,8 @@ describe("generation command repo retry", () => {
       },
       generation_output_slots: { findMany: vi.fn(), create: vi.fn() },
       generation_job_extras: extrasDelegate(),
-      cost_reservations: { findFirst: vi.fn(), create: vi.fn() },
-      command_idempotency: { findUnique: vi.fn(), create: vi.fn() },
+      billing_cost_reservations: { findFirst: vi.fn(), create: vi.fn() },
+      project_command_receipts: { findUnique: vi.fn(), create: vi.fn() },
     };
     const prisma = {
       $transaction: vi.fn(
@@ -773,7 +773,7 @@ describe("generation command repo retry", () => {
         create: vi.fn().mockResolvedValue({}),
       },
       generation_job_extras: extrasDelegate(),
-      cost_reservations: {
+      billing_cost_reservations: {
         findFirst: vi.fn().mockResolvedValue({
           reserved_amount_fen: 1234n,
           price_catalog_version: "v-pricing",
@@ -783,7 +783,7 @@ describe("generation command repo retry", () => {
         }),
         create: vi.fn().mockResolvedValue({}),
       },
-      command_idempotency: {
+      project_command_receipts: {
         findUnique: vi.fn().mockResolvedValue(null),
         create: vi
           .fn()
@@ -801,7 +801,7 @@ describe("generation command repo retry", () => {
     const secondTx = {
       generation_jobs: { findFirst: vi.fn().mockResolvedValue(original) },
       generation_job_extras: extrasDelegate(),
-      cost_reservations: {
+      billing_cost_reservations: {
         findFirst: vi.fn().mockResolvedValue({
           reserved_amount_fen: 1234n,
           price_catalog_version: "v-pricing",
@@ -810,7 +810,7 @@ describe("generation command repo retry", () => {
           cost_rule_version: "v1",
         }),
       },
-      command_idempotency: {
+      project_command_receipts: {
         findUnique: vi.fn().mockResolvedValue({
           request_hash: "hash-300",
           generation_job_id: 999n,
@@ -844,7 +844,7 @@ describe("generation command repo retry", () => {
       type: "video",
     });
     expect(prisma.$transaction).toHaveBeenCalledTimes(2);
-    expect(secondTx.command_idempotency.findUnique).toHaveBeenCalledOnce();
+    expect(secondTx.project_command_receipts.findUnique).toHaveBeenCalledOnce();
   });
 
   describe("retryJob 素材状态门（IKF YHJ）", () => {
@@ -867,7 +867,7 @@ describe("generation command repo retry", () => {
           findMany: vi.fn().mockResolvedValue([]),
           create: vi.fn().mockResolvedValue({}),
         },
-        cost_reservations: {
+        billing_cost_reservations: {
           findFirst: vi.fn().mockResolvedValue({
             reserved_amount_fen: 1234n,
             price_catalog_version: "v-pricing",
@@ -877,7 +877,7 @@ describe("generation command repo retry", () => {
           }),
           create: vi.fn().mockResolvedValue({}),
         },
-        command_idempotency: {
+        project_command_receipts: {
           findUnique: vi.fn().mockResolvedValue(null),
           create: vi.fn().mockResolvedValue({}),
         },
@@ -957,7 +957,7 @@ describe("generation command repo retry", () => {
           create: vi.fn(),
         },
         generation_job_extras: extrasDelegate(),
-        cost_reservations: {
+        billing_cost_reservations: {
           findFirst: vi.fn().mockResolvedValue({
             reserved_amount_fen: 1234n,
             price_catalog_version: "v-pricing",
@@ -966,7 +966,7 @@ describe("generation command repo retry", () => {
             cost_rule_version: "v1",
           }),
         },
-        command_idempotency: {
+        project_command_receipts: {
           findUnique: vi.fn().mockResolvedValue({
             request_hash: "hash-402",
             generation_job_id: 999n,
@@ -1045,11 +1045,11 @@ describe("retryJob 计费快照（IKL406：重试的 charge 必须带 rule_snaps
         create: vi.fn().mockResolvedValue({}),
       },
       generation_job_extras: extrasDelegate(),
-      cost_reservations: {
+      billing_cost_reservations: {
         findFirst: vi.fn().mockResolvedValue(null),
         create: vi.fn().mockResolvedValue({}),
       },
-      command_idempotency: {
+      project_command_receipts: {
         findUnique: vi.fn().mockResolvedValue(null),
         create: vi.fn().mockResolvedValue({}),
       },
@@ -1170,7 +1170,7 @@ describe("generation command repo billing（预扣与失败补偿）", () => {
       },
       generation_output_slots: { create: vi.fn().mockResolvedValue({}) },
       generation_job_extras: extrasDelegate(),
-      cost_reservations: { create: vi.fn().mockResolvedValue({}) },
+      billing_cost_reservations: { create: vi.fn().mockResolvedValue({}) },
       generation_job_logs: {
         create: options.failAtLog
           ? vi
@@ -1357,14 +1357,14 @@ describe("建任务幂等：同一把 Idempotency-Key 只建一个 job、只扣�
           },
           generation_output_slots: { create: vi.fn(async () => ({})) },
           generation_job_extras: extrasDelegate(),
-          cost_reservations: { create: vi.fn(async () => ({})) },
+          billing_cost_reservations: { create: vi.fn(async () => ({})) },
           generation_job_logs: { create: vi.fn(async () => ({})) },
           project_events: {
             create: vi.fn(
               async ({ data }: { data: Record<string, unknown> }) => data,
             ),
           },
-          command_idempotency: {
+          project_command_receipts: {
             create: vi.fn(async ({ data }: { data: IdemRow }) => {
               const key = rowKey(data);
               if (committed.has(key)) throw uniqueViolation();
@@ -1398,7 +1398,7 @@ describe("建任务幂等：同一把 Idempotency-Key 只建一个 job、只扣�
           }
         }
       },
-      command_idempotency: {
+      project_command_receipts: {
         findUnique: vi.fn(
           async ({
             where,
@@ -1543,7 +1543,7 @@ describe("generation command repo 样片阶段落库（IKIZQ8）", () => {
       generation_jobs: { create: createJob },
       generation_job_extras: extrasDelegate(),
       generation_output_slots: { create: vi.fn().mockResolvedValue({}) },
-      cost_reservations: { create: vi.fn().mockResolvedValue({}) },
+      billing_cost_reservations: { create: vi.fn().mockResolvedValue({}) },
       generation_job_logs: { create: vi.fn().mockResolvedValue({}) },
       project_events: { create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => data) },
     };

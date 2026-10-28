@@ -154,7 +154,7 @@ function parseId(id: string): bigint | null {
 export function createTopupTierRepo(prisma: PrismaClient): TopupTierRepo {
   return {
     async listAll() {
-      const rows = await prisma.topup_tiers.findMany({
+      const rows = await prisma.billing_products.findMany({
         where: { is_delete: 0 },
         orderBy: { sort_order: "asc" },
       });
@@ -163,7 +163,7 @@ export function createTopupTierRepo(prisma: PrismaClient): TopupTierRepo {
 
     async listActive() {
       const now = new Date();
-      const rows = await prisma.topup_tiers.findMany({
+      const rows = await prisma.billing_products.findMany({
         where: {
           is_delete: 0,
           status: "active",
@@ -180,14 +180,14 @@ export function createTopupTierRepo(prisma: PrismaClient): TopupTierRepo {
     async getById(id) {
       const pid = parseId(id);
       if (pid === null) return null;
-      const row = await prisma.topup_tiers.findFirst({
+      const row = await prisma.billing_products.findFirst({
         where: { id: pid, is_delete: 0 },
       });
       return row ? toView(row) : null;
     },
 
     async create(input) {
-      const maxSort = await prisma.topup_tiers.aggregate({
+      const maxSort = await prisma.billing_products.aggregate({
         where: { is_delete: 0 },
         _max: { sort_order: true },
       });
@@ -195,7 +195,7 @@ export function createTopupTierRepo(prisma: PrismaClient): TopupTierRepo {
       const price = Math.round(input.originalPrice * input.discount * 100) / 100;
       const baseCredits = BigInt(Math.round(input.baseCredits));
 
-      const row = await prisma.topup_tiers.create({
+      const row = await prisma.billing_products.create({
         data: {
           name: input.name || `${input.baseCredits}积分`,
           base_credits: baseCredits,
@@ -225,7 +225,7 @@ export function createTopupTierRepo(prisma: PrismaClient): TopupTierRepo {
     async update(id, input) {
       const pid = parseId(id);
       if (pid === null) return null;
-      const existing = await prisma.topup_tiers.findFirst({
+      const existing = await prisma.billing_products.findFirst({
         where: { id: pid, is_delete: 0 },
       });
       if (!existing) return null;
@@ -272,7 +272,7 @@ export function createTopupTierRepo(prisma: PrismaClient): TopupTierRepo {
         data.permission_denied_hint = input.permissionDeniedHint;
       }
 
-      const row = await prisma.topup_tiers.update({
+      const row = await prisma.billing_products.update({
         where: { id: pid },
         data,
       });
@@ -282,7 +282,7 @@ export function createTopupTierRepo(prisma: PrismaClient): TopupTierRepo {
     async remove(id) {
       const pid = parseId(id);
       if (pid === null) return false;
-      const r = await prisma.topup_tiers.updateMany({
+      const r = await prisma.billing_products.updateMany({
         where: { id: pid, is_delete: 0 },
         data: { is_delete: 1, gmt_modified: new Date() },
       });
@@ -299,7 +299,7 @@ export function createTopupTierRepo(prisma: PrismaClient): TopupTierRepo {
       if (invalid) throw new Error(`非法档位 id: ${invalid.rawId}`);
       await prisma.$transaction(
         parsed.map((item) =>
-          prisma.topup_tiers.update({
+          prisma.billing_products.update({
             where: { id: item.pid as bigint },
             data: { sort_order: item.sortOrder, gmt_modified: new Date() },
           }),

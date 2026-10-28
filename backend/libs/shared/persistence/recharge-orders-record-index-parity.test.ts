@@ -64,9 +64,11 @@ describe("recharge_orders 记录页列表索引三轨迁移", () => {
   });
 
   it("Prisma 模型与迁移同源（列同样的顺序）", () => {
-    expect(schemaPrisma).toContain(`@@index([is_delete, gmt_create], map: "${ALL_SITE_INDEX}")`);
     expect(schemaPrisma).toContain(
-      `@@index([is_delete, user_id, gmt_create], map: "${PER_USER_INDEX}")`,
+      `@@index([is_delete, gmt_create], map: "idx_billing_recharge_orders__is_delete_gmt_create")`,
+    );
+    expect(schemaPrisma).toContain(
+      `@@index([is_delete, user_id, gmt_create], map: "idx_billing_recharge_orders__is_delete_user_gmt_create")`,
     );
   });
 

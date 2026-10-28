@@ -82,7 +82,7 @@ describe.skipIf(!databaseUrl)("audio video mux create idempotency in an isolated
     vi.unstubAllGlobals();
     await app?.close();
     if (prisma && projectId) {
-      await prisma.client.command_idempotency.deleteMany({ where: { project_id: BigInt(projectId) } });
+      await prisma.client.project_command_receipts.deleteMany({ where: { project_id: BigInt(projectId) } });
       await prisma.client.generation_jobs.deleteMany({ where: { project_id: BigInt(projectId), type: "audio_video_mux" } });
       await prisma.client.user_assets.deleteMany({ where: { id: { in: [audioId, videoId, foreignVideoId] } } });
       await prisma.client.project.delete({ where: { id: BigInt(projectId) } });
@@ -105,7 +105,7 @@ describe.skipIf(!databaseUrl)("audio video mux create idempotency in an isolated
   async function counts() {
     return {
       jobs: await prisma.client.generation_jobs.count({ where: { project_id: BigInt(projectId), type: "audio_video_mux" } }),
-      commands: await prisma.client.command_idempotency.count({
+      commands: await prisma.client.project_command_receipts.count({
         where: { project_id: BigInt(projectId), operation: "audio_video_mux.create" },
       }),
     };
@@ -157,7 +157,7 @@ describe.skipIf(!databaseUrl)("audio video mux create idempotency in an isolated
     const failed = await send("enqueue-recover");
     expect(failed.status).toBe(400);
     expect(await failed.json()).toMatchObject({ msg: "任务入队失败", data: null });
-    const record = await prisma.client.command_idempotency.findUniqueOrThrow({
+    const record = await prisma.client.project_command_receipts.findUniqueOrThrow({
       where: { project_id_operation_idempotency_key: {
         project_id: BigInt(projectId), operation: "audio_video_mux.create", idempotency_key: "enqueue-recover",
       } },

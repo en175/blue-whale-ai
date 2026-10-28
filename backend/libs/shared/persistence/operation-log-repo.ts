@@ -78,7 +78,7 @@ export function createOperationLogRepo(prisma: PrismaClient): OperationLogRepo {
           { operator: { contains: q } },
         ];
       }
-      const rows = await prisma.admin_operation_logs.findMany({
+      const rows = await prisma.bw_admin_logs.findMany({
         where,
         orderBy: { gmt_create: "desc" },
         take: filter.limit ?? 500,
@@ -87,7 +87,7 @@ export function createOperationLogRepo(prisma: PrismaClient): OperationLogRepo {
     },
 
     async create(input) {
-      const row = await prisma.admin_operation_logs.create({
+      const row = await prisma.bw_admin_logs.create({
         data: {
           category: input.category,
           action: input.action,

@@ -96,7 +96,7 @@ export function createWorkerVideoOps(prisma: PrismaClient): Pick<WorkerRepo, "ma
           where: { id: BigInt(input.jobId) },
           data: { output_asset_ids: [Number(asset.id)] },
         });
-        await tx.cost_reservations.updateMany({
+        await tx.billing_cost_reservations.updateMany({
           where: {
             generation_job_id: BigInt(input.jobId),
             status: "reserved",
@@ -276,7 +276,7 @@ export function createWorkerVideoOps(prisma: PrismaClient): Pick<WorkerRepo, "ma
             });
           }
         }
-        await tx.cost_reservations.updateMany({
+        await tx.billing_cost_reservations.updateMany({
           where: {
             generation_job_id: BigInt(input.jobId),
             status: "reserved",
@@ -311,7 +311,7 @@ export function createWorkerVideoOps(prisma: PrismaClient): Pick<WorkerRepo, "ma
           },
         });
         if (updated.count !== 1) return false;
-        await tx.cost_reservations.updateMany({
+        await tx.billing_cost_reservations.updateMany({
           where: {
             generation_job_id: BigInt(input.jobId),
             status: "reserved",

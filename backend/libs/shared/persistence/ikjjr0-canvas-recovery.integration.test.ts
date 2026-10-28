@@ -220,12 +220,12 @@ describe.skipIf(!databaseUrl)("成片与重生样片恢复契约 v1 真库验证
     await prisma.generation_canvas_node_owners.deleteMany({ where: { project_id: pid } });
     await prisma.generation_canvas_outputs.deleteMany({});
     await prisma.generation_canvas_submissions.deleteMany({ where: { project_id: pid } });
-    await prisma.command_idempotency.deleteMany({ where: { project_id: pid } });
+    await prisma.project_command_receipts.deleteMany({ where: { project_id: pid } });
     await prisma.project_canvas.deleteMany({ where: { project_id: pid } });
     await prisma.storyboard_previews.deleteMany({ where: { project_id: pid } });
     await prisma.generation_output_slots.deleteMany({ where: { project_id: pid } });
     await prisma.generation_job_logs.deleteMany({});
-    await prisma.cost_reservations.deleteMany({});
+    await prisma.billing_cost_reservations.deleteMany({});
     await prisma.generation_jobs.deleteMany({ where: { project_id: pid } });
     await prisma.project_events.deleteMany({ where: { project_id: pid } });
     await prisma.$queryRaw`DELETE FROM project_event_stream WHERE project_id = ${pid}`;
@@ -386,7 +386,7 @@ describe.skipIf(!databaseUrl)("成片与重生样片恢复契约 v1 真库验证
     expect(await prisma.generation_jobs.count({ where: { project_id: BigInt(PROJECT_ID) } })).toBe(1);
     expect(await prisma.storyboard_previews.count({ where: { project_id: BigInt(PROJECT_ID) } })).toBe(1);
     expect(await prisma.generation_canvas_submissions.count({ where: { project_id: BigInt(PROJECT_ID) } })).toBe(1);
-    expect(await prisma.cost_reservations.count({})).toBe(1);
+    expect(await prisma.billing_cost_reservations.count({})).toBe(1);
   });
 
   it("★ S5 draft 角色：快照按服务端画布捕获；角色与画布不符 → 400 invalid_recovery_payload", async () => {
@@ -488,7 +488,7 @@ describe.skipIf(!databaseUrl)("成片与重生样片恢复契约 v1 真库验证
     expect(holds).toHaveLength(1);
     expect(await prisma.generation_jobs.count({ where: { project_id: BigInt(PROJECT_ID) } })).toBe(1);
     expect(await prisma.generation_canvas_submissions.count({ where: { project_id: BigInt(PROJECT_ID) } })).toBe(1);
-    expect(await prisma.command_idempotency.count({ where: { project_id: BigInt(PROJECT_ID) } })).toBe(1);
+    expect(await prisma.project_command_receipts.count({ where: { project_id: BigInt(PROJECT_ID) } })).toBe(1);
   });
 
   it("★ R3 预扣失败（charge 抛错）→ 整体失败零残留，不误发 release（钱没冻上不返还）", async () => {
@@ -505,8 +505,8 @@ describe.skipIf(!databaseUrl)("成片与重生样片恢复契约 v1 真库验证
     expect(await prisma.generation_jobs.count({ where: { project_id: BigInt(PROJECT_ID) } })).toBe(0);
     expect(await prisma.generation_canvas_submissions.count({ where: { project_id: BigInt(PROJECT_ID) } })).toBe(0);
     expect(await prisma.generation_canvas_node_owners.count({ where: { project_id: BigInt(PROJECT_ID) } })).toBe(0);
-    expect(await prisma.command_idempotency.count({ where: { project_id: BigInt(PROJECT_ID) } })).toBe(0);
-    expect(await prisma.cost_reservations.count({})).toBe(0);
+    expect(await prisma.project_command_receipts.count({ where: { project_id: BigInt(PROJECT_ID) } })).toBe(0);
+    expect(await prisma.billing_cost_reservations.count({})).toBe(0);
   });
 
   it("★ R4 预扣失败补偿：charge 成功后事务失败 → release(jobId)，零残留（资金不随库回滚丢）", async () => {
@@ -543,7 +543,7 @@ describe.skipIf(!databaseUrl)("成片与重生样片恢复契约 v1 真库验证
     expect(releases).toEqual(holds);
 
     expect(await prisma.generation_jobs.count({ where: { project_id: BigInt(PROJECT_ID) } })).toBe(0);
-    expect(await prisma.command_idempotency.count({ where: { project_id: BigInt(PROJECT_ID) } })).toBe(0);
+    expect(await prisma.project_command_receipts.count({ where: { project_id: BigInt(PROJECT_ID) } })).toBe(0);
     expect(await prisma.generation_canvas_node_owners.count({ where: { project_id: BigInt(PROJECT_ID) } })).toBe(0);
   });
 

@@ -285,7 +285,7 @@ CREATE TABLE `agent_runs` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
-CREATE TABLE `command_idempotency` (
+CREATE TABLE `project_command_receipts` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `project_id` BIGINT NOT NULL,
     `operation` VARCHAR(64) NOT NULL,
@@ -302,7 +302,7 @@ CREATE TABLE `command_idempotency` (
     `version` INTEGER NOT NULL DEFAULT 0,
     `is_delete` TINYINT NOT NULL DEFAULT 0,
 
-    UNIQUE INDEX `uk_command_idempotency`(`project_id`, `operation`, `idempotency_key`),
+    UNIQUE INDEX `uk_project_command_receipts__key`(`project_id`, `operation`, `idempotency_key`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
@@ -511,7 +511,7 @@ CREATE TABLE `verification_codes` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
-CREATE TABLE `topup_tiers` (
+CREATE TABLE `billing_products` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `name` VARCHAR(100) NOT NULL DEFAULT '',
     `amount` BIGINT NOT NULL,
@@ -532,7 +532,7 @@ CREATE TABLE `topup_tiers` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
-CREATE TABLE `admin_operation_logs` (
+CREATE TABLE `bw_admin_logs` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `category` VARCHAR(32) NOT NULL DEFAULT '',
     `action` VARCHAR(64) NOT NULL,
@@ -551,7 +551,7 @@ CREATE TABLE `admin_operation_logs` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
-CREATE TABLE `cost_reservations` (
+CREATE TABLE `billing_cost_reservations` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `generation_job_id` BIGINT NOT NULL,
     `user_id` BIGINT NOT NULL,
@@ -572,11 +572,11 @@ CREATE TABLE `cost_reservations` (
     `version` INTEGER NOT NULL DEFAULT 0,
     `is_delete` TINYINT NOT NULL DEFAULT 0,
 
-    UNIQUE INDEX `uk_cost_reservation_job`(`generation_job_id`),
+    UNIQUE INDEX `uk_billing_cost_reservations__job`(`generation_job_id`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
-CREATE TABLE `cost_adjustments` (
+CREATE TABLE `billing_cost_adjustments` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `batch_no` VARCHAR(64) NOT NULL,
     `generation_job_id` BIGINT NULL,
@@ -714,7 +714,7 @@ CREATE TABLE `conversation_quote_snapshots` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
-CREATE TABLE `legacy_card_history` (
+CREATE TABLE `project_card_migration_history` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `project_id` BIGINT NOT NULL,
     `node_id` VARCHAR(128) NOT NULL,
@@ -725,7 +725,7 @@ CREATE TABLE `legacy_card_history` (
     `card_json` JSON NOT NULL,
     `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
 
-    UNIQUE INDEX `uk_legacy_card_history`(`project_id`, `node_id`),
+    UNIQUE INDEX `uk_project_card_migration_history__node`(`project_id`, `node_id`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 

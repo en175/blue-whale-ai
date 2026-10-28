@@ -199,7 +199,7 @@ describe.skipIf(!databaseUrl)("新协议保存反向脱节守护（IKJLPC）", (
   }
 
   async function receiptOf(commandId: string) {
-    return prisma.command_idempotency.findUnique({
+    return prisma.project_command_receipts.findUnique({
       where: { project_id_operation_idempotency_key: { project_id: BigInt(PROJECT_ID), operation: "SAVE_CANVAS_RECOVERY_V1", idempotency_key: commandId } },
     });
   }
@@ -247,11 +247,11 @@ describe.skipIf(!databaseUrl)("新协议保存反向脱节守护（IKJLPC）", (
     await prisma.generation_canvas_node_owners.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
     await prisma.generation_canvas_outputs.deleteMany({});
     await prisma.generation_canvas_submissions.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
-    await prisma.command_idempotency.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
+    await prisma.project_command_receipts.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
     await prisma.project_canvas.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
     await prisma.generation_output_slots.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
     await prisma.generation_job_logs.deleteMany({});
-    await prisma.cost_reservations.deleteMany({});
+    await prisma.billing_cost_reservations.deleteMany({});
     await prisma.generation_jobs.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
   });
 

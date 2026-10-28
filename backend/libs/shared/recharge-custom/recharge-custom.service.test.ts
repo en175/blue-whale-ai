@@ -44,7 +44,7 @@ function makeService(row: typeof ROW | null = ROW, alwaysConflict = false) {
     },
   );
   const service = new RechargeCustomService({
-    client: { system_settings: { findUnique, updateMany } },
+    client: { bw_platform_settings: { findUnique, updateMany } },
   } as never);
   return { service, findUnique, updateMany };
 }

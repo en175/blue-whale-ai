@@ -102,7 +102,7 @@ async function deleteInTransaction(
   });
   if (!project) return { kind: "not_found" };
 
-  const existing = await tx.command_idempotency.findUnique({
+  const existing = await tx.project_command_receipts.findUnique({
     where: {
       project_id_operation_idempotency_key: {
         project_id: sceneCard.project_id,
@@ -141,7 +141,7 @@ async function deleteInTransaction(
       current_version: current?.version ?? sceneCard.version,
     };
   }
-  await tx.command_idempotency.create({
+  await tx.project_command_receipts.create({
     data: {
       project_id: sceneCard.project_id,
       operation: DELETE_OPERATION,

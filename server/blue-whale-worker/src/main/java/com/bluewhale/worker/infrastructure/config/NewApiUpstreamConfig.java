@@ -27,7 +27,7 @@ public class NewApiUpstreamConfig {
         String secret = env.getProperty(SystemSettingEnvelope.SECRET_ENV);
         if (secret == null || secret.isBlank()) {
             throw new IllegalStateException(
-                    SystemSettingEnvelope.SECRET_ENV + " 未配置：读不出 system_settings 里的上游凭证"
+                    SystemSettingEnvelope.SECRET_ENV + " 未配置：读不出 bw_platform_settings 里的上游凭证"
                             + "（主密钥必须与数据库分开存放；缺它时拒读，不降级成明文）");
         }
         return new UpstreamCredential(systemSettingMapper, secret.trim());

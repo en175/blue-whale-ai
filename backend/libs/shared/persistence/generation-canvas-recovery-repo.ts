@@ -79,7 +79,7 @@ export async function lockCanvasRecoveryForAcceptance(
 > {
   const pid = BigInt(acceptance.projectId);
   const canvasRow = await lockProjectAndCanvas(tx, pid);
-  const replayRow = await tx.command_idempotency.findUnique({
+  const replayRow = await tx.project_command_receipts.findUnique({
     where: {
       project_id_operation_idempotency_key: {
         project_id: pid,

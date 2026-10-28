@@ -96,7 +96,7 @@ export function makePrisma() {
   };
 
   const prisma = {
-    recharge_orders: {
+    billing_recharge_orders: {
       create: async ({ data }: { data: Row }) => {
         const row: Row = {
           id: BigInt(orders.size + 1),
@@ -134,7 +134,7 @@ export function makePrisma() {
         return { count: hits.length };
       },
     },
-    system_settings: {
+    bw_platform_settings: {
       findUnique: async ({ where }: { where: Row }) =>
         settings.get(String(where.setting_key)) ?? null,
       upsert: async ({ where, create, update }: { where: Row; create: Row; update: Row }) => {

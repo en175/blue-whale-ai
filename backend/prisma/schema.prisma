@@ -441,7 +441,7 @@ model agent_runs {
   @@index([status, engine, is_delete, id], map: "idx_agent_run_claim")
 }
 
-model command_idempotency {
+model project_command_receipts {
   id                BigInt   @id @default(autoincrement())
   project_id        BigInt
   operation         String   @db.VarChar(64)
@@ -460,7 +460,7 @@ model command_idempotency {
   version           Int      @default(0)
   is_delete         Int      @default(0) @db.TinyInt
 
-  @@unique([project_id, operation, idempotency_key], map: "uk_command_idempotency")
+  @@unique([project_id, operation, idempotency_key], map: "uk_project_command_receipts__key")
 }
 
 /// IKJJQU（IKIXK9-SPEC-20261002 B.2）：生成任务恢复契约 v1 —— 提交意图关联表。
@@ -753,7 +753,7 @@ model bw_verification_codes {
 }
 
 
-model topup_tiers {
+model billing_products {
   id             BigInt    @id @default(autoincrement())
   name           String    @default("") @db.VarChar(100)
   amount         BigInt
@@ -796,10 +796,10 @@ model topup_tiers {
   @@index([status, sort_order], map: "idx_tier_status_sort")
 }
 
-model recharge_orders {
+model billing_recharge_orders {
   id               BigInt    @id @default(autoincrement())
-  trade_no         String    @unique(map: "uk_recharge_orders__trade_no") @db.VarChar(64)
-  pay_order_id     String?   @unique(map: "uk_recharge_orders__pay_order_id") @db.VarChar(64)
+  trade_no         String    @unique(map: "uk_billing_recharge_orders__trade_no") @db.VarChar(64)
+  pay_order_id     String?   @unique(map: "uk_billing_recharge_orders__pay_order_id") @db.VarChar(64)
   /// 银行统一收银台链接（下单应答的 payData，内嵌银行令牌）。落库是为了**复用未支付订单**：
   /// 网关按 (mch_no, mch_order_no) 唯一，同一单号重下会被拒，链接事后要不回来。
   /// ⚠️ 判「有没有拿到过链接」看 pay_order_id（两者同一次更新写入，同真同假）
@@ -852,13 +852,13 @@ model recharge_orders {
   /// 管理端「充值记录」全站列表：WHERE is_delete = 0 ORDER BY gmt_create DESC, id DESC。
   /// `is_delete` 做等值前缀、`gmt_create` 提供顺序；id 不必显式写进索引
   /// （InnoDB 二级索引自带主键，MySQL 8.0 判顺序时算上它，故无 filesort）。
-  @@index([is_delete, gmt_create], map: "idx_recharge_orders__is_delete_gmt_create")
+  @@index([is_delete, gmt_create], map: "idx_billing_recharge_orders__is_delete_gmt_create")
   /// 同一页「按用户筛选」：WHERE is_delete = 0 AND user_id = ? ORDER BY gmt_create DESC, id DESC。
   /// user_id 必须排在 gmt_create **之前**才收窄得到一个人；全站那条索引代替不了它。
-  @@index([is_delete, user_id, gmt_create], map: "idx_recharge_orders__is_delete_user_gmt_create")
+  @@index([is_delete, user_id, gmt_create], map: "idx_billing_recharge_orders__is_delete_user_gmt_create")
 }
 
-model system_settings {
+model bw_platform_settings {
   setting_key   String   @id @db.VarChar(64)
   setting_value String   @db.Text
   is_secret     Boolean  @default(false)
@@ -868,7 +868,7 @@ model system_settings {
 }
 
 
-model admin_operation_logs {
+model bw_admin_logs {
   id             BigInt   @id @default(autoincrement())
   category       String   @default("") @db.VarChar(32)
   action         String   @db.VarChar(64)
@@ -887,7 +887,7 @@ model admin_operation_logs {
 }
 
 
-model cost_reservations {
+model billing_cost_reservations {
   id                    BigInt   @id @default(autoincrement())
   generation_job_id     BigInt
   user_id               BigInt
@@ -908,13 +908,13 @@ model cost_reservations {
   version               Int      @default(0)
   is_delete             Int      @default(0) @db.TinyInt
 
-  @@unique([generation_job_id], map: "uk_cost_reservation_job")
+  @@unique([generation_job_id], map: "uk_billing_cost_reservations__job")
 }
 
 /// IK9VZ0：多退少补结算审计（蓝鲸端只记账，执行在 new-api）：new-api 结算结果的接收记录。
 /// 幂等：batch_no 整批唯一（uk_adj_batch）；(generation_job_id, action_type) 单项唯一（uk_adj_job_action，
 /// 仅对有 job 归属的调整生效；MySQL 唯一索引对 NULL 不生效，无 job 的调整靠整批幂等兜底）。
-model cost_adjustments {
+model billing_cost_adjustments {
   id                BigInt   @id @default(autoincrement())
   batch_no          String   @db.VarChar(64)
   generation_job_id BigInt?
@@ -1062,7 +1062,7 @@ model conversation_quote_snapshots {
 }
 
 /// Immutable legacy generation-card migration history (IKDLQK): card content captured before conversion to an ordinary text node; read-only, never rewritten by later edits.
-model legacy_card_history {
+model project_card_migration_history {
   id          BigInt   @id @default(autoincrement())
   project_id  BigInt
   node_id     String   @db.VarChar(128)
@@ -1073,7 +1073,7 @@ model legacy_card_history {
   card_json   Json
   gmt_create  DateTime @default(now()) @db.DateTime(0)
 
-  @@unique([project_id, node_id], map: "uk_legacy_card_history")
+  @@unique([project_id, node_id], map: "uk_project_card_migration_history__node")
 }
 
 /// 会员周期（bw_memberships）。自建用户体系第一刀，建表理由见 migration 20260924120000。

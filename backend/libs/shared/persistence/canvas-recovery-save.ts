@@ -164,7 +164,7 @@ export async function saveCanvasWithRecovery(
     >`SELECT id, version, viewport_json, nodes_json, edges_json FROM project_canvas WHERE project_id = ${pid} FOR UPDATE`;
     const canvasRow = canvasRows[0] ?? null;
 
-    const receiptRow = await tx.command_idempotency.findUnique({
+    const receiptRow = await tx.project_command_receipts.findUnique({
       where: {
         project_id_operation_idempotency_key: {
           project_id: pid, operation: SAVE_CANVAS_RECOVERY_OPERATION, idempotency_key: input.commandId,
@@ -933,7 +933,7 @@ export async function saveCanvasWithRecovery(
       version: saved.version,
       recoveryReceipt: { commandId: input.commandId, replayed: false, changes },
     };
-    await tx.command_idempotency.create({
+    await tx.project_command_receipts.create({
       data: {
         project_id: pid,
         operation: SAVE_CANVAS_RECOVERY_OPERATION,

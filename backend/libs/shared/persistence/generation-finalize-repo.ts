@@ -178,7 +178,7 @@ async function createFinalizeJobWithinTx(
       status: "pending",
     },
   });
-  await tx.cost_reservations.create({
+  await tx.billing_cost_reservations.create({
     data: {
       generation_job_id: job.id,
       user_id: BigInt(input.userId),
