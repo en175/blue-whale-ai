@@ -78,6 +78,14 @@ describe("InternalAgentCanvasController", () => {
     });
   });
 
+  it("空白名称 → 400 invalid_request", async () => {
+    const { controller } = buildController();
+    await expect(controller.search(TOKEN, ...CONTEXT, { name: "   " })).rejects.toMatchObject({
+      status: 400,
+      code: "invalid_request",
+    });
+  });
+
   it("按名称搜索返回节点", async () => {
     const { controller, project } = buildController();
     const result = await controller.search(TOKEN, ...CONTEXT, { name: "蓝鲸" });

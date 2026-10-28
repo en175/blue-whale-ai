@@ -59,46 +59,47 @@ function fakePrisma(options: { marker?: number; nodes?: unknown[]; edges?: unkno
 describe("Agent 画布节点只读查询", () => {
   it("按名称子串（忽略大小写）、类型、标签、父节点与节点 id 过滤", async () => {
     const prisma = fakePrisma();
-    const byName = await searchAgentCanvasNodes(prisma, "55", { name: "蓝鲸" }, 0, 50);
+    const byName = await searchAgentCanvasNodes(prisma, "55", { name: "蓝鲸" }, null, 50);
     expect(byName.items.map((item) => item.id)).toEqual(["n1"]);
     expect(byName.items[0]).toMatchObject({ name: "蓝鲸文案", tags: ["脚本", "重要"], parent_node_id: "g1", position: { x: 1, y: 2 } });
 
-    const byType = await searchAgentCanvasNodes(prisma, "55", { type: "mediaNode" }, 0, 50);
+    const byType = await searchAgentCanvasNodes(prisma, "55", { type: "mediaNode" }, null, 50);
     expect(byType.items.map((item) => item.id)).toEqual(["n2"]);
 
-    const byTag = await searchAgentCanvasNodes(prisma, "55", { tags: ["脚本"] }, 0, 50);
+    const byTag = await searchAgentCanvasNodes(prisma, "55", { tags: ["脚本"] }, null, 50);
     expect(byTag.items.map((item) => item.id)).toEqual(["n1", "n3"]);
 
-    const byTwoTags = await searchAgentCanvasNodes(prisma, "55", { tags: ["脚本", "重要"] }, 0, 50);
+    const byTwoTags = await searchAgentCanvasNodes(prisma, "55", { tags: ["脚本", "重要"] }, null, 50);
     expect(byTwoTags.items.map((item) => item.id)).toEqual(["n1"]);
 
-    const byParent = await searchAgentCanvasNodes(prisma, "55", { parentNodeId: "g1" }, 0, 50);
+    const byParent = await searchAgentCanvasNodes(prisma, "55", { parentNodeId: "g1" }, null, 50);
     expect(byParent.items.map((item) => item.id)).toEqual(["n1"]);
 
-    const byId = await searchAgentCanvasNodes(prisma, "55", { nodeId: "n3" }, 0, 50);
+    const byId = await searchAgentCanvasNodes(prisma, "55", { nodeId: "n3" }, null, 50);
     expect(byId.items.map((item) => item.id)).toEqual(["n3"]);
   });
 
   it("没有筛选条件时返回 filter_required", async () => {
-    await expect(searchAgentCanvasNodes(fakePrisma(), "55", {}, 0, 50)).rejects.toMatchObject({
+    await expect(searchAgentCanvasNodes(fakePrisma(), "55", {}, null, 50)).rejects.toMatchObject({
       reason: "filter_required",
     });
   });
 
   it("分页与 total", async () => {
-    const first = await searchAgentCanvasNodes(fakePrisma(), "55", { tags: ["脚本"] }, 0, 1);
+    const first = await searchAgentCanvasNodes(fakePrisma(), "55", { tags: ["脚本"] }, null, 1);
     expect(first.items.map((item) => item.id)).toEqual(["n1"]);
-    expect(first.next_cursor).toBe("1");
+    expect(first.next_cursor).toBe("n1");
     expect(first.total).toBe(2);
-    const second = await searchAgentCanvasNodes(fakePrisma(), "55", { tags: ["脚本"] }, Number(first.next_cursor), 1);
+    const second = await searchAgentCanvasNodes(fakePrisma(), "55", { tags: ["脚本"] }, first.next_cursor, 1);
     expect(second.items.map((item) => item.id)).toEqual(["n3"]);
     expect(second.next_cursor).toBeNull();
   });
 
   it("游标与 limit 校验", () => {
-    expect(parseAgentCanvasCursor(undefined)).toBe(0);
-    expect(parseAgentCanvasCursor("12")).toBe(12);
-    expect(() => parseAgentCanvasCursor("abc")).toThrow(AgentCanvasRequestError);
+    expect(parseAgentCanvasCursor(undefined)).toBeNull();
+    expect(parseAgentCanvasCursor("n1")).toBe("n1");
+    expect(() => parseAgentCanvasCursor("")).toThrow(AgentCanvasRequestError);
+    expect(() => parseAgentCanvasCursor("x".repeat(129))).toThrow(AgentCanvasRequestError);
     expect(() => parseAgentCanvasCursor(-1 as never)).toThrow(AgentCanvasRequestError);
     expect(parseAgentCanvasLimit(undefined)).toBe(50);
     expect(parseAgentCanvasLimit(200)).toBe(200);
@@ -123,7 +124,7 @@ describe("Agent 画布节点只读查询", () => {
       ],
       edges: [],
     });
-    const result = await searchAgentCanvasNodes(prisma, "55", { name: "存活" }, 0, 50);
+    const result = await searchAgentCanvasNodes(prisma, "55", { name: "存活" }, null, 50);
     expect(result.items.map((item) => item.id)).toEqual(["n1"]);
     const details = await readAgentCanvasNodeDetails(prisma, "55", ["n1", "n2"]);
     expect(details.nodes.map((node) => node.id)).toEqual(["n1"]);
@@ -135,7 +136,7 @@ describe("Agent 画布节点只读查询", () => {
       fakePrisma({ nodes: [{ id: "n9", type: "textNode" }], edges: [] }),
       "55",
       { nodeId: "n9" },
-      0,
+      null,
       50,
     );
     expect(result.items[0]).toEqual({
@@ -147,5 +148,34 @@ describe("Agent 画布节点只读查询", () => {
       position: { x: 0, y: 0 },
       data: {},
     });
+  });
+
+  it("旧 JSON 结构异常按空画布处理，不抛 500", async () => {
+    const prisma = {
+      project_canvas: {
+        findFirst: async () => ({
+          id: 1n,
+          project_id: 55n,
+          version: 1,
+          viewport_json: null,
+          nodes_json: "oops",
+          edges_json: { bad: true },
+          rows_authoritative: 0,
+        }),
+      },
+    } as never;
+    const result = await searchAgentCanvasNodes(prisma, "55", { name: "任意" }, null, 50);
+    expect(result.items).toEqual([]);
+    expect(result.total).toBe(0);
+  });
+
+  it("详情不返回指向已不存在节点的悬空边", async () => {
+    const result = await readAgentCanvasNodeDetails(
+      fakePrisma({ nodes: [{ id: "n1", type: "textNode", position: { x: 0, y: 0 }, data: {} }], edges: [{ id: "e1", source: "n1", target: "n404" }] }),
+      "55",
+      ["n1"],
+    );
+    expect(result.nodes.map((node) => node.id)).toEqual(["n1"]);
+    expect(result.edges).toEqual([]);
   });
 });

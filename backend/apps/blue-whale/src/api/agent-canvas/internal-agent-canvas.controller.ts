@@ -2,6 +2,7 @@ import { Body, Controller, Headers, Post } from "@nestjs/common";
 import { NewApiError } from "@lib/core";
 import { BypassTransform } from "@lib/infra/decorators/bypass-transform.decorator.js";
 import { Public } from "@lib/infra/decorators/public.decorator.js";
+import { logger } from "@lib/infra/logging/blue-whale-logger.js";
 import {
   authorizedAgentService,
   trustedAgentContext,
@@ -21,10 +22,14 @@ import { ProjectService } from "@lib/shared/project/project.service.js";
 
 function optionalString(value: unknown, field: string, maxLength: number): string | undefined {
   if (value === undefined || value === null) return undefined;
-  if (typeof value !== "string" || value.length === 0 || value.length > maxLength) {
+  if (typeof value !== "string") {
     throw new NewApiError(`${field} 无效`, 400, "invalid_request");
   }
-  return value;
+  const trimmed = value.trim();
+  if (trimmed.length === 0 || trimmed.length > maxLength) {
+    throw new NewApiError(`${field} 无效`, 400, "invalid_request");
+  }
+  return trimmed;
 }
 
 function optionalTags(value: unknown): string[] | undefined {
@@ -52,6 +57,7 @@ export class InternalAgentCanvasController {
   ) {}
 
   private async context(
+    op: "search" | "details",
     authorization: string | undefined,
     tenantId: string | undefined,
     userHeader: string | undefined,
@@ -71,6 +77,9 @@ export class InternalAgentCanvasController {
     if (!await this.project.findOwnedById(context.projectId, context.userId)) {
       throw new NewApiError("项目不可访问", 403, "project_forbidden");
     }
+    logger.info(
+      `[agent-canvas] op=${op} tenant=${context.tenantId} user=${context.userId} project=${context.projectId} session=${context.sessionId}`,
+    );
     return context;
   }
 
@@ -98,7 +107,7 @@ export class InternalAgentCanvasController {
     @Headers("x-blue-whale-session-id") sessionHeader: string | undefined,
     @Body() body: unknown,
   ) {
-    const context = await this.context(authorization, tenantId, userHeader, projectHeader, sessionHeader);
+    const context = await this.context("search", authorization, tenantId, userHeader, projectHeader, sessionHeader);
     const payload = body !== null && typeof body === "object" && !Array.isArray(body)
       ? (body as Record<string, unknown>)
       : {};
@@ -134,7 +143,7 @@ export class InternalAgentCanvasController {
     @Headers("x-blue-whale-session-id") sessionHeader: string | undefined,
     @Body() body: unknown,
   ) {
-    const context = await this.context(authorization, tenantId, userHeader, projectHeader, sessionHeader);
+    const context = await this.context("details", authorization, tenantId, userHeader, projectHeader, sessionHeader);
     const raw = body !== null && typeof body === "object" && !Array.isArray(body)
       ? (body as Record<string, unknown>).node_ids
       : undefined;

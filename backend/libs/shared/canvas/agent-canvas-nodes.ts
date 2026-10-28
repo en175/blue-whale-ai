@@ -106,10 +106,12 @@ function toEdgeView(edge: Record<string, unknown>): AgentCanvasEdgeView | null {
 
 async function readCanvas(prisma: PrismaClient, projectId: string) {
   const view = await createCanvasRepo(prisma).getByProject(projectId);
-  const nodes = (JSON.parse(view.nodes ?? "[]") as unknown[])
+  const rawNodes = JSON.parse(view.nodes ?? "[]") as unknown;
+  const rawEdges = JSON.parse(view.edges ?? "[]") as unknown;
+  const nodes = (Array.isArray(rawNodes) ? rawNodes : [])
     .map((node) => (node !== null && typeof node === "object" && !Array.isArray(node) ? toNodeView(node as Record<string, unknown>) : null))
     .filter((node): node is AgentCanvasNodeView => node !== null);
-  const edges = (JSON.parse(view.edges ?? "[]") as unknown[])
+  const edges = (Array.isArray(rawEdges) ? rawEdges : [])
     .map((edge) => (edge !== null && typeof edge === "object" && !Array.isArray(edge) ? toEdgeView(edge as Record<string, unknown>) : null))
     .filter((edge): edge is AgentCanvasEdgeView => edge !== null);
   return { nodes, edges };
@@ -137,12 +139,12 @@ function matches(node: AgentCanvasNodeView, filters: AgentCanvasNodeFilters): bo
   return true;
 }
 
-export function parseAgentCanvasCursor(raw: unknown): number {
-  if (raw === undefined || raw === null) return 0;
-  if (typeof raw !== "string" || !/^[0-9]{1,9}$/.test(raw)) {
+export function parseAgentCanvasCursor(raw: unknown): string | null {
+  if (raw === undefined || raw === null) return null;
+  if (typeof raw !== "string" || raw.length === 0 || raw.length > 128) {
     throw new AgentCanvasRequestError("invalid_request");
   }
-  return Number(raw);
+  return raw;
 }
 
 export function parseAgentCanvasLimit(raw: unknown): number {
@@ -157,19 +159,18 @@ export async function searchAgentCanvasNodes(
   prisma: PrismaClient,
   projectId: string,
   filters: AgentCanvasNodeFilters,
-  cursor: number,
+  cursor: string | null,
   limit: number,
 ): Promise<AgentCanvasSearchResult> {
   if (!hasAgentCanvasFilters(filters)) throw new AgentCanvasRequestError("filter_required");
   const { nodes } = await readCanvas(prisma, projectId);
-  const matched = nodes.filter((node) => matches(node, filters));
-  const items = matched.slice(cursor, cursor + limit);
-  const next = cursor + items.length;
-  return {
-    items,
-    next_cursor: next < matched.length ? String(next) : null,
-    total: matched.length,
-  };
+  const matched = nodes
+    .filter((node) => matches(node, filters))
+    .sort((left, right) => left.id < right.id ? -1 : left.id > right.id ? 1 : 0);
+  const afterCursor = cursor === null ? matched : matched.filter((node) => node.id > cursor);
+  const items = afterCursor.slice(0, limit);
+  const next = afterCursor.length > items.length ? items[items.length - 1]!.id : null;
+  return { items, next_cursor: next, total: matched.length };
 }
 
 export async function readAgentCanvasNodeDetails(
@@ -178,13 +179,17 @@ export async function readAgentCanvasNodeDetails(
   nodeIds: string[],
 ): Promise<AgentCanvasDetailsResult> {
   const { nodes, edges } = await readCanvas(prisma, projectId);
+  const aliveIds = new Set(nodes.map((node) => node.id));
   const byId = new Map(nodes.map((node) => [node.id, node]));
   const found = nodeIds.filter((id) => byId.has(id));
   const missing = nodeIds.filter((id) => !byId.has(id));
   const foundIds = new Set(found);
   return {
     nodes: found.map((id) => byId.get(id)!),
-    edges: edges.filter((edge) => foundIds.has(edge.source) || foundIds.has(edge.target)),
+    edges: edges.filter((edge) =>
+      aliveIds.has(edge.source)
+      && aliveIds.has(edge.target)
+      && (foundIds.has(edge.source) || foundIds.has(edge.target))),
     missing,
   };
 }
