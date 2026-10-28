@@ -1,4 +1,4 @@
-import { clearEffectiveRecoveryOwners, countEffectiveRecoveryOwners } from "./recovery-owner-test-helpers.js";
+import { clearEffectiveRecoveryOwners, countEffectiveRecoveryOwners, effectiveCanvasRow } from "./recovery-owner-test-helpers.js";
 import { PrismaMariaDb } from "@prisma/adapter-mariadb";
 import type { Pool } from "mariadb";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -168,7 +168,7 @@ describe.skipIf(!databaseUrl)("新协议保存反向脱节守护（IKJLPC）", (
   }
 
   async function canvasRow() {
-    return prisma.project_canvas.findFirst({ where: { project_id: BigInt(PROJECT_ID) } });
+    return effectiveCanvasRow(prisma, PROJECT_ID);
   }
 
   async function canvasNodeIds(): Promise<string[]> {
@@ -250,6 +250,8 @@ describe.skipIf(!databaseUrl)("新协议保存反向脱节守护（IKJLPC）", (
     await prisma.generation_canvas_submissions.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
     await prisma.project_command_receipts.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
     await prisma.project_canvas.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
+    await prisma.project_edges.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
+    await prisma.project_nodes.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
     await prisma.generation_output_slots.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
     await prisma.generation_job_logs.deleteMany({});
     await prisma.billing_cost_reservations.deleteMany({});

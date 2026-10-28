@@ -130,6 +130,8 @@ describe.skipIf(!databaseUrl)("恢复契约 v1 真库验证（IKJJQU）", () => 
     await prisma.generation_canvas_submissions.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
     await prisma.project_command_receipts.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
     await prisma.project_canvas.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
+    await prisma.project_edges.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
+    await prisma.project_nodes.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
     await prisma.generation_output_slots.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
     await prisma.generation_job_logs.deleteMany({});
     await prisma.billing_cost_reservations.deleteMany({});

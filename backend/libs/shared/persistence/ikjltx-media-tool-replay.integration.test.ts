@@ -196,6 +196,8 @@ describe.skipIf(!databaseUrl)("媒体工具已受理意图重放真库验证（I
       await prisma.generation_canvas_submissions.deleteMany({ where: { project_id: BigInt(pid) } });
       await prisma.project_command_receipts.deleteMany({ where: { project_id: BigInt(pid) } });
       await prisma.project_canvas.deleteMany({ where: { project_id: BigInt(pid) } });
+      await prisma.project_edges.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
+      await prisma.project_nodes.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
       await prisma.generation_output_slots.deleteMany({ where: { project_id: BigInt(pid) } });
       await prisma.generation_jobs.deleteMany({ where: { project_id: BigInt(pid) } });
     }

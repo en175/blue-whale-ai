@@ -208,6 +208,8 @@ describe.skipIf(!databaseUrl)("恢复保存回执丢失可安全重放（IKJKU8�
     await prisma.generation_canvas_submissions.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
     await prisma.project_command_receipts.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
     await prisma.project_canvas.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
+    await prisma.project_edges.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
+    await prisma.project_nodes.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
     await prisma.generation_output_slots.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
     await prisma.generation_job_logs.deleteMany({});
     await prisma.billing_cost_reservations.deleteMany({});

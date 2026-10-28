@@ -207,10 +207,12 @@ describe.skipIf(!databaseUrl)("多结果任务逐项恢复与删除（IKJJQY）"
     await prisma.generation_canvas_submissions.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
     await prisma.project_command_receipts.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
     await prisma.project_canvas.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
+    await prisma.project_edges.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
+    await prisma.project_nodes.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
     await prisma.generation_output_slots.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
     await prisma.generation_job_logs.deleteMany({});
     await prisma.billing_cost_reservations.deleteMany({});
-    await prisma.assets.deleteMany({ where: { user_id: { in: [BigInt(USER_ID), BigInt(USER_ID) + 1n] } } });
+    await prisma.user_assets.deleteMany({ where: { user_id: { in: [BigInt(USER_ID), BigInt(USER_ID) + 1n] } } });
     await prisma.generation_jobs.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
   });
 
@@ -1166,7 +1168,9 @@ describe.skipIf(!databaseUrl)("多结果任务逐项恢复与删除（IKJJQY）"
         ["segment:2", "8616", true, "removed", 2],
       ]);
       const document = await createCanvasRepo(prisma).getByProject(PROJECT_ID);
-      expect(JSON.parse(document.nodes ?? "null")).toEqual(JSON.parse(JSON.stringify(nodes)));
+      const byNodeId = (list: Array<{ id?: unknown }>) =>
+        [...list].sort((left, right) => String(left.id) < String(right.id) ? -1 : String(left.id) > String(right.id) ? 1 : 0);
+      expect(byNodeId(JSON.parse(document.nodes ?? "null"))).toEqual(byNodeId(JSON.parse(JSON.stringify(nodes))));
       expect(document.version).toBe(saved.version);
       const resolved = await resolveCanvasRecoveryItems(prisma, PROJECT_ID, [recoveryItemId(UUID_A, "segment:2")]);
       expect(resolved[0]!.items).toEqual([expect.objectContaining({ state: "removed", revision: 2 })]);

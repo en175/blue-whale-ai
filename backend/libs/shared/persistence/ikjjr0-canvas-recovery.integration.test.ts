@@ -223,6 +223,8 @@ describe.skipIf(!databaseUrl)("成片与重生样片恢复契约 v1 真库验证
     await prisma.generation_canvas_submissions.deleteMany({ where: { project_id: pid } });
     await prisma.project_command_receipts.deleteMany({ where: { project_id: pid } });
     await prisma.project_canvas.deleteMany({ where: { project_id: pid } });
+    await prisma.project_edges.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
+    await prisma.project_nodes.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
     await prisma.storyboard_previews.deleteMany({ where: { project_id: pid } });
     await prisma.generation_output_slots.deleteMany({ where: { project_id: pid } });
     await prisma.generation_job_logs.deleteMany({});
@@ -532,7 +534,7 @@ describe.skipIf(!databaseUrl)("成片与重生样片恢复契约 v1 真库验证
       release: async (jobId: number) => { releases.push(jobId); },
     };
 
-    const failed = await regenerateCreate(regenerateAcceptance("0a1b2c3d-0000-4000-8000-0000000000f1", "node-compensate", 0), billing)
+    const failed = await regenerateCreate(regenerateAcceptance("0a1b2c3d-0000-4000-8000-0000000000f1", "node-compensate", 7), billing)
       .catch(error => error as Error);
     expect(failed).toBeInstanceOf(Error);
 
@@ -541,7 +543,7 @@ describe.skipIf(!databaseUrl)("成片与重生样片恢复契约 v1 真库验证
 
     expect(await prisma.generation_jobs.count({ where: { project_id: BigInt(PROJECT_ID) } })).toBe(0);
     expect(await prisma.project_command_receipts.count({ where: { project_id: BigInt(PROJECT_ID) } })).toBe(0);
-    expect(await countEffectiveRecoveryOwners(prisma, BigInt(PROJECT_ID))).toBe(0);
+    expect(await prisma.project_nodes.count({ where: { project_id: BigInt(PROJECT_ID), owner_submission_id: { not: null } } })).toBe(0);
   });
 
   it("★ R5 旧承接版本抢占旧成片节点 → 409，不覆盖旧承接（AC4）", async () => {

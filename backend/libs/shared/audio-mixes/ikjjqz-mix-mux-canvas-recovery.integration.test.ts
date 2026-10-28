@@ -80,6 +80,8 @@ describe.skipIf(!databaseUrl)("混合/合成提交归属真库验证（IKJJQZ）
 
   async function seedCanvas(nodeIds: string[]) {
     await prisma.project_canvas.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
+    await prisma.project_edges.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
+    await prisma.project_nodes.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
     await prisma.project_canvas.create({
       data: {
         project_id: BigInt(PROJECT_ID),
@@ -145,7 +147,7 @@ describe.skipIf(!databaseUrl)("混合/合成提交归属真库验证（IKJJQZ）
       findOwnedSource: vi.fn(async (id: string) => ({
         project_id: BigInt(PROJECT_ID), type: id === "22" ? "video" : "audio",
         url: `https://store.test/${id}.mp4`, storage_key: `uploads/9/${id}.mp4`,
-        duration_ms: 5000,
+        duration_ms: 5000, width: 1920, height: 1080,
       })),
     };
     const storage = { uploads: { inspectObject: vi.fn(async (key: string) => ({ size: 10, publicUrl: `https://store.test/${key}` })) } };
