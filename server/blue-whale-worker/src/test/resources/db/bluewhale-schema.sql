@@ -87,6 +87,7 @@ CREATE TABLE `project_canvas` (
     `gmt_modified` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
     `version` INTEGER NOT NULL DEFAULT 0,
     `is_delete` TINYINT NOT NULL DEFAULT 0,
+    `rows_authoritative` TINYINT NOT NULL DEFAULT 0,
 
     UNIQUE INDEX `uk_project_canvas__project`(`project_id`),
     PRIMARY KEY (`id`)

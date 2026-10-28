@@ -124,6 +124,7 @@ model project_canvas {
   gmt_modified  DateTime @default(now()) @db.DateTime(0)
   version       Int      @default(0)
   is_delete     Int      @default(0) @db.TinyInt
+  rows_authoritative Int @default(0) @db.TinyInt
 }
 
 /// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments

@@ -328,6 +328,8 @@ describe("canvas edges persistence (IKDLQF)", () => {
       .mockResolvedValueOnce(null);
     const repo = createCanvasRepo({
       project_canvas: { findFirst },
+      project_nodes: { findMany: vi.fn().mockResolvedValue([]) },
+      project_edges: { findMany: vi.fn().mockResolvedValue([]) },
     } as never);
 
     const withEdges = await repo.getByProject("55");
@@ -338,5 +340,100 @@ describe("canvas edges persistence (IKDLQF)", () => {
     expect(withoutEdges.edges).toBeNull();
     const missing = await repo.getByProject("55");
     expect(missing.edges).toBeNull();
+  });
+});
+
+describe("canvas 读取行表与旧 JSON 兜底（IKQY36）", () => {
+  const canvasRow = {
+    id: 9n,
+    project_id: 55n,
+    version: 4,
+    viewport_json: { x: 1, y: 2, zoom: 1 },
+    nodes_json: null,
+    edges_json: null,
+    rows_authoritative: 1,
+  };
+
+  it("行表有数据时按行还原节点与连线", async () => {
+    const repo = createCanvasRepo({
+      project_canvas: { findFirst: vi.fn().mockResolvedValue(canvasRow) },
+      project_nodes: {
+        findMany: vi.fn().mockResolvedValue([
+          { node_id: "n1", type: "textNode", pos_x: 10, pos_y: 20, data_json: { text: "甲" } },
+        ]),
+      },
+      project_edges: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            edge_id: "e1",
+            source_node_id: "n1",
+            target_node_id: "n2",
+            ref_role: "first",
+            data_json: { color: "red" },
+          },
+        ]),
+      },
+    } as never);
+
+    const view = await repo.getByProject("55");
+    expect(view.version).toBe(4);
+    expect(JSON.parse(view.nodes!)).toEqual([
+      { id: "n1", type: "textNode", position: { x: 10, y: 20 }, data: { text: "甲" } },
+    ]);
+    expect(JSON.parse(view.edges!)).toEqual([
+      {
+        id: "e1",
+        source: "n1",
+        target: "n2",
+        data: { color: "red", refRole: "first" },
+      },
+    ]);
+  });
+
+  it("行表为空时回退旧 JSON，并把老类型映射为新类型", async () => {
+    const repo = createCanvasRepo({
+      project_canvas: {
+        findFirst: vi.fn().mockResolvedValue({
+          ...canvasRow,
+          rows_authoritative: 0,
+          nodes_json: [
+            { id: "t1", type: "text", data: { text: "旧文本" } },
+            { id: "r1", type: "reference", data: { assetId: "7" } },
+          ],
+          edges_json: [{ id: "e1", source: "t1", target: "r1" }],
+        }),
+      },
+      project_nodes: { findMany: vi.fn().mockResolvedValue([]) },
+      project_edges: { findMany: vi.fn().mockResolvedValue([]) },
+    } as never);
+
+    const view = await repo.getByProject("55");
+    expect(JSON.parse(view.nodes!)).toEqual([
+      { id: "t1", type: "text", data: { text: "旧文本" } },
+      { id: "r1", type: "reference", data: { assetId: "7" } },
+    ]);
+    expect(JSON.parse(view.edges!)).toEqual([{ id: "e1", source: "t1", target: "r1" }]);
+  });
+
+  it("空画布返回空数组，与缺失项目可区分", async () => {
+    const repo = createCanvasRepo({
+      project_canvas: { findFirst: vi.fn().mockResolvedValue({ ...canvasRow, version: 0 }) },
+      project_nodes: { findMany: vi.fn().mockResolvedValue([]) },
+      project_edges: { findMany: vi.fn().mockResolvedValue([]) },
+    } as never);
+
+    const empty = await repo.getByProject("55");
+    expect(empty).toMatchObject({ id: "9", version: 0, nodes: "[]", edges: "[]" });
+
+    const missingScene = createCanvasRepo({
+      project_canvas: { findFirst: vi.fn().mockResolvedValue(null) },
+      project_nodes: { findMany: vi.fn().mockResolvedValue([]) },
+      project_edges: { findMany: vi.fn().mockResolvedValue([]) },
+    } as never);
+    expect(await missingScene.getByProject("55")).toMatchObject({
+      id: null,
+      version: null,
+      nodes: null,
+    });
   });
 });

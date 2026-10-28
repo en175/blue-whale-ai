@@ -192,6 +192,12 @@ export class CanvasService {
   }
 
   async migrateLegacyCards(projectId: string): Promise<{ canvas: CanvasView; report: LegacyMigrationReport }> {
+    if (await this.repo.isRowsAuthoritative(projectId)) {
+      return {
+        canvas: await this.repo.getByProject(projectId),
+        report: { migrated: [], failed: [] },
+      };
+    }
     for (let attempt = 0; attempt < 5; attempt += 1) {
       const canvas = await this.repo.getByProject(projectId);
       let nodes: CanvasNodeLike[];

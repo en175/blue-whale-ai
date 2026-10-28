@@ -30,10 +30,14 @@ function buildService(current: CanvasRow | null = null) {
       findFirst: vi.fn().mockResolvedValue(current),
       upsert: vi.fn(),
     },
+    project_nodes: { findMany: vi.fn().mockResolvedValue([]) },
+    project_edges: { findMany: vi.fn().mockResolvedValue([]) },
     generation_output_slots: { updateMany: vi.fn() },
   };
   const client = {
     project_canvas: { findFirst: vi.fn().mockResolvedValue(current) },
+    project_nodes: { findMany: vi.fn().mockResolvedValue([]) },
+    project_edges: { findMany: vi.fn().mockResolvedValue([]) },
     generation_canvas_submissions: { findFirst: vi.fn().mockResolvedValue(null), findMany: vi.fn().mockResolvedValue([]) },
     generation_canvas_node_owners: { findMany: vi.fn().mockResolvedValue([]) },
     $transaction: vi.fn(
