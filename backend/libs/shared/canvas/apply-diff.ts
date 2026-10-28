@@ -61,7 +61,7 @@ function sortValue(value: unknown): unknown {
   return value;
 }
 
-function coordinate(value: unknown): number | null {
+export function coordinate(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? Math.round(value) : null;
 }
 

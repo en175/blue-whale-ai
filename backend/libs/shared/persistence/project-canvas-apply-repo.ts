@@ -13,6 +13,7 @@ import {
   type CanvasNodeRow,
 } from "../canvas/apply-diff.js";
 import { linkPromptMaterials, markOutputSlotsPlaced } from "./canvas-repo.js";
+import { importCanvasJsonToRows } from "./canvas-json-import.js";
 import { setJobExtras } from "./generation-jobs-extra-repo.js";
 
 export interface CanvasApplyMaterials {
@@ -104,13 +105,32 @@ async function markAudioMixScoped(
 
 async function lockCanvas(tx: Tx, projectId: bigint) {
   await tx.$queryRaw`SELECT id FROM project WHERE id = ${projectId} FOR UPDATE`;
-  const rows = await tx.$queryRaw<Array<{ id: bigint; version: number; viewport_json: Prisma.JsonValue | null }>>`
-    SELECT id, version, viewport_json FROM project_canvas WHERE project_id = ${projectId} FOR UPDATE
+  const locked = await tx.$queryRaw<Array<{ id: bigint }>>`
+    SELECT id FROM project_canvas WHERE project_id = ${projectId} FOR UPDATE
   `;
-  if (rows.length > 0) return rows[0]!;
+  if (locked.length > 0) {
+    return tx.project_canvas.findUniqueOrThrow({
+      where: { project_id: projectId },
+      select: {
+        id: true,
+        version: true,
+        viewport_json: true,
+        nodes_json: true,
+        edges_json: true,
+        rows_authoritative: true,
+      },
+    });
+  }
   return tx.project_canvas.create({
     data: { project_id: projectId, version: 0 },
-    select: { id: true, version: true, viewport_json: true },
+    select: {
+      id: true,
+      version: true,
+      viewport_json: true,
+      nodes_json: true,
+      edges_json: true,
+      rows_authoritative: true,
+    },
   });
 }
 
@@ -187,6 +207,9 @@ export async function applyCanvasChanges(
 
   return prisma.$transaction(async (tx) => {
     const canvas = await lockCanvas(tx, pid);
+    if (canvas.rows_authoritative !== 1) {
+      await importCanvasJsonToRows(tx, pid, canvas);
+    }
 
     const existingNodes = await tx.project_nodes.findMany({
       where: { project_id: pid, node_id: { in: [...nodeIds, ...deleteNodeIds] } },
