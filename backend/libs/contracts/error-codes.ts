@@ -101,6 +101,9 @@ export const ACCOUNT_ERROR_BIND_SUCCEEDED_LOGIN_FAILED = "bind_succeeded_login_f
 export const ACCOUNT_ERROR_CAPTCHA_REQUIRED = "captcha_required";
 export const ACCOUNT_ERROR_CAPTCHA_INVALID = "captcha_invalid";
 export const ACCOUNT_ERROR_CAPTCHA_EXPIRED = "captcha_expired";
+export const ACCOUNT_ERROR_OPERATION_NOT_FOUND = "operation_not_found";
+export const ACCOUNT_ERROR_OPERATION_FORBIDDEN = "operation_forbidden";
+export const ACCOUNT_ERROR_SMS_SEND_FAILED = "sms_send_failed";
 
 export const GENERATION_ERROR_UNKNOWN_NUMERIC_CODE = 1000;
 
@@ -199,6 +202,9 @@ export const ACCOUNT_ERROR_NUMERIC_CODES: Record<string, number> = {
   [ACCOUNT_ERROR_CAPTCHA_REQUIRED]: 1127,
   [ACCOUNT_ERROR_CAPTCHA_INVALID]: 1128,
   [ACCOUNT_ERROR_CAPTCHA_EXPIRED]: 1129,
+  [ACCOUNT_ERROR_OPERATION_NOT_FOUND]: 1115,
+  [ACCOUNT_ERROR_OPERATION_FORBIDDEN]: 1116,
+  [ACCOUNT_ERROR_SMS_SEND_FAILED]: 1130,
 };
 
 export function accountErrorToNumeric(code: string): number {
@@ -428,6 +434,7 @@ export const ERROR_CODES: Record<number, string> = {
   1127: "请先完成验证码验证",
   1128: "验证码错误，已换新图，请重新输入",
   1129: "验证已超时，请换一张后重试",
+  1130: "短信发送失败，请重试",
   100000: "缺少幂等键",
   100100: "资源不存在",
   100202: "资源不可用",

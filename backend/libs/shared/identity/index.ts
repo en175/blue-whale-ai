@@ -19,6 +19,7 @@ export {
   type LocalLoginResult,
 } from "./identity.service.js";
 export { PhoneActionService, type PhoneActionKind } from "./phone-action.service.js";
+export { operationRef, parseOperationDetail } from "./operation-ref.js";
 export { PasswordPolicyError } from "./password.js";
 
 export { LastSuperAdminError } from "@lib/core/identity/roles.js";

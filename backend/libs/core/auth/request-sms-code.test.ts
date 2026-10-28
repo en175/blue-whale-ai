@@ -48,7 +48,10 @@ describe("requestSmsCode", () => {
           generateCode: () => "123456",
         },
       ),
-    ).rejects.toThrow("sms down");
+    ).rejects.toMatchObject({
+      name: "SmsSendFailedError",
+      failure: expect.objectContaining({ message: "sms down" }),
+    });
     expect(consumeCode).toHaveBeenCalledWith("9");
     expect(invalidateOtherCodes).not.toHaveBeenCalled();
   });

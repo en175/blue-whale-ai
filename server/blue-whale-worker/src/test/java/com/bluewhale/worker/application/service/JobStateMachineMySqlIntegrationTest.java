@@ -1379,7 +1379,8 @@ class JobStateMachineMySqlIntegrationTest {
                 LocalDateTime.now().minusSeconds(10), 99L,
                 "{\"prompt\":\"一只猫在跑步\","
                         + "\"model_id\":\"seedance-2\",\"duration\":5.0,"
-                        + "\"resolution\":\"720p\",\"aspect_ratio\":\"16:9\"}");
+                        + "\"resolution\":\"720p\",\"aspect_ratio\":\"16:9\","
+                        + "\"output_width\":1280,\"output_height\":720}");
         jdbc.update("UPDATE generation_jobs SET retry_of_job_id=?, "
                 + "gmt_create=DATE_SUB(NOW(), INTERVAL 119 MINUTE) WHERE id=?", parentId, retryId);
         String retry = String.valueOf(retryId);

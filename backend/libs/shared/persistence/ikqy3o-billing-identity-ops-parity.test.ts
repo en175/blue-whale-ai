@@ -65,6 +65,8 @@ const JAVA_SCHEMA_RENAMED = [...RENAMED].filter(
   ([from]) => from !== "recharge_orders" && from !== "system_settings",
 );
 
+const SUPERSEDED_TABLES = new Set(["admin_operation_logs"]);
+
 const BACKEND_ROOT = new URL("../../..", import.meta.url).pathname;
 const REPO_ROOT = new URL("../../../..", import.meta.url).pathname;
 
@@ -137,6 +139,7 @@ describe("IKQY3O 三轨迁移（计费 / 身份 / 运维 / 命令回执表改名
 
   it("Prisma 模型只剩新表名", () => {
     for (const [from, to] of RENAMED) {
+      if (SUPERSEDED_TABLES.has(from)) continue;
       expect(schemaPrisma).toContain("model " + to + " {");
       expect(schemaPrisma).not.toContain("model " + from + " {");
     }
@@ -148,6 +151,7 @@ describe("IKQY3O 三轨迁移（计费 / 身份 / 运维 / 命令回执表改名
 
   it("Java 测试 schema 同步新表名", () => {
     for (const [from, to] of JAVA_SCHEMA_RENAMED) {
+      if (SUPERSEDED_TABLES.has(from)) continue;
       expect(javaSchemaSql).not.toContain("CREATE TABLE `" + from + "`");
       expect(javaSchemaSql).toContain("CREATE TABLE `" + to + "`");
     }

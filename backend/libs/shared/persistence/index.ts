@@ -278,6 +278,10 @@ export {
 } from "./topup-tier-repo.js";
 export {
   createOperationLogRepo,
+  OPERATION_STATUS_DONE,
+  OPERATION_STATUS_PENDING,
+  OPERATION_STATUS_SUCCEEDED,
+  OPERATION_STATUS_FAILED,
   type OperationLogRepo,
   type OperationLogView,
   type OperationLogFilter,

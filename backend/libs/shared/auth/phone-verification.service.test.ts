@@ -93,7 +93,10 @@ describe("PhoneVerificationService.issue", () => {
     sms.send.mockRejectedValue(new Error("sms down"));
     await expect(
       service().issue({ phone: "13800001234", purpose: "login", ip: "1.2.3.4" }),
-    ).rejects.toThrow("sms down");
+    ).rejects.toMatchObject({
+      name: "SmsSendFailedError",
+      failure: expect.objectContaining({ message: "sms down" }),
+    });
     expect(repo.consumeCode).toHaveBeenCalledWith("9");
     expect(repo.invalidateOtherCodes).not.toHaveBeenCalled();
   });

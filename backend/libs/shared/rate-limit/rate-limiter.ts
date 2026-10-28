@@ -13,6 +13,7 @@ export type RateLimitTakeInput = {
 export type RateLimitTakeResult = {
   allowed: boolean;
   retryAfter?: number;
+  member?: string;
 };
 
 const SLIDING_WINDOW = `
@@ -70,9 +71,16 @@ export class RateLimiter implements OnModuleDestroy {
           retryAfter: Math.max(1, Math.ceil(Number(retryMs) / 1000)),
         };
       }
-      return { allowed: true };
+      return { allowed: true, member };
     } catch {
       return { allowed: true };
+    }
+  }
+
+  async refund(scope: string, key: string, member: string): Promise<void> {
+    try {
+      await this.redis.zrem(this.countKey(scope, key), member);
+    } catch {
     }
   }
 

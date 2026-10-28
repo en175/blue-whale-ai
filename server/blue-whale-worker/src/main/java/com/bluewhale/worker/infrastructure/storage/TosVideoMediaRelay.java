@@ -2,6 +2,8 @@ package com.bluewhale.worker.infrastructure.storage;
 
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.VideoProviderError;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.volcengine.tos.TOSV2;
 import com.volcengine.tos.TOSV2ClientBuilder;
 import com.volcengine.tos.comm.common.ACLType;
@@ -55,6 +57,14 @@ public class TosVideoMediaRelay {
     private static final Duration STREAM_ERROR_BODY_TIMEOUT = Duration.ofSeconds(60);
 
     static final String TASK_DEADLINE_ABORT_MESSAGE = "任务执行截止时间已到，中止结果转存";
+
+    private static final Duration PROBE_TIMEOUT = Duration.ofSeconds(10);
+
+    private static final String MEDIA_INFO_PROCESS = "video/info";
+
+    private static final int MAX_MEDIA_INFO_BYTES = 256 * 1024;
+
+    private static final ObjectMapper JSON = new ObjectMapper();
 
     private static final ScheduledExecutorService WATCHDOG_SCHEDULER =
             Executors.newSingleThreadScheduledExecutor(r -> {
@@ -314,6 +324,84 @@ public class TosVideoMediaRelay {
         }
     }
 
+    public ProbedMediaInfo probeMediaInfo(String storageKey) {
+        if (isBlank(storageKey)) return null;
+        try {
+            var signed = client.preSignedURL(new PreSignedURLInput()
+                    .setHttpMethod("GET")
+                    .setBucket(bucket)
+                    .setKey(storageKey)
+                    .setExpires(60)
+                    .setQuery(Map.of("x-tos-process", MEDIA_INFO_PROCESS)));
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(signed.getSignedUrl()))
+                    .timeout(PROBE_TIMEOUT)
+                    .GET()
+                    .build();
+            HttpResponse<InputStream> response = httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
+            try (InputStream body = response.body()) {
+                if (response.statusCode() >= 400) {
+                    log.warn("TOS media info 探测失败 storageKey={} status={}", storageKey, response.statusCode());
+                    return null;
+                }
+                byte[] bytes = body.readNBytes(MAX_MEDIA_INFO_BYTES + 1);
+                if (bytes.length > MAX_MEDIA_INFO_BYTES) {
+                    log.warn("TOS media info 响应超限，按探测失败处理 storageKey={}", storageKey);
+                    return null;
+                }
+                return parseMediaInfo(new String(bytes, java.nio.charset.StandardCharsets.UTF_8));
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            log.warn("TOS media info 探测被中断 storageKey={}", storageKey);
+            return null;
+        } catch (Exception e) {
+            log.warn("TOS media info 探测异常 storageKey={} err={}", storageKey, e.getMessage());
+            return null;
+        }
+    }
+
+    static ProbedMediaInfo parseMediaInfo(String body) {
+        try {
+            JsonNode root = JSON.readTree(body);
+            Double durationSec = positiveDouble(root.path("format").path("duration"));
+            JsonNode streams = root.path("streams");
+            Integer width = null;
+            Integer height = null;
+            if (streams.isArray()) {
+                for (JsonNode stream : streams) {
+                    if (!"video".equals(stream.path("codec_type").asText())) continue;
+                    if (stream.path("disposition").path("attached_pic").asInt(0) == 1) continue;
+                    if (width == null) {
+                        int streamWidth = stream.path("width").asInt(0);
+                        int streamHeight = stream.path("height").asInt(0);
+                        if (streamWidth > 0 && streamHeight > 0) {
+                            width = streamWidth;
+                            height = streamHeight;
+                        }
+                    }
+                    if (durationSec == null) durationSec = positiveDouble(stream.path("duration"));
+                    if (width != null && durationSec != null) break;
+                }
+            }
+            if (width == null && height == null && durationSec == null) return null;
+            return new ProbedMediaInfo(width, height, durationSec);
+        } catch (Exception e) {
+            log.warn("TOS media info 解析失败 err={}", e.getMessage());
+        }
+        return null;
+    }
+
+    private static Double positiveDouble(JsonNode node) {
+        if (node == null || node.isMissingNode() || node.isNull()) return null;
+        try {
+            double value = node.isNumber() ? node.asDouble() : Double.parseDouble(node.asText());
+            return Double.isFinite(value) && value > 0 ? value : null;
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
     static String videoExtension(String mime) {
         if ("video/webm".equals(mime)) return "webm";
         if ("video/quicktime".equals(mime)) return "mov";
@@ -321,6 +409,8 @@ public class TosVideoMediaRelay {
     }
 
     public record StoredVideo(String url, String storageKey, String mime, Long size, String md5) {}
+
+    public record ProbedMediaInfo(Integer width, Integer height, Double durationSec) {}
 
     public static final class TransferAbortHandle {
         private volatile Runnable action;

@@ -96,7 +96,7 @@ describe("enforceRateLimit", () => {
       limiter: { take } as never,
       allowlist: { isAllowed: () => false } as never,
     });
-    expect(decision).toEqual({ allowed: true });
+    expect(decision).toMatchObject({ allowed: true });
     expect(take).not.toHaveBeenCalled();
   });
 });

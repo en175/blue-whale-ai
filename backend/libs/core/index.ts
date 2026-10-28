@@ -58,12 +58,13 @@ export {
 } from "./jwt.js";
 export {
   requestSmsCode,
+  SmsSendFailedError,
   type RequestSmsCodeInput,
   type RequestSmsCodeDeps,
   type RequestSmsCodeResult,
   type VerificationCodeRecord,
 } from "./auth/request-sms-code.js";
-export { PHONE_RE, isValidPhone, maskPhone } from "./auth/phone.js";
+export { PHONE_RE, isValidPhone, maskIdentifier, maskPhone } from "./auth/phone.js";
 export { isTelecomPhone } from "./auth/carrier.js";
 export {
   CAPTCHA_TTL_MS,

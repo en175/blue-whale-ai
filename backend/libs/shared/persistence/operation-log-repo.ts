@@ -2,6 +2,11 @@ import { wallClockRfc3339 } from "@lib/core";
 import type { PrismaClient } from "@prisma/client";
 
 
+export const OPERATION_STATUS_DONE = 0;
+export const OPERATION_STATUS_PENDING = 1;
+export const OPERATION_STATUS_SUCCEEDED = 2;
+export const OPERATION_STATUS_FAILED = 3;
+
 export interface OperationLogView {
   id: string;
   category: string;
@@ -12,6 +17,8 @@ export interface OperationLogView {
   operator: string;
   operatorId: string | null;
   ipAddress: string | null;
+  status: number;
+  ref: string | null;
   createdAt: string;
 }
 
@@ -32,11 +39,18 @@ export interface CreateOperationLogInput {
   operator?: string;
   operatorId?: string | null;
   ipAddress?: string | null;
+  status?: number;
+  ref?: string | null;
 }
 
 export interface OperationLogRepo {
   list(filter?: OperationLogFilter): Promise<OperationLogView[]>;
   create(input: CreateOperationLogInput): Promise<OperationLogView>;
+  findByRef(ref: string, targetUserId?: string): Promise<OperationLogView | null>;
+  finishByRef(
+    ref: string,
+    input: { status: number; detail?: string },
+  ): Promise<boolean>;
 }
 
 
@@ -52,6 +66,8 @@ function toView(row: any): OperationLogView {
     operator: row.operator,
     operatorId: row.operator_id != null ? row.operator_id.toString() : null,
     ipAddress: row.ip_address,
+    status: row.status ?? OPERATION_STATUS_DONE,
+    ref: row.ref ?? null,
     createdAt: wallClockRfc3339(new Date(row.gmt_create)),
   };
 }
@@ -78,7 +94,7 @@ export function createOperationLogRepo(prisma: PrismaClient): OperationLogRepo {
           { operator: { contains: q } },
         ];
       }
-      const rows = await prisma.bw_admin_logs.findMany({
+      const rows = await prisma.bw_operation_logs.findMany({
         where,
         orderBy: { gmt_create: "desc" },
         take: filter.limit ?? 500,
@@ -87,7 +103,7 @@ export function createOperationLogRepo(prisma: PrismaClient): OperationLogRepo {
     },
 
     async create(input) {
-      const row = await prisma.bw_admin_logs.create({
+      const row = await prisma.bw_operation_logs.create({
         data: {
           category: input.category,
           action: input.action,
@@ -99,9 +115,36 @@ export function createOperationLogRepo(prisma: PrismaClient): OperationLogRepo {
           operator_id:
             input.operatorId != null ? BigInt(input.operatorId) : null,
           ip_address: input.ipAddress ?? null,
+          status: input.status ?? OPERATION_STATUS_DONE,
+          ref: input.ref ?? null,
         },
       });
       return toView(row);
+    },
+
+    async findByRef(ref, targetUserId) {
+      const row = await prisma.bw_operation_logs.findFirst({
+        where: {
+          ref,
+          is_delete: 0,
+          ...(targetUserId != null
+            ? { target_user_id: BigInt(targetUserId) }
+            : {}),
+        },
+      });
+      return row ? toView(row) : null;
+    },
+
+    async finishByRef(ref, input) {
+      const result = await prisma.bw_operation_logs.updateMany({
+        where: { ref, is_delete: 0 },
+        data: {
+          status: input.status,
+          ...(input.detail !== undefined ? { detail: input.detail } : {}),
+          gmt_modified: new Date(),
+        },
+      });
+      return result.count > 0;
     },
   };
 }
