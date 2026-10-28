@@ -20,7 +20,6 @@ describe("sceneCardChargeInput（IKR60U）", () => {
       parameters: PARAMETERS,
       prompt: "人物走过街角",
       references: [],
-      defaultDuration: 8,
     });
 
     expect(input).toEqual({
@@ -41,14 +40,13 @@ describe("sceneCardChargeInput（IKR60U）", () => {
     });
   });
 
-  it("duration 为空时回落能力行默认时长", () => {
+  it("duration 为空时不写入时长（由计费侧拒绝而不是按默认值扣）", () => {
     const input = sceneCardChargeInput({
       parameters: { ...PARAMETERS, duration: null } as never,
       prompt: "x",
       references: [],
-      defaultDuration: 8,
     });
-    expect(input.duration).toBe(8);
+    expect("duration" in input).toBe(false);
   });
 
   it("视频参考带时长 → 进入 video 档与 reference_seconds", () => {
@@ -58,7 +56,6 @@ describe("sceneCardChargeInput（IKR60U）", () => {
       references: [
         { role: "reference", type: "video", asset_id: "9001", duration: 4.4 },
       ],
-      defaultDuration: null,
     });
 
     const specs = extractSpecs(input, "video");

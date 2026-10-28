@@ -329,7 +329,8 @@ export function canonicalSizeValue(
   const match = supported.find(
     (s) => (s.api_value ?? "").toLowerCase() === folded || (s.id ?? "").toLowerCase() === folded,
   );
-  return match?.api_value ?? match?.id ?? size;
+  const canonical = match ? match.api_value || match.id : undefined;
+  return canonical !== undefined && canonical.length > 0 ? canonical : size;
 }
 
 

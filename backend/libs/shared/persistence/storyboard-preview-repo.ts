@@ -94,9 +94,8 @@ function checkImageCapabilityLimit(
 async function createStoryboardPreviewInTransaction(
   tx: Prisma.TransactionClient,
   input: CreateStoryboardPreviewInput,
-  held: { jobId: number | null },
+  onCharged: (jobId: number) => void,
 ): Promise<CreateStoryboardPreviewResult> {
-  held.jobId = null;
   const projectId = BigInt(input.projectId);
   const userId = BigInt(input.userId);
   const sceneCardId = BigInt(input.sceneCardId);
@@ -248,7 +247,7 @@ async function createStoryboardPreviewInTransaction(
             },
             ...(ruleSnapshot !== undefined ? { ruleSnapshot } : {}),
           });
-          held.jobId = jobId;
+          onCharged(jobId);
         },
         release: (jobId, reason) =>
           input.billing!.release({ userId: input.userId, jobId, reason }),
@@ -417,19 +416,27 @@ export function createStoryboardPreviewRepo(
 ): StoryboardPreviewRepo {
   return {
     createStoryboardPreview(input) {
-      const held: { jobId: number | null } = { jobId: null };
-      return transactionWithUniqueRetry(prisma, (tx) =>
-        createStoryboardPreviewInTransaction(tx, input, held),
-      ).catch(async (error: unknown) => {
-        await releaseUnlessJobCommitted({
-          release: input.billing
-            ? (jobId, reason) =>
-                input.billing!.release({ userId: input.userId, jobId, reason })
-            : undefined,
-          jobId: held.jobId,
-          probe: jobExistenceProbe(prisma),
-          reason: error instanceof Error ? error.message : String(error),
-        });
+      const charged: number[] = [];
+      const releaseCharged = async () => {
+        for (const jobId of charged.splice(0)) {
+          await releaseUnlessJobCommitted({
+            release: input.billing
+              ? (id, reason) =>
+                  input.billing!.release({ userId: input.userId, jobId: id, reason })
+              : undefined,
+            jobId,
+            probe: jobExistenceProbe(prisma),
+            reason: "事务重试或失败前释放上一笔扣款",
+          });
+        }
+      };
+      return transactionWithUniqueRetry(prisma, async (tx) => {
+        await releaseCharged();
+        return createStoryboardPreviewInTransaction(tx, input, (jobId) =>
+          charged.push(jobId),
+        );
+      }).catch(async (error: unknown) => {
+        await releaseCharged();
         throw error;
       });
     },

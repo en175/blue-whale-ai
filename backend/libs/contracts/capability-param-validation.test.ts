@@ -699,4 +699,10 @@ describe("canonicalSizeValue（IKR4OO 大小写归一）", () => {
     expect(canonicalSizeValue("8k", SIZES)).toBe("8k");
     expect(canonicalSizeValue("4k", [])).toBe("4k");
   });
+
+  it("只有 id 没有 api_value 的档位不返回空串（空串会跳过尺寸校验）", () => {
+    const idOnly = [{ id: "2k", label: "2K" } as never];
+    expect(canonicalSizeValue("2K", idOnly)).toBe("2k");
+    expect(canonicalSizeValue("2k", idOnly)).toBe("2k");
+  });
 });

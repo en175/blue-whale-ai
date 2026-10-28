@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import { RESOURCE_NOT_FOUND_CODE, fail, frozenVideoModeOf, ok, type ResultEnvelope } from "@lib/contracts";
+import { RESOURCE_NOT_FOUND_CODE, canonicalSizeValue, fail, frozenVideoModeOf, ok, type ResultEnvelope } from "@lib/contracts";
 import {
   DEFAULT_IMAGE_REFERENCE_MAX,
   type AssetOwnershipOps,
@@ -73,7 +73,7 @@ export async function handleQuoteGenerationJob(
 
   const type = body.type as GenerationType;
   const params = body.parameters as
-    | { model_id?: unknown; sample_mode?: unknown; resolution?: unknown }
+    | { model_id?: unknown; sample_mode?: unknown; resolution?: unknown; size?: unknown }
     | undefined;
   const modelId = typeof params?.model_id === "string" ? params.model_id : null;
   if (modelId === null) return ok(EMPTY_QUOTE);
@@ -81,6 +81,18 @@ export async function handleQuoteGenerationJob(
   const whitelist = await deps.models.listEnabledByType(type);
   const capability = whitelist.find((m) => m.model_id === modelId);
   if (!capability) return ok(EMPTY_QUOTE);
+
+  const supportedSizes = Array.isArray(capability.supported_sizes)
+    ? capability.supported_sizes
+    : [];
+  if (params !== undefined) {
+    if (typeof params.resolution === "string") {
+      params.resolution = canonicalSizeValue(params.resolution, supportedSizes);
+    }
+    if (typeof params.size === "string") {
+      params.size = canonicalSizeValue(params.size, supportedSizes);
+    }
+  }
 
   const ruling = ruleSampleMode({
     type,

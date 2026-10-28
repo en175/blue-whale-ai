@@ -262,7 +262,8 @@ describe("createMediaToolJobWithRecovery：受理主体编排", () => {
     expect(writeRowsMock).not.toHaveBeenCalled();
   });
 
-  it("keeps the legacy client_token idempotency shape without recovery", async () => {    const prisma = makePrisma();
+  it("keeps the legacy client_token idempotency shape without recovery", async () => {
+    const prisma = makePrisma();
     readIdemMock.mockResolvedValue(null);
     const createJob = vi.fn().mockResolvedValue({ jobId: "401", status: "queued" });
     const out = await createMediaToolJobWithRecovery(prisma, null, createJob, {

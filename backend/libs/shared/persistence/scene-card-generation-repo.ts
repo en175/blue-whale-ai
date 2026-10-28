@@ -290,9 +290,8 @@ export function sceneCardChargeInput(args: {
   parameters: FrozenGenerationParameters;
   prompt: string;
   references: SceneCardChargeReference[];
-  defaultDuration: number | null;
 }): Record<string, unknown> {
-  const duration = args.parameters.duration ?? args.defaultDuration;
+  const duration = args.parameters.duration;
   return {
     model_id: args.parameters.model_id,
     resolution: args.parameters.size,
@@ -393,9 +392,8 @@ async function resolveReferenceAssetsToFlat(
 async function regenerateSceneCardInTransaction(
   tx: Prisma.TransactionClient,
   input: RegenerateSceneCardInput,
-  held: { jobId: number | null },
+  onCharged: (jobId: number) => void,
 ): Promise<RegenerateSceneCardResult> {
-  held.jobId = null;
   const projectId = BigInt(input.projectId);
   const userId = BigInt(input.userId);
   const sceneCardId = BigInt(input.sceneCardId);
@@ -546,6 +544,16 @@ async function regenerateSceneCardInTransaction(
 
   const { flat: flatReferences, chargeReferences } =
     await resolveReferenceAssetsToFlat(tx, input.reference_assets);
+  if (
+    chargeReferences.some(
+      (ref) => ref.type === "video" && ref.duration === undefined,
+    )
+  ) {
+    return {
+      kind: "validation_failed",
+      reason: "参考视频时长读取失败，请稍后重试或更换素材",
+    };
+  }
 
   const referenceCountReason = await checkReferenceCountLimits(
     tx,
@@ -604,11 +612,10 @@ async function regenerateSceneCardInTransaction(
               parameters: input.parameters,
               prompt: sceneCard.content_markdown,
               references: chargeReferences,
-              defaultDuration: capability.default_duration,
             }),
             ...(ruleSnapshot !== undefined ? { ruleSnapshot } : {}),
           });
-          held.jobId = jobId;
+          onCharged(jobId);
         },
         release: (jobId, reason) =>
           input.billing!.release({ userId: input.userId, jobId, reason }),
@@ -678,21 +685,31 @@ export function createSceneCardGenerationRepo(
 ): SceneCardGenerationRepo {
   return {
     regenerateSceneCard(input) {
-      const held: { jobId: number | null } = { jobId: null };
+      const charged: number[] = [];
+      const releaseCharged = async () => {
+        for (const jobId of charged.splice(0)) {
+          await releaseUnlessJobCommitted({
+            release: input.billing
+              ? (id, reason) =>
+                  input.billing!.release({ userId: input.userId, jobId: id, reason })
+              : undefined,
+            jobId,
+            probe: jobExistenceProbe(prisma),
+            reason: "事务重试或失败前释放上一笔扣款",
+          });
+        }
+      };
       return transactionWithUniqueRetry(
         prisma,
-        (tx) => regenerateSceneCardInTransaction(tx, input, held),
+        async (tx) => {
+          await releaseCharged();
+          return regenerateSceneCardInTransaction(tx, input, (jobId) =>
+            charged.push(jobId),
+          );
+        },
         { maxWait: 10_000, timeout: 30_000 },
       ).catch(async (error: unknown) => {
-        await releaseUnlessJobCommitted({
-          release: input.billing
-            ? (jobId, reason) =>
-                input.billing!.release({ userId: input.userId, jobId, reason })
-            : undefined,
-          jobId: held.jobId,
-          probe: jobExistenceProbe(prisma),
-          reason: error instanceof Error ? error.message : String(error),
-        });
+        await releaseCharged();
         throw error;
       });
     },

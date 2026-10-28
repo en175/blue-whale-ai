@@ -2,6 +2,83 @@ import type { PrismaClient } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createStoryboardPreviewRepo } from "./storyboard-preview-repo.js";
+import {
+  buildTx,
+  CAPABILITY_SNAPSHOT,
+} from "./scene-card-generation-repo.test-helpers.js";
+
+describe("StoryboardPreviewRepo.createStoryboardPreview 计费（IKR60U）", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("建单时按图片口径扣费一次，输出张数带入规格", async () => {
+    const tx = buildTx({
+      catalog_models: {
+        findUnique: vi.fn().mockResolvedValue({
+          version: 3,
+          enabled: true,
+          is_delete: false,
+          supported_sizes: [
+            { id: "1280x720", label: "720p", api_value: "1280x720" },
+          ],
+          supported_aspect_ratios: ["16:9"],
+          supported_durations: { min: 5, max: 5, step: 1 },
+          supported_formats: ["mp4"],
+          default_size: "1280x720",
+          default_format: null,
+          default_aspect_ratio: "16:9",
+          default_duration: 5,
+          features: { quantity_max: 2 },
+        }),
+      },
+      storyboard_previews: {
+        create: vi.fn().mockResolvedValue({ id: 8001n }),
+      },
+    });
+    const transaction = vi.fn(
+      async (callback: (tx: unknown) => Promise<unknown>) => callback(tx),
+    );
+    const prisma = { $transaction: transaction } as unknown as PrismaClient;
+    const repo = createStoryboardPreviewRepo(prisma);
+    const billing = {
+      charge: vi.fn().mockResolvedValue(undefined),
+      release: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const result = await repo.createStoryboardPreview({
+      userId: "100",
+      projectId: "42",
+      sceneCardId: "5001",
+      idempotencyKey: "cmd-1",
+      requestHash: "a".repeat(64),
+      base_scene_card_version: 1,
+      parameters: {
+        model_id: "doubao-seedance-1.0",
+        size: "1280x720",
+        aspect_ratio: "16:9",
+        count: 2,
+      },
+      capability_snapshot_version: CAPABILITY_SNAPSHOT,
+      billing,
+    });
+
+    expect(result.kind).toBe("applied");
+    expect(billing.charge).toHaveBeenCalledTimes(1);
+    expect(billing.charge.mock.calls[0]![0]).toMatchObject({
+      userId: "100",
+      jobId: 9001,
+      modelId: "doubao-seedance-1.0",
+      taskType: "image",
+      input: {
+        size: "1280x720",
+        aspect_ratio: "16:9",
+        expected_output_count: 2,
+      },
+    });
+    expect(billing.release).not.toHaveBeenCalled();
+  });
+});
 
 function buildPrisma(overrides: Record<string, Record<string, ReturnType<typeof vi.fn>>>) {
   return {
