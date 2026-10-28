@@ -74,6 +74,7 @@ import { Reflector } from "@nestjs/core";
 import { ApiError } from "@lib/core";
 import {
   ACCOUNT_ERROR_CODE_WRONG,
+  ACCOUNT_ERROR_SMS_SEND_FAILED,
   ACCOUNT_ERROR_TERMS_REQUIRED,
   ACCOUNT_LOCKED,
   FAILURE_CODE,
@@ -153,6 +154,11 @@ function setup() {
     identity as never,
   );
   const allowlist = { isAllowed: vi.fn(() => false) };
+  const operationLog = {
+    record: vi.fn(async () => undefined),
+    finish: vi.fn(async () => undefined),
+    findByRef: vi.fn(async () => null),
+  };
   const controller = new AuthController(
     verification as never,
     sessions as unknown as SessionService,
@@ -164,6 +170,7 @@ function setup() {
     captcha as never,
     loginEntry,
     allowlist as never,
+    operationLog as never,
   );
   const res = {
     cookie: vi.fn(),
@@ -181,6 +188,7 @@ function setup() {
     phoneActions,
     captcha,
     allowlist,
+    operationLog,
   };
 }
 
@@ -801,22 +809,30 @@ describe("AuthController 发码（验证码通过后）", () => {
     expect(verification.issue).not.toHaveBeenCalled();
   });
 
-  it("短信渠道失败 → 返回短信发送失败信封", async () => {
+  it("短信渠道失败 → 抛出 502 并退回同号额度", async () => {
     const { controller, verification, limiter } = setup();
-    vi.spyOn(limiter, "take").mockResolvedValue({ allowed: true } as never);
+    vi.spyOn(limiter, "take").mockResolvedValue({
+      allowed: true,
+      member: "member-1",
+    } as never);
+    const refund = vi.spyOn(limiter, "refund").mockResolvedValue(undefined);
     verification.issue.mockRejectedValue(new Error("sms down"));
 
-    const out = await controller.sendCode(
-      {
-        phone: "13800001234",
-        purpose: "login",
-        captcha_id: "cap_test",
-        captcha_answer: "AB2C",
-      },
-      "1.2.3.4",
-    );
-
-    expect(out).toMatchObject({ code: 400, msg: "短信发送失败" });
+    await expect(
+      controller.sendCode(
+        {
+          phone: "13800001234",
+          purpose: "login",
+          captcha_id: "cap_test",
+          captcha_answer: "AB2C",
+        },
+        "1.2.3.4",
+      ),
+    ).rejects.toMatchObject({
+      status: 502,
+      code: ACCOUNT_ERROR_SMS_SEND_FAILED,
+    });
+    expect(refund).toHaveBeenCalledTimes(2);
   });
 
   it("短信渠道失败 → 记录上游错误码与脱敏手机号，对外不泄漏原文", async () => {
@@ -827,18 +843,23 @@ describe("AuthController 发码（验证码通过后）", () => {
       new SmsUpstreamError("InvalidTemplate", "模板不存在", 400),
     );
 
-    const out = await controller.sendCode(
-      {
-        phone: "13800001234",
-        purpose: "login",
-        captcha_id: "cap_test",
-        captcha_answer: "AB2C",
-      },
-      "1.2.3.4",
-    );
+    const error = await controller
+      .sendCode(
+        {
+          phone: "13800001234",
+          purpose: "login",
+          captcha_id: "cap_test",
+          captcha_answer: "AB2C",
+        },
+        "1.2.3.4",
+      )
+      .catch((thrown: unknown) => thrown);
 
-    expect(out).toMatchObject({ code: 400, msg: "短信发送失败" });
-    expect(JSON.stringify(out)).not.toContain("InvalidTemplate");
+    expect(error).toMatchObject({
+      status: 502,
+      code: ACCOUNT_ERROR_SMS_SEND_FAILED,
+    });
+    expect(String((error as Error).message)).not.toContain("InvalidTemplate");
     const record = JSON.parse(String(warn.mock.calls.at(-1)?.[0]));
     expect(record).toMatchObject({
       body: "[sms] send failed",
@@ -892,5 +913,41 @@ describe("AuthController 发码（验证码通过后）", () => {
 
     expect(take).not.toHaveBeenCalled();
     expect(verification.issue).toHaveBeenCalled();
+  });
+});
+
+describe("迁移结果查询（IKQ1HL）", () => {
+  it("缺凭证或无记录 → operation_not_found", async () => {
+    const { controller } = setup();
+    expect(await controller.migrationResult({})).toMatchObject({
+      error_code: "operation_not_found",
+    });
+    expect(
+      await controller.migrationResult({ migration_token: "pa_x" }),
+    ).toMatchObject({ error_code: "operation_not_found" });
+  });
+
+  it("凭证已作废但记录存在 → 仍返回最终状态", async () => {
+    const { controller, operationLog } = setup();
+    operationLog.findByRef.mockResolvedValue({
+      id: "1",
+      category: "account",
+      action: "migration_bind",
+      target: "alice",
+      targetUserId: "42",
+      detail: JSON.stringify({ phone: "138****1234" }),
+      operator: "alice",
+      operatorId: "42",
+      ipAddress: null,
+      status: 2,
+      ref: "ref-1",
+      createdAt: "2026-10-28T00:00:00+08:00",
+    } as never);
+
+    const out = await controller.migrationResult({ migration_token: "pa_x" });
+    expect(out).toMatchObject({
+      code: 200,
+      data: { operation: "migration_bind", status: 2 },
+    });
   });
 });

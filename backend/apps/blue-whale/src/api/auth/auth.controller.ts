@@ -9,7 +9,7 @@ import {
   Res,
 } from "@nestjs/common";
 import type { Request, Response } from "express";
-import { ApiError, maskPhone } from "@lib/core";
+import { ApiError, maskIdentifier, maskPhone } from "@lib/core";
 import {
   ACCOUNT_ERROR_BIND_SUCCEEDED_LOGIN_FAILED,
   ACCOUNT_ERROR_CAPTCHA_EXPIRED,
@@ -17,7 +17,9 @@ import {
   ACCOUNT_ERROR_CAPTCHA_REQUIRED,
   ACCOUNT_ERROR_MIGRATION_INELIGIBLE,
   ACCOUNT_ERROR_MIGRATION_TOKEN_EXPIRED,
+  ACCOUNT_ERROR_OPERATION_NOT_FOUND,
   ACCOUNT_ERROR_PHONE_TAKEN,
+  ACCOUNT_ERROR_SMS_SEND_FAILED,
   ACCOUNT_ERROR_TERMS_REQUIRED,
   ACCOUNT_LOCKED,
   FAILURE_CODE,
@@ -50,10 +52,18 @@ import {
   IdentityService,
   InvalidCredentialsError,
   MigrationIneligibleError,
+  operationRef,
+  parseOperationDetail,
   PhoneActionService,
   PhoneBindingService,
   PhoneTakenError,
 } from "@lib/shared/identity/index.js";
+import { OperationLogService } from "@lib/shared/operation-log/operation-log.service.js";
+import {
+  OPERATION_STATUS_FAILED,
+  OPERATION_STATUS_PENDING,
+  OPERATION_STATUS_SUCCEEDED,
+} from "@lib/shared/persistence/index.js";
 import { LoginEntryService } from "@lib/shared/session/login-entry.service.js";
 import { SessionService } from "@lib/shared/session/session.service.js";
 import { extractLoginToken } from "@lib/shared/session/login-token.js";
@@ -143,6 +153,7 @@ export class AuthController {
     private readonly captcha: CaptchaService,
     private readonly loginEntry: LoginEntryService,
     private readonly allowlist: RateLimitAllowlist,
+    private readonly operationLog: OperationLogService,
   ) {}
 
   @Public()
@@ -245,8 +256,22 @@ export class AuthController {
       return ok();
     } catch (error) {
       this.logSendFailure(phone, ip, purpose, error);
-      return fail(FAILURE_CODE, "短信发送失败");
+      await this.refundPhoneQuota(phoneDecision.taken);
+      throw new ApiError(
+        "短信发送失败，请重试",
+        502,
+        ACCOUNT_ERROR_SMS_SEND_FAILED,
+      );
     }
+  }
+
+  private async refundPhoneQuota(
+    taken: { scope: string; key: string; member: string }[] | undefined,
+  ): Promise<void> {
+    if (!taken?.length) return;
+    await Promise.all(
+      taken.map((entry) => this.limiter.refund(entry.scope, entry.key, entry.member)),
+    );
   }
 
   private logSendFailure(
@@ -430,7 +455,24 @@ export class AuthController {
         kind: "migration",
         userId: Number(userId),
       });
-      return ok({ migration_token: migrationToken, expires_in: 600 });
+      const ref = operationRef(migrationToken);
+      await this.operationLog.record({
+        category: "account",
+        action: "migration_bind",
+        target: maskIdentifier(username),
+        targetUserId: userId,
+        detail: JSON.stringify({ stage: "verified" }),
+        operator: maskIdentifier(username),
+        operatorId: userId,
+        ipAddress: ip,
+        status: OPERATION_STATUS_PENDING,
+        ref,
+      });
+      return ok({
+        migration_token: migrationToken,
+        operation_ref: ref,
+        expires_in: 600,
+      });
     } catch (error) {
       if (error instanceof InvalidCredentialsError) {
         const result = await this.limiter.take({
@@ -515,6 +557,7 @@ export class AuthController {
         ACCOUNT_ERROR_MIGRATION_TOKEN_EXPIRED,
       );
     }
+    const ref = operationRef(token);
 
     let user: { id: string; username: string };
     try {
@@ -524,6 +567,13 @@ export class AuthController {
       });
     } catch (error) {
       if (error instanceof PhoneTakenError) {
+        await this.operationLog.finish(ref, {
+          status: OPERATION_STATUS_FAILED,
+          detail: JSON.stringify({
+            message: error.message,
+            error_code: ACCOUNT_ERROR_PHONE_TAKEN,
+          }),
+        });
         await this.loginEntry.fail({
           username: phone,
           ip,
@@ -539,6 +589,13 @@ export class AuthController {
       }
       const failure = phoneCodeFailure(error);
       if (failure) {
+        await this.operationLog.finish(ref, {
+          status: OPERATION_STATUS_FAILED,
+          detail: JSON.stringify({
+            message: failure.message,
+            error_code: failure.code ?? null,
+          }),
+        });
         await this.loginEntry.fail({
           username: phone,
           ip,
@@ -547,6 +604,12 @@ export class AuthController {
         });
         throw failure;
       }
+      await this.operationLog.finish(ref, {
+        status: OPERATION_STATUS_FAILED,
+        detail: JSON.stringify({
+          message: error instanceof Error ? error.message : String(error),
+        }),
+      });
       throw toAuthError(error);
     }
 
@@ -559,6 +622,11 @@ export class AuthController {
         }`,
       );
     }
+
+    await this.operationLog.finish(ref, {
+      status: OPERATION_STATUS_SUCCEEDED,
+      detail: JSON.stringify({ phone: maskPhone(phone) }),
+    });
 
     try {
       const result = await this.identity.getLoginResult(user.id);
@@ -578,12 +646,43 @@ export class AuthController {
           error instanceof Error ? error.message : String(error)
         }`,
       );
+      await this.operationLog.finish(ref, {
+        status: OPERATION_STATUS_SUCCEEDED,
+        detail: JSON.stringify({
+          phone: maskPhone(phone),
+          login: "failed",
+        }),
+      });
       throw new ApiError(
         "手机号已绑定，请重新登录",
         500,
         ACCOUNT_ERROR_BIND_SUCCEEDED_LOGIN_FAILED,
       );
     }
+  }
+
+  @Public()
+  @Post("migration/result")
+  async migrationResult(@Body() body: { migration_token?: unknown }) {
+    const token =
+      typeof body?.migration_token === "string" ? body.migration_token.trim() : "";
+    const record = token
+      ? await this.operationLog.findByRef(operationRef(token))
+      : null;
+    if (!record || record.action !== "migration_bind") {
+      return fail(
+        FAILURE_CODE,
+        "暂未找到本次操作记录，请重试核实",
+        null,
+        ACCOUNT_ERROR_OPERATION_NOT_FOUND,
+      );
+    }
+    return ok({
+      operation: record.action,
+      status: record.status,
+      detail: parseOperationDetail(record.detail),
+      created_at: record.createdAt,
+    });
   }
 
   @Public()

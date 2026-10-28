@@ -489,7 +489,7 @@ CREATE TABLE `billing_products` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
-CREATE TABLE `bw_admin_logs` (
+CREATE TABLE `bw_operation_logs` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `category` VARCHAR(32) NOT NULL DEFAULT '',
     `action` VARCHAR(64) NOT NULL,
@@ -499,12 +499,15 @@ CREATE TABLE `bw_admin_logs` (
     `operator` VARCHAR(64) NOT NULL DEFAULT '',
     `operator_id` BIGINT NULL,
     `ip_address` VARCHAR(64) NULL,
+    `status` TINYINT NOT NULL DEFAULT 0,
+    `ref` VARCHAR(64) NULL,
     `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
     `gmt_modified` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
     `version` INTEGER NOT NULL DEFAULT 0,
     `is_delete` TINYINT NOT NULL DEFAULT 0,
 
     INDEX `idx_oplog_category_created`(`category`, `gmt_create`),
+    INDEX `idx_bw_operation_logs__ref`(`ref`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 

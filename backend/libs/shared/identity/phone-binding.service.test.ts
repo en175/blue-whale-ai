@@ -67,6 +67,8 @@ function build(over: {
       },
     ),
     updatePhone: vi.fn().mockResolvedValue(undefined),
+    rebindPhoneIfCurrent: vi.fn().mockResolvedValue(true),
+    bindPhoneIfUnbound: vi.fn().mockResolvedValue(true),
   };
   const roles = {
     listRoleCodes: vi.fn().mockResolvedValue(["user"]),
@@ -197,7 +199,11 @@ describe("PhoneBindingService 补绑 / 换绑", () => {
       code: "123456",
     });
     expect(out).toEqual({ phone: "13700000000" });
-    expect(users.updatePhone).toHaveBeenCalledWith("42", "13700000000");
+    expect(users.rebindPhoneIfCurrent).toHaveBeenCalledWith(
+      "42",
+      "13800001234",
+      "13700000000",
+    );
   });
 
   it("提交换绑：原绑定已变化 / 同号分别拒绝", async () => {
@@ -232,7 +238,27 @@ describe("PhoneBindingService 补绑 / 换绑", () => {
       code: "123456",
       purposes: ["rebind_new"],
     });
-    expect(users.updatePhone).toHaveBeenCalledWith("42", "13700000000");
+    expect(users.rebindPhoneIfCurrent).toHaveBeenCalledWith(
+      "42",
+      "13800001234",
+      "13700000000",
+    );
+  });
+
+  it("并发提交换绑：条件更新 0 行 → 冲突且不消费验证码", async () => {
+    const { service, users, verification } = build({
+      user: row({ phone: "13800001234" }),
+    });
+    users.rebindPhoneIfCurrent.mockResolvedValue(false);
+
+    await expect(
+      service.commitRebind("42", {
+        oldPhone: "13800001234",
+        phone: "13700000000",
+        code: "123456",
+      }),
+    ).rejects.toThrow(RebindBindingChangedError);
+    expect(verification.consume).not.toHaveBeenCalled();
   });
 });
 
@@ -322,8 +348,24 @@ describe("PhoneBindingService 内部账号迁移", () => {
       code: "123456",
       purposes: ["bind", "legacy"],
     });
-    expect(users.updatePhone).toHaveBeenCalledWith("42", "13800001234");
+    expect(users.bindPhoneIfUnbound).toHaveBeenCalledWith("42", "13800001234");
     expect(out.id).toBe("42");
+  });
+
+  it("并发迁移补绑：条件更新 0 行 → 拒绝且不消费验证码", async () => {
+    const { service, users, verification } = build();
+    users.bindPhoneIfUnbound.mockResolvedValue(false);
+
+    await expect(
+      service.commitMigrationBind("42", {
+        phone: "13800001234",
+        code: "123456",
+      }),
+    ).rejects.toMatchObject({
+      name: "MigrationIneligibleError",
+      message: "账号绑定状态已变化，请重新登录",
+    });
+    expect(verification.consume).not.toHaveBeenCalled();
   });
 
   it("补绑时资格不符 → 提示已绑定手机号", async () => {

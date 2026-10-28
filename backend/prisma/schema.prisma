@@ -830,7 +830,7 @@ model bw_platform_settings {
 }
 
 
-model bw_admin_logs {
+model bw_operation_logs {
   id             BigInt   @id @default(autoincrement())
   category       String   @default("") @db.VarChar(32)
   action         String   @db.VarChar(64)
@@ -840,12 +840,15 @@ model bw_admin_logs {
   operator       String   @default("") @db.VarChar(64)
   operator_id    BigInt?
   ip_address     String?  @db.VarChar(64)
+  status         Int      @default(0) @db.TinyInt
+  ref            String?  @db.VarChar(64)
   gmt_create     DateTime @default(now()) @db.DateTime(0)
   gmt_modified   DateTime @default(now()) @db.DateTime(0)
   version        Int      @default(0)
   is_delete      Int      @default(0) @db.TinyInt
 
   @@index([category, gmt_create], map: "idx_oplog_category_created")
+  @@index([ref], map: "idx_bw_operation_logs__ref")
 }
 
 

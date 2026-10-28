@@ -8,3 +8,8 @@ export function maskPhone(value: string): string {
   if (!PHONE_RE.test(value)) return "***";
   return `${value.slice(0, 3)}****${value.slice(7)}`;
 }
+
+export function maskIdentifier(value: string): string {
+  if (!PHONE_RE.test(value)) return value;
+  return `${value.slice(0, 3)}****${value.slice(7)}`;
+}

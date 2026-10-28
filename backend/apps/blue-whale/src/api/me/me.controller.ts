@@ -1,8 +1,10 @@
-import { Body, Controller, Get, Patch, Post, Put, Req, Res } from "@nestjs/common";
+import { Body, Controller, Get, Headers, Param, Patch, Post, Put, Req, Res } from "@nestjs/common";
 import type { Request, Response } from "express";
-import { ApiError } from "@lib/core";
+import { ApiError, maskIdentifier, maskPhone } from "@lib/core";
 import { createLogger } from "@lib/core/logging";
 import {
+  ACCOUNT_ERROR_OPERATION_FORBIDDEN,
+  ACCOUNT_ERROR_OPERATION_NOT_FOUND,
   ACCOUNT_ERROR_REBIND_TOKEN_EXPIRED,
   ACCOUNT_ERROR_REBIND_TOKEN_INVALID,
   ACCOUNT_ERROR_UNKNOWN_NUMERIC_CODE,
@@ -21,9 +23,17 @@ import {
   AccountDirectoryService,
   IdentityService,
   InvalidCredentialsError,
+  operationRef,
+  parseOperationDetail,
   PhoneActionService,
   PhoneBindingService,
 } from "@lib/shared/identity/index.js";
+import { OperationLogService } from "@lib/shared/operation-log/operation-log.service.js";
+import {
+  OPERATION_STATUS_FAILED,
+  OPERATION_STATUS_PENDING,
+  OPERATION_STATUS_SUCCEEDED,
+} from "@lib/shared/persistence/index.js";
 import { SessionService } from "@lib/shared/session/session.service.js";
 import { clearSessionCookie } from "@lib/shared/session/cookie.js";
 import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js";
@@ -49,6 +59,7 @@ export class MeController {
     private readonly phoneBinding: PhoneBindingService,
     private readonly directory: AccountDirectoryService,
     private readonly phoneActions: PhoneActionService,
+    private readonly operationLog: OperationLogService,
   ) {}
 
   @Get("me")
@@ -108,6 +119,7 @@ export class MeController {
   async verifyCurrentPhone(
     @Body() body: RebindVerifyCurrentDto,
     @CurrentUser() user: AuthenticatedUser | undefined,
+    @Headers("x-forwarded-for") forwardedFor?: string,
   ) {
     const userId = user?.userId;
     if (userId == null) {
@@ -124,7 +136,24 @@ export class MeController {
         userId: Number(userId),
         phone: oldPhone,
       });
-      return ok({ rebind_token: rebindToken, expires_in: 600 });
+      const ref = operationRef(rebindToken);
+      await this.operationLog.record({
+        category: "account",
+        action: "phone_rebind",
+        target: maskPhone(oldPhone),
+        targetUserId: userId,
+        detail: JSON.stringify({ stage: "verified" }),
+        operator: maskPhone(oldPhone),
+        operatorId: userId,
+        ipAddress: forwardedFor?.split(",")[0]?.trim() || null,
+        status: OPERATION_STATUS_PENDING,
+        ref,
+      });
+      return ok({
+        rebind_token: rebindToken,
+        operation_ref: ref,
+        expires_in: 600,
+      });
     } catch (error) {
       if (error instanceof InvalidCredentialsError) {
         throw new ApiError("登录已过期，请重新验证", 401, "unauthorized");
@@ -180,6 +209,7 @@ export class MeController {
     }
 
     let newPhone: string;
+    const ref = operationRef(token);
     try {
       ({ phone: newPhone } = await this.phoneBinding.commitRebind(userId, {
         oldPhone: action.phone,
@@ -188,12 +218,29 @@ export class MeController {
       }));
     } catch (error) {
       if (error instanceof InvalidCredentialsError) {
+        await this.operationLog.finish(ref, {
+          status: OPERATION_STATUS_FAILED,
+          detail: JSON.stringify({ message: "登录已过期，请重新验证" }),
+        });
         throw new ApiError("登录已过期，请重新验证", 401, "unauthorized");
       }
       const failure = projectAuthFailure(error);
       if (failure) {
+        await this.operationLog.finish(ref, {
+          status: OPERATION_STATUS_FAILED,
+          detail: JSON.stringify({
+            message: failure.message,
+            error_code: failure.errorCode ?? null,
+          }),
+        });
         return fail(FAILURE_CODE, failure.message, null, failure.errorCode);
       }
+      await this.operationLog.finish(ref, {
+        status: OPERATION_STATUS_FAILED,
+        detail: JSON.stringify({
+          message: error instanceof Error ? error.message : String(error),
+        }),
+      });
       throw error;
     }
 
@@ -217,6 +264,13 @@ export class MeController {
       );
     }
     clearSessionCookie(res);
+    await this.operationLog.finish(ref, {
+      status: OPERATION_STATUS_SUCCEEDED,
+      detail: JSON.stringify({
+        phone: maskPhone(newPhone),
+        revoked_sessions: revokedSessions,
+      }),
+    });
     return ok({
       phone: newPhone,
       revoked_sessions: revokedSessions,
@@ -233,8 +287,24 @@ export class MeController {
     if (userId == null) {
       throw new ApiError("缺少登录凭证", 401, "unauthorized");
     }
+    const operationId =
+      typeof body.operation_id === "string"
+        ? body.operation_id.trim().slice(0, 64)
+        : "";
+    const ref = operationId || null;
     try {
       const result = await this.identity.updateNickname(userId, body.nickname);
+      await this.operationLog.record({
+        category: "account",
+        action: "nickname_update",
+        target: result.nickname,
+        targetUserId: userId,
+        detail: JSON.stringify({ nickname: result.nickname }),
+        operator: maskIdentifier(user?.username ?? ""),
+        operatorId: userId,
+        status: OPERATION_STATUS_SUCCEEDED,
+        ref,
+      });
       return ok(result);
     } catch (error) {
       if (error instanceof InvalidCredentialsError) {
@@ -242,10 +312,57 @@ export class MeController {
       }
       const failure = projectAuthFailure(error);
       if (failure) {
+        await this.operationLog.record({
+          category: "account",
+          action: "nickname_update",
+          targetUserId: userId,
+          detail: JSON.stringify({
+            message: failure.message,
+            error_code: failure.errorCode ?? null,
+          }),
+          operator: maskIdentifier(user?.username ?? ""),
+          operatorId: userId,
+          status: OPERATION_STATUS_FAILED,
+          ref,
+        });
         return fail(FAILURE_CODE, failure.message, null, failure.errorCode);
       }
       throw error;
     }
+  }
+
+  @Get("me/operations/:ref")
+  async operationResult(
+    @Param("ref") ref: string,
+    @CurrentUser() user: AuthenticatedUser | undefined,
+  ) {
+    const userId = user?.userId;
+    if (userId == null) {
+      throw new ApiError("缺少登录凭证", 401, "unauthorized");
+    }
+    const record = ref ? await this.operationLog.findByRef(ref.trim()) : null;
+    if (!record) {
+      return fail(
+        FAILURE_CODE,
+        "暂未找到本次操作记录，请重试核实",
+        null,
+        ACCOUNT_ERROR_OPERATION_NOT_FOUND,
+      );
+    }
+    if (record.targetUserId !== String(userId)) {
+      return fail(
+        FAILURE_CODE,
+        "无权查询该操作记录",
+        null,
+        ACCOUNT_ERROR_OPERATION_FORBIDDEN,
+      );
+    }
+    return ok({
+      operation: record.action,
+      status: record.status,
+      detail: parseOperationDetail(record.detail),
+      created_at: record.createdAt,
+    });
   }
 
 

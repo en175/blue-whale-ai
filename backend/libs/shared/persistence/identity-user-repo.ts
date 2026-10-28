@@ -34,6 +34,12 @@ export interface IdentityUserRepo {
   }): Promise<IdentityUserRow>;
   updatePassword(id: string, passwordHash: string): Promise<void>;
   updatePhone(id: string, phone: string): Promise<void>;
+  rebindPhoneIfCurrent(
+    id: string,
+    currentPhone: string,
+    phone: string,
+  ): Promise<boolean>;
+  bindPhoneIfUnbound(id: string, phone: string): Promise<boolean>;
   updateNickname(id: string, nickname: string): Promise<void>;
   updateStatus(id: string, status: IdentityUserStatus): Promise<boolean>;
 }
@@ -211,6 +217,40 @@ export function createIdentityUserRepo(prisma: PrismaClient): IdentityUserRepo {
           where: { id: BigInt(id) },
           data: { phone, gmt_modified: new Date() },
         });
+      } catch (error) {
+        if (isUniqueViolation(error)) throw new PhoneTakenError();
+        throw error;
+      }
+    },
+
+    async rebindPhoneIfCurrent(id, currentPhone, phone) {
+      try {
+        const result = await prisma.bw_users.updateMany({
+          where: {
+            id: BigInt(id),
+            phone: currentPhone,
+            is_delete: false,
+          },
+          data: { phone, gmt_modified: new Date() },
+        });
+        return result.count > 0;
+      } catch (error) {
+        if (isUniqueViolation(error)) throw new PhoneTakenError();
+        throw error;
+      }
+    },
+
+    async bindPhoneIfUnbound(id, phone) {
+      try {
+        const result = await prisma.bw_users.updateMany({
+          where: {
+            id: BigInt(id),
+            is_delete: false,
+            OR: [{ phone: null }, { phone: "" }],
+          },
+          data: { phone, gmt_modified: new Date() },
+        });
+        return result.count > 0;
       } catch (error) {
         if (isUniqueViolation(error)) throw new PhoneTakenError();
         throw error;
