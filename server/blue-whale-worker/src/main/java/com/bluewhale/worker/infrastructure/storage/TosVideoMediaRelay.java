@@ -372,14 +372,16 @@ public class TosVideoMediaRelay {
                 for (JsonNode stream : streams) {
                     if (!"video".equals(stream.path("codec_type").asText())) continue;
                     if (stream.path("disposition").path("attached_pic").asInt(0) == 1) continue;
-                    int streamWidth = stream.path("width").asInt(0);
-                    int streamHeight = stream.path("height").asInt(0);
-                    if (streamWidth > 0 && streamHeight > 0) {
-                        width = streamWidth;
-                        height = streamHeight;
+                    if (width == null) {
+                        int streamWidth = stream.path("width").asInt(0);
+                        int streamHeight = stream.path("height").asInt(0);
+                        if (streamWidth > 0 && streamHeight > 0) {
+                            width = streamWidth;
+                            height = streamHeight;
+                        }
                     }
                     if (durationSec == null) durationSec = positiveDouble(stream.path("duration"));
-                    break;
+                    if (width != null && durationSec != null) break;
                 }
             }
             if (width == null && height == null && durationSec == null) return null;

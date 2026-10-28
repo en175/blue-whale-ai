@@ -407,11 +407,8 @@ public class VideoJobProcessor implements JobProcessor {
         TosVideoMediaRelay.ProbedMediaInfo mediaInfo = null;
         if (mediaRelay != null && stored.storageKey() != null) {
             mediaInfo = mediaRelay.probeMediaInfo(stored.storageKey());
-            if (mediaInfo == null) {
-                log.warn("[video] TOS 探测视频信息失败，宽高/时长按兜底记录 jobId={}", claim.id());
-            }
         } else {
-            log.warn("[video] 无 TOS 探测条件（storageKey 缺失），宽高/时长按快照与请求值记录 jobId={}", claim.id());
+            log.info("[video] 无 TOS 探测条件，宽高/时长按快照与请求值记录 jobId={}", claim.id());
         }
 
         int[] dimensions = resolveDimensions(claim.input());
