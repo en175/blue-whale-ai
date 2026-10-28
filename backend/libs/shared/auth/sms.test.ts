@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createVolcengineSmsProvider, resolveSmsCredentials } from "./sms.js";
+import {
+  createVolcengineSmsProvider,
+  resolveSmsCredentials,
+  resolveSmsProvider,
+} from "./sms.js";
 
 function stubSmsFetch(): () => string {
   let sign = "";
@@ -16,6 +20,50 @@ function stubSmsFetch(): () => string {
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+});
+
+describe("短信签名 — 统一使用配置签名", () => {
+  it("所有号段都使用配置的签名", async () => {
+    const sentSign = stubSmsFetch();
+    const provider = createVolcengineSmsProvider({
+      ak: "ak",
+      sk: "sk",
+      smsAccount: "8c026cce",
+      sign: "杭州玄浮科技",
+      templateId: "tpl",
+    });
+    await provider.send("19967324916", "123456");
+    expect(sentSign()).toBe("杭州玄浮科技");
+    await provider.send("13812345678", "123456");
+    expect(sentSign()).toBe("杭州玄浮科技");
+  });
+
+  it("从环境变量 VOLC_SMS_SIGN 读取签名并去除空白", async () => {
+    const sentSign = stubSmsFetch();
+    const provider = resolveSmsProvider({
+      SMS_PROVIDER: "volcengine",
+      VOLC_SMS_ACCOUNT: "8c026cce",
+      VOLC_SMS_TEMPLATE_ID: "tpl",
+      VOLC_SMS_SIGN: " 杭州玄浮科技 ",
+      VOLC_ACCESS_KEY_ID: "ak",
+      VOLC_SECRET_ACCESS_KEY: "sk",
+    });
+    await provider.send("13812345678", "123456");
+    expect(sentSign()).toBe("杭州玄浮科技");
+  });
+
+  it("未配置 VOLC_SMS_SIGN 时默认杭州玄浮科技", async () => {
+    const sentSign = stubSmsFetch();
+    const provider = resolveSmsProvider({
+      SMS_PROVIDER: "volcengine",
+      VOLC_SMS_ACCOUNT: "8c026cce",
+      VOLC_SMS_TEMPLATE_ID: "tpl",
+      VOLC_ACCESS_KEY_ID: "ak",
+      VOLC_SECRET_ACCESS_KEY: "sk",
+    });
+    await provider.send("13812345678", "123456");
+    expect(sentSign()).toBe("杭州玄浮科技");
+  });
 });
 
 describe("发送失败 — 记录上游可用的失败原因", () => {

@@ -135,7 +135,7 @@ export function resolveSmsProvider(
       ak: credentials.ak,
       sk: credentials.sk,
       smsAccount: env.VOLC_SMS_ACCOUNT ?? "",
-      sign: env.VOLC_SMS_SIGN ?? "玄浮科技",
+      sign: env.VOLC_SMS_SIGN?.trim() || "杭州玄浮科技",
       templateId: env.VOLC_SMS_TEMPLATE_ID ?? "",
     });
   }
