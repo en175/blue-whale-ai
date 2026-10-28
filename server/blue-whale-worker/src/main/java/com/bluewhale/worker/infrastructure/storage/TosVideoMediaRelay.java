@@ -2,6 +2,8 @@ package com.bluewhale.worker.infrastructure.storage;
 
 import com.bluewhale.worker.domain.error.GenerationError;
 import com.bluewhale.worker.domain.error.VideoProviderError;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.volcengine.tos.TOSV2;
 import com.volcengine.tos.TOSV2ClientBuilder;
 import com.volcengine.tos.comm.common.ACLType;
@@ -55,6 +57,14 @@ public class TosVideoMediaRelay {
     private static final Duration STREAM_ERROR_BODY_TIMEOUT = Duration.ofSeconds(60);
 
     static final String TASK_DEADLINE_ABORT_MESSAGE = "任务执行截止时间已到，中止结果转存";
+
+    private static final Duration PROBE_TIMEOUT = Duration.ofSeconds(10);
+
+    private static final String MEDIA_INFO_PROCESS = "video/info";
+
+    private static final int MAX_MEDIA_INFO_BYTES = 256 * 1024;
+
+    private static final ObjectMapper JSON = new ObjectMapper();
 
     private static final ScheduledExecutorService WATCHDOG_SCHEDULER =
             Executors.newSingleThreadScheduledExecutor(r -> {
@@ -312,6 +322,60 @@ public class TosVideoMediaRelay {
         } catch (Exception e) {
             log.warn("转存中止后清理未发布 TOS 对象失败 storageKey={} err={}", storageKey, e.getMessage());
         }
+    }
+
+    public int[] probeVideoDimensions(String storageKey) {
+        if (isBlank(storageKey)) return null;
+        try {
+            var signed = client.preSignedURL(new PreSignedURLInput()
+                    .setHttpMethod("GET")
+                    .setBucket(bucket)
+                    .setKey(storageKey)
+                    .setExpires(60)
+                    .setQuery(Map.of("x-tos-process", MEDIA_INFO_PROCESS)));
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(signed.getSignedUrl()))
+                    .timeout(PROBE_TIMEOUT)
+                    .GET()
+                    .build();
+            HttpResponse<InputStream> response = httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
+            try (InputStream body = response.body()) {
+                if (response.statusCode() >= 400) {
+                    log.warn("TOS media info 探测失败 storageKey={} status={}", storageKey, response.statusCode());
+                    return null;
+                }
+                byte[] bytes = body.readNBytes(MAX_MEDIA_INFO_BYTES + 1);
+                if (bytes.length > MAX_MEDIA_INFO_BYTES) {
+                    log.warn("TOS media info 响应超限，资产宽高留空 storageKey={}", storageKey);
+                    return null;
+                }
+                return parseVideoDimensions(new String(bytes, java.nio.charset.StandardCharsets.UTF_8));
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            log.warn("TOS media info 探测被中断 storageKey={}", storageKey);
+            return null;
+        } catch (Exception e) {
+            log.warn("TOS media info 探测异常 storageKey={} err={}", storageKey, e.getMessage());
+            return null;
+        }
+    }
+
+    static int[] parseVideoDimensions(String body) {
+        try {
+            JsonNode streams = JSON.readTree(body).path("streams");
+            if (!streams.isArray()) return null;
+            for (JsonNode stream : streams) {
+                if (!"video".equals(stream.path("codec_type").asText())) continue;
+                if (stream.path("disposition").path("attached_pic").asInt(0) == 1) continue;
+                int width = stream.path("width").asInt(0);
+                int height = stream.path("height").asInt(0);
+                if (width > 0 && height > 0) return new int[]{width, height};
+            }
+        } catch (Exception e) {
+            log.warn("TOS media info 解析失败 err={}", e.getMessage());
+        }
+        return null;
     }
 
     static String videoExtension(String mime) {

@@ -903,47 +903,176 @@ class VideoJobProcessorTest {
 
 
     @Nested
-    @DisplayName("视频尺寸换算")
+    @DisplayName("视频尺寸取快照配置")
     class VideoDimensionsTests {
 
         @Test
-        @DisplayName("1080p + 16:9 → 1920x1080")
-        void resolution_1080p_16_9() {
-            int[] dims = VideoJobProcessor.videoDimensions("1080p", "16:9");
-            assertThat(dims).isNotNull();
-            assertThat(dims[0]).isEqualTo(1920);
-            assertThat(dims[1]).isEqualTo(1080);
+        @DisplayName("9:16/720p 快照 720x1280 → 竖版宽高不按分辨率数字推算")
+        void config_9_16() {
+            Map<String, Object> input = baseInput();
+            input.put("aspect_ratio", "9:16");
+            input.put("output_width", 720);
+            input.put("output_height", 1280);
+
+            assertThat(VideoJobProcessor.resolveDimensions(input)).containsExactly(720, 1280);
         }
 
         @Test
-        @DisplayName("720p + 1:1 → 720x720")
-        void resolution_720p_1_1() {
-            int[] dims = VideoJobProcessor.videoDimensions("720p", "1:1");
-            assertThat(dims).isNotNull();
-            assertThat(dims[0]).isEqualTo(720);
-            assertThat(dims[1]).isEqualTo(720);
+        @DisplayName("1:1/720p 快照 960x960 → 采用能力表像素，不按 720x720 推算")
+        void config_1_1() {
+            Map<String, Object> input = baseInput();
+            input.put("aspect_ratio", "1:1");
+            input.put("output_width", 960);
+            input.put("output_height", 960);
+
+            assertThat(VideoJobProcessor.resolveDimensions(input)).containsExactly(960, 960);
         }
 
         @Test
-        @DisplayName("size '1280x720' → 1280x720")
-        void size_1280x720() {
-            int[] dims = VideoJobProcessor.dimensionsFromSize("1280x720");
-            assertThat(dims).isNotNull();
-            assertThat(dims[0]).isEqualTo(1280);
-            assertThat(dims[1]).isEqualTo(720);
+        @DisplayName("16:9/1080p 快照 1920x1080 → 原样采用")
+        void config_16_9() {
+            Map<String, Object> input = baseInput();
+            input.put("resolution", "1080p");
+            input.put("output_width", 1920);
+            input.put("output_height", 1080);
+
+            assertThat(VideoJobProcessor.resolveDimensions(input)).containsExactly(1920, 1080);
         }
 
         @Test
-        @DisplayName("无效 resolution → null")
-        void invalidResolution_null() {
-            assertThat(VideoJobProcessor.videoDimensions("hd", "16:9")).isNull();
+        @DisplayName("adaptive 不采用快照尺寸 → null（交由 TOS 探测）")
+        void adaptive_null() {
+            Map<String, Object> input = baseInput();
+            input.put("aspect_ratio", "adaptive");
+
+            assertThat(VideoJobProcessor.resolveDimensions(input)).isNull();
         }
 
         @Test
-        @DisplayName("无效 size → null")
-        void invalidSize_null() {
-            assertThat(VideoJobProcessor.dimensionsFromSize("large")).isNull();
+        @DisplayName("快照缺 output_width/output_height → null，不回落推算")
+        void missing_null() {
+            Map<String, Object> input = baseInput();
+            input.remove("output_width");
+            input.remove("output_height");
+
+            assertThat(VideoJobProcessor.resolveDimensions(input)).isNull();
         }
+
+        @Test
+        @DisplayName("快照尺寸非正数 → null")
+        void nonPositive_null() {
+            Map<String, Object> input = baseInput();
+            input.put("output_width", 0);
+            input.put("output_height", -1);
+
+            assertThat(VideoJobProcessor.resolveDimensions(input)).isNull();
+        }
+    }
+
+    @Test
+    @DisplayName("IKQYI7: 固定比例发布取快照宽高，不调 TOS 探测")
+    void publishFixedRatio_usesSnapshotDims() {
+        Map<String, Object> input = baseInput();
+        input.put("aspect_ratio", "9:16");
+        input.put("output_width", 720);
+        input.put("output_height", 1280);
+        ClaimedVideoJobDto claim = videoClaim("160", false, null, 0, 0, "parent-task-dims", input);
+        doReturn(Optional.of(claim)).when(stateMachine)
+                .claimVideoJobById(eq("160"), anyString());
+        doReturn("token").when(upstreamCredential).requireKey();
+        doReturn(new VideoTaskObservation("succeeded", 100, "http://parent-video.mp4", null, null, null))
+                .when(videoClient).poll(eq("token"), eq("parent-task-dims"));
+        doReturn(new StoredVideo("http://tos/video.mp4", "key", "video/mp4", 100L, "0123456789abcdef0123456789abcdef"))
+                .when(mediaRelay).persist(anyString(), anyString());
+        doReturn(true).when(finalizer)
+                .publishVideoResult(anyString(), anyString(), anyString(),
+                        anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(), anyInt(), anyInt(), anyDouble(), any(), any());
+
+        processor.handle("160");
+
+        verify(mediaRelay, never()).probeVideoDimensions(anyString());
+        verify(finalizer).publishVideoResult(eq("160"), anyString(), anyString(),
+                anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(),
+                eq(720), eq(1280), anyDouble(), any(), any());
+    }
+
+    @Test
+    @DisplayName("IKQYI7: adaptive 不采信快照近似值，发布取 TOS 探测的真实宽高")
+    void publishAdaptive_usesProbedDims() {
+        Map<String, Object> input = baseInput();
+        input.put("aspect_ratio", "adaptive");
+        input.put("output_width", 1920);
+        input.put("output_height", 1080);
+        ClaimedVideoJobDto claim = videoClaim("161", false, null, 0, 0, "parent-task-adaptive", input);
+        doReturn(Optional.of(claim)).when(stateMachine)
+                .claimVideoJobById(eq("161"), anyString());
+        doReturn("token").when(upstreamCredential).requireKey();
+        doReturn(new VideoTaskObservation("succeeded", 100, "http://parent-video.mp4", null, null, null))
+                .when(videoClient).poll(eq("token"), eq("parent-task-adaptive"));
+        doReturn(new StoredVideo("http://tos/video.mp4", "key", "video/mp4", 100L, "0123456789abcdef0123456789abcdef"))
+                .when(mediaRelay).persist(anyString(), anyString());
+        doReturn(new int[]{1900, 1090}).when(mediaRelay).probeVideoDimensions("key");
+        doReturn(true).when(finalizer)
+                .publishVideoResult(anyString(), anyString(), anyString(),
+                        anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(), anyInt(), anyInt(), anyDouble(), any(), any());
+
+        processor.handle("161");
+
+        verify(finalizer).publishVideoResult(eq("161"), anyString(), anyString(),
+                anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(),
+                eq(1900), eq(1090), anyDouble(), any(), any());
+    }
+
+    @Test
+    @DisplayName("IKQYI7: 固定比例快照缺宽高 → 回落 TOS 探测")
+    void publishMissingSnapshot_usesProbedDims() {
+        Map<String, Object> input = baseInput();
+        input.remove("output_width");
+        input.remove("output_height");
+        ClaimedVideoJobDto claim = videoClaim("163", false, null, 0, 0, "parent-task-missing-dims", input);
+        doReturn(Optional.of(claim)).when(stateMachine)
+                .claimVideoJobById(eq("163"), anyString());
+        doReturn("token").when(upstreamCredential).requireKey();
+        doReturn(new VideoTaskObservation("succeeded", 100, "http://parent-video.mp4", null, null, null))
+                .when(videoClient).poll(eq("token"), eq("parent-task-missing-dims"));
+        doReturn(new StoredVideo("http://tos/video.mp4", "key", "video/mp4", 100L, "0123456789abcdef0123456789abcdef"))
+                .when(mediaRelay).persist(anyString(), anyString());
+        doReturn(new int[]{1280, 720}).when(mediaRelay).probeVideoDimensions("key");
+        doReturn(true).when(finalizer)
+                .publishVideoResult(anyString(), anyString(), anyString(),
+                        anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(), anyInt(), anyInt(), anyDouble(), any(), any());
+
+        processor.handle("163");
+
+        verify(mediaRelay).probeVideoDimensions("key");
+        verify(finalizer).publishVideoResult(eq("163"), anyString(), anyString(),
+                anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(),
+                eq(1280), eq(720), anyDouble(), any(), any());
+    }
+
+    @Test
+    @DisplayName("IKQYI7: TOS 探测失败 → 宽高留空且发布照常")
+    void publishProbeFails_publishesWithNullDims() {
+        Map<String, Object> input = baseInput();
+        input.put("aspect_ratio", "adaptive");
+        ClaimedVideoJobDto claim = videoClaim("162", false, null, 0, 0, "parent-task-probe-fail", input);
+        doReturn(Optional.of(claim)).when(stateMachine)
+                .claimVideoJobById(eq("162"), anyString());
+        doReturn("token").when(upstreamCredential).requireKey();
+        doReturn(new VideoTaskObservation("succeeded", 100, "http://parent-video.mp4", null, null, null))
+                .when(videoClient).poll(eq("token"), eq("parent-task-probe-fail"));
+        doReturn(new StoredVideo("http://tos/video.mp4", "key", "video/mp4", 100L, "0123456789abcdef0123456789abcdef"))
+                .when(mediaRelay).persist(anyString(), anyString());
+        doReturn(null).when(mediaRelay).probeVideoDimensions("key");
+        doReturn(true).when(finalizer)
+                .publishVideoResult(anyString(), anyString(), anyString(),
+                        anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(), anyInt(), anyInt(), anyDouble(), any(), any());
+
+        processor.handle("162");
+
+        verify(finalizer).publishVideoResult(eq("162"), anyString(), anyString(),
+                anyString(), anyLong(), anyString(), anyString(), anyString(), any(), anyString(),
+                isNull(), isNull(), anyDouble(), any(), any());
     }
 
 
@@ -2192,6 +2321,8 @@ class VideoJobProcessorTest {
         input.put("duration", 5.0);
         input.put("resolution", "720p");
         input.put("aspect_ratio", "16:9");
+        input.put("output_width", 1280);
+        input.put("output_height", 720);
         return input;
     }
 
