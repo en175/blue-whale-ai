@@ -1,3 +1,4 @@
+import { clearEffectiveRecoveryOwners, findEffectiveRecoveryOwner } from "./recovery-owner-test-helpers.js";
 
 
 
@@ -217,7 +218,7 @@ describe.skipIf(!databaseUrl)("显式 apply/restore 核对可信产物资产（I
   });
 
   beforeEach(async () => {
-    await prisma.generation_canvas_node_owners.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
+    await clearEffectiveRecoveryOwners(prisma, BigInt(PROJECT_ID));
     await prisma.generation_canvas_outputs.deleteMany({});
     await prisma.generation_canvas_submissions.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
     await prisma.project_command_receipts.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
@@ -278,9 +279,7 @@ describe.skipIf(!databaseUrl)("显式 apply/restore 核对可信产物资产（I
     expect(submission?.target_state).toBe("pending");
     expect(Number(submission?.target_revision)).toBe(1);
     expect(await outputRow(UUID_A, PRIMARY_OUTPUT_KEY)).toBeNull();
-    const owner = await prisma.generation_canvas_node_owners.findUnique({
-      where: { project_id_node_id: { project_id: BigInt(PROJECT_ID), node_id: "ikjlts-node-a" } },
-    });
+    const owner = await findEffectiveRecoveryOwner(prisma, BigInt(PROJECT_ID), "ikjlts-node-a");
     expect(owner?.output_key).toBe(TARGET_OUTPUT_KEY);
     expect(await prisma.project_command_receipts.count({
       where: { project_id: BigInt(PROJECT_ID), operation: "SAVE_CANVAS_RECOVERY_V1", idempotency_key: CMD("10001") },
@@ -521,9 +520,7 @@ describe.skipIf(!databaseUrl)("显式 apply/restore 核对可信产物资产（I
     const nodes = ((await canvasRow())?.nodes_json ?? []) as Array<{ data: Record<string, unknown> }>;
     expect(nodes[0]!.data.assetId).toBe("11");
 
-    const owner = await prisma.generation_canvas_node_owners.findUnique({
-      where: { project_id_node_id: { project_id: BigInt(PROJECT_ID), node_id: "ikjlts-node-a" } },
-    });
+    const owner = await findEffectiveRecoveryOwner(prisma, BigInt(PROJECT_ID), "ikjlts-node-a");
     expect(owner?.output_key).toBe(PRIMARY_OUTPUT_KEY);
   });
 });

@@ -3,6 +3,7 @@ import type { PromptPreviewSource, PromptPreviewContent, PromptMaterial } from "
 import type { Prisma, PrismaClient } from "@prisma/client";
 
 import { extraString, loadJobExtras, setJobExtras } from "./generation-jobs-extra-repo.js";
+import { replaceCanvasRows } from "./canvas-rows-replace.js";
 
 
 export interface CanvasView {
@@ -112,6 +113,25 @@ function toView(row: {
       row.viewport_json == null ? null : JSON.stringify(row.viewport_json),
     nodes: row.nodes_json == null ? null : JSON.stringify(row.nodes_json),
     edges: row.edges_json == null ? null : JSON.stringify(row.edges_json),
+  };
+}
+
+async function rowsView(
+  tx: Prisma.TransactionClient,
+  projectId: bigint,
+  row: { id: bigint; project_id: bigint; version: number; viewport_json: unknown },
+): Promise<CanvasView> {
+  const [nodes, edges] = await Promise.all([
+    tx.project_nodes.findMany({ where: { project_id: projectId, is_delete: 0 }, orderBy: { id: "asc" } }),
+    tx.project_edges.findMany({ where: { project_id: projectId, is_delete: 0 }, orderBy: { id: "asc" } }),
+  ]);
+  return {
+    id: row.id.toString(),
+    project_id: row.project_id.toString(),
+    version: row.version,
+    viewport: row.viewport_json == null ? null : JSON.stringify(row.viewport_json),
+    nodes: JSON.stringify(nodes.map(nodeFromRow)),
+    edges: JSON.stringify(edges.map(edgeFromRow)),
   };
 }
 
@@ -253,37 +273,49 @@ export function createCanvasRepo(prisma: PrismaClient): CanvasRepo {
     },
     async save(projectId, viewport, nodes) {
       const pid = BigInt(projectId);
-      const data = {
-        viewport_json: viewport ? JSON.parse(viewport) : null,
-        nodes_json: nodes ? JSON.parse(nodes) : null,
-      };
+      const parsedNodes = nodes ? JSON.parse(nodes) : [];
       return prisma.$transaction(async (tx) => {
         const row = await tx.project_canvas.upsert({
           where: { project_id: pid },
-          create: { project_id: pid, ...data },
-          update: { ...data, version: { increment: 1 } },
+          create: {
+            project_id: pid,
+            viewport_json: viewport ? JSON.parse(viewport) : null,
+            rows_authoritative: 1,
+          },
+          update: {
+            viewport_json: viewport ? JSON.parse(viewport) : null,
+            rows_authoritative: 1,
+            version: { increment: 1 },
+          },
         });
-        await markOutputSlotsPlaced(tx, pid, data.nodes_json);
-        return toView(row);
+        const currentEdges = await tx.project_edges.findMany({
+          where: { project_id: pid, is_delete: 0 },
+          orderBy: { id: "asc" },
+        });
+        await replaceCanvasRows(tx, pid, parsedNodes, currentEdges.map(edgeFromRow));
+        await markOutputSlotsPlaced(tx, pid, parsedNodes);
+        return rowsView(tx, pid, row);
       });
     },
     async saveIfVersion(projectId, expectedVersion, viewport, nodes, edges, materials) {
       const pid = BigInt(projectId);
-      const data = {
-        viewport_json: viewport ? JSON.parse(viewport) : null,
-        nodes_json: nodes ? JSON.parse(nodes) : null,
-        edges_json: edges ? JSON.parse(edges) : null,
-      };
+      const parsedNodes = nodes ? JSON.parse(nodes) : [];
+      const parsedEdges = edges ? JSON.parse(edges) : [];
       if (expectedVersion === null) {
         try {
           return await prisma.$transaction(async (tx) => {
             const row = await tx.project_canvas.create({
-              data: { project_id: pid, ...data },
+              data: {
+                project_id: pid,
+                viewport_json: viewport ? JSON.parse(viewport) : null,
+                rows_authoritative: 1,
+              },
             });
+            await replaceCanvasRows(tx, pid, parsedNodes, parsedEdges);
             await linkPromptMaterials(tx, pid, materials);
-            await markOutputSlotsPlaced(tx, pid, data.nodes_json);
-            await markAudioMixCards(tx, pid, data.nodes_json, materials?.ownerId);
-            return toView(row);
+            await markOutputSlotsPlaced(tx, pid, parsedNodes);
+            await markAudioMixCards(tx, pid, parsedNodes, materials?.ownerId);
+            return rowsView(tx, pid, row);
           });
         } catch (error) {
           if (
@@ -300,14 +332,19 @@ export function createCanvasRepo(prisma: PrismaClient): CanvasRepo {
       return prisma.$transaction(async (tx) => {
         const result = await tx.project_canvas.updateMany({
           where: { project_id: pid, version: expectedVersion },
-          data: { ...data, version: { increment: 1 } },
+          data: {
+            viewport_json: viewport ? JSON.parse(viewport) : null,
+            rows_authoritative: 1,
+            version: { increment: 1 },
+          },
         });
         if (result.count !== 1) return null;
+        await replaceCanvasRows(tx, pid, parsedNodes, parsedEdges);
         await linkPromptMaterials(tx, pid, materials);
-        await markOutputSlotsPlaced(tx, pid, data.nodes_json);
-        await markAudioMixCards(tx, pid, data.nodes_json, materials?.ownerId);
+        await markOutputSlotsPlaced(tx, pid, parsedNodes);
+        await markAudioMixCards(tx, pid, parsedNodes, materials?.ownerId);
         const row = await tx.project_canvas.findFirst({ where: { project_id: pid } });
-        return row ? toView(row) : null;
+        return row ? rowsView(tx, pid, row) : null;
       });
     },
   };

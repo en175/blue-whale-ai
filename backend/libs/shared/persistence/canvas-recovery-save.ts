@@ -3,7 +3,6 @@
 
 
 import { createHash } from "node:crypto";
-import { isDeepStrictEqual } from "node:util";
 
 import {
   CANVAS_RECOVERY_PROTOCOL_VERSION,
@@ -17,8 +16,10 @@ import {
 import { Prisma } from "@prisma/client";
 import type { PrismaClient } from "@prisma/client";
 
-import { linkPromptMaterials, markAudioMixCards, markOutputSlotsPlaced } from "./canvas-repo.js";
-import { RecoveryContractError } from "./generation-canvas-recovery-repo.js";
+import { edgeFromRow, linkPromptMaterials, markAudioMixCards, markOutputSlotsPlaced, nodeFromRow } from "./canvas-repo.js";
+import { RecoveryContractError, canvasNodesOf, loadRecoveryOwners, type RecoveryNodeOwner } from "./generation-canvas-recovery-repo.js";
+import { stableJson } from "../canvas/apply-diff.js";
+import { CanvasRowsWriteError, replaceCanvasRows } from "./canvas-rows-replace.js";
 import {
   isMultiResultOutputKey,
   outputNodeIdForKey,
@@ -90,17 +91,35 @@ function markerOf(node: Record<string, unknown> | undefined): Record<string, unk
 }
 
 
-function parsePreviousNodes(raw: unknown): Array<Record<string, unknown>> {
-  if (raw === null || raw === undefined) return [];
-  const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
-  return Array.isArray(parsed) ? parsed as Array<Record<string, unknown>> : [];
-}
-
 function markerMatches(marker: Record<string, unknown> | null, submissionId: string, outputKey: string): boolean {
   return marker !== null
     && marker.protocolVersion === CANVAS_RECOVERY_PROTOCOL_VERSION
     && marker.submissionId === submissionId
     && marker.outputKey === outputKey;
+}
+
+async function canvasContentMatches(
+  tx: Prisma.TransactionClient,
+  projectId: bigint,
+  nodes: Array<Record<string, unknown>>,
+  edges: Array<Record<string, unknown>>,
+): Promise<boolean> {
+  const [nodeRows, edgeRows] = await Promise.all([
+    tx.project_nodes.findMany({ where: { project_id: projectId, is_delete: 0 } }),
+    tx.project_edges.findMany({ where: { project_id: projectId, is_delete: 0 } }),
+  ]);
+  if (nodeRows.length !== nodes.length || edgeRows.length !== edges.length) return false;
+  const nodeById = new Map(nodeRows.map((row) => [row.node_id, nodeFromRow(row)]));
+  for (const node of nodes) {
+    const row = nodeById.get(String(node.id));
+    if (!row || stableJson(row) !== stableJson(node)) return false;
+  }
+  const edgeById = new Map(edgeRows.map((row) => [row.edge_id, edgeFromRow(row)]));
+  for (const edge of edges) {
+    const row = edgeById.get(String(edge.id));
+    if (!row || stableJson(row) !== stableJson(edge)) return false;
+  }
+  return true;
 }
 
 const MARKER_IDENTITY_KEYS = ["protocolVersion", "submissionId", "outputKey"] as const;
@@ -160,8 +179,8 @@ export async function saveCanvasWithRecovery(
 
     await tx.$queryRaw`SELECT id FROM project WHERE id = ${pid} FOR UPDATE`;
     const canvasRows = await tx.$queryRaw<
-      Array<{ id: bigint; version: number; viewport_json: unknown; nodes_json: unknown; edges_json: unknown }>
-    >`SELECT id, version, viewport_json, nodes_json, edges_json FROM project_canvas WHERE project_id = ${pid} FOR UPDATE`;
+      Array<{ id: bigint; version: number; viewport_json: unknown; nodes_json: unknown; edges_json: unknown; rows_authoritative: number }>
+    >`SELECT id, version, viewport_json, nodes_json, edges_json, rows_authoritative FROM project_canvas WHERE project_id = ${pid} FOR UPDATE`;
     const canvasRow = canvasRows[0] ?? null;
 
     const receiptRow = await tx.project_command_receipts.findUnique({
@@ -241,22 +260,17 @@ export async function saveCanvasWithRecovery(
 
 
 
-    const previousNodes = parsePreviousNodes(canvasRow?.nodes_json);
+    const previousNodes = await canvasNodesOf(tx, pid, canvasRow);
     const involvedNodes = [...new Set([
       ...itemStates.map(item => item.nodeId),
       ...previousNodes.filter(node => markerOf(node) !== null).map(node => String(node.id)),
     ])].sort();
-    const ownerRows = involvedNodes.length > 0
-      ? await tx.$queryRaw<
-        Array<{ node_id: string; generation_canvas_submission_id: bigint; output_key: string; binding_revision: number }>
-      >`SELECT node_id, generation_canvas_submission_id, output_key, binding_revision
-      FROM generation_canvas_node_owners WHERE project_id = ${pid}
-      AND node_id IN (${Prisma.join(involvedNodes)}) FOR UPDATE`
-      : [];
-    const ownerByNode = new Map(ownerRows.map(owner => [owner.node_id, owner]));
-    const ownerSubmissionRows = ownerRows.length > 0
+    const ownerByNode = involvedNodes.length > 0
+      ? await loadRecoveryOwners(tx, pid, involvedNodes)
+      : new Map<string, RecoveryNodeOwner>();
+    const ownerSubmissionRows = ownerByNode.size > 0
       ? await tx.generation_canvas_submissions.findMany({
-          where: { id: { in: ownerRows.map(owner => owner.generation_canvas_submission_id) } },
+          where: { id: { in: [...ownerByNode.values()].map(owner => owner.submissionId) } },
           select: { id: true, submission_id: true },
         })
       : [];
@@ -264,8 +278,8 @@ export async function saveCanvasWithRecovery(
     const ownerOfNode = (nodeId: string): { submissionId: string; outputKey: string } | null => {
       const owner = ownerByNode.get(nodeId);
       if (owner === undefined) return null;
-      const ownerSubmissionId = ownerSubmissionIdByRowId.get(owner.generation_canvas_submission_id.toString());
-      return ownerSubmissionId === undefined ? null : { submissionId: ownerSubmissionId, outputKey: owner.output_key };
+      const ownerSubmissionId = ownerSubmissionIdByRowId.get(owner.submissionId.toString());
+      return ownerSubmissionId === undefined ? null : { submissionId: ownerSubmissionId, outputKey: owner.outputKey };
     };
     const changes: CanvasRecoveryReceiptChange[] = [];
 
@@ -365,8 +379,8 @@ export async function saveCanvasWithRecovery(
       const node = incomingByNode.get(item.nodeId);
       const marker = markerOf(node);
       const owner = ownerByNode.get(item.nodeId);
-      const owned = owner !== undefined && owner.generation_canvas_submission_id === item.submissionRow.id
-        && owner.output_key === item.outputKey;
+      const owned = owner !== undefined && owner.submissionId === item.submissionRow.id
+        && owner.outputKey === item.outputKey;
       const conflict = (currentState: string, currentRevision: number) =>
         new RecoveryContractError(
           recoveryError(409, "恢复项状态已变化，请刷新后重试", RECOVERY_REASONS.itemConflict, {
@@ -409,7 +423,7 @@ export async function saveCanvasWithRecovery(
 
 
           if (item.outputKey === PRIMARY_OUTPUT_KEY
-            && (owner === undefined || owner.generation_canvas_submission_id !== item.submissionRow.id)) {
+            && (owner === undefined || owner.submissionId !== item.submissionRow.id)) {
             throw nodeConflict();
           }
 
@@ -814,19 +828,14 @@ export async function saveCanvasWithRecovery(
     }
     const ownerWriteNodeIds = [...new Set(aligned.filter(write => write.createOwner).map(write => write.nodeId))];
     if (ownerWriteNodeIds.length > 0) {
-      const existingOwnerRows = await tx.$queryRaw<
-        Array<{ node_id: string; generation_canvas_submission_id: bigint; output_key: string }>
-      >`SELECT node_id, generation_canvas_submission_id, output_key
-        FROM generation_canvas_node_owners WHERE project_id = ${pid}
-        AND node_id IN (${Prisma.join(ownerWriteNodeIds)}) FOR UPDATE`;
-      const existingOwnerByNode = new Map(existingOwnerRows.map(row => [row.node_id, row]));
+      const existingOwnerByNode = await loadRecoveryOwners(tx, pid, ownerWriteNodeIds);
       for (let index = aligned.length - 1; index >= 0; index -= 1) {
         const write = aligned[index]!;
         if (!write.createOwner) continue;
         const existing = existingOwnerByNode.get(write.nodeId);
         if (existing === undefined) continue;
-        if (existing.generation_canvas_submission_id === write.submissionRow.id
-          && existing.output_key === write.outputKey) {
+        if (existing.submissionId === write.submissionRow.id
+          && existing.outputKey === write.outputKey) {
           write.createOwner = false;
           continue;
         }
@@ -834,11 +843,11 @@ export async function saveCanvasWithRecovery(
       }
     }
 
-    const data = {
-      viewport_json: input.viewport ? JSON.parse(input.viewport) : null,
-      nodes_json: JSON.parse(input.nodes),
-      edges_json: JSON.parse(input.edges),
-    };
+    const incomingEdges = JSON.parse(input.edges) as Array<Record<string, unknown>>;
+    const nextViewport = input.viewport ? JSON.parse(input.viewport) : null;
+    const currentViewport = canvasRow === null
+      ? null
+      : typeof canvasRow.viewport_json === "string" ? JSON.parse(canvasRow.viewport_json) : canvasRow.viewport_json ?? null;
 
     const unchangedPrimaryApply = canvasRow !== null && input.materials === undefined
       && aligned.length === 0
@@ -846,20 +855,33 @@ export async function saveCanvasWithRecovery(
         const item = itemStates[index]!;
         const owner = ownerByNode.get(item.nodeId);
         return change.action === "apply" && item.outputKey === PRIMARY_OUTPUT_KEY && item.state === "present"
-          && owner?.generation_canvas_submission_id === item.submissionRow.id && owner.output_key === PRIMARY_OUTPUT_KEY;
-      }) && isDeepStrictEqual(
-        [canvasRow.viewport_json, canvasRow.nodes_json, canvasRow.edges_json]
-          .map(value => typeof value === "string" ? JSON.parse(value) : value),
-        [data.viewport_json, data.nodes_json, data.edges_json],
-      );
+          && owner?.submissionId === item.submissionRow.id && owner.outputKey === PRIMARY_OUTPUT_KEY;
+      })
+      && stableJson(currentViewport) === stableJson(nextViewport)
+      && await canvasContentMatches(tx, pid, incomingNodes, incomingEdges);
     const saved = unchangedPrimaryApply ? canvasRow : canvasRow === null
-      ? await tx.project_canvas.create({ data: { project_id: pid, ...data } })
-      : await tx.project_canvas.update({ where: { id: canvasRow.id }, data: { ...data, version: { increment: 1 } } });
+      ? await tx.project_canvas.create({
+          data: { project_id: pid, viewport_json: nextViewport, rows_authoritative: 1 },
+        })
+      : await tx.project_canvas.update({
+          where: { id: canvasRow.id },
+          data: { viewport_json: nextViewport, rows_authoritative: 1, version: { increment: 1 } },
+        });
 
     if (!unchangedPrimaryApply) {
+      try {
+        await replaceCanvasRows(tx, pid, incomingNodes, incomingEdges);
+      } catch (error) {
+        if (error instanceof CanvasRowsWriteError) {
+          throw new RecoveryContractError(
+            recoveryError(400, "画布文档格式无效", RECOVERY_REASONS.invalidPayload),
+          );
+        }
+        throw error;
+      }
       if (input.materials) await linkPromptMaterials(tx, pid, input.materials as never);
-      await markOutputSlotsPlaced(tx, pid, data.nodes_json);
-      await markAudioMixCards(tx, pid, data.nodes_json, input.ownerId);
+      await markOutputSlotsPlaced(tx, pid, incomingNodes);
+      await markAudioMixCards(tx, pid, incomingNodes, input.ownerId);
     }
 
     for (const write of [...planned, ...aligned]) {
@@ -893,25 +915,25 @@ export async function saveCanvasWithRecovery(
 
 
       if (write.outputKey === PRIMARY_OUTPUT_KEY) {
-        await tx.generation_canvas_node_owners.updateMany({
+        await tx.project_nodes.updateMany({
           where: {
             project_id: pid,
             node_id: write.submissionRow.target_node_id,
-            generation_canvas_submission_id: write.submissionRow.id,
+            owner_submission_id: write.submissionRow.id,
           },
-          data: { output_key: PRIMARY_OUTPUT_KEY, gmt_modified: new Date() },
+          data: { owner_output_key: PRIMARY_OUTPUT_KEY, gmt_modified: new Date() },
         });
       }
 
 
       if (write.createOwner) {
-        await tx.generation_canvas_node_owners.create({
+        await tx.project_nodes.updateMany({
+          where: { project_id: pid, node_id: write.nodeId },
           data: {
-            project_id: pid,
-            node_id: write.nodeId,
-            generation_canvas_submission_id: write.submissionRow.id,
-            output_key: write.outputKey,
-            binding_revision: 1,
+            owner_submission_id: write.submissionRow.id,
+            owner_output_key: write.outputKey,
+            owner_binding_revision: 1,
+            gmt_modified: new Date(),
           },
         });
       }
@@ -924,7 +946,7 @@ export async function saveCanvasWithRecovery(
         recoveryItemId: input.changes[index]!.recoveryItemId,
         revision: write.nextRevision,
 
-        nodeBindingRevision: owner ? Number(owner.binding_revision) : write.createOwner ? 1 : 0,
+        nodeBindingRevision: owner ? owner.bindingRevision : write.createOwner ? 1 : 0,
         state: write.nextState,
       });
     }

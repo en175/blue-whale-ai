@@ -2,6 +2,53 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createCanvasRepo } from "./canvas-repo.js";
 
+function rowTableMocks() {
+  const nodeRows: Array<Record<string, unknown>> = [];
+  const edgeRows: Array<Record<string, unknown>> = [];
+  const applyUpdate = (row: Record<string, unknown> | undefined, data: Record<string, unknown>) => {
+    if (!row) return;
+    for (const [key, value] of Object.entries(data)) {
+      if (key === "version" && typeof value === "object" && value !== null && "increment" in value) {
+        row.version = Number(row.version ?? 0) + Number((value as { increment: number }).increment);
+      } else {
+        row[key] = value;
+      }
+    }
+  };
+  return {
+    nodeRows,
+    edgeRows,
+    project_nodes: {
+      findMany: vi.fn(async () => nodeRows.filter((row) => row.is_delete === 0).map((row) => ({ ...row }))),
+      create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+        const row = { version: 0, is_delete: 0, ...data };
+        nodeRows.push(row);
+        return row;
+      }),
+      update: vi.fn(async ({ where, data }: { where: { project_id_node_id: { project_id: bigint; node_id: string } }; data: Record<string, unknown> }) => {
+        const key = where.project_id_node_id;
+        const row = nodeRows.find((item) => item.project_id === key.project_id && item.node_id === key.node_id);
+        applyUpdate(row, data);
+        return row;
+      }),
+    },
+    project_edges: {
+      findMany: vi.fn(async () => edgeRows.filter((row) => row.is_delete === 0).map((row) => ({ ...row }))),
+      create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+        const row = { version: 0, is_delete: 0, ...data };
+        edgeRows.push(row);
+        return row;
+      }),
+      update: vi.fn(async ({ where, data }: { where: { project_id_edge_id: { project_id: bigint; edge_id: string } }; data: Record<string, unknown> }) => {
+        const key = where.project_id_edge_id;
+        const row = edgeRows.find((item) => item.project_id === key.project_id && item.edge_id === key.edge_id);
+        applyUpdate(row, data);
+        return row;
+      }),
+    },
+  };
+}
+
 describe("canvas optimistic save", () => {
   it("首次保存规范混合结果卡记为 present，移除记 removed，撤销重加回 present", async () => {
     let version = 3;
@@ -16,6 +63,7 @@ describe("canvas optimistic save", () => {
       return {};
     });
     const tx = {
+      ...rowTableMocks(),
       project_canvas: {
         updateMany: vi.fn(async ({ where }: { where: { version: number } }) => {
           if (where.version !== version) return { count: 0 };
@@ -59,6 +107,7 @@ describe("canvas optimistic save", () => {
   it("IKJCOE：卡号不在本人本项目作用域内 → 一个扩展位都不写（跨用户写防护）", async () => {
     const upsertExtra = vi.fn().mockResolvedValue({});
     const tx = {
+      ...rowTableMocks(),
       project_canvas: {
         updateMany: vi.fn(async () => ({ count: 1 })),
         findFirst: vi.fn(async () => ({
@@ -104,6 +153,7 @@ describe("canvas optimistic save", () => {
     const jobScan = vi.fn().mockResolvedValue([]);
     const jobUpsert = vi.fn();
     const tx = {
+      ...rowTableMocks(),
       project_canvas: {
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
         findFirst: vi.fn().mockResolvedValue({ id: 1n, project_id: 55n, version: 4, viewport_json: null, nodes_json: [], edges_json: null }),
@@ -126,6 +176,7 @@ describe("canvas optimistic save", () => {
     const updateMany = vi.fn().mockResolvedValue({ count: 0 });
     const jobUpsert = vi.fn();
     const tx = {
+      ...rowTableMocks(),
       project_canvas: { updateMany },
       generation_jobs: { findMany: vi.fn().mockResolvedValue([]) },
       generation_job_extras: {
@@ -145,6 +196,7 @@ describe("canvas optimistic save", () => {
     const jobUpsert = vi.fn().mockResolvedValue({});
     const assetsWrite = vi.fn();
     const tx = {
+      ...rowTableMocks(),
       project_canvas: {
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
         findFirst: vi.fn().mockResolvedValue({ id: 1n, project_id: 55n, version: 4, viewport_json: null, nodes_json: [], edges_json: null }),
@@ -181,6 +233,7 @@ describe("canvas optimistic save", () => {
     const updateMany = vi.fn().mockResolvedValue({ count: 0 });
     const upsert = vi.fn();
     const tx = {
+      ...rowTableMocks(),
       project_canvas: { updateMany, upsert, findFirst: vi.fn() },
       generation_output_slots: { updateMany: vi.fn() },
     };
@@ -209,8 +262,7 @@ describe("canvas optimistic save", () => {
       where: { project_id: 55n, version: 3 },
       data: {
         viewport_json: null,
-        nodes_json: [{ id: "stale" }],
-        edges_json: null,
+        rows_authoritative: 1,
         version: { increment: 1 },
       },
     });
@@ -220,6 +272,7 @@ describe("canvas optimistic save", () => {
   it("marks deterministic output slots placed in the same Canvas transaction", async () => {
     const markPlaced = vi.fn().mockResolvedValue({ count: 1 });
     const tx = {
+      ...rowTableMocks(),
       project_canvas: {
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
         findFirst: vi.fn().mockResolvedValue({
@@ -245,7 +298,7 @@ describe("canvas optimistic save", () => {
       "55",
       3,
       null,
-      JSON.stringify([{ id: "generation-output:501" }]),
+      JSON.stringify([{ id: "generation-output:501", type: "mediaNode" }]),
       null,
     );
 
@@ -266,6 +319,7 @@ describe("canvas edges persistence (IKDLQF)", () => {
     const edges = [{ id: "e1", source: "text-1", target: "media-1" }];
     const updateMany = vi.fn().mockResolvedValue({ count: 1 });
     const tx = {
+      ...rowTableMocks(),
       project_canvas: {
         updateMany,
         findFirst: vi.fn().mockResolvedValue({
@@ -290,7 +344,7 @@ describe("canvas edges persistence (IKDLQF)", () => {
       "55",
       3,
       null,
-      JSON.stringify([{ id: "text-1" }, { id: "media-1" }]),
+      JSON.stringify([{ id: "text-1", type: "textNode" }, { id: "media-1", type: "mediaNode" }]),
       JSON.stringify(edges),
     );
 
@@ -298,10 +352,12 @@ describe("canvas edges persistence (IKDLQF)", () => {
       where: { project_id: 55n, version: 3 },
       data: {
         viewport_json: null,
-        nodes_json: [{ id: "text-1" }, { id: "media-1" }],
-        edges_json: edges,
+        rows_authoritative: 1,
         version: { increment: 1 },
       },
+    });
+    expect(tx.project_edges.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ edge_id: "e1", source_node_id: "text-1", target_node_id: "media-1" }),
     });
     expect(view?.edges).toBe(JSON.stringify(edges));
   });

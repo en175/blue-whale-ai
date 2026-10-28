@@ -63,7 +63,10 @@ describe("IKQY33 三轨迁移（画布节点行表与 project_ 前缀）", () =>
       const model = modelBlock(schemaPrisma, table);
       expect(model).toBeDefined();
       const modelColumns = [...model!.matchAll(/^\s{2}([a-z_]+)\s/gm)].map((m) => m[1]);
-      expect(modelColumns).toEqual(sqlColumns);
+      const expectedColumns = table === "project_nodes"
+        ? [...sqlColumns, "owner_submission_id", "owner_output_key", "owner_binding_revision"]
+        : sqlColumns;
+      expect(modelColumns).toEqual(expectedColumns);
     }
   });
 

@@ -307,6 +307,9 @@ model project_nodes {
   gmt_modified DateTime @default(now()) @db.DateTime(0)
   version      Int      @default(0)
   is_delete    Int      @default(0) @db.TinyInt
+  owner_submission_id    BigInt?
+  owner_output_key       String? @db.VarChar(128)
+  owner_binding_revision Int     @default(0)
 
   @@unique([project_id, node_id], map: "uk_project_nodes__node")
   @@index([project_id, type, is_delete], map: "idx_project_nodes__type")
@@ -454,9 +457,6 @@ model project_command_receipts {
 }
 
 /// IKJJQU（IKIXK9-SPEC-20261002 B.2）：生成任务恢复契约 v1 —— 提交意图关联表。
-/// 一次用户提交或失败卡重试是一行；同次网络重放复用身份（uk uk_...__submission 幂等回读），
-/// 用户再次发起重试用新身份。当前承接以 generation_canvas_node_owners 为准，
-/// 历史提交不可用较晚时间戳夺回归属。
 model generation_canvas_submissions {
   id                       BigInt   @id @default(autoincrement())
   project_id               BigInt
@@ -507,21 +507,6 @@ model generation_canvas_outputs {
 
   @@unique([generation_canvas_submission_id, output_key], map: "uk_generation_canvas_outputs__key")
   @@unique([generation_canvas_submission_id, node_id], map: "uk_generation_canvas_outputs__node")
-}
-
-/// IKJJQU（B.2）：节点唯一归属表。同项目同节点唯一有效承接者，独立于原始占位卡是哪一张。
-/// 新提交接管节点时在受理事务中核对并推进版本；删除保留归属行和版本。
-model generation_canvas_node_owners {
-  id                             BigInt   @id @default(autoincrement())
-  project_id                     BigInt
-  node_id                        String   @db.VarChar(128)
-  generation_canvas_submission_id BigInt
-  output_key                     String   @db.VarChar(128)
-  binding_revision               Int
-  gmt_create                     DateTime @default(now()) @db.DateTime(0)
-  gmt_modified                   DateTime @default(now()) @db.DateTime(0)
-
-  @@unique([project_id, node_id], map: "uk_generation_canvas_node_owners__node")
 }
 
 /// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
