@@ -43,7 +43,7 @@ export function createLab(load: Loader) {
           },
         },
         assets: { resolveInputAssets: async (ids: string[]) => ids.filter(id => id === '42').map(() => ({
-          id: '42', type: 'video', duration: 6, width: 640, height: 360, url: reference.url,
+          id: '42', type: 'video', duration: 6, width: 1280, height: 720, url: reference.url,
         })) },
       });
       return { status: 200, body: { ...result, manual_evidence: { request: body, task_snapshots: snapshots,

@@ -24,7 +24,7 @@ export const initialModel = {
 };
 export const reference = {
   id: 42, name: '验收参考视频 · 6 秒', type: 'video', status: 'ready',
-  url: '/__ikluvp/reference', width: 640, height: 360, duration: 6,
+  url: '/__ikluvp/reference', width: 1280, height: 720, duration: 6,
   size: 300000, source: 'uploaded', model: null, created_at: '2026-10-15T08:00:00Z',
 };
 export const cases = [
