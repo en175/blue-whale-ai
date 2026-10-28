@@ -49,7 +49,7 @@ export async function linkPromptMaterials(tx: Prisma.TransactionClient, projectI
   }
 }
 
-function nodeFromRow(row: {
+export function nodeFromRow(row: {
   node_id: string;
   type: string;
   pos_x: number | null;
@@ -64,7 +64,7 @@ function nodeFromRow(row: {
   };
 }
 
-function edgeFromRow(row: {
+export function edgeFromRow(row: {
   edge_id: string;
   source_node_id: string;
   target_node_id: string;

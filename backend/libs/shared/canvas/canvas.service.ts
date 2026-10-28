@@ -33,6 +33,10 @@ import {
   CanvasApplyConflictError,
   applyCanvasChanges,
 } from "@lib/shared/persistence/project-canvas-apply-repo.js";
+import {
+  CanvasRowsImportError,
+  ensureCanvasRowsImported,
+} from "@lib/shared/persistence/canvas-json-import.js";
 import { validateMediaIndexShape, validateNodePayload, validatePromptSourcePayload } from "./node-validation.js";
 
 function parseIdList(raw: unknown, field: string): string[] {
@@ -346,6 +350,7 @@ export class CanvasService {
   ) {
     const owned = await this.project.findOwnedById(projectId, ownerId);
     if (!owned) throw new DomainError(DATA_NOT_EXIST_CODE, "项目不存在");
+    await this.ensureRows(projectId);
     const nodes = parseApplyNodes(body.upsert_nodes);
     const edges = parseApplyEdges(body.upsert_edges);
     const deleteNodeIds = parseIdList(body.delete_node_ids, "delete_node_ids");
@@ -426,12 +431,33 @@ export class CanvasService {
         }
         throw new BadRequestException("节点或连线 id 在请求内重复");
       }
+      if (error instanceof CanvasRowsImportError) {
+        throw this.rowsImportConflict(error);
+      }
       if (error instanceof PromptMaterialUnavailableError) {
         throw new BadRequestException("素材已删除、无权访问或身份不一致，原内容未改动");
       }
       throw error;
     }
     return ok(result);
+  }
+
+  private rowsImportConflict(error: CanvasRowsImportError): ConflictException {
+    return new ConflictException(
+      error.reason === "parse_failure"
+        ? "画布存量数据无法自动转换，请联系管理员处理"
+        : "画布行数据与迁移标记不一致，请联系管理员处理",
+    );
+  }
+
+  private async ensureRows(projectId: string) {
+    if (await this.repo.isRowsAuthoritative(projectId)) return;
+    try {
+      await ensureCanvasRowsImported(this.prisma.client, BigInt(projectId));
+    } catch (error) {
+      if (error instanceof CanvasRowsImportError) throw this.rowsImportConflict(error);
+      throw error;
+    }
   }
 
   private async collectApplyMaterials(
