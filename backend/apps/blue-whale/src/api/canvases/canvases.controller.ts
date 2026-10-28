@@ -87,6 +87,22 @@ export class CanvasesController {
     res.status(200).json(result);
   }
 
+  @Post(":projectId/apply")
+  @HttpCode(200)
+  applyChanges(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("projectId") projectId: string,
+    @Body() body: unknown,
+  ) {
+    return this.canvas.apply(user.userId, projectId, (body ?? {}) as {
+      upsert_nodes?: unknown;
+      delete_node_ids?: unknown;
+      upsert_edges?: unknown;
+      delete_edge_ids?: unknown;
+      viewport?: unknown;
+    });
+  }
+
   @Put(":projectId")
   async save(
     @CurrentUser() user: AuthenticatedUser,

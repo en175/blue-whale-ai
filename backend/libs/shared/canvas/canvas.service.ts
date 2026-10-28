@@ -29,6 +29,55 @@ import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";
 import { promptMentionSchema, validPromptMentions, mediaMentionSchema, mediaRefSchema, validMediaMentions, mediaRefsCoverMentions, mediaAndPromptMentionsDisjoint, TEXT_INDEX_EDGE_MARKER, type PromptPreviewContent, type PromptPreviewSource } from "@lib/contracts";
 import { PromptMaterialUnavailableError } from "@lib/shared/persistence/canvas-repo.js";
+import {
+  CanvasApplyConflictError,
+  applyCanvasChanges,
+  type CanvasApplyInput,
+} from "@lib/shared/persistence/project-canvas-apply-repo.js";
+import { validateMediaIndexShape, validateNodePayload, validatePromptSourcePayload } from "./node-validation.js";
+
+function parseIdList(raw: unknown, field: string): string[] {
+  if (raw === undefined || raw === null) return [];
+  if (!Array.isArray(raw) || raw.some((item) => typeof item !== "string" || item.length === 0 || item.length > 128)) {
+    throw new BadRequestException(`${field} 格式无效`);
+  }
+  if (raw.length > CANVAS_EDGE_LIMITS.maxEdges) throw new BadRequestException(`${field} 数量超限`);
+  return [...new Set(raw as string[])];
+}
+
+function parseApplyNodes(raw: unknown): Array<{ id: string; type: string; position?: { x?: unknown; y?: unknown }; data?: Record<string, unknown> }> {
+  if (!Array.isArray(raw)) throw new BadRequestException("画布节点格式无效");
+  if (Buffer.byteLength(JSON.stringify(raw), "utf8") > limits.canvasBytes) {
+    throw new BadRequestException("画布内容超过 4 MiB，原内容未改动");
+  }
+  for (const item of raw) {
+    if (!item || typeof item !== "object" || typeof (item as { id?: unknown }).id !== "string" || typeof (item as { type?: unknown }).type !== "string") {
+      throw new BadRequestException("画布节点格式无效");
+    }
+  }
+  return raw as Array<{ id: string; type: string; position?: { x?: unknown; y?: unknown }; data?: Record<string, unknown> }>;
+}
+
+function parseApplyEdges(raw: unknown): Array<{ id: string; source: string; target: string; [key: string]: unknown }> {
+  if (raw === undefined || raw === null) return [];
+  if (!Array.isArray(raw)) throw new BadRequestException("画布连线格式无效");
+  if (Buffer.byteLength(JSON.stringify(raw), "utf8") > CANVAS_EDGE_LIMITS.edgesBytes) {
+    throw new BadRequestException("连线内容超过 256 KiB，原内容未改动");
+  }
+  if (raw.length > CANVAS_EDGE_LIMITS.maxEdges) {
+    throw new BadRequestException(`连线数量超过 ${CANVAS_EDGE_LIMITS.maxEdges} 条上限，原内容未改动`);
+  }
+  const pairs = new Set<string>();
+  return raw.map((item) => {
+    const parsed = canvasEdgeSchema.safeParse(item);
+    if (!parsed.success) throw new BadRequestException("画布连线格式无效，原内容未改动");
+    const pair = `${parsed.data.source}\0${parsed.data.target}`;
+    if (pairs.has(pair)) throw new BadRequestException("同一对节点之间只允许一条连线，原内容未改动");
+    pairs.add(pair);
+    return item as { id: string; source: string; target: string; [key: string]: unknown };
+  });
+}
+
 
 function isReusableApplyMediaNode(item: { type?: string; data?: Record<string, unknown> }): boolean {
   if (item.type !== "mediaNode") return false;
@@ -249,6 +298,96 @@ export class CanvasService {
       }
     }
     throw new ConflictException("画布正在被修改，请重试应用");
+  }
+
+  async apply(
+    ownerId: string,
+    projectId: string,
+    body: {
+      upsert_nodes?: unknown;
+      delete_node_ids?: unknown;
+      upsert_edges?: unknown;
+      delete_edge_ids?: unknown;
+      viewport?: unknown;
+    },
+  ) {
+    const owned = await this.project.findOwnedById(projectId, ownerId);
+    if (!owned) throw new DomainError(DATA_NOT_EXIST_CODE, "项目不存在");
+    const nodes = parseApplyNodes(body.upsert_nodes);
+    const edges = parseApplyEdges(body.upsert_edges);
+    const deleteNodeIds = parseIdList(body.delete_node_ids, "delete_node_ids");
+    const deleteEdgeIds = parseIdList(body.delete_edge_ids, "delete_edge_ids");
+    const batchNodeIds = new Set(nodes.map((node) => node.id));
+    for (const node of nodes) {
+      validateNodePayload(node, limits);
+      validateMediaIndexShape(node);
+      validatePromptSourcePayload(node);
+    }
+    const removed = new Set(deleteNodeIds.filter((id) => !batchNodeIds.has(id)));
+    const referenced = [...new Set(edges.flatMap((edge) => [edge.source, edge.target]))].filter(
+      (id) => !batchNodeIds.has(id),
+    );
+    if (referenced.length > 0) {
+      const alive = await this.prisma.client.project_nodes.findMany({
+        where: { project_id: BigInt(projectId), node_id: { in: referenced }, is_delete: 0 },
+        select: { node_id: true },
+      });
+      const aliveIds = new Set(alive.map((row) => row.node_id));
+      if (referenced.some((id) => !aliveIds.has(id) || removed.has(id))) {
+        throw new BadRequestException("连线端点必须引用存在的画布节点，原内容未改动");
+      }
+    }
+    const materials = await this.collectApplyMaterials(ownerId, nodes);
+    let result;
+    try {
+      result = await applyCanvasChanges(this.prisma.client, {
+        projectId,
+        nodes,
+        deleteNodeIds,
+        edges,
+        deleteEdgeIds,
+        ...(body.viewport !== undefined ? { viewport: body.viewport } : {}),
+        actorId: ownerId,
+        ...(materials.length > 0 ? { materials: { ownerId, items: materials } } : {}),
+      });
+    } catch (error) {
+      if (error instanceof CanvasApplyConflictError) {
+        if (error.reason === "duplicate_edge_pair") {
+          throw new BadRequestException("同一对节点之间只允许一条连线，原内容未改动");
+        }
+        throw new BadRequestException("节点或连线 id 在请求内重复");
+      }
+      if (error instanceof PromptMaterialUnavailableError) {
+        throw new BadRequestException("素材已删除、无权访问或身份不一致，原内容未改动");
+      }
+      throw error;
+    }
+    return ok(result);
+  }
+
+  private async collectApplyMaterials(
+    ownerId: string,
+    nodes: Array<{ data?: Record<string, unknown> }>,
+  ): Promise<Array<{ assetId: string; mediaType: "image" | "video" | "audio" }>> {
+    const byAsset = new Map<string, { assetId: string; mediaType: string; url: string }>();
+    for (const node of nodes) {
+      if (node.data?.promptSource === undefined) continue;
+      const list = Array.isArray(node.data.promptMaterials)
+        ? (node.data.promptMaterials as Array<{ assetId: string; mediaType: string; url: string }>)
+        : [];
+      for (const item of list) byAsset.set(item.assetId, item);
+    }
+    const items: Array<{ assetId: string; mediaType: "image" | "video" | "audio" }> = [];
+    for (const item of byAsset.values()) {
+      const asset = await this.prisma.client.user_assets.findFirst({
+        where: { id: BigInt(item.assetId), user_id: BigInt(ownerId), is_delete: false, status: "normal" },
+      });
+      if (!asset || asset.type !== item.mediaType || asset.url !== item.url || !["image", "video", "audio"].includes(asset.type)) {
+        throw new BadRequestException("素材已删除、无权访问或身份不一致，原内容未改动");
+      }
+      items.push({ assetId: item.assetId, mediaType: asset.type as "image" | "video" | "audio" });
+    }
+    return items;
   }
 
   async save(
