@@ -100,13 +100,13 @@ class MaterialAssetMapperMySqlIntegrationTest {
 
     @BeforeEach
     void cleanup() {
-        jdbc.execute("DELETE FROM catalog_material_states");
+        jdbc.execute("DELETE FROM user_material_info");
         jdbc.execute("DELETE FROM user_assets WHERE id IN (880001, 880002)");
     }
 
     private void insert(String materialId, long userId, String status, int ageMinutes) {
         jdbc.update("""
-                INSERT INTO catalog_material_states
+                INSERT INTO user_material_info
                   (material_id, user_id, material_group_id, status, gmt_create, gmt_modified)
                 VALUES (?, ?, 'group-1', ?, DATE_SUB(NOW(), INTERVAL ? MINUTE), NOW())
                 """, materialId, userId, status, ageMinutes);
@@ -115,7 +115,7 @@ class MaterialAssetMapperMySqlIntegrationTest {
     private Map<String, Object> read(String materialId) {
         return jdbc.queryForMap(
                 "SELECT status, error_code, error_message, status_checked_at, version "
-                        + "FROM catalog_material_states WHERE material_id = ?", materialId);
+                        + "FROM user_material_info WHERE material_id = ?", materialId);
     }
 
     @Test
@@ -188,7 +188,7 @@ class MaterialAssetMapperMySqlIntegrationTest {
     @DisplayName("mirrorStatus 不凭空造行（无行时影响行数为 0）")
     void mirrorStatusNeverInserts() {
         assertThat(assetMapper.mirrorStatus(9L, "asset-nonexistent", "Active", null, null)).isZero();
-        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM catalog_material_states", Integer.class)).isZero();
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM user_material_info", Integer.class)).isZero();
     }
 
     @Test

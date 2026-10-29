@@ -86,7 +86,9 @@ const RENAMED = new Map([
   ["homepage_hero", "content_homepage_heroes"],
 ]);
 
-const SUPERSEDED_BY_IKRGTJ = new Set(["shared_assets", "material_groups"]);
+const SUPERSEDED_BY_IKRGTJ = new Set(["shared_assets", "material_groups", "material_assets"]);
+
+const SUPERSEDED_INDEX_RENAMES = new Set(["uk_material_assets_material", "idx_material_assets_poll", "idx_material_assets_group"]);
 
 const INDEX_RENAMES = new Map([
   ["uk_media_tool_pricing__tool_type", "uk_catalog_media_tools__tool_type"],
@@ -131,6 +133,7 @@ describe("IKQY3N 三轨迁移（目录/素材/技能与模板表改名）", () =
       expect(schemaPrisma).not.toContain("model " + from + " {");
     }
     for (const [from, to] of INDEX_RENAMES) {
+      if (SUPERSEDED_INDEX_RENAMES.has(from)) continue;
       expect(schemaPrisma).not.toContain('"' + from + '"');
       expect(schemaPrisma).toContain('"' + to + '"');
     }
@@ -145,6 +148,7 @@ describe("IKQY3N 三轨迁移（目录/素材/技能与模板表改名）", () =
       }
     }
     for (const [from, to] of INDEX_RENAMES) {
+      if (SUPERSEDED_INDEX_RENAMES.has(from)) continue;
       expect(javaSchemaSql).not.toContain("`" + from + "`");
       if (from !== "uk_media_tool_pricing__tool_type") {
         expect(javaSchemaSql).toContain("`" + to + "`");

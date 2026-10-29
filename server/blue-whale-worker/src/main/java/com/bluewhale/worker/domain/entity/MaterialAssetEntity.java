@@ -7,7 +7,7 @@ import com.baomidou.mybatisplus.annotation.TableName;
 
 import java.time.LocalDateTime;
 
-@TableName("catalog_material_states")
+@TableName("user_material_info")
 public class MaterialAssetEntity {
     @TableId(type = IdType.AUTO)
     private Long id;

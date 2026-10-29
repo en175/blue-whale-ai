@@ -121,12 +121,12 @@ export class LocalCanvasRecoveryService {
     ownerId: string,
     references: AssetReference[],
     targetProjectId?: string,
-    client: Pick<PrismaService["client"], "user_assets" | "catalog_material_states"> = this.prisma.client,
+    client: Pick<PrismaService["client"], "user_assets" | "user_material_info"> = this.prisma.client,
   ): Promise<PromptMaterial[]> {
     if (references.length === 0) return [];
     const ids = references.flatMap(ref => [ref.assetId, ref.resolvedAssetId].flatMap(id => id && /^[1-9][0-9]{0,18}$/.test(id) ? [BigInt(id)] : []));
     const materialIds = references.flatMap(ref => ref.assetId && /^asset-.{1,128}$/i.test(ref.assetId) ? [ref.assetId] : []);
-    const activeMaterials = materialIds.length === 0 ? [] : await client.catalog_material_states.findMany({ where: {
+    const activeMaterials = materialIds.length === 0 ? [] : await client.user_material_info.findMany({ where: {
       user_id: BigInt(ownerId), material_id: { in: materialIds }, status: "Active",
     }, select: { material_id: true } });
     const activeMaterialIds = new Set(activeMaterials.map(material => material.material_id));
