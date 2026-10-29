@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Plus, Pencil, Trash2, ChevronUp, ChevronDown, Film, Image as ImageIcon, Upload, Eye, EyeOff } from 'lucide-react';
 import {
   createTemplateCard,
+  createAdminTemplateTag,
   updateTemplateCard,
   deleteTemplateCard,
   moveTemplateCard,
@@ -53,6 +54,8 @@ export default function TemplateManage() {
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [actionError, setActionError] = useState('');
+  const [featuredOnly, setFeaturedOnly] = useState(false);
+  const [newTagOpen, setNewTagOpen] = useState(false);
 
   const tagName = (code: string) => tags.find((t) => t.tag_code === code)?.label ?? code;
 
@@ -63,8 +66,11 @@ export default function TemplateManage() {
   );
   const tags: AdminTemplateTag[] = tagsQuery.data ?? [];
   const templates: TemplateCard[] = useMemo(
-    () => [...(cardsQuery.data ?? [])].sort((a, b) => a.sort_order - b.sort_order),
-    [cardsQuery.data],
+    () =>
+      [...(cardsQuery.data ?? [])]
+        .sort((a, b) => a.sort_order - b.sort_order)
+        .filter((t) => !featuredOnly || t.is_featured === 1),
+    [cardsQuery.data, featuredOnly],
   );
   const loading = cardsQuery.isPending;
   const loadError = cardsQuery.isError
@@ -161,6 +167,9 @@ export default function TemplateManage() {
             <Chip active={activeTab === 'all'} onClick={() => setActiveTab('all')}>
               全部
             </Chip>
+            <Chip active={featuredOnly} onClick={() => setFeaturedOnly((v) => !v)}>
+              精选
+            </Chip>
             {tags.map((t) => (
               <span
                 key={t.tag_code}
@@ -194,6 +203,13 @@ export default function TemplateManage() {
                 />
               </span>
             ))}
+            <Button
+              size="sm"
+              icon={<Plus size={13} strokeWidth={2} />}
+              onClick={() => setNewTagOpen(true)}
+            >
+              新建标签
+            </Button>
           </Toolbar>
         </div>
 
@@ -205,6 +221,7 @@ export default function TemplateManage() {
               <th>标签</th>
               <th>形态</th>
               <th>排序</th>
+              <th>精选</th>
               <th>资源</th>
               <th>操作</th>
             </tr>
@@ -212,14 +229,14 @@ export default function TemplateManage() {
           <tbody>
             {loading && (
               <tr>
-                <td colSpan={6}>
+                <td colSpan={7}>
                   <Empty message="加载中…" />
                 </td>
               </tr>
             )}
             {!loading && loadError && (
               <tr>
-                <td colSpan={6}>
+                <td colSpan={7}>
                   <Empty
                     message={loadError}
                     extra={
@@ -231,7 +248,7 @@ export default function TemplateManage() {
             )}
             {!loading && !loadError && templates.length === 0 && (
               <tr>
-                <td colSpan={6}>
+                <td colSpan={7}>
                   <Empty
                     message="暂无模板"
                     extra={
@@ -254,6 +271,7 @@ export default function TemplateManage() {
                 </td>
                 <td>{layoutLabel(t.layout)}</td>
                 <td>{t.sort_order}</td>
+                <td>{t.is_featured === 1 ? <Badge tone="neutral">精选</Badge> : '—'}</td>
                 <td>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     {t.video_url && (
@@ -333,6 +351,16 @@ export default function TemplateManage() {
         />
       )}
 
+      {newTagOpen && (
+        <NewTagModal
+          onClose={() => setNewTagOpen(false)}
+          onCreated={() => {
+            setNewTagOpen(false);
+            void tagsQuery.refetch();
+          }}
+        />
+      )}
+
       {}
       {deleteId !== null && (
         <ConfirmModal
@@ -409,6 +437,100 @@ function RenameTagModal({
   );
 }
 
+function NewTagModal({
+  onClose,
+  onCreated,
+}: {
+  onClose: () => void;
+  onCreated: () => void;
+}) {
+  const [code, setCode] = useState('');
+  const [label, setLabel] = useState('');
+  const [sort, setSort] = useState('0');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  const save = async () => {
+    if (saving) return;
+    const sortNum = parseInt(sort, 10);
+    if (Number.isNaN(sortNum) || sortNum < 0) {
+      setError('排序值须为非负整数');
+      return;
+    }
+    setSaving(true);
+    setError('');
+    try {
+      await createAdminTemplateTag({
+        tag_code: code.trim(),
+        label: label.trim(),
+        sort_order: sortNum,
+      });
+      onCreated();
+    } catch (e) {
+      setError(isApiError(e) ? e.message : '新建标签失败，请稍后重试');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal
+      open
+      title={
+        <>
+          新建标签 <Hint>编码为小写字母、数字、下划线或短横线，创建后不可修改。</Hint>
+        </>
+      }
+      width={560}
+      onClose={onClose}
+      footer={
+        <>
+          <Button onClick={onClose}>取消</Button>
+          <Button
+            variant="primary"
+            disabled={!code.trim() || !label.trim() || saving}
+            onClick={save}
+          >
+            {saving ? '保存中…' : '保存'}
+          </Button>
+        </>
+      }
+    >
+      <div style={{ marginBottom: 6 }}>标签编码</div>
+      <Input
+        maxLength={64}
+        value={code}
+        placeholder="goods"
+        aria-label="标签编码"
+        onChange={(e) => setCode(e.target.value)}
+        style={{ width: '100%' }}
+      />
+      <div style={{ marginTop: 16, marginBottom: 6 }}>显示名称</div>
+      <Input
+        maxLength={128}
+        value={label}
+        placeholder="商品展示"
+        aria-label="标签显示名称"
+        onChange={(e) => setLabel(e.target.value)}
+        style={{ width: '100%' }}
+      />
+      <div style={{ marginTop: 16, marginBottom: 6 }}>排序值</div>
+      <Input
+        type="number"
+        value={sort}
+        aria-label="标签排序值"
+        onChange={(e) => setSort(e.target.value)}
+        style={{ width: '100%' }}
+      />
+      {error && (
+        <div style={{ marginTop: 12 }}>
+          <Alert tone="danger">{error}</Alert>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
 interface TemplateFormModalProps {
   initial?: TemplateCard;
   tags: AdminTemplateTag[];
@@ -424,6 +546,7 @@ function TemplateFormModal({ initial, tags, defaultTag, onClose, onSubmit }: Tem
   const [sort, setSort] = useState(initial !== undefined ? String(initial.sort_order) : '0');
   const [videoUrl, setVideoUrl] = useState(initial?.video_url ?? '');
   const [content, setContent] = useState(initial?.content ?? '');
+  const [featured, setFeatured] = useState(initial?.is_featured === 1);
   const [images, setImages] = useState<{ id?: string; url: string }[]>(
     initial?.images.map((img) => ({ id: img.id, url: img.image_url })) ?? []
   );
@@ -510,6 +633,7 @@ function TemplateFormModal({ initial, tags, defaultTag, onClose, onSubmit }: Tem
           tag_code: tag,
           layout,
           sort_order: sortNum,
+          is_featured: featured ? 1 : 0,
           ...(videoUrl.trim() ? { video_url: videoUrl.trim() } : {}),
           ...(content.trim() ? { content: content.trim() } : {}),
           images: images.map((img) => ({
@@ -556,7 +680,7 @@ function TemplateFormModal({ initial, tags, defaultTag, onClose, onSubmit }: Tem
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: '1fr 1.4fr 1fr',
+          gridTemplateColumns: '1fr 1.4fr 1fr 1fr',
           gap: 20,
           marginTop: 22,
         }}
@@ -589,6 +713,18 @@ function TemplateFormModal({ initial, tags, defaultTag, onClose, onSubmit }: Tem
             aria-label="排序值"
             onChange={(e) => setSort(e.target.value)}
             style={{ width: '100%' }}
+          />
+        </div>
+        <div>
+          <div style={{ marginBottom: 6 }}>精选</div>
+          <Select
+            options={[
+              { value: '0', label: '否' },
+              { value: '1', label: '是' },
+            ]}
+            value={featured ? '1' : '0'}
+            onChange={(v) => setFeatured(v === '1')}
+            aria-label="精选"
           />
         </div>
       </div>

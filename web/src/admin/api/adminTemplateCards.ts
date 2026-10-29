@@ -15,6 +15,7 @@ export interface TemplateCard {
   video_url: string | null;
   layout: string;
   sort_order: number;
+  is_featured: number;
   images: TemplateImage[];
 }
 
@@ -28,6 +29,7 @@ export interface TemplateCardPayload {
   tag_code: string;
   layout: string;
   sort_order: number;
+  is_featured?: number;
   video_url?: string;
   content?: string;
   images?: { id?: string; image_url: string }[];
@@ -65,6 +67,14 @@ export interface AdminTemplateTag {
 
 export function fetchAdminTemplateTags() {
   return http.get<AdminTemplateTag[]>('/api/admin/template-tags');
+}
+
+export function createAdminTemplateTag(params: {
+  tag_code: string;
+  label: string;
+  sort_order: number;
+}) {
+  return http.post<{ tag_code: string }>('/api/admin/template-tags', params);
 }
 
 export function renameAdminTemplateTag(tag_code: string, label: string) {
