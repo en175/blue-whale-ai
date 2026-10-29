@@ -589,6 +589,31 @@ describe("handleQuoteGenerationJob 样片模式（IKIZQ7）", () => {
 
     expect(new Set([revA, revInput, revTier, revCap]).size).toBe(4);
   });
+
+  it("★ 视频报价指纹不含提示词字数（IKRH5I）：提示词形态变化不使报价失效", async () => {
+    const prompts = [
+      "人物走过街角",
+      "&7&走过街角",
+      "图片1走过街角",
+      "文本1：外景说明人物走过街角",
+    ];
+    const revisions: Array<string | null | undefined> = [];
+    for (const prompt of prompts) {
+      const billing = fakeBilling();
+      revisions.push(
+        (
+          await handleQuoteGenerationJob(
+            USER_ID,
+            PROJECT_ID,
+            SAMPLE_BODY({ prompt }),
+            sampleDeps(billing.client),
+          )
+        ).data?.quote_revision,
+      );
+    }
+    expect(revisions.every((revision) => typeof revision === "string")).toBe(true);
+    expect(new Set(revisions).size).toBe(1);
+  });
 });
 
 describe("IKJ797 编辑/延长任务报价时长口径", () => {

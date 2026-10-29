@@ -48,6 +48,14 @@ export interface QuoteGenerationJobData {
 
 const EMPTY_QUOTE: QuoteGenerationJobData = { credits: null, quote_revision: null };
 
+export function videoQuoteRevisionInput(
+  quoteInput: Record<string, unknown>,
+): Record<string, unknown> {
+  const input = { ...quoteInput };
+  delete input.prompt_characters;
+  return input;
+}
+
 export function quoteRevisionOf(args: {
   catalogVersion: number;
   capabilityVersion: number | undefined;
@@ -189,7 +197,7 @@ export async function handleQuoteGenerationJob(
       catalogVersion: quote.catalogVersion,
       capabilityVersion: capability.version,
       tier: quote.tier,
-      quoteInput: input,
+      quoteInput: type === "video" ? videoQuoteRevisionInput(input) : input,
     }),
     ...(bySourceVideo ? { duration_basis: "source_video" as const } : {}),
   });

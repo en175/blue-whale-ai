@@ -1,8 +1,10 @@
 import { type MediaGenStatus, type VideoRefRole } from '@/custom/enums';
+import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import type { Dispatch, RefObject, SetStateAction } from 'react';
 import type { Edge, Node } from '@xyflow/react';
 import { envelopeErrorCode, isApiError } from '@/shared/api/http';
+import { generationQuoteKeys } from '@/custom/api/generationQuote';
 import {
   quoteSampleRegenerate,
   quoteVideoFinalize,
@@ -116,6 +118,7 @@ function draftModeOfNodeIn(
 export function useCanvasGenerationSubmission(host: CanvasGenerationSubmissionHost): CanvasGenerationSubmissionHandles {
   const hostRef = useRef(host);
   hostRef.current = host;
+  const queryClient = useQueryClient();
 
   const [finalizeQuotes, setFinalizeQuotes] = useState<
     Record<string, { phase: 'loading' } | { phase: 'ready'; credits: number; revision: string } | { phase: 'empty' }>
@@ -797,6 +800,9 @@ export function useCanvasGenerationSubmission(host: CanvasGenerationSubmissionHo
               setMediaNodes((prev) => prev.filter((n) => n.id !== nodeId));
               setEdges(prev => prev.filter(edge => edge.target !== nodeId));
             };
+            if (isApiError(e) && Number(e.code) === 1056) {
+              void queryClient.invalidateQueries({ queryKey: generationQuoteKeys.all });
+            }
             if (openRechargeForCreditsError(e)) {
               if (inPlaceNodeId) rollbackInPlace();
               else removePlaceholder();

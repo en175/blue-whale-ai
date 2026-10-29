@@ -7,7 +7,7 @@ import {
   handleCreateGenerationJob,
   projectQuoteInput,
 } from "./handle-create-generation-job.js";
-import { quoteRevisionOf } from "./handle-quote-generation-job.js";
+import { quoteRevisionOf, videoQuoteRevisionInput } from "./handle-quote-generation-job.js";
 
 
 
@@ -3557,7 +3557,7 @@ function sampleConfirmationOf(
       catalogVersion: quoteResult.catalogVersion,
       capabilityVersion: capability.version as number | undefined,
       tier: quoteResult.tier,
-      quoteInput,
+      quoteInput: videoQuoteRevisionInput(quoteInput),
     }),
   };
 }

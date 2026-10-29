@@ -255,7 +255,6 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
         return size ? (size.api_value ?? size.id) : undefined;
       })();
 
-  const [quotePrompt, setQuotePrompt] = useState('');
   const wireParams = effectiveVideoParams(currentModel?.features, selectedMode, {
     aspectRatio: selectedRatio,
     duration,
@@ -268,10 +267,8 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
     ...(wireParams.duration ? { duration: wireParams.duration } : {}),
     generate_audio: generateAudio,
     ...(sampleMode ? { sample_mode: true as const } : {}),
-
-    ...(quotePrompt ? { prompt: quotePrompt } : {}),
     mode: selectedMode,
-  }), [currentModel?.model_id, quoteResolution, wireParams.aspect_ratio, wireParams.duration, generateAudio, sampleMode, quotePrompt, selectedMode]);
+  }), [currentModel?.model_id, quoteResolution, wireParams.aspect_ratio, wireParams.duration, generateAudio, sampleMode, selectedMode]);
 
   const readOnly = sending || videoDraftBinding.submitting || videoDraftBinding.status === 'generating';
 
@@ -402,7 +399,16 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
 
   const stripHasItems = videoMediaRefs.reference.length > 0 || (attachments?.length ?? 0) > 0;
 
-  const quoteReferences = useMemo(() => buildVideoJobReferences(videoMediaRefs), [videoMediaRefs]);
+  const mixedStrip = useMixedRefStrip(
+    isKeyframe ? [] : videoMediaRefs.reference.map(r => videoRefStripKey(r).slice(6)),
+    (attachments ?? []).map(a => a.nodeId), { stripOrder, onStripOrderChange },
+  );
+  const orderedVideoMediaRefs = useMemo(() => ({
+    ...videoMediaRefs,
+    reference: orderRefStripItems(videoMediaRefs.reference, videoRefStripKey, mixedStrip.order),
+  }), [videoMediaRefs, mixedStrip.order]);
+
+  const quoteReferences = useMemo(() => buildVideoJobReferences(orderedVideoMediaRefs), [orderedVideoMediaRefs]);
 
   const sampleQuoteQuery = useQuery({
     ...generationQuoteOptions(projectId ?? '', {
@@ -420,15 +426,6 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
     || (sampleQuoteQuery.data != null
       && sampleQuoteQuery.data.credits != null
       && sampleQuoteQuery.data.quote_revision != null);
-
-  const mixedStrip = useMixedRefStrip(
-    isKeyframe ? [] : videoMediaRefs.reference.map(r => videoRefStripKey(r).slice(6)),
-    (attachments ?? []).map(a => a.nodeId), { stripOrder, onStripOrderChange },
-  );
-  const orderedVideoMediaRefs = useMemo(() => ({
-    ...videoMediaRefs,
-    reference: orderRefStripItems(videoMediaRefs.reference, videoRefStripKey, mixedStrip.order),
-  }), [videoMediaRefs, mixedStrip.order]);
 
   const { labelOf: mediaLabelOf, refItems, numberMap: refNumberMap } = useMemo(() => videoLabelMapOf(orderedVideoMediaRefs, selectedMode), [orderedVideoMediaRefs, selectedMode]);
   const orderedTextNodeIds = useMemo(() => mixedStrip.order.filter(key => key.startsWith('text:')).map(key => key.slice(5)), [mixedStrip.order]);
@@ -468,11 +465,6 @@ export default function BottomDialog({ projectId, onClose, onSend, initialText, 
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const flatValue = useMemo(() => flattenPromptDocWith(promptDoc, (key) => refLabelOfStable.current(key)), [promptDoc, reconcileKey]);
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => setQuotePrompt(flatValue), 600);
-    return () => window.clearTimeout(timer);
-  }, [flatValue]);
 
   const hasInvalidRef = docHasInvalidRef(promptDoc);
 

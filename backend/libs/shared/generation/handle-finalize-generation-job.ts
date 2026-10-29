@@ -34,7 +34,7 @@ import type { BillingCharge } from "../billing/billing-charge.js";
 import type { BillingRelease } from "../billing/billing-release.js";
 import type { JobBilling } from "../persistence/job-billing.js";
 import type { CreateJobIdempotency } from "../persistence/generation-job-idempotency.js";
-import { quoteRevisionOf } from "./handle-quote-generation-job.js";
+import { quoteRevisionOf, videoQuoteRevisionInput } from "./handle-quote-generation-job.js";
 import {
   canonicalJson,
   IDEMPOTENCY_KEY_MAX_LENGTH,
@@ -190,7 +190,7 @@ export async function handleFinalizeGenerationJobQuote(
       catalogVersion: quote.catalogVersion,
       capabilityVersion: capability.row.version,
       tier: quote.tier,
-      quoteInput: derived,
+      quoteInput: videoQuoteRevisionInput(derived),
     }),
   });
 }
@@ -287,7 +287,7 @@ export async function handleFinalizeGenerationJobCreate(
           catalogVersion: quote.catalogVersion,
           capabilityVersion: capability.row.version,
           tier: quote.tier,
-          quoteInput: derived,
+          quoteInput: videoQuoteRevisionInput(derived),
         })
       : null;
   if (quote === null) {
