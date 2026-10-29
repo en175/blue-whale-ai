@@ -806,3 +806,43 @@ describe("ProjectRepo last_edited_at / keyword / limit (IKRE7U)", () => {
     expect(views[0].previews).toEqual([]);
   });
 });
+
+describe("ProjectRepo source (IKRGON)", () => {
+  it("filters by source", async () => {
+    const findMany = vi.fn().mockResolvedValue([]);
+    const prisma = {
+      project: { findMany },
+    } as unknown as PrismaClient;
+
+    await createProjectRepo(prisma).listByOwner("100", { source: "dialog" });
+
+    expect(findMany).toHaveBeenCalledWith({
+      where: {
+        owner_id: 100n,
+        purpose: "canvas",
+        is_delete: 0,
+        source: "dialog",
+      },
+      orderBy: [{ pinned_at: "desc" }, { last_edited_at: "desc" }, { id: "desc" }],
+    });
+  });
+
+  it("writes the requested source and defaults to canvas", async () => {
+    const findMany = vi.fn().mockResolvedValue([]);
+    const create = vi.fn().mockResolvedValue({
+      id: 1n,
+      name: "A",
+      gmt_create: new Date("2026-08-25T00:00:00Z"),
+      last_edited_at: new Date("2026-08-25T00:00:00Z"),
+      last_opened_at: null,
+      pinned_at: null,
+    });
+    const prisma = { project: { findMany, create } } as unknown as PrismaClient;
+
+    await createProjectRepo(prisma).create("100", "A", "dialog");
+    await createProjectRepo(prisma).create("100", "B");
+
+    expect(create.mock.calls[0][0].data.source).toBe("dialog");
+    expect(create.mock.calls[1][0].data.source).toBe("canvas");
+  });
+});

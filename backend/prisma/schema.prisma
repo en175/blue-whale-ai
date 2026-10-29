@@ -282,6 +282,7 @@ model project {
   name           String    @db.VarChar(128)
   thumb          String?   @db.VarChar(512)
   purpose        String    @default("canvas") @db.VarChar(32)
+  source         String    @default("canvas") @db.VarChar(16)
   inbox_guard    BigInt?   @unique(map: "uk_project_inbox_guard")
   last_opened_at DateTime? @db.DateTime(0)
   last_edited_at DateTime  @default(now()) @db.DateTime(0)

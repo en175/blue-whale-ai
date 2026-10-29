@@ -26,8 +26,11 @@ export interface ProjectPage {
   current: number;
 }
 
+export type ProjectSource = "dialog" | "canvas";
+
 export interface ProjectListOptions {
   keyword?: string;
+  source?: ProjectSource;
 }
 
 export interface ProjectRepo {
@@ -43,7 +46,7 @@ export interface ProjectRepo {
     limit: number,
     options?: ProjectListOptions,
   ): Promise<ProjectView[]>;
-  create(ownerId: string, name: string): Promise<ProjectView>;
+  create(ownerId: string, name: string, source?: ProjectSource): Promise<ProjectView>;
   findOwnedById(id: string, ownerId: string): Promise<ProjectView | null>;
   findOwnerId(id: string): Promise<string | null>;
   rename(
@@ -258,6 +261,7 @@ export function createProjectRepo(prisma: PrismaClient): ProjectRepo {
       owner_id: BigInt(ownerId),
       purpose: "canvas",
       is_delete: 0,
+      ...(options?.source ? { source: options.source } : {}),
       ...(keyword ? { name: { contains: keyword } } : {}),
     };
   }
@@ -303,14 +307,14 @@ export function createProjectRepo(prisma: PrismaClient): ProjectRepo {
       await attachPreviews(ownerId, rows, views);
       return views;
     },
-    async create(ownerId, name) {
+    async create(ownerId, name, source) {
       const trimmed = name.trim();
       const finalName = await uniqueName(
         BigInt(ownerId),
         trimmed === "" ? defaultProjectName() : trimmed,
       );
       const row = await prisma.project.create({
-        data: { owner_id: BigInt(ownerId), name: finalName },
+        data: { owner_id: BigInt(ownerId), name: finalName, source: source ?? "canvas" },
       });
       return toView(row);
     },

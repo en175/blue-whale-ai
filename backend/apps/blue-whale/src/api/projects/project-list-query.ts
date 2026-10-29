@@ -1,10 +1,20 @@
+import { parseProjectSource, type ProjectSource } from "./project-source.js";
+
+export type { ProjectSource };
+
 export const PROJECT_LIST_LIMIT_MAX = 20;
 export const PROJECT_LIST_KEYWORD_MAX = 64;
 
 export type ProjectListQuery =
-  | { kind: "all"; keyword?: string }
-  | { kind: "page"; page: number; size: number; keyword?: string }
-  | { kind: "limit"; limit: number; keyword?: string }
+  | { kind: "all"; keyword?: string; source?: ProjectSource }
+  | {
+      kind: "page";
+      page: number;
+      size: number;
+      keyword?: string;
+      source?: ProjectSource;
+    }
+  | { kind: "limit"; limit: number; keyword?: string; source?: ProjectSource }
   | { kind: "invalid"; reason: string };
 
 export function resolveProjectListQuery(
@@ -15,6 +25,16 @@ export function resolveProjectListQuery(
     return { kind: "invalid", reason: `keyword 长度不得超过 ${PROJECT_LIST_KEYWORD_MAX}` };
   }
   const keywordOption = keyword ? { keyword } : {};
+  if (Object.hasOwn(query, "kind")) {
+    return { kind: "invalid", reason: "参数 kind 已更名为 source" };
+  }
+  const rawSource = query.source;
+  if (rawSource !== undefined && typeof rawSource !== "string") {
+    return { kind: "invalid", reason: "source 参数格式非法" };
+  }
+  const parsedSource = parseProjectSource(rawSource?.trim());
+  if (!parsedSource.ok) return { kind: "invalid", reason: parsedSource.reason };
+  const sourceOption = parsedSource.source ? { source: parsedSource.source } : {};
   const hasPage = Object.hasOwn(query, "page");
   const hasSize = Object.hasOwn(query, "size");
   const hasLimit = Object.hasOwn(query, "limit");
@@ -29,13 +49,14 @@ export function resolveProjectListQuery(
     if (!Number.isInteger(limit) || limit < 1 || limit > PROJECT_LIST_LIMIT_MAX) {
       return { kind: "invalid", reason: `limit 必须在 1-${PROJECT_LIST_LIMIT_MAX} 之间` };
     }
-    return { kind: "limit", limit, ...keywordOption };
+    return { kind: "limit", limit, ...keywordOption, ...sourceOption };
   }
-  if (!hasPage) return { kind: "all", ...keywordOption };
+  if (!hasPage) return { kind: "all", ...keywordOption, ...sourceOption };
   return {
     kind: "page",
     page: Math.max(1, Number(query.page) || 1),
     size: Math.max(1, Number(query.size) || 1),
     ...keywordOption,
+    ...sourceOption,
   };
 }
