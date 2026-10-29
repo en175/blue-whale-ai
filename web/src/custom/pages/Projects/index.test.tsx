@@ -44,24 +44,24 @@ const projects: ProjectRecord[] = [
   {
     id: 'with-previews',
     name: '有预览项目',
-    thumb: null,
     previews: [
-      'https://cdn.example.test/previews/one.png',
-      'https://cdn.example.test/previews/two.png',
-      'https://cdn.example.test/previews/three.png',
-      'https://cdn.example.test/previews/four.png',
+      { url: 'https://cdn.example.test/previews/one.png', type: 'image' },
+      { url: 'https://cdn.example.test/previews/two.png', type: 'image' },
+      { url: 'https://cdn.example.test/previews/three.png', type: 'image' },
+      { url: 'https://cdn.example.test/previews/four.mp4', type: 'video' },
     ],
     created_at: '2026-09-04T00:00:00.000Z',
     last_opened_at: null,
+    last_edited_at: '2026-09-04T00:00:00.000Z',
     pinned_at: '2026-09-10T00:00:00.000Z',
   },
   {
     id: 'without-previews',
     name: '空预览项目',
-    thumb: null,
     previews: [],
     created_at: '2026-09-03T00:00:00.000Z',
     last_opened_at: null,
+    last_edited_at: '2026-09-03T00:00:00.000Z',
     pinned_at: null,
   },
 ];
@@ -164,7 +164,7 @@ describe('Projects 项目卡片页', () => {
     expect(projectApi.fetchProjectPage).toHaveBeenCalledWith(1);
     expect(document.body.querySelectorAll('img[alt^="有预览项目 图片预览"]')).toHaveLength(3);
     expect(document.body.querySelector('img[alt="有预览项目 图片预览 4"]')).toBeNull();
-    expect(document.body.querySelector('[aria-label="暂无图片预览"]')?.textContent).toContain('暂无图片预览');
+    expect(document.body.querySelector('[aria-label="暂无内容预览"]')?.textContent).toContain('暂无内容预览');
   });
 
   it('点击项目卡片会带项目 id 跳转到画布', async () => {

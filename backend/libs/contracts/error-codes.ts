@@ -14,7 +14,6 @@ export const ERROR_CAPABILITY_UNSUPPORTED_DURATION = "capability_unsupported_dur
 export const ERROR_INVALID_REFERENCE = "invalid_reference";
 export const ERROR_INVALID_REFERENCE_TYPE = "invalid_reference_type";
 export const ERROR_INVALID_REFERENCE_MEDIA = "invalid_reference_media";
-export const ERROR_REFERENCE_TOO_LARGE = "reference_too_large";
 export const ERROR_OUTPUT_COUNT_MISMATCH = "output_count_mismatch";
 
 export const ERROR_QUOTA_EXHAUSTED = "quota_exhausted";
@@ -170,7 +169,6 @@ export const GENERATION_ERROR_NUMERIC_CODES: Record<string, number> = {
   [ERROR_PLATFORM_QUOTA_EXHAUSTED]: 1061,
   [ERROR_JOB_NOT_CANCELABLE]: 1062,
   [ERROR_QUOTE_UNAVAILABLE]: 1063,
-  [ERROR_REFERENCE_TOO_LARGE]: 1064,
 };
 
 export function errorCodeToNumeric(code: string): number {
@@ -192,7 +190,7 @@ export const ERROR_CATEGORY_CODES: Record<ErrorCategory, readonly number[]> = {
   transient: [1011, 1012, 1015, 1019, 1024, 1028],
   content_rejected: [1018, 1038, 1059],
   capability: [1002, 1003, 1004, 1007, 1025, 1030, 1031, 1032, 1033, 1054, 1055, 1057, 1058, 1060, 1062],
-  reference: [1006, 1008, 1023, 1027, 1034, 1035, 1036, 1064],
+  reference: [1006, 1008, 1023, 1027, 1034, 1035, 1036],
   model_unavailable: [1005, 1009, 1010, 1061],
   quota: [1001],
   storage: [1016],
@@ -450,7 +448,6 @@ const GENERATION_MESSAGE_OVERRIDES: Record<number, string> = {
   1058: "已超过样片转成片的截止时间，可重新生成样片后再试",
   1062: "仅排队中的任务可取消",
   1063: "暂时无法发送，请稍后再试。",
-  1064: "参考文件超过大小限制，请更换或压缩后上传。",
 };
 
 for (const [category, codes] of Object.entries(ERROR_CATEGORY_CODES) as [ErrorCategory, readonly number[]][]) {

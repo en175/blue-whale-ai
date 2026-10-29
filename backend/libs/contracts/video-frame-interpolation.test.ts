@@ -196,7 +196,7 @@ describe("video_frame_interpolation 双端一致性（读 worker-java 源码文�
   it("执行面兜底码 video_frame_interpolation_failed → 1049（1045-1048 已占用），Java 契约侧常量同步", () => {
     expect(ERROR_VIDEO_FRAME_INTERPOLATION_FAILED).toBe("video_frame_interpolation_failed");
     expect(GENERATION_ERROR_NUMERIC_CODES[ERROR_VIDEO_FRAME_INTERPOLATION_FAILED]).toBe(1049);
-    expect(ERROR_CODES[1049]).toBe("视频插帧失败，请重试");
+    expect(ERROR_CODES[1049]).toBe("操作未完成，请稍后查看。");
     expect(contractJava).toContain(
       'String ERROR_VIDEO_FRAME_INTERPOLATION_FAILED = "video_frame_interpolation_failed";',
     );

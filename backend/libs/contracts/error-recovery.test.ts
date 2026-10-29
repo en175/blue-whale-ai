@@ -3,7 +3,6 @@ import {
   ERROR_CATEGORY_CODES,
   ERROR_CODES,
   ERROR_QUOTE_UNAVAILABLE,
-  ERROR_REFERENCE_TOO_LARGE,
   GENERATION_ERROR_NUMERIC_CODES,
   errorRecoveryOf,
 } from "./error-codes.js";
@@ -43,10 +42,9 @@ describe("错误分类与可恢复性", () => {
     expect(errorRecoveryOf(9999)).toEqual({ category: "unknown", retryable: false });
   });
 
-  it("补充的报价不可用与参考过大均有分类和文案", () => {
+  it("补充的报价不可用有分类和文案", () => {
     expect(GENERATION_ERROR_NUMERIC_CODES[ERROR_QUOTE_UNAVAILABLE]).toBe(1063);
-    expect(GENERATION_ERROR_NUMERIC_CODES[ERROR_REFERENCE_TOO_LARGE]).toBe(1064);
+    expect(ERROR_CODES[1063]).toBe("暂时无法发送，请稍后再试。");
     expect(errorRecoveryOf(1063)).toEqual({ category: "quote_changed", retryable: false });
-    expect(errorRecoveryOf(1064)).toEqual({ category: "reference", retryable: false });
   });
 });

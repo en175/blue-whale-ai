@@ -17,11 +17,19 @@ export class AgentTemplatesController {
   async page(@Query() query: Record<string, string> = {}) {
     const tagCode = (query.tagCode ?? "").trim();
     if (tagCode) {
-      const tags = await this.template.listAllTags();
-      const valid =
-        tags.length > 0
-          ? tags.some((tag) => tag.tag_code === tagCode)
-          : isValidTagCode(tagCode);
+      let valid: boolean;
+      try {
+        const tags = await this.template.listAllTags();
+        valid =
+          tags.length > 0
+            ? tags.some((tag) => tag.tag_code === tagCode)
+            : isValidTagCode(tagCode);
+      } catch (e) {
+        valid = isValidTagCode(tagCode);
+        logger.error(
+          `[templates/page] 标签读取失败，回退静态枚举: ${e instanceof Error ? e.message : e}`,
+        );
+      }
       if (!valid) {
         throw new DomainError(FAILURE_CODE, `非法标签: ${tagCode}`);
       }

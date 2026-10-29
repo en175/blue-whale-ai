@@ -1,7 +1,7 @@
 # 生成任务失败错误体对接文档（前端）
 
 > 需求：IKBQEE / ADR-0078「生成任务失败消息体统一设计」。覆盖生成任务（图片/视频/音频/媒体提取）失败后，`GET /api/jobs/:id` 与画布快照里**失败响应的统一结构**，前端据此展示失败文案、判断重试、识别余额不足。
-> 版本：v2（2026-08-29，二期结构升级）。所有请求需 `Authorization: Bearer <token>`；响应统一 `{ code, msg, data }`，`code===200` 成功，前端 `apiRequest` 已解包 `data`。
+> 版本：v3（2026-10-29，IKRE84：失败分类与可恢复性）。所有请求需 `Authorization: Bearer <token>`；响应统一 `{ code, msg, data }`，`code===200` 成功，前端 `apiRequest` 已解包 `data`。
 
 ---
 
@@ -28,12 +28,14 @@ GET /api/jobs/:id
 ```json
 {
   "code": 1001,
-  "msg": "账户余额不足，请充值后重试",
+  "msg": "积分余额不足，本次尚未提交。",
   "data": {
     "job_id": "1585",
     "status": "failed",
     "progress": 0,
-    "asset": null
+    "asset": null,
+    "category": "quota",
+    "retryable": false
   }
 }
 ```
@@ -44,7 +46,7 @@ GET /api/jobs/:id
 |---|---|---|
 | `code` | number | **数值错误码**（1xxx 段，见 §3 清单）。**每错一码**，前端可按码精确判断（如 `1001` 余额不足 → 引导充值）。未知/白名单外兜底 `1000` |
 | `msg` | string | **用户可见中文文案**，后端统一生成，**不会泄漏 provider 原文/英文**。前端直接展示 |
-| `data` | object | 纯任务字段：`job_id` / `status` / `progress` / `asset`。**不再包含 `error`/`retryable`** |
+| `data` | object | 任务字段：`job_id` / `status` / `progress` / `asset`，以及失败分类 `category`、可重试标记 `retryable`（见 §2.1） |
 
 > ⚠️ **前端行为变化**：失败响应 `code !== 200`，`apiRequest`（`web/src/api/http.ts`）会**抛 ApiError**（`msg` 即中文文案）。轮询失败任务时**不能**依赖 `data.status`——它不可达，需在 `.catch` 里按 `ApiError` 收敛为失败态。旧接口（`code=200` + `data.error`）已不再返回。
 
@@ -71,13 +73,34 @@ GET /api/jobs/:id
     "type": "image",
     "error": {
       "code": 1001,
-      "message": "账户余额不足，请充值后重试"
+      "message": "积分余额不足，本次尚未提交。",
+      "category": "quota",
+      "retryable": false
     }
   }
 ]
 ```
 
-> 快照场景 `error` 是**挂在任务对象上的子对象**（结构 `{code: 数值码, message: 中文}`），因为快照是一整棵项目树，不能把错误提升到顶层。**与轮询接口的顶层结构不同，但语义一致**：`code` 同一张数值码表、`message` 同一份中文文案。
+> 快照场景 `error` 是**挂在任务对象上的子对象**（结构 `{code: 数值码, message: 中文, category, retryable}`），因为快照是一整棵项目树，不能把错误提升到顶层。**与轮询接口的顶层结构不同，但语义一致**：`code` 同一张数值码表、`message` 同一份中文文案。
+
+
+## 2.1 失败分类与可恢复性（IKRE84）
+
+分类与可恢复性的唯一来源是后端码表（`backend/libs/contracts/error-codes.ts` 的 `ERROR_CATEGORY_CODES`）。前端按 `category` 决定文案与动作，**不要**自行维护 `code → 分类` 映射。
+
+| category | 含义 | 前端动作 |
+|---|---|---|
+| `transient` | 可恢复临时异常 | 满足 §6 条件时显示一个「重试」 |
+| `content_rejected` | 内容审核未通过 | 「修改内容」，原样重发不给重试 |
+| `capability` | 参数/能力不支持 | 「修改参数」，定位不符项 |
+| `reference` | 参考或源素材异常 | 「更换素材」 |
+| `model_unavailable` | 模型/平台不可用 | 「修改模型」；平台额度不足**不引导充值** |
+| `quota` | 用户积分不足 | 引导充值 |
+| `storage` | 结果保存失败 | 只显示保存失败状态，不重新生成 |
+| `quote_changed` | 报价变化/不可用 | 展示新报价，用户确认后再发 |
+| `unknown` | 无可靠原因 | 通用兜底，保留输入供编辑，不给重试 |
+
+`retryable` 只表示「属于可恢复临时异常」；是否真的出现重试入口，还要同时满足：任务已明确失败、服务端内部重试已结束、原输入仍完整有效、没有同次待核对的请求。
 
 ---
 
@@ -95,45 +118,23 @@ GET /api/jobs/:id
 
 ---
 
-## 4. 数值错误码清单（对外契约）
+## 4. 数值错误码（对外契约）
 
-> 前端可按 `code` 做分支（如余额不足引导充值）。`msg` 已足够展示，`code` 用于精确语义判断。**每错一码，一一对应**；未列出的未知码兜底 `1000`。
+**文案与分类的唯一来源是后端码表** `backend/libs/contracts/error-codes.ts`（`ERROR_CODES` / `ERROR_CATEGORY_CODES` / `GENERATION_MESSAGE_OVERRIDES`）。本文不再复制逐码文案，避免两份表漂移。
 
-| 数值码 | canonical 字符串码 | msg（中文） |
-|---|---|---|
-| **1000** | （未知/白名单外） | 按任务类型兜底：视频/音频/图像生成失败 |
-| **1001** | `quota_exhausted` | **账户余额不足，请充值后重试**——只表示**用户个人积分**不足 |
-| 1002 | `invalid_input` | 输入参数无效 |
-| 1003 | `unsupported_type` | 不支持的生成类型 |
-| 1004 | `unsupported_input` | 输入内容不支持 |
-| 1005 | `model_unavailable` | 模型未开通或不可用 |
-| 1006 | `reference_asset_unavailable` | 参考素材不可用 |
-| 1007 | `reference_limit_exceeded` | 参考素材数量超过限制 |
-| 1008 | `source_asset_unavailable` | 源视频资产不可用 |
-| 1009 | `provider_credential_missing` | 生成服务凭证未配置 |
-| 1010 | `provider_config` | 生成服务配置不完整 |
-| 1011 | `provider_failed` | 视频/音频/图像生成失败（按任务类型） |
-| 1012 | `provider_timeout` | 生成服务响应超时 |
-| 1013 | `no_result` | 生成服务未返回结果 |
-| 1014 | `submission_unknown` | 无法确认视频任务是否已提交 |
-| 1015 | `timed_out` | 视频生成超时 |
-| 1016 | `storage_failed` | 生成结果存储失败 |
-| 1017 | `all_outputs_failed` | 所有输出均生成失败 |
-| 1018 | `content_rejected` | 生成内容未通过安全审核 |
-| 1019 | `content_review_unavailable` | 内容审核不可用 |
-| 1020 | `media_extract_failed` | 音频提取失败 |
-| 1021 | `video_generation_failed` | 视频生成失败 |
-| 1022 | `image_generation_failed` | 图像生成失败 |
-| 1023 | `video_has_no_audio_track` | 视频没有音轨 |
-| 1024 | `video_download_failed` | 视频下载失败 |
-| 1025 | `video_too_large` | 视频超过大小上限 |
-| 1026 | `extract_failed` | 音频提取失败 |
-| 1027 | `upload_failed` | 音频上传失败 |
-| 1028 | `enqueue_failed` | 任务入队失败 |
-| 1029-1043 | （后续工单新增细分码） | 能力目录/参考系/图像系（高清/擦除/扩图/抠图）/去字幕等兜底与细分码——单一来源 = `backend/libs/contracts/error-codes.ts` 数值表，此处不再逐行展开 |
-| **1044** | `media_extract_provider_failed` | 音频提取失败，请重试（音视频分离火山执行路径兜底；本地 ffmpeg 链路兜底仍为 1020，映射口径 = 迁移契约 §18.4） |
+前端需要知道的语义锚点：
 
-| **1061** | `platform_quota_exhausted` | **生成服务额度不足，请联系平台管理员**——平台统一调用账户额度不足，用户个人积分没问题 |
+| 数值码 | canonical | 语义 | category |
+|---|---|---|---|
+| 1000 | （未知） | 白名单外兜底 | unknown |
+| 1001 | `quota_exhausted` | **用户个人积分**不足，未受理 | quota |
+| 1014 | `submission_unknown` | 受理不明，走「核对状态」，不给重试 | unknown |
+| 1018 / 1038 / 1059 | `content_rejected*` | 内容审核未通过 | content_rejected |
+| 1056 | `quote_stale` | 报价已变化 | quote_changed |
+| 1061 | `platform_quota_exhausted` | **平台**额度不足，不引导个人充值 | model_unavailable |
+| 1063 | `quote_unavailable` | 无法取得有效报价，本次未提交 | quote_changed |
+
+其余 1002–1062 的文案、分类与可恢复性以码表为准；新增码必须同时补分类（穷举测试会拦）。
 
 > **段位约定**（全项目统一，`packages/contracts/src/result.ts`）：
 > - `4xx`/`5xx`：HTTP 语义错误（参数/未授权/资源不存在等基础设施错误）
@@ -188,4 +189,5 @@ new-api 只有一份共享凭证（`system_settings.upstream.new_api_key`），�
 | 版本 | 日期 | 变更 |
 |---|---|---|
 | v1 | 2026-08-29 | 新增；一期实施后形态（`data.error` 子对象、`retryable` 恒 true、details 不返回、quota 识别） |
+| v3 | 2026-10-29 | IKRE84：失败响应新增 `category` 与 `retryable`（分类唯一来源在码表）；108 条生成码文案按 PRD 5.2/5.3 改写；新增 1063 `quote_unavailable`；删除 §4 逐码表，改为码表指针 |
 | v2 | 2026-08-29 | **二期结构升级**：失败从 `data.error` 子对象 → 顶层 `{code: 数值码, msg: 中文, data: 纯任务字段}`；字符串码 → 数值码表（1001-1028，每错一码，兜底 1000）；删除 `retryable`/`params` 对外输出；快照 `error` 保持 `{code,message}` 子对象（数值码 + 中文） |

@@ -1,4 +1,3 @@
-export const PROJECT_LIST_LIMIT_DEFAULT = 3;
 export const PROJECT_LIST_LIMIT_MAX = 20;
 export const PROJECT_LIST_KEYWORD_MAX = 64;
 

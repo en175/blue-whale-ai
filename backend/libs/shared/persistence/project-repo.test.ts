@@ -18,7 +18,7 @@ function canvasFindMany(
 }
 
 describe("ProjectRepo GenerationInbox isolation", () => {
-  it("lists only ordinary canvas projects, pinned first then by creation time desc", async () => {
+  it("lists only ordinary canvas projects, pinned first then by last edited time desc", async () => {
     const projectFindMany = vi.fn().mockResolvedValue([]);
     const assetFindMany = vi.fn();
     const prisma = {
