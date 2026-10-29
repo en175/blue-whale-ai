@@ -66,21 +66,25 @@ function moreButtons(): HTMLButtonElement[] {
   return [...mountNode.querySelectorAll<HTMLButtonElement>('button')].filter((b) => b.textContent === '更多');
 }
 
-async function typeSearch(value: string) {
+async function typeSearch(value: string, advanceMs = 1000) {
   const input = mountNode.querySelector<HTMLInputElement>('input[aria-label="搜索项目"]')!;
   await act(async () => {
     const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
     setter.call(input, value);
     input.dispatchEvent(new Event('input', { bubbles: true }));
   });
-  await act(async () => {
-    await Promise.resolve();
-    await Promise.resolve();
-  });
+  if (advanceMs > 0) {
+    await act(async () => {
+      vi.advanceTimersByTime(advanceMs);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+  }
 }
 
 beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  vi.useFakeTimers();
   api.fetchProjectListQuery.mockImplementation(async ({ source, page }: { source: string; page: number }) => {
     if (source === 'dialog') {
       return page === 1
@@ -95,6 +99,7 @@ afterEach(async () => {
   if (root) await act(async () => root.unmount());
   mountNode?.remove();
   vi.clearAllMocks();
+  vi.useRealTimers();
 });
 
 describe('HomeSidebar 历史分组', () => {
@@ -128,6 +133,39 @@ describe('HomeSidebar 历史分组', () => {
 
     expect(api.fetchProjectListQuery).toHaveBeenCalledWith(expect.objectContaining({ source: 'dialog', page: 1, keyword: '海报' }));
     expect(api.fetchProjectListQuery).toHaveBeenCalledWith(expect.objectContaining({ source: 'canvas', page: 1, keyword: '海报' }));
+  });
+
+  it('搜索防抖 1 秒：输入后未满 1 秒不发请求，显示搜索中', async () => {
+    await renderSidebar();
+    api.fetchProjectListQuery.mockClear();
+
+    await typeSearch('海报', 999);
+    expect(api.fetchProjectListQuery).not.toHaveBeenCalled();
+    expect(mountNode.textContent).toContain('搜索中…');
+
+    await act(async () => {
+      vi.advanceTimersByTime(1);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(api.fetchProjectListQuery).toHaveBeenCalledWith(expect.objectContaining({ keyword: '海报' }));
+  });
+
+  it('连续输入只发最后一次请求', async () => {
+    await renderSidebar();
+    api.fetchProjectListQuery.mockClear();
+
+    await typeSearch('海', 400);
+    await typeSearch('海报', 400);
+    expect(api.fetchProjectListQuery).not.toHaveBeenCalled();
+
+    await act(async () => {
+      vi.advanceTimersByTime(600);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    const keywords = api.fetchProjectListQuery.mock.calls.map((call) => call[0].keyword);
+    expect(keywords).toEqual(['海报', '海报']);
   });
 
   it('两组都为空且有搜索词时显示空态', async () => {

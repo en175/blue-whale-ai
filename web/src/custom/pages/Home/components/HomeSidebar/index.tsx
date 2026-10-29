@@ -22,6 +22,7 @@ const menuItems = [
 ];
 
 const PAGE_SIZE = 6;
+const SEARCH_DEBOUNCE_MS = 1000;
 
 const GROUPS: { key: ProjectSource; label: string }[] = [
   { key: 'dialog', label: '生成' },
@@ -51,10 +52,16 @@ export default function HomeSidebar({
   const user = useSyncExternalStore(subscribe, getCurrentUser);
   const [showLogin, setShowLogin] = useState(false);
   const [keyword, setKeyword] = useState('');
+  const [debouncedKeyword, setDebouncedKeyword] = useState('');
   const [groups, setGroups] = useState<Record<ProjectSource, GroupState>>(EMPTY);
   const [menuOpen, setMenuOpen] = useState<string | null>(null);
   const pendingItem = useRef<(typeof menuItems)[0] | null>(null);
   const requestRef = useRef(0);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedKeyword(keyword), SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [keyword]);
 
   useEffect(() => {
     const matched = menuItems.find((item) => item.path === location.pathname);
@@ -67,7 +74,7 @@ export default function HomeSidebar({
   useEffect(() => {
     if (!user || !expanded) return;
     const ticket = ++requestRef.current;
-    const search = keyword.trim();
+    const search = debouncedKeyword.trim();
     setGroups({ dialog: { ...EMPTY_GROUP, loading: true }, canvas: { ...EMPTY_GROUP, loading: true } });
     Promise.all(GROUPS.map((group) => load(group.key, 1, search).catch(() => null))).then((pages) => {
       if (ticket !== requestRef.current) return;
@@ -76,14 +83,14 @@ export default function HomeSidebar({
         canvas: pages[1] ? { records: pages[1].records, page: 1, total: pages[1].total, loading: false } : EMPTY_GROUP,
       });
     });
-  }, [keyword, user, expanded]);
+  }, [debouncedKeyword, user, expanded]);
 
   const loadMore = async (source: ProjectSource) => {
     const group = groups[source];
     if (group.loading) return;
     setGroups((prev) => ({ ...prev, [source]: { ...prev[source], loading: true } }));
     const nextPage = group.page + 1;
-    const data = await load(source, nextPage, keyword.trim()).catch(() => null);
+    const data = await load(source, nextPage, debouncedKeyword.trim()).catch(() => null);
     setGroups((prev) =>
       data
         ? {
@@ -170,7 +177,8 @@ export default function HomeSidebar({
     }
   };
 
-  const searching = keyword.trim().length > 0;
+  const searching = debouncedKeyword.trim().length > 0;
+  const pendingSearch = keyword !== debouncedKeyword;
   const hasHistory = GROUPS.some((group) => groups[group.key].records.length > 0);
 
   return (
@@ -220,7 +228,9 @@ export default function HomeSidebar({
             />
           </label>
           <div className={styles.historyScroll}>
-            {searching && !hasHistory ? (
+            {pendingSearch ? (
+              <p className={styles.historyEmpty}>搜索中…</p>
+            ) : searching && !hasHistory ? (
               <p className={styles.historyEmpty}>没有匹配的项目</p>
             ) : (
               GROUPS.map((group) => {
@@ -235,7 +245,7 @@ export default function HomeSidebar({
                     ) : (
                       <ul className={styles.historyItems}>
                         {items.map((record) => {
-                          const cover = record.previews?.[0];
+                          const cover = record.previews?.find((preview) => preview.type === 'image');
                           return (
                             <li key={record.id} className={styles.historyItem}>
                               <button
@@ -245,11 +255,7 @@ export default function HomeSidebar({
                               >
                                 <span className={styles.historyThumb}>
                                   {cover ? (
-                                    cover.type === 'video' ? (
-                                      <video src={resolveMediaSrc(cover.url)} muted playsInline preload="metadata" />
-                                    ) : (
-                                      <img src={resolveMediaSrc(cover.url)} alt="" loading="lazy" />
-                                    )
+                                    <img src={resolveMediaSrc(cover.url)} alt="" loading="lazy" />
                                   ) : (
                                     <LayoutGrid size={16} strokeWidth={1.8} aria-hidden="true" />
                                   )}
