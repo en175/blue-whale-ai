@@ -362,8 +362,6 @@ model conversation_messages {
   @@index([project_id], map: "idx_message_project")
 }
 
-/// 旧内嵌 Agent 引擎运行表（已退役，IKCKOW 保留）：支撑「个人技能删除时进行中引用禁删」
-/// 保护（SkillInUseError + run_pin scrub，见 skill-repo deletePersonal），不再有写入方。
 model project_command_receipts {
   id                BigInt   @id @default(autoincrement())
   project_id        BigInt

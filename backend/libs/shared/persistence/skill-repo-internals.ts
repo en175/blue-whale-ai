@@ -1,4 +1,4 @@
-import type { Prisma, PrismaClient } from "@prisma/client";
+import type { PrismaClient } from "@prisma/client";
 import type {
   SkillLibraryLang,
 } from "./skill-repo-types.js";

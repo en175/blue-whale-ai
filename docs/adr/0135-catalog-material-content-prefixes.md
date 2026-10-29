@@ -40,7 +40,7 @@ ADR-0117 §2 把前缀空间收敛为 `identity_ / billing_ / generation_`，§6
 - ADR-0117 §2 的前缀空间以及 §4/§5/§6 的免改名单对这批表不再适用。具体被取代的条目：§4 的 `generation_model_capability`、§5 的 `template_card` / `template_card_image` / `template_tag`、§3 无名表清单里的 `homepage_hero`、§6 的三个 skill / 三个 asset。其余条款（复数、`uk_{表}__{列}`、审计列、不设 `@@map`）继续有效。
 - 同批次的 `project_` 改名见 ADR-0134；两票不重叠。
 
-## 修订（2026-10-29，IKRGTJ / IKRIFX）
+## 修订（2026-10-29，IKRGTJ / IKRIFX / IKRJ9P）
 
 - IKRGTJ `086`：`user_shared_asset_snapshots` 整表退役，后端 `shared-assets` 模块、路由与契约，前端共享资产弹窗与保存入口一并删除；`catalog_material_groups` 曾临时改名为 `user_material_info`。
 - IKRIFX `088` 修正素材域口径：`user_material_info` → `user_material_groups`（按 `user_id` 存用户人像库分组，归属是用户）；`catalog_material_states` → `user_material_info`（镜像上游素材状态）。三条含旧表名的索引随表改名为 `uk_user_material_info__material`、`idx_user_material_info__poll`、`idx_user_material_info__group`；`user_material_groups` 的三条索引不含旧表名，按决策 3 不改。
@@ -49,3 +49,4 @@ ADR-0117 §2 把前缀空间收敛为 `identity_ / billing_ / generation_`，§6
   `RENAME TABLE user_material_info TO catalog_material_states, user_material_groups TO user_material_info;`
   再把三条索引改回 `uk_catalog_material_states__material`、`idx_catalog_material_states__poll`、`idx_catalog_material_states__group`；然后按 `086` 逆序 `RENAME TABLE user_material_info TO catalog_material_groups`；并按 `008` + `078` 重建 `user_shared_asset_snapshots`。删表不可恢复，迁移前备份。
 - IKRJ9P `089`：`catalog_media_tools` → `bw_media_tools`，索引 `uk_catalog_media_tools__tool_type` → `uk_bw_media_tools__tool_type`；`agent_runs` 整表退役（历史表，无写入方）。
+- IKRJ9P `089`：`catalog_media_tools` → `bw_media_tools`（索引随表改名为 `uk_bw_media_tools__tool_type`）；`agent_runs` 整表退役（历史表，无写入方）。破坏性窗口同 `086` / `088`：镜像与迁移同一维护窗口，先镜像后 DDL；回滚执行 `RENAME TABLE bw_media_tools TO catalog_media_tools` 与索引反向改名，`agent_runs` 删表不可恢复，迁移前备份。

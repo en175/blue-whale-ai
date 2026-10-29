@@ -334,6 +334,8 @@ IK60WU 起，`POST /api/agent/skills/mine` 统一按「最近创建或添加」�
 
 #### 13.2.1 进行中禁删（v8，IK6B2H）
 
+> 2026-10-29（IKRJ9P）：`agent_runs` 已退役，进行中禁删与 `run_pin` scrub 一并下线；删除个人技能不再返回 `100105`。
+
 - **存在进行中的 AgentRun 引用时拒绝删除**：引用指 `agent_runs.run_pin`（运行固定快照，
   JSON 列）的 `creative_skill_resources` / `auto_creative_skill_candidates` 中出现该
   `creative_skill_id`。进行中 = 非终态，采用 fail-closed 写法
