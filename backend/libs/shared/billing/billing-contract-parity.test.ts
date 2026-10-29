@@ -86,6 +86,21 @@ describe("★ 计费契约对账：MQ topic", () => {
     expect(billingDefaultTopics()).toEqual(EXPECTED);
     expect(workerDefaultTopics()).toEqual(EXPECTED);
   });
+
+  it("两端都对终态 topic 应用环境后缀，漏一侧即红", () => {
+    const producer = stripComments(
+      read(`${JAVA_WORKER}application/service/TerminalEventOutbox.java`),
+    );
+    const consumer = stripComments(
+      read(`${JAVA_BILLING}infrastructure/mq/JobEventConsumer.java`),
+    );
+    expect(producer, "worker 生产的终态 topic 未经 MqEnvSuffix.apply 包装").toContain(
+      "MqEnvSuffix.apply(",
+    );
+    expect(consumer, "billing 订阅的终态 topic 未经 MqEnvSuffix.apply 包装").toContain(
+      "MqEnvSuffix.apply(",
+    );
+  });
 });
 
 

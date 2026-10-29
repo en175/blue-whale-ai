@@ -1,4 +1,10 @@
-export const GENERATION_TASK_QUEUE = "generation-task";
+const MQ_ENV_SUFFIX = (process.env.MQ_ENV_SUFFIX ?? "").trim().replace(/^-+/, "");
+
+export const GENERATION_TASK_TOPIC = "generation-task";
+
+export const GENERATION_TASK_QUEUE = MQ_ENV_SUFFIX
+  ? `${GENERATION_TASK_TOPIC}-${MQ_ENV_SUFFIX}`
+  : GENERATION_TASK_TOPIC;
 
 export const MEDIA_EXTRACT_TAG = "media_extract";
 

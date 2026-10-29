@@ -55,6 +55,7 @@ curl localhost:4002/ready
 | `ROCKETMQ_ACCESS_KEY` | 否 | RocketMQ 认证 | — |
 | `ROCKETMQ_SECRET_KEY` | 否 | RocketMQ 认证 | — |
 | `ROCKETMQ_SSL_ENABLED` | 否 | 启用 SSL | `false` |
+| `MQ_ENV_SUFFIX` | 否 | 给全部 topic 与消费组追加 `-<后缀>`，用于同一 broker 上并行多套环境（如 dev 与测试站）。只允许字母、数字、下划线和连字符；留空时名称逐字不变。**backend、worker、billing 三处必须设同一个值**，且后缀只作用于基线名，不要把已带后缀的 topic 再通过 `worker.billing.topic-terminal` 覆盖一次 | 空 |
 | `VOLC_ACCESS_KEY_ID` | 是 | TOS 认证 | — |
 | `VOLC_SECRET_ACCESS_KEY` | 是 | TOS 认证 | — |
 | `VOLC_TOS_ENDPOINT` | 是 | TOS 端点 | — |

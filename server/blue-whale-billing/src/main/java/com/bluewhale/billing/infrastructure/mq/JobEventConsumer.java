@@ -1,6 +1,7 @@
 package com.bluewhale.billing.infrastructure.mq;
 
 import com.bluewhale.billing.application.CreditService;
+import com.bluewhale.common.mq.MqEnvSuffix;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.rocketmq.client.apis.ClientConfiguration;
@@ -30,20 +31,21 @@ public class JobEventConsumer implements AutoCloseable {
                             String terminalTopic,
                             CreditService credits) throws Exception {
         this.credits = credits;
-        this.terminalTopic = terminalTopic;
+        this.terminalTopic = MqEnvSuffix.apply(terminalTopic);
         this.json = new ObjectMapper()
                 .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
 
+        String group = MqEnvSuffix.apply(consumerGroup);
         this.consumer = ClientServiceProvider.loadService()
                 .newPushConsumerBuilder()
                 .setClientConfiguration(clientConfiguration)
-                .setConsumerGroup(consumerGroup)
+                .setConsumerGroup(group)
                 .setSubscriptionExpressions(Map.of(
-                        terminalTopic, new FilterExpression("*")))
+                        this.terminalTopic, new FilterExpression("*")))
                 .setMessageListener(this::onMessage)
                 .build();
 
-        log.info("计费事件消费者已启动：group={} 订阅 {}", consumerGroup, terminalTopic);
+        log.info("计费事件消费者已启动：group={} 订阅 {}", group, this.terminalTopic);
     }
 
     @Override
