@@ -48,3 +48,4 @@ ADR-0117 §2 把前缀空间收敛为 `identity_ / billing_ / generation_`，§6
 - 回滚：先按 `088` 逆序，必须让状态表先让出 `user_material_info`：
   `RENAME TABLE user_material_info TO catalog_material_states, user_material_groups TO user_material_info;`
   再把三条索引改回 `uk_catalog_material_states__material`、`idx_catalog_material_states__poll`、`idx_catalog_material_states__group`；然后按 `086` 逆序 `RENAME TABLE user_material_info TO catalog_material_groups`；并按 `008` + `078` 重建 `user_shared_asset_snapshots`。删表不可恢复，迁移前备份。
+- IKRJ9P `089`：`catalog_media_tools` → `bw_media_tools`，索引 `uk_catalog_media_tools__tool_type` → `uk_bw_media_tools__tool_type`；`agent_runs` 整表退役（历史表，无写入方）。

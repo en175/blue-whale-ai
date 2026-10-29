@@ -1,9 +1,4 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
-import {
-  agentRunPinSchema,
-  type AgentRunPin,
-} from "@lib/contracts";
-
 import type {
   SkillLibraryLang,
 } from "./skill-repo-types.js";
@@ -197,33 +192,5 @@ export async function resolveOfficialSourceSkillId(
   return c > 0 ? sourceSkillId.toString() : null;
 }
 
-export function escapeJsonSearchTerm(creativeSkillId: string): string {
-  return creativeSkillId.replace(/_/g, "\\_");
-}
 
-export async function countActiveRunReferences(
-  tx: Prisma.TransactionClient,
-  creativeSkillId: string,
-): Promise<number> {
-  const rows = await tx.$queryRawUnsafe<{ c: bigint }[]>(
-    `SELECT COUNT(*) AS c FROM agent_runs WHERE is_delete = 0 AND status NOT IN ('completed', 'failed', 'cancelled') AND JSON_SEARCH(run_pin, 'one', ?) IS NOT NULL`,
-    escapeJsonSearchTerm(creativeSkillId),
-  );
-  return Number(rows[0]?.c ?? 0);
-}
 
-export function decodeTerminalRunPin(
-  raw: unknown,
-): { pin: AgentRunPin; serialized: string } | null {
-  const serialized = typeof raw === "string" ? raw : JSON.stringify(raw);
-  if (serialized === undefined) return null;
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(serialized);
-  } catch {
-    return null;
-  }
-  const result = agentRunPinSchema.safeParse(parsed);
-  if (!result.success) return null;
-  return { pin: result.data, serialized };
-}

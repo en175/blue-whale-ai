@@ -205,38 +205,6 @@ CREATE TABLE `conversation_messages` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
-CREATE TABLE `agent_runs` (
-    `id` BIGINT NOT NULL AUTO_INCREMENT,
-    `project_id` BIGINT NOT NULL,
-    `conversation_id` BIGINT NOT NULL,
-    `active_guard` BIGINT NULL,
-    `user_id` BIGINT NOT NULL,
-    `status` VARCHAR(32) NOT NULL,
-    `stage` VARCHAR(32) NULL,
-    `engine` VARCHAR(64) NOT NULL,
-    `engine_version` VARCHAR(64) NOT NULL,
-    `adapter_schema_version` INTEGER NOT NULL,
-    `input_sequence_no` INTEGER NOT NULL DEFAULT 0,
-    `lease_owner` VARCHAR(128) NULL,
-    `lease_expires_at` DATETIME(0) NULL,
-    `fencing_token` BIGINT NOT NULL DEFAULT 0,
-    `terminal_reason` VARCHAR(64) NULL,
-    `failure_code` VARCHAR(128) NULL,
-    `failure_message` TEXT NULL,
-    `retry_count` INTEGER NOT NULL DEFAULT 0,
-    `run_pin` JSON NULL,
-    `activated_creative_skill_versions` JSON NULL,
-    `reasoning_summary` VARCHAR(280) NULL,
-    `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
-    `gmt_modified` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
-    `version` INTEGER NOT NULL DEFAULT 0,
-    `is_delete` TINYINT NOT NULL DEFAULT 0,
-
-    UNIQUE INDEX `uk_agent_run_active_guard`(`active_guard`),
-    INDEX `idx_agent_run_project_status`(`project_id`, `status`),
-    INDEX `idx_agent_run_claim`(`status`, `engine`, `is_delete`, `id`),
-    PRIMARY KEY (`id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 CREATE TABLE `project_command_receipts` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,

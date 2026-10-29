@@ -1,8 +1,7 @@
 import {createHash, randomUUID} from "node:crypto";
 import type {PrismaClient} from "@prisma/client";
-import {scrubCreativeSkillFromRunPin} from "./agent-run-pin.js";
-import {checkPersonalNameKeyAvailable, countActiveRunReferences, decodeTerminalRunPin, escapeJsonSearchTerm, generateCreativeSkillId, mapCreativeSkillIds, mapUsageCounts, matchLibraryKeyword, normalizeNameKey, resolveDescription, resolveName, resolveOfficialSourceSkillId, type SkillRow} from "./skill-repo-internals.js";
-import {SkillAddConflictError, SkillInUseError, SkillNameConflictError, SkillNameReservedError} from "./skill-repo-types.js";
+import {checkPersonalNameKeyAvailable, generateCreativeSkillId, mapCreativeSkillIds, mapUsageCounts, matchLibraryKeyword, normalizeNameKey, resolveDescription, resolveName, resolveOfficialSourceSkillId, type SkillRow} from "./skill-repo-internals.js";
+import {SkillAddConflictError, SkillNameConflictError, SkillNameReservedError} from "./skill-repo-types.js";
 import type {SkillMineView, SkillRepo} from "./skill-repo-types.js";
 
 export * from "./skill-repo-types.js";
@@ -310,42 +309,12 @@ export function createSkillRepo(prisma: PrismaClient): SkillRepo {
         const skill = rows[0];
         if (!skill) return false;
 
-        if ((await countActiveRunReferences(tx, creativeSkillId)) > 0) {
-          throw new SkillInUseError(skill.name, creativeSkillId);
-        }
-
         const deleted = await tx.$executeRawUnsafe(
           `DELETE FROM catalog_creative_skills WHERE creative_skill_id = ? AND asset_domain = 'personal' AND owner_user_id = ?`,
           creativeSkillId,
           BigInt(ownerUserId),
         );
         if (deleted === 0) return false;
-
-        if ((await countActiveRunReferences(tx, creativeSkillId)) > 0) {
-          throw new SkillInUseError(skill.name, creativeSkillId);
-        }
-
-        const refs = await tx.$queryRawUnsafe<
-          { id: bigint; run_pin: unknown }[]
-        >(
-          `SELECT id, run_pin FROM agent_runs WHERE is_delete = 0 AND status IN ('completed', 'failed', 'cancelled') AND JSON_SEARCH(run_pin, 'one', ?) IS NOT NULL`,
-          escapeJsonSearchTerm(creativeSkillId),
-        );
-        for (const ref of refs) {
-          const decoded = decodeTerminalRunPin(ref.run_pin);
-          if (!decoded) continue;
-          const scrubbed = scrubCreativeSkillFromRunPin(
-            decoded.pin,
-            creativeSkillId,
-          );
-          const next = JSON.stringify(scrubbed);
-          if (next === decoded.serialized) continue;
-          await tx.$executeRawUnsafe(
-            `UPDATE agent_runs SET run_pin = ?, gmt_modified = CURRENT_TIMESTAMP(3) WHERE id = ?`,
-            next,
-            ref.id,
-          );
-        }
 
         await tx.$executeRawUnsafe(
           `DELETE FROM catalog_creative_skill_versions WHERE creative_skill_id = ?`,

@@ -86,9 +86,9 @@ const RENAMED = new Map([
   ["homepage_hero", "content_homepage_heroes"],
 ]);
 
-const SUPERSEDED_BY_IKRGTJ = new Set(["shared_assets", "material_groups", "material_assets"]);
+const SUPERSEDED_BY_IKRGTJ = new Set(["shared_assets", "material_groups", "material_assets", "media_tool_pricing"]);
 
-const SUPERSEDED_INDEX_RENAMES = new Set(["uk_material_assets_material", "idx_material_assets_poll", "idx_material_assets_group"]);
+const SUPERSEDED_INDEX_RENAMES = new Set(["uk_material_assets_material", "idx_material_assets_poll", "idx_material_assets_group", "uk_media_tool_pricing__tool_type"]);
 
 const INDEX_RENAMES = new Map([
   ["uk_media_tool_pricing__tool_type", "uk_catalog_media_tools__tool_type"],

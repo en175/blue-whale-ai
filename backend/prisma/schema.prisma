@@ -235,7 +235,7 @@ model catalog_models {
   @@index([capability_type, enabled], map: "idx_capability_type_enabled")
 }
 
-model catalog_media_tools {
+model bw_media_tools {
   id             BigInt   @id @default(autoincrement())
   tool_type      String   @db.VarChar(64)
   label          String   @db.VarChar(64)
@@ -247,7 +247,7 @@ model catalog_media_tools {
   gmt_modified   DateTime @default(now()) @db.DateTime(0)
   is_delete      Boolean  @default(false)
 
-  @@unique([tool_type], map: "uk_catalog_media_tools__tool_type")
+  @@unique([tool_type], map: "uk_bw_media_tools__tool_type")
 }
 
 /// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
@@ -364,38 +364,6 @@ model conversation_messages {
 
 /// 旧内嵌 Agent 引擎运行表（已退役，IKCKOW 保留）：支撑「个人技能删除时进行中引用禁删」
 /// 保护（SkillInUseError + run_pin scrub，见 skill-repo deletePersonal），不再有写入方。
-model agent_runs {
-  id                                BigInt    @id @default(autoincrement())
-  project_id                        BigInt
-  conversation_id                   BigInt
-  active_guard                      BigInt?   @unique(map: "uk_agent_run_active_guard")
-  user_id                           BigInt
-  status                            String    @db.VarChar(32)
-  stage                             String?   @db.VarChar(32)
-  engine                            String    @db.VarChar(64)
-  engine_version                    String    @db.VarChar(64)
-  adapter_schema_version            Int
-  input_sequence_no                 Int       @default(0)
-  lease_owner                       String?   @db.VarChar(128)
-  lease_expires_at                  DateTime? @db.DateTime(0)
-  fencing_token                     BigInt    @default(0)
-  terminal_reason                   String?   @db.VarChar(64)
-  failure_code                      String?   @db.VarChar(128)
-  failure_message                   String?   @db.Text
-  /// 手动重试计数（IK67GZ，契约 §8.3）：每次用户重试 failed→queued 递增。
-  retry_count                       Int       @default(0)
-  run_pin                           Json?
-  activated_creative_skill_versions Json?
-  reasoning_summary                 String?   @db.VarChar(280)
-  gmt_create                        DateTime  @default(now()) @db.DateTime(0)
-  gmt_modified                      DateTime  @default(now()) @db.DateTime(0)
-  version                           Int       @default(0)
-  is_delete                         Int       @default(0) @db.TinyInt
-
-  @@index([project_id, status], map: "idx_agent_run_project_status")
-  @@index([status, engine, is_delete, id], map: "idx_agent_run_claim")
-}
-
 model project_command_receipts {
   id                BigInt   @id @default(autoincrement())
   project_id        BigInt

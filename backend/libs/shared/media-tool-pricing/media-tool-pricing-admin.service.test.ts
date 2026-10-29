@@ -54,7 +54,7 @@ function fakeService(initial = [row()]) {
     },
   };
   return new MediaToolPricingAdminService({
-    client: { catalog_media_tools: client },
+    client: { bw_media_tools: client },
   } as never);
 }
 
