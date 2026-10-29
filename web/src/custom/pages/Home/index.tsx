@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import UserDropdown from '@/custom/components/UserDropdown';
 import CreditsBadge from './components/CreditsBadge';
 import CreditsShopButton from './components/CreditsShopButton';
@@ -11,6 +12,7 @@ import styles from './index.module.css';
 export type HomeWorkspace = 'create' | 'canvas';
 
 export default function Home() {
+  const navigate = useNavigate();
   const [chatDraft, setChatDraft] = useState<{ text: string; ts: number; mediaType: 'video' | 'image' } | null>(null);
   const [workspace, setWorkspace] = useState<HomeWorkspace>('create');
 
@@ -34,7 +36,7 @@ export default function Home() {
           {workspace === 'canvas' && (
             <div className={styles.canvasEntryWrap}>
               <div className={styles.entryHeading}>
-                <button type="button" className={styles.entryLink} onClick={() => setWorkspace('canvas')}>
+                <button type="button" className={styles.entryLink} onClick={() => navigate('/projects')}>
                   全部项目 ↗
                 </button>
               </div>

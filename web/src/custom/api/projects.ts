@@ -77,7 +77,7 @@ export function fetchProjectListQuery(params: ProjectListQuery) {
 }
 
 export function fetchRecentProjects(limit = 3) {
-  return apiRequest<ProjectPageData>(`/api/projects?${projectQuery({ limit }).toString()}`, { silent: true });
+  return apiRequest<ProjectRecord[]>(`/api/projects?${projectQuery({ limit }).toString()}`, { silent: true });
 }
 
 export function touchProjectLastOpened(id: ProjectRecord['id']): Promise<void> {

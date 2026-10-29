@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useAuthStore, type SessionUser } from '@/shared/stores/auth';
 import Home from './index';
@@ -47,7 +48,7 @@ async function renderHome() {
   document.body.appendChild(mountNode);
   root = createRoot(mountNode);
   await act(async () => {
-    root.render(createElement(Home));
+    root.render(createElement(MemoryRouter, null, createElement(Home)));
   });
 }
 

@@ -26,8 +26,8 @@ export default function CanvasEntry() {
     if (!getCurrentUser()) return;
     let alive = true;
     fetchRecentProjects(RECENT_LIMIT)
-      .then((page) => {
-        if (alive) setRecent((page.records ?? []).slice(0, RECENT_LIMIT));
+      .then((list) => {
+        if (alive) setRecent((list ?? []).slice(0, RECENT_LIMIT));
       })
       .catch(() => undefined);
     return () => {

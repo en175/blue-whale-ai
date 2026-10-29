@@ -56,17 +56,12 @@ async function renderEntry() {
 beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   api.createProject.mockResolvedValue(record('42', 'new'));
-  api.fetchRecentProjects.mockResolvedValue({
-    records: [
-      record('1', '有图项目', [{ url: 'https://cdn.example.test/a.png', type: 'image' }]),
-      record('2', '只有视频', [{ url: 'https://cdn.example.test/b.mp4', type: 'video' }]),
-      record('3', '空项目'),
-      record('4', '第四个'),
-    ],
-    total: 4,
-    size: 3,
-    current: 1,
-  });
+  api.fetchRecentProjects.mockResolvedValue([
+    record('1', '有图项目', [{ url: 'https://cdn.example.test/a.png', type: 'image' }]),
+    record('2', '只有视频', [{ url: 'https://cdn.example.test/b.mp4', type: 'video' }]),
+    record('3', '空项目'),
+    record('4', '第四个'),
+  ]);
 });
 
 afterEach(async () => {

@@ -70,14 +70,13 @@
 }
 
 .canvasEntryWrap {
-  width: min(940px, 100%);
-  margin: 0 auto;
+  width: 100%;
 }
 
 .entryHeading {
   display: flex;
   justify-content: flex-end;
-  margin-bottom: 12px;
+  margin: 8px 0 18px;
 }
 
 .entryLink {
