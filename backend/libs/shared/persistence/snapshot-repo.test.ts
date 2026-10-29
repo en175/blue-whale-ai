@@ -122,7 +122,7 @@ describe("SnapshotRepo.loadJobsAndAssets", () => {
       },
       project_asset: { findMany: vi.fn().mockResolvedValue([]) },
       generation_output_slots: { findMany: vi.fn().mockResolvedValue([]) },
-      catalog_material_states: { findMany: findMaterialAssets },
+      user_material_info: { findMany: findMaterialAssets },
     } as unknown as PrismaClient;
 
     const result = await createSnapshotRepo(prisma).loadJobsAndAssets("55", "100");
@@ -155,7 +155,7 @@ describe("SnapshotRepo.loadJobsAndAssets", () => {
     });
   });
 
-  it("没有任何 asset 关联素材库时不发 catalog_material_states 查询", async () => {
+  it("没有任何 asset 关联素材库时不发 user_material_info 查询", async () => {
     const findMaterialAssets = vi.fn();
     const prisma = {
       generation_jobs: { findMany: vi.fn().mockResolvedValue([]) },
@@ -166,7 +166,7 @@ describe("SnapshotRepo.loadJobsAndAssets", () => {
       },
       project_asset: { findMany: vi.fn().mockResolvedValue([]) },
       generation_output_slots: { findMany: vi.fn().mockResolvedValue([]) },
-      catalog_material_states: { findMany: findMaterialAssets },
+      user_material_info: { findMany: findMaterialAssets },
     } as unknown as PrismaClient;
 
     await createSnapshotRepo(prisma).loadJobsAndAssets("55", "100");

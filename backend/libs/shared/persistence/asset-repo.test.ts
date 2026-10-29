@@ -823,7 +823,7 @@ describe("createAssetRepo 素材校验状态（IKFYHJ）", () => {
     },
     generation_jobs: { findMany: vi.fn().mockResolvedValue([]) },
     catalog_models: { findMany: vi.fn().mockResolvedValue([]) },
-    catalog_material_states: { findMany: findMaterial },
+    user_material_info: { findMany: findMaterial },
   });
 
   it("带上状态与确认时间；未关联/无状态行 → null", async () => {
@@ -910,7 +910,7 @@ describe("createAssetRepo 素材校验状态（IKFYHJ）", () => {
       user_assets: { findFirst: vi.fn().mockResolvedValue(baseRow({ material_id: "asset-a" })) },
       generation_jobs: { findMany: vi.fn().mockResolvedValue([]) },
       catalog_models: { findMany: vi.fn().mockResolvedValue([]) },
-      catalog_material_states: { findMany: findMaterial },
+      user_material_info: { findMany: findMaterial },
     };
 
     const view = await createAssetRepo(prisma as never).findOwnedById("1", "9");
@@ -1053,15 +1053,15 @@ describe("createAssetRepo 两阶段资产阶段与来源投影（IKIZQH，金标
   });
 });
 
-describe("AssetRepo.clearMaterialGroupLink（ADR-0126 改走 catalog_material_states）", () => {
+describe("AssetRepo.clearMaterialGroupLink（ADR-0126 改走 user_material_info）", () => {
   function repoWith(rows: Array<{ material_id: string }>) {
     const updateMany = vi.fn().mockResolvedValue({ count: rows.length });
     const findMany = vi.fn().mockResolvedValue(rows);
-    const prisma = { user_assets: { updateMany }, catalog_material_states: { findMany } };
+    const prisma = { user_assets: { updateMany }, user_material_info: { findMany } };
     return { repo: createAssetRepo(prisma as never), updateMany, findMany };
   }
 
-  it("先按组反查 catalog_material_states，再清这批资产的 material_id", async () => {
+  it("先按组反查 user_material_info，再清这批资产的 material_id", async () => {
     const { repo, updateMany, findMany } = repoWith([
       { material_id: "asset-a" },
       { material_id: "asset-b" },

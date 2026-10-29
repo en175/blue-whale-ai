@@ -91,8 +91,8 @@ describe("IKFYHJ 双轨迁移（素材校验状态镜像）", () => {
   });
 
   it("schema.prisma 同步 model 与关键唯一键", () => {
-    expect(schemaPrisma).toContain("model catalog_material_states ");
-    expect(schemaPrisma).toContain("uk_catalog_material_states__material");
+    expect(schemaPrisma).toContain("model user_material_info ");
+    expect(schemaPrisma).toContain("uk_user_material_info__material");
   });
 });
 

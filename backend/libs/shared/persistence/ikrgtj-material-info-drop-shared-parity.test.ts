@@ -71,14 +71,12 @@ describe("素材组表归位与共享资产快照退役（IKRGTJ）", () => {
     }
   });
 
-  it("Prisma 模型与新表名一致，旧模型已删除", () => {
-    expect(schemaPrisma).toContain("model user_material_info {");
+  it("Prisma 模型不再保留 IKRGTJ 改名前的旧名（groups 表已由 IKRIFX 对调）", () => {
     expect(schemaPrisma).not.toContain("model catalog_material_groups {");
     expect(schemaPrisma).not.toContain("model user_shared_asset_snapshots {");
   });
 
-  it("Java 测试 schema 同步改名与删表", () => {
-    expect(javaSchemaSql).toContain("CREATE TABLE `user_material_info`");
+  it("Java 测试 schema 不再保留 IKRGTJ 改名前的旧名", () => {
     expect(javaSchemaSql).not.toContain("CREATE TABLE `catalog_material_groups`");
     expect(javaSchemaSql).not.toContain("user_shared_asset_snapshots");
   });

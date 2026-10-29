@@ -248,7 +248,7 @@ async function resolveMaterialStatuses(
 
   for (let i = 0; i < materialIds.length; i += MATERIAL_ID_CHUNK) {
     const chunk = materialIds.slice(i, i + MATERIAL_ID_CHUNK);
-    const statusRows = await prisma.catalog_material_states.findMany({
+    const statusRows = await prisma.user_material_info.findMany({
       where: { user_id: BigInt(userId), material_id: { in: chunk } },
       select: { material_id: true, status: true, status_checked_at: true },
     });
@@ -836,7 +836,7 @@ export function createAssetRepo(prisma: PrismaClient): AssetRepo {
     },
     async clearMaterialGroupLink(userId, materialGroupId) {
       const uid = BigInt(userId);
-      const rows = await prisma.catalog_material_states.findMany({
+      const rows = await prisma.user_material_info.findMany({
         where: { user_id: uid, material_group_id: materialGroupId },
         select: { material_id: true },
       });

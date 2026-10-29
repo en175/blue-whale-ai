@@ -14,7 +14,7 @@
 | 删了本地资产，素材库里还在 | `DELETE /api/assets/:assetId` 只软删本地，素材库里那条素材留着——用户下次刷新列表还会看到它 | **删除级联**：先删上游素材，成功才软删本地；失败就报错 |
 | 素材组能看到别人的 | `ListAssetGroups` 的真人组走透传上游；素材库是「共享、单租户」，上游返回不带归属 | 虚拟组与真人组**都读本地**，只返回当前用户自己的组 |
 | 同一个素材被重复入库 | 第二次 `CreateAsset` 会把 `material_id` 覆盖掉，上一条变成无人指向的孤儿 | **入库前置判断**：已就绪直接回既有素材 id；历史判失败先清掉再重建 |
-| 组归属字段存两遍 | `user_assets.material_group_id` 与 `catalog_material_states.material_group_id` 是同一个事实 | 删掉 `user_assets.material_group_id`，组归属的唯一真相是 `catalog_material_states` |
+| 组归属字段存两遍 | `user_assets.material_group_id` 与 `user_material_info.material_group_id` 是同一个事实 | 删掉 `user_assets.material_group_id`，组归属的唯一真相是 `user_material_info` |
 
 **一句话给前端**：① 素材库列表改调 `POST /api/assets/library-materials`；② 删资产前弹框要提示「会一并删除素材库素材」；③ `ListAssetGroups` 的 `GroupType` **必须传**；④ 入库拿到 `Result.AlreadyLinked === true` 就提示「已入库」。
 
@@ -147,7 +147,7 @@ DELETE /api/assets/:assetId
 
 ### 3.1 行为变化
 
-`POST /api/material/ListAssetGroups` 的虚拟组与真人组**都改读本地表**（`user_material_info`），不再吐上游的全租户列表。
+`POST /api/material/ListAssetGroups` 的虚拟组与真人组**都改读本地表**（`user_material_groups`），不再吐上游的全租户列表。
 
 | `Filter.GroupType` | 行为 |
 |---|---|

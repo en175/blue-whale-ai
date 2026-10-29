@@ -188,7 +188,7 @@ describe.skipIf(!process.env.IKNCL3_DATABASE_URL)("本地恢复画布公开 API"
   it("角色库原身份恢复后保留全文、关联资产并可幂等重读", async () => {
     const materialId = `asset-recovery-${sourceId}`;
     const asset = await prisma.client.user_assets.create({ data: { user_id: 983003n, project_id: BigInt(sourceId), type: "image", url: `https://assets.invalid/material-${sourceId}.png`, material_id: materialId } });
-    await prisma.client.catalog_material_states.create({ data: { material_id: materialId, user_id: 983003n, material_group_id: `group-recovery-${sourceId}`, status: "Active" } });
+    await prisma.client.user_material_info.create({ data: { material_id: materialId, user_id: 983003n, material_group_id: `group-recovery-${sourceId}`, status: "Active" } });
     const nodes = [{ id: "role-card", type: "assetNode", position: { x: 10, y: 20 }, data: { kind: "custom", initialRefs: [{ id: "role-reference", src: asset.url, type: "image", assetId: materialId }] } }];
     const body = { ...payload, nodes: JSON.stringify(nodes) };
     const id = "04e0b9cc-04dd-45ad-930b-3c0000000015";
@@ -215,7 +215,7 @@ describe.skipIf(!process.env.IKNCL3_DATABASE_URL)("本地恢复画布公开 API"
     const materialId = `asset-20261019-${sourceId}-A_1`;
     const asset = await prisma.client.user_assets.create({ data: { user_id: 983003n, project_id: BigInt(sourceId), type: "image", url: `https://assets.invalid/material-state-${sourceId}.png`, material_id: materialId } });
     const material = { material_id: materialId, user_id: 983003n, material_group_id: `group-state-${sourceId}`, status: "Active" };
-    await prisma.client.catalog_material_states.create({ data: material });
+    await prisma.client.user_material_info.create({ data: material });
     const nodes = [{ id: "role-state", type: "assetNode", data: { initialRefs: [{ id: "role-state-ref", src: asset.url, type: "image", assetId: materialId }] } }];
     const body = { ...payload, nodes: JSON.stringify(nodes) };
     const id = "04e0b9cc-04dd-45ad-930b-3c0000000016";
@@ -226,10 +226,10 @@ describe.skipIf(!process.env.IKNCL3_DATABASE_URL)("本地恢复画布公开 API"
     const beforeJobs = await prisma.client.generation_jobs.count();
     const beforeReservations = await prisma.client.billing_cost_reservations.count();
     const cases = [
-      async () => { await prisma.client.catalog_material_states.update({ where: { material_id: materialId }, data: { user_id: 983004n } }); },
-      async () => { await prisma.client.catalog_material_states.update({ where: { material_id: materialId }, data: { status: "Processing" } }); },
-      async () => { await prisma.client.catalog_material_states.update({ where: { material_id: materialId }, data: { status: "Failed" } }); },
-      async () => { await prisma.client.catalog_material_states.delete({ where: { material_id: materialId } }); },
+      async () => { await prisma.client.user_material_info.update({ where: { material_id: materialId }, data: { user_id: 983004n } }); },
+      async () => { await prisma.client.user_material_info.update({ where: { material_id: materialId }, data: { status: "Processing" } }); },
+      async () => { await prisma.client.user_material_info.update({ where: { material_id: materialId }, data: { status: "Failed" } }); },
+      async () => { await prisma.client.user_material_info.delete({ where: { material_id: materialId } }); },
       async () => { await prisma.client.user_assets.update({ where: { id: asset.id }, data: { user_id: 983004n } }); },
       async () => { await prisma.client.user_assets.update({ where: { id: asset.id }, data: { is_delete: true } }); },
       async () => { await prisma.client.user_assets.update({ where: { id: asset.id }, data: { status: "disabled" } }); },
@@ -249,7 +249,7 @@ describe.skipIf(!process.env.IKNCL3_DATABASE_URL)("本地恢复画布公开 API"
         }
       } finally {
         await prisma.client.user_assets.update({ where: { id: asset.id }, data: { user_id: 983003n, is_delete: false, status: "normal", material_id: materialId, url: asset.url, type: "image" } });
-        await prisma.client.catalog_material_states.upsert({ where: { material_id: materialId }, create: material, update: { user_id: 983003n, status: "Active" } });
+        await prisma.client.user_material_info.upsert({ where: { material_id: materialId }, create: material, update: { user_id: 983003n, status: "Active" } });
       }
       expect((await (await request("GET", id)).json()).data).toEqual(complete.data);
     }

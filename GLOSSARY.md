@@ -1142,7 +1142,7 @@ _Avoid_: 在任何页面再写本地比例图标实现；恢复查表法（写�
 **素材库（material library）**:
 网关对外暴露的素材资源能力集；凭证（AK/SK）配置在网关侧，下游客户端不持有。本仓产品经
 `POST /api/material/{Action}` 透传调用，归属与状态以网关/上游为权威；本仓只持久化两处——
-素材库**组**（`user_material_info`，本地为组主）与素材**校验状态**的镜像（`catalog_material_states`，见下条），
+素材库**组**（`user_material_groups`，本地为组主）与素材**校验状态**的镜像（`user_material_info`，见下条），
 素材本身仍零落表。
 _Avoid_: 渠道（它不提供模型请求）、把素材库素材当成 Product Fact、本仓存素材本体
 
@@ -1168,11 +1168,11 @@ _Avoid_: 文件、附件、Asset（本仓的 Project 文件单元）
 
 **素材状态**:
 `Active`（就绪）、`Processing`（处理中）、`Failed`（失败）。上游为权威，本仓在
-`catalog_material_states` 镜像一份供生成判定用；**展示层仍以上游响应为准**，镜像只在「生成采纳」处被读取。
+`user_material_info` 镜像一份供生成判定用；**展示层仍以上游响应为准**，镜像只在「生成采纳」处被读取。
 _Avoid_: 状态码、把镜像当成独立产品事实、用镜像驱动展示
 
 **素材校验状态（material compliance status）**:
-本仓镜像的上游**素材状态**，落在 `catalog_material_states` 表，是**生成任务判定「该素材能否用作视频生成参考」的判据**：
+本仓镜像的上游**素材状态**，落在 `user_material_info` 表，是**生成任务判定「该素材能否用作视频生成参考」的判据**：
 `Active` 放行，`Failed` 及其他报错，`Processing` 或无记录则实时回查上游并回写。只镜像状态与失败原文，
 不含素材正文信息（真身在上游）。它由生成任务消费，不由展示层消费。
 _Avoid_: 素材表（素材真身在上游）、把校验状态当 Asset 的属性、与「素材状态」混用

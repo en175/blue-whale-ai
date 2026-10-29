@@ -161,7 +161,7 @@ export function createSnapshotRepo(prisma: PrismaClient): SnapshotRepo {
         ),
       ];
       if (materialIds.length > 0) {
-        const statusRows = await prisma.catalog_material_states.findMany({
+        const statusRows = await prisma.user_material_info.findMany({
           where: { user_id: uid, material_id: { in: materialIds } },
           select: {
             material_id: true,

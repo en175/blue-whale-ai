@@ -35,7 +35,7 @@ CREATE TABLE `user_assets` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
-CREATE TABLE `user_material_info` (
+CREATE TABLE `user_material_groups` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `user_id` BIGINT NOT NULL,
     `material_group_id` VARCHAR(128) NOT NULL,
@@ -581,7 +581,7 @@ CREATE TABLE `conversation_quote_snapshots` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
-CREATE TABLE `catalog_material_states` (
+CREATE TABLE `user_material_info` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `material_id` VARCHAR(128) NOT NULL,
     `user_id` BIGINT NOT NULL,
@@ -594,9 +594,9 @@ CREATE TABLE `catalog_material_states` (
     `gmt_modified` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
     `version` INTEGER NOT NULL DEFAULT 0,
 
-    INDEX `idx_catalog_material_states__poll`(`status`, `gmt_create`),
-    INDEX `idx_catalog_material_states__group`(`material_group_id`),
-    UNIQUE INDEX `uk_catalog_material_states__material`(`material_id`),
+    INDEX `idx_user_material_info__poll`(`status`, `gmt_create`),
+    INDEX `idx_user_material_info__group`(`material_group_id`),
+    UNIQUE INDEX `uk_user_material_info__material`(`material_id`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 

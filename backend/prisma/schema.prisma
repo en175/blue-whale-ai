@@ -47,7 +47,7 @@ model user_assets {
 /// kind：virtual=虚拟人像库组（每用户至多 1 个默认组），real=真人像库组（每用户可多个）。
 /// cover_url：封面图（真人组用，虚拟组可空）。material_group_id：上游组 id（group-...）。
 /// is_default 每用户 virtual 至多 1 个用应用层保证（MySQL 唯一索引无法表达条件唯一，不设 DB 约束）。
-model user_material_info {
+model user_material_groups {
   id                BigInt    @id @default(autoincrement())
   user_id           BigInt
   material_group_id String    @db.VarChar(128)
@@ -71,9 +71,9 @@ model user_material_info {
 /// status = Processing | Active | Failed；素材真身在上游，本表只存状态与失败原文（error_* 仅供内部归因，不展示）。
 /// status_checked_at = 最后一次向上游确认状态的时间。
 /// 无 is_delete/deleted_at：本表行是素材的附属状态，没有独立价值，删除时硬删（ADR-0087 决策 5）。
-model catalog_material_states {
+model user_material_info {
   id                BigInt    @id @default(autoincrement())
-  material_id       String    @unique(map: "uk_catalog_material_states__material") @db.VarChar(128)
+  material_id       String    @unique(map: "uk_user_material_info__material") @db.VarChar(128)
   user_id           BigInt
   material_group_id String    @db.VarChar(128)
   status            String    @db.VarChar(16)
@@ -84,8 +84,8 @@ model catalog_material_states {
   gmt_modified      DateTime  @default(now()) @db.DateTime(0)
   version           Int       @default(0)
 
-  @@index([status, gmt_create], map: "idx_catalog_material_states__poll")
-  @@index([material_group_id], map: "idx_catalog_material_states__group")
+  @@index([status, gmt_create], map: "idx_user_material_info__poll")
+  @@index([material_group_id], map: "idx_user_material_info__group")
 }
 
 /// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments

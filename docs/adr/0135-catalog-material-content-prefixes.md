@@ -40,9 +40,11 @@ ADR-0117 §2 把前缀空间收敛为 `identity_ / billing_ / generation_`，§6
 - ADR-0117 §2 的前缀空间以及 §4/§5/§6 的免改名单对这批表不再适用。具体被取代的条目：§4 的 `generation_model_capability`、§5 的 `template_card` / `template_card_image` / `template_tag`、§3 无名表清单里的 `homepage_hero`、§6 的三个 skill / 三个 asset。其余条款（复数、`uk_{表}__{列}`、审计列、不设 `@@map`）继续有效。
 - 同批次的 `project_` 改名见 ADR-0134；两票不重叠。
 
-## 修订（2026-10-29，IKRGTJ）
+## 修订（2026-10-29，IKRGTJ / IKRIFX）
 
-- `catalog_material_groups` → `user_material_info`：该表按 `user_id` 存用户人像库分组，归属是用户而非只读目录，`catalog_` 前缀不成立。三条索引名不含旧表名，按决策 3 不改。
-- `user_shared_asset_snapshots` 整表退役：`086` 直接 `DROP TABLE`，后端 `shared-assets` 模块、路由与契约，前端共享资产弹窗与保存入口一并删除。ADR-0117 §6 与 ADR-0139 中依赖「共享资产历史条目仍可读」的兼容描述不再成立。
-- `086` 是破坏性变更，两个方向都有窗口期：新镜像先上线、`086` 尚未执行时，它会按 `user_material_info` 访问仍是旧表名的库，素材组相关接口（`ListAssetGroups` 的 `AIGC` / `LivenessFace`、虚拟默认组补建）会直接 500；`086` 执行后旧镜像立即读不到表。镜像发布与 `086` 必须在同一维护窗口内完成，先镜像后 DDL，且新镜像不得长时间空跑。worker-java 不读这两张表，无额外顺序要求。
-- 回滚：执行 `RENAME TABLE user_material_info TO catalog_material_groups` 恢复改名，并按 `008` + `078` 重建 `user_shared_asset_snapshots`；同时回退 backend 与 worker 镜像。删表不可恢复，迁移前先备份。
+- IKRGTJ `086`：`user_shared_asset_snapshots` 整表退役，后端 `shared-assets` 模块、路由与契约，前端共享资产弹窗与保存入口一并删除；`catalog_material_groups` 曾临时改名为 `user_material_info`。
+- IKRIFX `088` 修正素材域口径：`user_material_info` → `user_material_groups`（按 `user_id` 存用户人像库分组，归属是用户）；`catalog_material_states` → `user_material_info`（镜像上游素材状态）。三条含旧表名的索引随表改名为 `uk_user_material_info__material`、`idx_user_material_info__poll`、`idx_user_material_info__group`；`user_material_groups` 的三条索引不含旧表名，按决策 3 不改。
+- 破坏性窗口：新镜像先上线、迁移尚未执行时，它会按新表名访问仍是旧表名的库，素材组与素材状态相关接口会直接 500；迁移执行后旧镜像立即读不到表。镜像发布与 `086` / `088` 必须在同一维护窗口内完成，先镜像后 DDL，且新镜像不得长时间空跑；迁移必须按 `078` → `086` → `088` 顺序执行，`088` 依赖 `086` 产出的 `user_material_info`。worker-java 的 `MaterialAssetMapper` 读 `user_material_info`，必须与 backend 同批。
+- 回滚：先按 `088` 逆序，必须让状态表先让出 `user_material_info`：
+  `RENAME TABLE user_material_info TO catalog_material_states, user_material_groups TO user_material_info;`
+  再把三条索引改回 `uk_catalog_material_states__material`、`idx_catalog_material_states__poll`、`idx_catalog_material_states__group`；然后按 `086` 逆序 `RENAME TABLE user_material_info TO catalog_material_groups`；并按 `008` + `078` 重建 `user_shared_asset_snapshots`。删表不可恢复，迁移前备份。
