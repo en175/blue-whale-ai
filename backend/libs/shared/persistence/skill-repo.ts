@@ -138,7 +138,7 @@ export function createSkillRepo(prisma: PrismaClient): SkillRepo {
              JOIN catalog_creative_skill_versions v ON v.creative_skill_id = cs.creative_skill_id
              LEFT JOIN catalog_skills s ON s.id = cs.source_skill_id AND s.is_delete = 0
             WHERE cs.creative_skill_id = ?
-              AND (cs.asset_domain = 'official'
+              AND ((cs.asset_domain = 'official' AND s.id IS NOT NULL)
                    OR (cs.asset_domain = 'personal' AND cs.owner_user_id = ?))
             ORDER BY (v.creative_skill_version_id = cs.active_version_id) DESC, v.id DESC
             LIMIT 1`,
