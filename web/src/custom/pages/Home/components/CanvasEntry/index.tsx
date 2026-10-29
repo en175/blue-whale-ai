@@ -5,9 +5,8 @@ import { createProject } from '@/custom/api/projects';
 import LoginModal from '@/custom/components/LoginModal';
 import { showToast } from '@/custom/components/Toast';
 import { getCurrentUser } from '@/shared/utils/auth';
+import { MOCK_RECENT_CANVASES } from './mockRecentCanvases';
 import styles from './index.module.css';
-
-const RECENT_SLOTS = 3;
 
 function makeProjectName(): string {
   const d = new Date();
@@ -20,7 +19,7 @@ export default function CanvasEntry() {
   const [showLogin, setShowLogin] = useState(false);
   const [creating, setCreating] = useState(false);
 
-  const recentSlots = Array.from({ length: RECENT_SLOTS }, (_, index) => index);
+  const recentCanvases = MOCK_RECENT_CANVASES;
 
   const createCanvas = async () => {
     if (creating) return;
@@ -53,15 +52,19 @@ export default function CanvasEntry() {
           </span>
           <span className={styles.newCanvasLabel}>新建画布</span>
         </button>
-        {recentSlots.map((index) => (
+        {recentCanvases.slice(0, 3).map((recent) => (
           <div
-            key={index}
+            key={recent.id}
             className={styles.recentSlot}
             data-testid="canvas-recent-placeholder"
-          >
-            <span className={styles.recentPlaceholder}>
+            data-mock-id={recent.id}
+          >            <span className={styles.recentPlaceholder}>
               <ImagePlus size={22} strokeWidth={1.6} />
             </span>
+            <div className={styles.recentText}>
+              <strong className={styles.recentName}>{recent.name}</strong>
+              <span className={styles.recentTime}>{recent.updatedAt}</span>
+            </div>
           </div>
         ))}
       </div>
