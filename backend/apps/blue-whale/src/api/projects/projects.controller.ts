@@ -39,7 +39,13 @@ export class ProjectsController {
     if (resolved.kind === "invalid") {
       return fail(FAILURE_CODE, resolved.reason);
     }
-    const options = resolved.keyword ? { keyword: resolved.keyword } : undefined;
+    const options =
+      resolved.keyword || resolved.entryKind
+        ? {
+            ...(resolved.keyword ? { keyword: resolved.keyword } : {}),
+            ...(resolved.entryKind ? { kind: resolved.entryKind } : {}),
+          }
+        : undefined;
     if (resolved.kind === "all") {
       return ok(await this.project.listByOwner(user.userId, options));
     }
@@ -61,10 +67,14 @@ export class ProjectsController {
   @Post()
   async create(
     @CurrentUser() user: AuthenticatedUser,
-    @Body() body: { name?: unknown },
+    @Body() body: { name?: unknown; entry_kind?: unknown },
   ) {
     const name = typeof body.name === "string" ? body.name.trim() : "";
-    return ok(await this.project.create(user.userId, name));
+    const rawKind = body.entry_kind;
+    if (rawKind !== undefined && rawKind !== "dialog" && rawKind !== "canvas") {
+      return fail(FAILURE_CODE, "entry_kind 仅支持 dialog/canvas");
+    }
+    return ok(await this.project.create(user.userId, name, rawKind));
   }
 
   @Post("batch-delete")

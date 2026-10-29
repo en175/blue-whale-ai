@@ -47,8 +47,12 @@ export class ProjectService {
     return this.repo.listByOwnerRecent(ownerId, limit, options);
   }
 
-  create(ownerId: string, name: string) {
-    return this.repo.create(ownerId, name);
+  create(
+    ownerId: string,
+    name: string,
+    entryKind?: Parameters<ReturnType<typeof createProjectRepo>["create"]>[2],
+  ) {
+    return this.repo.create(ownerId, name, entryKind);
   }
 
   rename(id: string, ownerId: string, name: string) {
