@@ -3,17 +3,17 @@ import { describe, expect, it } from "vitest";
 
 const migrationSql = readFileSync(
   new URL(
-    "../../../prisma/migrations/20261029130000_ikre7x_template_card_is_featured/migration.sql",
+    "../../../prisma/migrations/20261029140000_ikre7x_catalog_templates_is_featured/migration.sql",
     import.meta.url,
   ),
   "utf8",
 );
 const standaloneSql = readFileSync(
-  new URL("../../../prisma/schema/077_ikre7x_template_card_is_featured.sql", import.meta.url),
+  new URL("../../../prisma/schema/079_ikre7x_catalog_templates_is_featured.sql", import.meta.url),
   "utf8",
 );
 const snapshotSql = readFileSync(
-  new URL("../../../../docs/sql/20261029_ikre7x_template_card_is_featured.sql", import.meta.url),
+  new URL("../../../../docs/sql/20261029_ikre7x_catalog_templates_is_featured.sql", import.meta.url),
   "utf8",
 );
 const schemaPrisma = readFileSync(
@@ -21,7 +21,7 @@ const schemaPrisma = readFileSync(
   "utf8",
 );
 
-describe("IKRE7X 三轨迁移（template_card is_featured）", () => {
+describe("IKRE7X 三轨迁移（catalog_templates is_featured）", () => {
   it("三处 SQL 逐字一致", () => {
     expect(migrationSql).toBe(standaloneSql);
     expect(migrationSql).toBe(snapshotSql);

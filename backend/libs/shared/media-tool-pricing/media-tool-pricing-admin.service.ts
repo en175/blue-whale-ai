@@ -156,7 +156,7 @@ export class MediaToolPricingAdminService {
   constructor(private readonly prisma: PrismaService) {}
 
   private get client() {
-    return this.prisma.client.media_tool_pricing;
+    return this.prisma.client.catalog_media_tools;
   }
 
   async listAll(): Promise<MediaToolPricingRow[]> {
@@ -182,7 +182,7 @@ export class MediaToolPricingAdminService {
       where: { tool_type: toolType, is_delete: false },
     });
     if (!existing) return null;
-    const data: Prisma.media_tool_pricingUpdateInput = {
+    const data: Prisma.catalog_media_toolsUpdateInput = {
       ...(input.label !== undefined ? { label: input.label } : {}),
       ...(input.pricing !== undefined ? { pricing: input.pricing } : {}),
       ...(input.enabled !== undefined ? { enabled: input.enabled } : {}),

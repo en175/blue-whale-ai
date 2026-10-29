@@ -90,7 +90,7 @@ function makeService(overrides: {
   const prisma = {
     client: {
       generation_jobs: { create, findUnique: vi.fn().mockResolvedValue({ status: "queued" }) },
-      cost_reservations: { create: costCreate },
+      billing_cost_reservations: { create: costCreate },
     },
   };
   return {

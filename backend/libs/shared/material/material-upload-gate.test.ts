@@ -141,7 +141,7 @@ describe("assertMaterialLinkable（上传口素材闸）", () => {
     expect(upsertProcessing).not.toHaveBeenCalled();
   });
 
-  it("无记录 + 上游 Active 但没给 GroupId → 放行，只是补不了行（material_assets 那列 NOT NULL）", async () => {
+  it("无记录 + 上游 Active 但没给 GroupId → 放行，只是补不了行（catalog_material_states 那列 NOT NULL）", async () => {
     const { gateDeps, upsertProcessing } = deps(null, {
       status: "Active",
       groupId: null,

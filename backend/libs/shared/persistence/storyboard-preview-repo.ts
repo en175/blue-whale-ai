@@ -9,6 +9,9 @@ import type {
 import { aspectRatioIds } from "@lib/contracts";
 
 import { createJobWithinTx } from "./generation-command-repo.js";
+import type { JobBilling, JobBillingSource } from "./job-billing.js";
+import { jobExistenceProbe, releaseUnlessJobCommitted } from "./job-billing.js";
+import { serializePricingRule } from "./model-capability-repo.js";
 import {
   canvasBindingView,
   lockCanvasRecoveryForAcceptance,
@@ -18,7 +21,6 @@ import {
   type CanvasRecoveryPlan,
 } from "./generation-canvas-recovery-repo.js";
 import { capabilityDigestFromModelCapability } from "./capability-digest.js";
-import { appendProjectEvent } from "./product-event-repo.js";
 import { transactionWithUniqueRetry } from "./conversation-repo.js";
 
 const OPERATION = "scene_card.storyboard_preview";
@@ -33,6 +35,7 @@ export interface CreateStoryboardPreviewInput {
   parameters: StoryboardPreviewParameters;
   capability_snapshot_version: CapabilitySnapshotVersion;
   quotaCheck?: () => Promise<{ sufficient: boolean }>;
+  billing?: JobBillingSource;
   canvasRecovery?: CanvasRecoveryAcceptance;
 }
 
@@ -91,6 +94,7 @@ function checkImageCapabilityLimit(
 async function createStoryboardPreviewInTransaction(
   tx: Prisma.TransactionClient,
   input: CreateStoryboardPreviewInput,
+  onCharged: (jobId: number) => void,
 ): Promise<CreateStoryboardPreviewResult> {
   const projectId = BigInt(input.projectId);
   const userId = BigInt(input.userId);
@@ -102,7 +106,7 @@ async function createStoryboardPreviewInTransaction(
   });
   if (!project) return { kind: "forbidden" } as const;
 
-  const existing = await tx.command_idempotency.findUnique({
+  const existing = await tx.project_command_receipts.findUnique({
     where: {
       project_id_operation_idempotency_key: {
         project_id: projectId,
@@ -144,7 +148,7 @@ async function createStoryboardPreviewInTransaction(
 
   const snapshot = input.capability_snapshot_version;
 
-  const capability = await tx.generation_model_capability.findUnique({
+  const capability = await tx.catalog_models.findUnique({
     where: {
       provider_id_model_id: {
         provider_id: snapshot.provider_id,
@@ -164,6 +168,7 @@ async function createStoryboardPreviewInTransaction(
       default_aspect_ratio: true,
       default_duration: true,
       features: true,
+      pricing: true,
     },
   });
   if (!capability || !capability.enabled || capability.is_delete)
@@ -187,7 +192,7 @@ async function createStoryboardPreviewInTransaction(
   if (input.canvasRecovery) {
     const locked = await lockCanvasRecoveryForAcceptance(tx, input.canvasRecovery);
     if (locked.kind === "replay") {
-      const winner = await tx.command_idempotency.findUnique({
+      const winner = await tx.project_command_receipts.findUnique({
         where: {
           project_id_operation_idempotency_key: {
             project_id: projectId,
@@ -216,26 +221,53 @@ async function createStoryboardPreviewInTransaction(
       `${input.projectId}\0storyboard_preview\0${sceneCardId}\0${input.idempotencyKey}`,
     )
     .digest("hex");
-  const createdJob = await createJobWithinTx(tx, {
-    projectId: input.projectId,
-    userId: input.userId,
-    type: "image",
-    expectedOutputCount: input.parameters.count,
-    source: "storyboard_preview",
-    actionIdentity,
-    actionType: OPERATION,
-    sceneCardId: sceneCardId.toString(),
-    input: {
-      prompt: sceneCard.content_markdown,
-      model_id: input.parameters.model_id,
-      size: input.parameters.size,
-      aspect_ratio: input.parameters.aspect_ratio,
-      web_search: false,
-      sequential_image_generation: false,
-      storyboard_preview: true,
-      scene_card_id: sceneCardId.toString(),
+  const jobInput = {
+    prompt: sceneCard.content_markdown,
+    model_id: input.parameters.model_id,
+    size: input.parameters.size,
+    aspect_ratio: input.parameters.aspect_ratio,
+    web_search: false,
+    sequential_image_generation: false,
+    storyboard_preview: true,
+    scene_card_id: sceneCardId.toString(),
+  };
+  const ruleSnapshot = serializePricingRule({ pricing: capability.pricing });
+  const jobBilling: JobBilling | undefined = input.billing
+    ? {
+        charge: async (jobId) => {
+          await input.billing!.charge({
+            userId: input.userId,
+            jobId,
+            commandId: actionIdentity,
+            modelId: input.parameters.model_id,
+            taskType: "image",
+            input: {
+              ...jobInput,
+              expected_output_count: input.parameters.count,
+            },
+            ...(ruleSnapshot !== undefined ? { ruleSnapshot } : {}),
+          });
+          onCharged(jobId);
+        },
+        release: (jobId, reason) =>
+          input.billing!.release({ userId: input.userId, jobId, reason }),
+      }
+    : undefined;
+  const createdJob = await createJobWithinTx(
+    tx,
+    {
+      projectId: input.projectId,
+      userId: input.userId,
+      type: "image",
+      expectedOutputCount: input.parameters.count,
+      source: "storyboard_preview",
+      actionIdentity,
+      actionType: OPERATION,
+      sceneCardId: sceneCardId.toString(),
+      input: jobInput,
     },
-  });
+    jobBilling,
+  );
   if ("kind" in createdJob) throw new Error("unreachable: storyboard job creation never conflicts idempotency");
   if (recoveryPlan) {
     await writeCanvasRecoveryRows(tx, recoveryPlan, BigInt(createdJob.generation_job_id));
@@ -253,7 +285,7 @@ async function createStoryboardPreviewInTransaction(
     },
   });
 
-  await tx.command_idempotency.create({
+  await tx.project_command_receipts.create({
     data: {
       project_id: projectId,
       operation: OPERATION,
@@ -265,27 +297,12 @@ async function createStoryboardPreviewInTransaction(
     },
   });
 
-  const event = await appendProjectEvent(tx, {
-    projectId: input.projectId,
-    eventType: "storyboard_preview.created",
-    aggregateType: "storyboard_preview",
-    aggregateId: preview.id.toString(),
-    aggregateVersion: 1,
-    correlationId: input.idempotencyKey,
-    payload: {
-      preview_id: preview.id.toString(),
-      scene_card_id: sceneCardId.toString(),
-      first_generation_job_id: createdJob.generation_job_id,
-      summary_status: "generating",
-    },
-  });
-
   return {
     kind: "applied",
     preview_id: preview.id.toString(),
     scene_card_id: sceneCardId.toString(),
     generation_job_id: createdJob.generation_job_id,
-    cursor: Math.max(createdJob.cursor, Number(event.cursor)).toString(),
+    cursor: createdJob.cursor.toString(),
   };
 }
 
@@ -342,12 +359,12 @@ export async function validateStoryboardFrames(
 }
 
 async function findAccessibleAssetIds(
-  client: Pick<Prisma.TransactionClient, "assets">,
+  client: Pick<Prisma.TransactionClient, "user_assets">,
   projectId: bigint,
   assetIds: bigint[],
 ): Promise<Set<bigint>> {
   if (assetIds.length === 0) return new Set();
-  const assets = await client.assets.findMany({
+  const assets = await client.user_assets.findMany({
     where: {
       id: { in: assetIds },
       project_id: projectId,
@@ -399,9 +416,35 @@ export function createStoryboardPreviewRepo(
 ): StoryboardPreviewRepo {
   return {
     createStoryboardPreview(input) {
-      return transactionWithUniqueRetry(prisma, (tx) =>
-        createStoryboardPreviewInTransaction(tx, input),
-      );
+      const charged: number[] = [];
+      const releaseCharged = async (reason: string) => {
+        for (const jobId of charged.splice(0)) {
+          await releaseUnlessJobCommitted({
+            release: input.billing
+              ? (id, releaseReason) =>
+                  input.billing!.release({
+                    userId: input.userId,
+                    jobId: id,
+                    reason: releaseReason,
+                  })
+              : undefined,
+            jobId,
+            probe: jobExistenceProbe(prisma),
+            reason,
+          });
+        }
+      };
+      return transactionWithUniqueRetry(prisma, async (tx) => {
+        await releaseCharged("事务重试前释放上一笔扣款");
+        return createStoryboardPreviewInTransaction(tx, input, (jobId) =>
+          charged.push(jobId),
+        );
+      }).catch(async (error: unknown) => {
+        await releaseCharged(
+          error instanceof Error ? error.message : String(error),
+        );
+        throw error;
+      });
     },
     canvasBindingView(projectId, submissionId) {
       return canvasBindingView(prisma, projectId, submissionId);

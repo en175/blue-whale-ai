@@ -162,7 +162,7 @@ export function createModelCapabilityAdminRepo(
 ): ModelCapabilityAdminRepo {
   const repo: ModelCapabilityAdminRepo = {
     async listAll() {
-      const rows = await prisma.generation_model_capability.findMany({
+      const rows = await prisma.catalog_models.findMany({
         where: { is_delete: false },
         orderBy: [{ capability_type: "asc" }, { sort_order: "asc" }],
       });
@@ -172,20 +172,20 @@ export function createModelCapabilityAdminRepo(
     async getById(id) {
       const pid = parseId(id);
       if (pid === null) return null;
-      const row = await prisma.generation_model_capability.findFirst({
+      const row = await prisma.catalog_models.findFirst({
         where: { id: pid, is_delete: false },
       });
       return row ? toRow(row) : null;
     },
 
     async create(input) {
-      const maxSort = await prisma.generation_model_capability.aggregate({
+      const maxSort = await prisma.catalog_models.aggregate({
         where: { is_delete: false },
         _max: { sort_order: true },
       });
       const nextSort = (maxSort._max.sort_order ?? 0) + 1;
       try {
-        const row = await prisma.generation_model_capability.create({
+        const row = await prisma.catalog_models.create({
           data: {
             provider_id: input.provider_id,
             model_id: input.model_id,
@@ -221,7 +221,7 @@ export function createModelCapabilityAdminRepo(
     async update(id, input) {
       const pid = parseId(id);
       if (pid === null) return null;
-      const existing = await prisma.generation_model_capability.findFirst({
+      const existing = await prisma.catalog_models.findFirst({
         where: { id: pid, is_delete: false },
       });
       if (!existing) return null;
@@ -250,7 +250,7 @@ export function createModelCapabilityAdminRepo(
       if (input.enabled !== undefined) data.enabled = input.enabled;
       if (input.sort_order !== undefined) data.sort_order = input.sort_order;
 
-      const row = await prisma.generation_model_capability.update({
+      const row = await prisma.catalog_models.update({
         where: { id: pid },
         data,
       });
@@ -261,12 +261,12 @@ export function createModelCapabilityAdminRepo(
       const pid = parseId(id);
       if (pid === null) return null;
       const flipped = await prisma.$executeRaw`
-        UPDATE generation_model_capability
+        UPDATE catalog_models
         SET enabled = NOT enabled, gmt_modified = NOW()
         WHERE id = ${pid} AND is_delete = false
       `;
       if (flipped === 0) return null;
-      const row = await prisma.generation_model_capability.findFirst({
+      const row = await prisma.catalog_models.findFirst({
         where: { id: pid, is_delete: false },
       });
       return row ? toRow(row) : null;
@@ -275,7 +275,7 @@ export function createModelCapabilityAdminRepo(
     async remove(id) {
       const pid = parseId(id);
       if (pid === null) return false;
-      const r = await prisma.generation_model_capability.updateMany({
+      const r = await prisma.catalog_models.updateMany({
         where: { id: pid, is_delete: false },
         data: { is_delete: true, gmt_modified: new Date() },
       });
@@ -290,7 +290,7 @@ export function createModelCapabilityAdminRepo(
       }));
       const invalid = parsed.find((p) => p.pid === null);
       if (invalid) throw new Error(`非法模型 id: ${invalid.rawId}`);
-      const existing = await prisma.generation_model_capability.findMany({
+      const existing = await prisma.catalog_models.findMany({
         where: { id: { in: parsed.map((p) => p.pid as bigint) }, is_delete: false },
         select: { id: true },
       });
@@ -301,7 +301,7 @@ export function createModelCapabilityAdminRepo(
       }
       await prisma.$transaction(
         parsed.map((item) =>
-          prisma.generation_model_capability.update({
+          prisma.catalog_models.update({
             where: { id: item.pid as bigint },
             data: { sort_order: item.sortOrder, gmt_modified: new Date() },
           }),
@@ -313,14 +313,14 @@ export function createModelCapabilityAdminRepo(
     async setDefault(id) {
       const pid = parseId(id);
       if (pid === null) return null;
-      const target = await prisma.generation_model_capability.findFirst({
+      const target = await prisma.catalog_models.findFirst({
         where: { id: pid, is_delete: false },
         select: { id: true, capability_type: true },
       });
       if (!target) return null;
 
       await prisma.$transaction([
-        prisma.generation_model_capability.updateMany({
+        prisma.catalog_models.updateMany({
           where: {
             capability_type: target.capability_type,
             is_delete: false,
@@ -329,13 +329,13 @@ export function createModelCapabilityAdminRepo(
           },
           data: { is_default: false, gmt_modified: new Date() },
         }),
-        prisma.generation_model_capability.update({
+        prisma.catalog_models.update({
           where: { id: pid },
           data: { is_default: true, gmt_modified: new Date() },
         }),
       ]);
 
-      const row = await prisma.generation_model_capability.findFirst({
+      const row = await prisma.catalog_models.findFirst({
         where: { id: pid, is_delete: false },
       });
       return row ? toRow(row) : null;

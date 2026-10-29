@@ -2,11 +2,15 @@ import { useEffect, useRef, type Dispatch, type SetStateAction } from 'react';
 import { useAuthStore } from '@/shared/stores/auth';
 import { fetchMe, fetchCredits, toSessionUser } from '@/custom/api/auth';
 import { fetchProjects, createProject, touchProjectLastOpened } from '@/custom/api/projects';
+import { showToast } from '@/shared/components/Toast';
 import type { CanvasProject } from '../../components/ProjectSelector';
 import {
+  MISSING_PROJECT_MESSAGE,
   findLastOpenedProjectId,
   findLatestCreatedProjectId,
+  isUnreachableProjectId,
   pickCanvasIdAfterLoad,
+  readCanvasIdFromSearch,
 } from '../../graph/canvasQuery';
 
 export function useCanvasSessionBootstrap(input: {
@@ -14,10 +18,13 @@ export function useCanvasSessionBootstrap(input: {
   projects: CanvasProject[];
   setProjects: Dispatch<SetStateAction<CanvasProject[]>>;
   setCurrentId: Dispatch<SetStateAction<string>>;
+  navigate: (to: string, options: { replace: boolean }) => void;
+  location: { search: string };
 }): void {
-  const { currentId, projects, setProjects, setCurrentId } = input;
+  const { currentId, projects, setProjects, setCurrentId, navigate, location } = input;
   const updateUser = useAuthStore((s) => s.updateUser);
   const setUsage = useAuthStore((s) => s.setUsage);
+  const loadedRef = useRef(false);
   useEffect(() => {
     fetchMe()
       .then((me) => updateUser(toSessionUser(me)))
@@ -41,6 +48,7 @@ export function useCanvasSessionBootstrap(input: {
     fetchProjects()
       .then(async (list) => {
         if (!alive) return;
+        loadedRef.current = true;
         const lastOpenedId = findLastOpenedProjectId(list);
         const latestCreatedId = findLatestCreatedProjectId(list);
         let mapped = list.map((p) => ({ id: String(p.id), name: p.name, pinned: Boolean(p.pinned_at) }));
@@ -60,6 +68,12 @@ export function useCanvasSessionBootstrap(input: {
       alive = false;
     };
   }, [setProjects, setCurrentId]);
+  useEffect(() => {
+    if (!loadedRef.current || !isUnreachableProjectId(currentId, projects.map((p) => p.id), true)) return;
+    if (readCanvasIdFromSearch(new URLSearchParams(location.search)) !== currentId) return;
+    showToast('error', MISSING_PROJECT_MESSAGE);
+    navigate('/projects', { replace: true });
+  }, [currentId, projects, location.search, navigate]);
   const lastTouchedProjectRef = useRef('');
   useEffect(() => {
     if (!currentId || lastTouchedProjectRef.current === currentId) return;

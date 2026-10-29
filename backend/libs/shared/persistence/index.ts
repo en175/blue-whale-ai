@@ -24,12 +24,6 @@ export {
   type ConversationQuoteRow,
 } from "./conversation-quote-repo.js";
 export {
-  createLegacyCardHistoryRepo,
-  type LegacyCardHistoryDraft,
-  type LegacyCardHistoryRepo,
-  type LegacyCardHistoryRow,
-} from "./legacy-card-history-repo.js";
-export {
   createJobRepo,
   type JobRepo,
   type JobListItem,
@@ -69,13 +63,6 @@ export {
   type SnapshotSceneCardGenerationRecordView,
   type SnapshotStoryboardPreviewView,
 } from "./snapshot-repo.js";
-export {
-  appendProjectEvent,
-  createProductEventRepo,
-  type AppendProjectEventInput,
-  type ProductEventRepo,
-  type ProductEventView,
-} from "./product-event-repo.js";
 export {
   transactionWithUniqueRetry,
 } from "./conversation-repo.js";
@@ -285,6 +272,10 @@ export {
 } from "./topup-tier-repo.js";
 export {
   createOperationLogRepo,
+  OPERATION_STATUS_DONE,
+  OPERATION_STATUS_PENDING,
+  OPERATION_STATUS_SUCCEEDED,
+  OPERATION_STATUS_FAILED,
   type OperationLogRepo,
   type OperationLogView,
   type OperationLogFilter,

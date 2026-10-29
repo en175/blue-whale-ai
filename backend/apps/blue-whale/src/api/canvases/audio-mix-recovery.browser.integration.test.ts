@@ -191,7 +191,7 @@ describe.skipIf(process.env.IKI697_BROWSER !== "1")(
       const { createServer: createVite } = await import("../../../../../../web/node_modules/vite/dist/node/index.js");
       const projectId = (await projects.create("9", "IKI697 browser")).id;
       const createAsset = async (name: string) => {
-        const row = await prisma.client.assets.create({ data: {
+        const row = await prisma.client.user_assets.create({ data: {
           user_id: 9n, project_id: BigInt(projectId), type: "audio", source: "uploaded", status: "normal",
           storage_key: `uploads/9/${name}.wav`, url: `${mediaBase}/${name}.wav`,
           duration_ms: 10_000, size: BigInt(wav.length),
@@ -336,7 +336,7 @@ describe.skipIf(process.env.IKI697_BROWSER !== "1")(
           audio.pause();
         });
         expect(servedOutputHashes).toContain(hash(storedOutput!));
-        expect(await prisma.client.assets.count({ where: { generation_job_id: retryJob.id } })).toBe(1);
+        expect(await prisma.client.user_assets.count({ where: { generation_job_id: retryJob.id } })).toBe(1);
         await page.locator('.react-flow__node-mediaNode[data-id="source"]').click();
         await page.keyboard.press("Delete");
         await vi.waitFor(async () => {
@@ -346,7 +346,7 @@ describe.skipIf(process.env.IKI697_BROWSER !== "1")(
         }, { timeout: 10_000 });
         await page.reload();
         await result.waitFor();
-        expect(await prisma.client.assets.count({ where: { generation_job_id: BigInt(jobId) } })).toBe(1);
+        expect(await prisma.client.user_assets.count({ where: { generation_job_id: BigInt(jobId) } })).toBe(1);
         await result.click();
         await page.keyboard.press("Delete");
         await vi.waitFor(async () => {
@@ -355,7 +355,7 @@ describe.skipIf(process.env.IKI697_BROWSER !== "1")(
         }, { timeout: 10_000 });
         await page.reload();
         expect(await result.count()).toBe(0);
-        expect(await prisma.client.assets.count({ where: { generation_job_id: BigInt(jobId) } })).toBe(1);
+        expect(await prisma.client.user_assets.count({ where: { generation_job_id: BigInt(jobId) } })).toBe(1);
       } finally {
         await browser.close();
         await vite.close();
@@ -366,11 +366,11 @@ describe.skipIf(process.env.IKI697_BROWSER !== "1")(
       const { chromium } = await import("playwright");
       const { createServer: createVite } = await import("../../../../../../web/node_modules/vite/dist/node/index.js");
       const projectId = (await projects.create("9", "IKI8AZ cancel browser")).id;
-      const source = await prisma.client.assets.create({ data: {
+      const source = await prisma.client.user_assets.create({ data: {
         user_id: 9n, project_id: BigInt(projectId), type: "audio", source: "uploaded", status: "normal",
         storage_key: "uploads/9/cancel-source.wav", url: `${mediaBase}/cancel-source.wav`, duration_ms: 10_000,
       } });
-      const other = await prisma.client.assets.create({ data: {
+      const other = await prisma.client.user_assets.create({ data: {
         user_id: 9n, project_id: BigInt(projectId), type: "audio", source: "uploaded", status: "normal",
         storage_key: "uploads/9/cancel-other.wav", url: `${mediaBase}/cancel-other.wav`, duration_ms: 10_000,
       } });
@@ -446,7 +446,7 @@ describe.skipIf(process.env.IKI697_BROWSER !== "1")(
         expect(await result.count()).toBe(0);
         expect((await prisma.client.generation_jobs.findUniqueOrThrow({ where: { id: BigInt(jobId) } })).canvas_card_state)
           .toBe("removed");
-        expect(await prisma.client.assets.count({ where: { generation_job_id: BigInt(jobId) } })).toBe(0);
+        expect(await prisma.client.user_assets.count({ where: { generation_job_id: BigInt(jobId) } })).toBe(0);
       } finally {
         await browser.close();
         await vite.close();

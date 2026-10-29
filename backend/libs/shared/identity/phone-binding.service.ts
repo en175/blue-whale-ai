@@ -155,8 +155,13 @@ export class PhoneBindingService {
       code: input.code,
       purposes: ["rebind_new"],
     });
+    const updated = await this.users.rebindPhoneIfCurrent(
+      String(userId),
+      currentPhone,
+      input.phone,
+    );
+    if (!updated) throw new RebindBindingChangedError();
     await this.verification.consume(verified);
-    await this.users.updatePhone(String(userId), input.phone);
     return { phone: input.phone };
   }
 
@@ -202,10 +207,16 @@ export class PhoneBindingService {
       code: input.code,
       purposes: ["bind", LEGACY_VERIFICATION_PURPOSE],
     });
+    const updated = await this.users.bindPhoneIfUnbound(
+      String(userId),
+      input.phone,
+    );
+    if (!updated) {
+      throw new MigrationIneligibleError("账号绑定状态已变化，请重新登录");
+    }
     await this.verification.consume(verified);
-    await this.users.updatePhone(String(userId), input.phone);
-    const updated = await this.users.findById(String(userId));
-    if (!updated) throw new MigrationIneligibleError();
-    return updated;
+    const bound = await this.users.findById(String(userId));
+    if (!bound) throw new MigrationIneligibleError();
+    return bound;
   }
 }

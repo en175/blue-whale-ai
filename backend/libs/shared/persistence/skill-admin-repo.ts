@@ -32,7 +32,7 @@ export interface SkillAdminRepo {
 export function createSkillAdminRepo(prisma: PrismaClient): SkillAdminRepo {
   return {
     async listOfficialSkills() {
-      const rows = await prisma.skill.findMany({
+      const rows = await prisma.catalog_skills.findMany({
         where: { source: "official", is_delete: 0 },
         orderBy: [{ sort_order: "asc" }, { id: "asc" }],
         select: {
@@ -53,7 +53,7 @@ export function createSkillAdminRepo(prisma: PrismaClient): SkillAdminRepo {
     },
 
     async listCategories() {
-      const rows = await prisma.skill.groupBy({
+      const rows = await prisma.catalog_skills.groupBy({
         by: ["category"],
         where: { source: "official", is_delete: 0, category: { not: "" } },
         _count: { _all: true },
@@ -63,7 +63,7 @@ export function createSkillAdminRepo(prisma: PrismaClient): SkillAdminRepo {
     },
 
     async setCategory(id, category) {
-      const result = await prisma.skill.updateMany({
+      const result = await prisma.catalog_skills.updateMany({
         where: { id, source: "official", is_delete: 0 },
         data: { category },
       });
@@ -71,7 +71,7 @@ export function createSkillAdminRepo(prisma: PrismaClient): SkillAdminRepo {
     },
 
     async assignCategory(ids, category) {
-      const result = await prisma.skill.updateMany({
+      const result = await prisma.catalog_skills.updateMany({
         where: { id: { in: ids }, source: "official", is_delete: 0 },
         data: { category },
       });
@@ -79,13 +79,13 @@ export function createSkillAdminRepo(prisma: PrismaClient): SkillAdminRepo {
     },
 
     async backfillOfficialAssets() {
-      const rows = await prisma.skill.findMany({
+      const rows = await prisma.catalog_skills.findMany({
         where: { source: "official", is_delete: 0 },
         select: { id: true, name: true, description: true, content: true },
       });
       let created = 0;
       for (const row of rows) {
-        const existing = await prisma.creative_skill.findFirst({
+        const existing = await prisma.catalog_creative_skills.findFirst({
           where: { source_skill_id: row.id, asset_domain: "official" },
           select: { id: true },
         });
@@ -97,7 +97,7 @@ export function createSkillAdminRepo(prisma: PrismaClient): SkillAdminRepo {
         const versionId = randomUUID();
         await prisma.$transaction(async (tx) => {
           await tx.$executeRawUnsafe(
-            `INSERT INTO creative_skill (creative_skill_id, name, description, owner_user_id, asset_domain, name_key, source_skill_id, active_version_id) VALUES (?, ?, ?, 0, 'official', ?, ?, ?)`,
+            `INSERT INTO catalog_creative_skills (creative_skill_id, name, description, owner_user_id, asset_domain, name_key, source_skill_id, active_version_id) VALUES (?, ?, ?, 0, 'official', ?, ?, ?)`,
             creativeSkillId,
             row.name,
             row.description,
@@ -106,7 +106,7 @@ export function createSkillAdminRepo(prisma: PrismaClient): SkillAdminRepo {
             versionId,
           );
           await tx.$executeRawUnsafe(
-            `INSERT INTO creative_skill_version (creative_skill_version_id, creative_skill_id, display_version, body, content_digest, resource_digest) VALUES (?, ?, '1.0.0', ?, ?, ?)`,
+            `INSERT INTO catalog_creative_skill_versions (creative_skill_version_id, creative_skill_id, display_version, body, content_digest, resource_digest) VALUES (?, ?, '1.0.0', ?, ?, ?)`,
             versionId,
             creativeSkillId,
             body,
@@ -120,7 +120,7 @@ export function createSkillAdminRepo(prisma: PrismaClient): SkillAdminRepo {
     },
 
     async renameCategory(from, to) {
-      const result = await prisma.skill.updateMany({
+      const result = await prisma.catalog_skills.updateMany({
         where: { source: "official", is_delete: 0, category: from },
         data: { category: to },
       });
@@ -128,7 +128,7 @@ export function createSkillAdminRepo(prisma: PrismaClient): SkillAdminRepo {
     },
 
     async clearCategory(name) {
-      const result = await prisma.skill.updateMany({
+      const result = await prisma.catalog_skills.updateMany({
         where: { source: "official", is_delete: 0, category: name },
         data: { category: "" },
       });

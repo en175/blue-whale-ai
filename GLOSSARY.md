@@ -734,7 +734,7 @@ Asset 正式发布时原子创建初始 NodeItem。**入口职责独立、是不
 三个生图入口共享的执行层，与入口的产品职责边界正交。由三部分组成：
 - **GenerationProvider** —— 图片执行层的产品中性请求/结果契约；具体实现（Fake、OpenAI、
   火山方舟 Agent Plan 等）按运行 mode（`GENERATION_MODE`）装配，当前没有独立的运行时 Provider Registry。
-- **generation_model_capability** —— 图片 / 视频 / 文生文 / 音频模型能力目录的权威数据表：
+- **catalog_models** —— 图片 / 视频 / 文生文 / 音频模型能力目录的权威数据表：
   provider_id + model_id 唯一标识一档能力，记录展示信息（label / icon）与该能力类型适用的
   参数（图片与视频：尺寸选项 / 比例选项 / 格式 / 时长等；音频：时长 / 格式，无调用尺寸矩阵）及启停状态。
   承担双重角色：① 前端模型选项的展示源（不再写死，经 `/api/generation/models` 拉取）；
@@ -977,7 +977,7 @@ _Avoid_: Token 指纹、用户名、邮箱、浏览器本地 ID、客户端自�
 **上游统一 Key（项目级上游凭证）**:
 调用 new-api 的唯一凭证，**全项目共用一把**，以 `sk-` 开头。new-api 已从「我们的用户体系」降级为
 「带一把统一 key 的上游供应商」（[ADR-0114](docs/adr/0114-new-api-as-upstream-identity-and-billing-services.md)），
-所以这把 Key **不绑定任何 User**，与谁登录无关。它住在 `system_settings` 表 `upstream` 行的
+所以这把 Key **不绑定任何 User**，与谁登录无关。它住在 `bw_platform_settings` 表 `upstream` 行的
 `new_api_key`（管理端「系统设置 → 上游凭证」维护，AES-256-GCM 信封由 `SYSTEM_SETTINGS_SECRET` 解），
 **每次调用现查**，因此轮换对全部在线会话与在途任务立即生效。消费方只有一类：需要打上游的执行体
 ——worker 的 18 个 GenerationJob 处理器与素材状态定时跟进，都直连该配置读取，**不冻结进 job**。
@@ -1142,7 +1142,7 @@ _Avoid_: 在任何页面再写本地比例图标实现；恢复查表法（写�
 **素材库（material library）**:
 网关对外暴露的素材资源能力集；凭证（AK/SK）配置在网关侧，下游客户端不持有。本仓产品经
 `POST /api/material/{Action}` 透传调用，归属与状态以网关/上游为权威；本仓只持久化两处——
-素材库**组**（`material_groups`，本地为组主）与素材**校验状态**的镜像（`material_assets`，见下条），
+素材库**组**（`catalog_material_groups`，本地为组主）与素材**校验状态**的镜像（`catalog_material_states`，见下条），
 素材本身仍零落表。
 _Avoid_: 渠道（它不提供模型请求）、把素材库素材当成 Product Fact、本仓存素材本体
 
@@ -1168,11 +1168,11 @@ _Avoid_: 文件、附件、Asset（本仓的 Project 文件单元）
 
 **素材状态**:
 `Active`（就绪）、`Processing`（处理中）、`Failed`（失败）。上游为权威，本仓在
-`material_assets` 镜像一份供生成判定用；**展示层仍以上游响应为准**，镜像只在「生成采纳」处被读取。
+`catalog_material_states` 镜像一份供生成判定用；**展示层仍以上游响应为准**，镜像只在「生成采纳」处被读取。
 _Avoid_: 状态码、把镜像当成独立产品事实、用镜像驱动展示
 
 **素材校验状态（material compliance status）**:
-本仓镜像的上游**素材状态**，落在 `material_assets` 表，是**生成任务判定「该素材能否用作视频生成参考」的判据**：
+本仓镜像的上游**素材状态**，落在 `catalog_material_states` 表，是**生成任务判定「该素材能否用作视频生成参考」的判据**：
 `Active` 放行，`Failed` 及其他报错，`Processing` 或无记录则实时回查上游并回写。只镜像状态与失败原文，
 不含素材正文信息（真身在上游）。它由生成任务消费，不由展示层消费。
 _Avoid_: 素材表（素材真身在上游）、把校验状态当 Asset 的属性、与「素材状态」混用
@@ -1405,7 +1405,7 @@ _Avoid_: API Key、动态价格目录、模型供应商原始配置、用通用�
 
 **Agent 推理模型（Agent Reasoning Model）**:
 驱动 AgentChatPanel 对话编排（respond / clarify / cancel / submit_plan）的大模型，经 ModelProfile
-钉入 RunPin，由 agent-worker 装配适配器调用。它与 `generation_model_capability` 的 text 档位
+钉入 RunPin，由 agent-worker 装配适配器调用。它与 `catalog_models` 的 text 档位
 （TextCompletion 文生文白名单通道）是两条独立链路，互不复用。
 _Avoid_: 文本补全模型、文生文模型、把 Agent 推理与 TextCompletion 混为一条链路
 
@@ -1423,7 +1423,7 @@ AgentRuntimeManifest 对平台工具注册表的版本化允许子集，只赋�
 _Avoid_: 已授权命令、模型输出即执行、绕过 GenerationAuthorizationGate。
 
 **ToolDefinition（工具定义）**:
-平台以程序注册表（ToolRegistry）代码注册的 Agent 可提议工具，是发布期 ToolGrant 校验的运行时权威。每项含稳定 `tool_id`（`^[a-z][a-z0-9_.-]{0,127}$`）、递增 `registry_version`、`effect`（read / side_effect）、`risk_level`、输入 / 输出 Draft 2020-12 JSON Schema（禁 `$ref`）、平台静态约束上界 `constraints`，以及所需模型能力与生图能力类型（对接 `generation_model_capability`）。
+平台以程序注册表（ToolRegistry）代码注册的 Agent 可提议工具，是发布期 ToolGrant 校验的运行时权威。每项含稳定 `tool_id`（`^[a-z][a-z0-9_.-]{0,127}$`）、递增 `registry_version`、`effect`（read / side_effect）、`risk_level`、输入 / 输出 Draft 2020-12 JSON Schema（禁 `$ref`）、平台静态约束上界 `constraints`，以及所需模型能力与生图能力类型（对接 `catalog_models`）。
 _Avoid_: 配置字符串、含 `$ref` 的 Schema、在 ToolGrant 里携带 risk_level。
 
 **ToolRegistry（工具注册表）**:
@@ -1653,11 +1653,11 @@ _Avoid_: 让人类记忆凭证命令；把 Issue/PR/文档/工具输出视为授
 _Avoid_: 用字符串相等判断目录身份；以为 realpath/resolve 能统一大小写拼写
 
 **模板卡片（TemplateCard）**:
-首页 dock 下方按 TemplateTag 分类分页展示的灵感入口，存于 template_card 表：有标题、content 提示词、渲染形态（layout）、可选视频预览与一组封面图。点击把 content 追加进输入框（content 为空时兜底 title）。删除一律软删（is_delete），可恢复。
+首页 dock 下方按 TemplateTag 分类分页展示的灵感入口，存于 catalog_templates 表：有标题、content 提示词、渲染形态（layout）、可选视频预览与一组封面图。点击把 content 追加进输入框（content 为空时兜底 title）。删除一律软删（is_delete），可恢复。
 _Avoid_: 把模板卡片与 Skill、SceneCard、生成结果混称；物理删除模板卡片
 
 **模板标签（TemplateTag）**:
-首页模板卡片的内容分类维度，存于 template_tag 表：tag_code 与顺序固定不可改，仅 label 可由管理后台改名。它与 layout（渲染形态）正交：一个管内容分类，一个管卡片长相。
+首页模板卡片的内容分类维度，存于 catalog_template_tags 表：tag_code 与顺序固定不可改，仅 label 可由管理后台改名。它与 layout（渲染形态）正交：一个管内容分类，一个管卡片长相。
 _Avoid_: 把模板标签与 Skill 分类混用；假定标签可增删或调序
 
 **layout（渲染形态）**:
@@ -1665,7 +1665,7 @@ _Avoid_: 把模板标签与 Skill 分类混用；假定标签可增删或调序
 _Avoid_: 使用四种之外的值；把 layout 当内容分类
 
 **content（模板提示词）**:
-模板卡片的提示词正文（template_card.content）：点击卡片时追加进输入框的真实内容。title 只是展示标题，仅在 content 为空时兜底。
+模板卡片的提示词正文（catalog_templates.content）：点击卡片时追加进输入框的真实内容。title 只是展示标题，仅在 content 为空时兜底。
 _Avoid_: 把 title 当提示词（历史行为，已修正）；把 content 与 SceneCard 正文混称
 
 **模板媒体对象（TemplateMediaObject）**:

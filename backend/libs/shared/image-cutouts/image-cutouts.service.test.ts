@@ -100,7 +100,7 @@ function makeService(overrides: {
       create,
       findUnique: vi.fn().mockResolvedValue({ status: "processing" }),
     },
-    cost_reservations: { create: costCreate },
+    billing_cost_reservations: { create: costCreate },
   };
   client.$transaction = vi.fn((fn: (tx: unknown) => Promise<unknown>) =>
     fn(client),

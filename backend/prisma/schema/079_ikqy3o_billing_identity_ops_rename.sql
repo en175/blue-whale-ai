@@ -1,0 +1,10 @@
+SET NAMES utf8mb4;
+ALTER TABLE `recharge_orders` RENAME INDEX `uk_recharge_orders__trade_no` TO `uk_billing_recharge_orders__trade_no`;
+ALTER TABLE `recharge_orders` RENAME INDEX `uk_recharge_orders__pay_order_id` TO `uk_billing_recharge_orders__pay_order_id`;
+ALTER TABLE `recharge_orders` RENAME INDEX `idx_recharge_orders__is_delete_gmt_create` TO `idx_billing_recharge_orders__is_delete_gmt_create`;
+ALTER TABLE `recharge_orders` RENAME INDEX `idx_recharge_orders__is_delete_user_gmt_create` TO `idx_billing_recharge_orders__is_delete_user_gmt_create`;
+ALTER TABLE `cost_reservations` RENAME INDEX `uk_cost_reservation_job` TO `uk_billing_cost_reservations__job`;
+ALTER TABLE `command_idempotency` RENAME INDEX `uk_command_idempotency` TO `uk_project_command_receipts__key`;
+ALTER TABLE `legacy_card_history` RENAME INDEX `uk_legacy_card_history` TO `uk_project_card_migration_history__node`;
+RENAME TABLE `topup_tiers` TO `billing_products`, `recharge_orders` TO `billing_recharge_orders`, `cost_reservations` TO `billing_cost_reservations`, `cost_adjustments` TO `billing_cost_adjustments`, `admin_operation_logs` TO `bw_admin_logs`, `system_settings` TO `bw_platform_settings`, `command_idempotency` TO `project_command_receipts`, `legacy_card_history` TO `project_card_migration_history`;
+ALTER TABLE `project_card_migration_history` COMMENT = '旧画布卡片迁移历史；保留 180 天（按 gmt_create），超期由 backend/scripts/cleanup-project-card-migration-history.mjs 清理';

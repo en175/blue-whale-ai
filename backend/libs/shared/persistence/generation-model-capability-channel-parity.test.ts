@@ -79,7 +79,7 @@ describe("generation_model_capability.channel 三轨迁移", () => {
   });
 
   it("schema.prisma 有该列（本迁移加的是可空列；041 之后收成必填）", () => {
-    const model = schemaPrisma.slice(schemaPrisma.indexOf(`model ${TABLE} {`));
+    const model = schemaPrisma.slice(schemaPrisma.indexOf(`model catalog_models {`));
     const body = model.slice(0, model.indexOf("\n}"));
     expect(body).toMatch(new RegExp(`${COLUMN}\\s+String`));
     expect(standaloneSql).toContain("VARCHAR(32) NULL");

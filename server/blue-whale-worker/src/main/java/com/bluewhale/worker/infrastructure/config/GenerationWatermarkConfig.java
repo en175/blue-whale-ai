@@ -41,7 +41,7 @@ public class GenerationWatermarkConfig {
             try {
                 raw = systemSettingMapper.selectValue(SETTING_KEY);
             } catch (Exception e) {
-                log.warn("读取 system_settings.watermark 失败，按关闭处理: {}", e.getMessage());
+                log.warn("读取 bw_platform_settings.watermark 失败，按关闭处理: {}", e.getMessage());
                 return false;
             }
             if (raw == null || raw.isBlank()) return false;
@@ -50,7 +50,7 @@ public class GenerationWatermarkConfig {
                 JsonNode value = node.get(FIELD_ENABLED);
                 return value != null && value.isBoolean() && value.asBoolean();
             } catch (Exception e) {
-                log.warn("system_settings.watermark 不是合法 JSON，按关闭处理: {}", e.getMessage());
+                log.warn("bw_platform_settings.watermark 不是合法 JSON，按关闭处理: {}", e.getMessage());
                 return false;
             }
         }

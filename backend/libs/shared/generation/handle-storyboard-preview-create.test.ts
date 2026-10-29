@@ -59,6 +59,32 @@ function requestBody(overrides: Record<string, unknown> = {}): string {
   return JSON.stringify({ ...BASE_BODY, ...overrides });
 }
 
+describe("handleStoryboardPreviewCreate 计费接线（IKR60U）", () => {
+  it("传入 billing → repo 收到同一份 charge/release 依赖", async () => {
+    const repo = buildRepo({
+      kind: "applied",
+      preview_id: "7002",
+      scene_card_id: "5001",
+      generation_job_id: "8102",
+      cursor: "43",
+    });
+    const billing = { charge: vi.fn(), release: vi.fn() };
+
+    const result = await handleStoryboardPreviewCreate(
+      "9",
+      "55",
+      "5001",
+      "idem-4",
+      requestBody(),
+      repo,
+      { billing },
+    );
+
+    expect(result.code).toBe(200);
+    expect(repo.createStoryboardPreview.mock.calls[0]![0].billing).toBe(billing);
+  });
+});
+
 describe("handleStoryboardPreviewCreate canvas_binding（IKJJR0）", () => {
   it("★ 携带 canvas_binding → 统一关联受理：repo 收到 acceptance（operation/taskType/摘要同源），响应带绑定视图", async () => {
     const repo = buildRepo({

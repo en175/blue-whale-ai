@@ -7,7 +7,7 @@ import {
   AUDIO_VIDEO_MUX_TAG,
   AUDIO_SPEED_TAG,
   AUDIO_TRIM_TAG,
-  GENERATION_TASK_QUEUE,
+  GENERATION_TASK_TOPIC,
   IMAGE_CUTOUT_TAG,
   IMAGE_ENHANCE_TAG,
   IMAGE_ERASE_TAG,
@@ -62,9 +62,9 @@ describe("GenerationMqRoute ↔ queue.constants.ts 双端一致性（读 Java �
     ).toBe(EXPECTED_ROUTE_COUNT);
   });
 
-  it(`${EXPECTED_ROUTE_COUNT} 个入口逐项存在：topic = GENERATION_TASK_QUEUE，tag = TS 同名常量`, () => {
+  it(`${EXPECTED_ROUTE_COUNT} 个入口逐项存在：topic = GENERATION_TASK_TOPIC，tag = TS 同名常量`, () => {
     for (const { entry, tag } of EXPECTED_ROUTES) {
-      expect(mqRouteJava).toContain(`${entry}("${GENERATION_TASK_QUEUE}", "${tag}")`);
+      expect(mqRouteJava).toContain(`${entry}("${GENERATION_TASK_TOPIC}", "${tag}")`);
     }
   });
 
@@ -81,7 +81,7 @@ describe("GenerationMqRoute ↔ queue.constants.ts 双端一致性（读 Java �
     expect(declared).toEqual(
       EXPECTED_ROUTES.map(({ entry, tag }) => ({
         entry,
-        topic: GENERATION_TASK_QUEUE,
+        topic: GENERATION_TASK_TOPIC,
         tag,
       })),
     );

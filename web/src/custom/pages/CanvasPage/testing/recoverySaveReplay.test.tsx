@@ -147,13 +147,7 @@ vi.mock('@/custom/api/assets', () => ({
 
 vi.mock('@/custom/api/canvas', () => ({
   applyPromptPreview: apiMocks.applyPromptPreview,
-  listLegacyCardHistory: vi.fn(async () => ({ items: [] })),
   createConversationQuote: vi.fn(),
-  legacyCardHistoryOptions: (projectId: string) => ({
-    queryKey: ['canvas', projectId, 'legacy-history'],
-    queryFn: () => Promise.resolve({ items: [] }),
-    retry: false,
-  }),
   readCanvasConflictVersion: (error: unknown): number | undefined => {
     const version = (error as { data?: { version?: unknown } } | null | undefined)?.data?.version;
     return typeof version === 'number' ? version : undefined;

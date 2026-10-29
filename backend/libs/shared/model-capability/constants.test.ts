@@ -866,3 +866,39 @@ it.each(["text2video", "omni", "image_reference", "first_frame", "first_last_fra
   expect(parseModelUpdateBody({ features: { task_types: { [mode]: { allow_auto_duration: true } } } }))
     .toMatchObject({ ok: true });
 });
+
+describe("参考图总像素与宽高比写侧闸门（IKQYEH）", () => {
+  it.each([0, 0.5, -1, 1.5, 101])("宽高比 %s → 拒绝", (value) => {
+    expect(
+      parseModelUpdateBody({ features: { max_reference_image_ratio: value } }).ok,
+    ).toBe(false);
+  });
+
+  it.each(["max_reference_image_ratio", "maxReferenceImageRatio"])(
+    "宽高比合法值（%s）→ 放行",
+    (key) => {
+      for (const value of [1, 16, 100]) {
+        expect(
+          parseModelUpdateBody({ features: { [key]: value } }).ok,
+        ).toBe(true);
+      }
+    },
+  );
+
+  it.each([0, 1.5, 1_000_000_001])("总像素 %s → 拒绝", (value) => {
+    expect(
+      parseModelUpdateBody({ features: { max_reference_image_pixels: value } }).ok,
+    ).toBe(false);
+  });
+
+  it.each(["max_reference_image_pixels", "maxReferenceImagePixels"])(
+    "总像素合法值（%s）→ 放行",
+    (key) => {
+      for (const value of [1, 1_000_000, 36_000_000]) {
+        expect(
+          parseModelUpdateBody({ features: { [key]: value } }).ok,
+        ).toBe(true);
+      }
+    },
+  );
+});

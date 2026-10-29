@@ -25,7 +25,7 @@ describe("createTopupTierRepo.update — 保存即 +1 版", () => {
   it("保存一次 version 自增 1（只改名字也算——名字是用户看得到的东西）", async () => {
     const findFirst = vi.fn().mockResolvedValue({ ...ROW, version: 3 });
     const update = vi.fn().mockResolvedValue(ROW);
-    const repo = createTopupTierRepo({ topup_tiers: { findFirst, update } } as never);
+    const repo = createTopupTierRepo({ billing_products: { findFirst, update } } as never);
 
     const view = await repo.update("7", { name: "春季特惠" });
 
@@ -41,7 +41,7 @@ describe("createTopupTierRepo.updateSortOrder — 排序不是配置变更", () 
   it("只写 sort_order，不碰 version（拖一下顺序不代表商品口径变了）", async () => {
     const update = vi.fn().mockResolvedValue(ROW);
     const repo = createTopupTierRepo({
-      topup_tiers: { update },
+      billing_products: { update },
       $transaction: async (ops: unknown[]) => ops,
     } as never);
 
@@ -73,7 +73,7 @@ describe("createTopupTierRepo.create — 新建默认草稿", () => {
     const create = vi.fn().mockResolvedValue(ROW);
     const aggregate = vi.fn().mockResolvedValue({ _max: { sort_order: 3 } });
     const repo = createTopupTierRepo({
-      topup_tiers: { create, aggregate },
+      billing_products: { create, aggregate },
     } as never);
 
     await repo.create({ baseCredits: 1500, originalPrice: 100, discount: 1 });
@@ -90,7 +90,7 @@ describe("createTopupTierRepo.create — 新建默认草稿", () => {
     const create = vi.fn().mockResolvedValue(ROW);
     const aggregate = vi.fn().mockResolvedValue({ _max: { sort_order: 0 } });
     const repo = createTopupTierRepo({
-      topup_tiers: { create, aggregate },
+      billing_products: { create, aggregate },
     } as never);
 
     await repo.create({
@@ -109,7 +109,7 @@ describe("createTopupTierRepo.create — 新建默认草稿", () => {
     const create = vi.fn().mockResolvedValue(ROW);
     const aggregate = vi.fn().mockResolvedValue({ _max: { sort_order: 0 } });
     const repo = createTopupTierRepo({
-      topup_tiers: { create, aggregate },
+      billing_products: { create, aggregate },
     } as never);
 
     await repo.create({ baseCredits: 1500, originalPrice: 100, discount: 1 });
@@ -134,7 +134,7 @@ describe("createTopupTierRepo.create — 新建默认草稿", () => {
     const create = vi.fn().mockResolvedValue(ROW);
     const aggregate = vi.fn().mockResolvedValue({ _max: { sort_order: 0 } });
     const repo = createTopupTierRepo({
-      topup_tiers: { create, aggregate },
+      billing_products: { create, aggregate },
     } as never);
 
     await repo.create({ baseCredits: 7_500, originalPrice: 100, discount: 1 });
@@ -148,7 +148,7 @@ describe("createTopupTierRepo.create — 新建默认草稿", () => {
 describe("createTopupTierRepo — 卡片字段读写", () => {
   it("★ 白名单宽读：数字转串、掐前导零、去重、丢掉看不懂的元素", async () => {
     const findMany = vi.fn().mockResolvedValue([FULL_ROW]);
-    const repo = createTopupTierRepo({ topup_tiers: { findMany } } as never);
+    const repo = createTopupTierRepo({ billing_products: { findMany } } as never);
 
     const [view] = await repo.listAll();
 
@@ -159,7 +159,7 @@ describe("createTopupTierRepo — 卡片字段读写", () => {
     const findMany = vi
       .fn()
       .mockResolvedValue([{ ...FULL_ROW, permission_allowlist: null }]);
-    const repo = createTopupTierRepo({ topup_tiers: { findMany } } as never);
+    const repo = createTopupTierRepo({ billing_products: { findMany } } as never);
 
     const [view] = await repo.listAll();
 
@@ -168,7 +168,7 @@ describe("createTopupTierRepo — 卡片字段读写", () => {
 
   it("TINYINT 与 BIGINT 出库时转成布尔与 number", async () => {
     const findMany = vi.fn().mockResolvedValue([FULL_ROW]);
-    const repo = createTopupTierRepo({ topup_tiers: { findMany } } as never);
+    const repo = createTopupTierRepo({ billing_products: { findMany } } as never);
 
     const [view] = await repo.listAll();
 
@@ -184,7 +184,7 @@ describe("createTopupTierRepo — 卡片字段读写", () => {
   it("编辑只写传了的列：没传的新字段一个都不许出现在 UPDATE 里", async () => {
     const findFirst = vi.fn().mockResolvedValue({ ...ROW, version: 3 });
     const update = vi.fn().mockResolvedValue(ROW);
-    const repo = createTopupTierRepo({ topup_tiers: { findFirst, update } } as never);
+    const repo = createTopupTierRepo({ billing_products: { findFirst, update } } as never);
 
     await repo.update("7", { activityTag: "首购超级翻倍" });
 
@@ -209,7 +209,7 @@ describe("createTopupTierRepo — 卡片字段读写", () => {
   it("★ 传了基础积分才写：`base_credits` 与遗留列 `amount` 一起落同一个数", async () => {
     const findFirst = vi.fn().mockResolvedValue({ ...ROW, version: 3 });
     const update = vi.fn().mockResolvedValue(ROW);
-    const repo = createTopupTierRepo({ topup_tiers: { findFirst, update } } as never);
+    const repo = createTopupTierRepo({ billing_products: { findFirst, update } } as never);
 
     await repo.update("7", { baseCredits: 7_500 });
 
@@ -221,7 +221,7 @@ describe("createTopupTierRepo — 卡片字段读写", () => {
   it("白名单传数组时按原样写回（上游已归一）", async () => {
     const findFirst = vi.fn().mockResolvedValue({ ...ROW, version: 3 });
     const update = vi.fn().mockResolvedValue(ROW);
-    const repo = createTopupTierRepo({ topup_tiers: { findFirst, update } } as never);
+    const repo = createTopupTierRepo({ billing_products: { findFirst, update } } as never);
 
     await repo.update("7", { permissionAllowlist: ["9001", "42"] });
 

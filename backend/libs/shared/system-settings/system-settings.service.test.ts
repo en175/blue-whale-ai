@@ -10,7 +10,7 @@ import { UpstreamCredentialMissingError } from "@lib/shared/upstream/new-api-egr
 function makePrisma() {
   const rows = new Map<string, Record<string, unknown>>();
   const prisma = {
-    system_settings: {
+    bw_platform_settings: {
       findUnique: async ({ where }: { where: { setting_key: string } }) =>
         rows.get(where.setting_key) ?? null,
       upsert: async ({
@@ -37,7 +37,7 @@ const KEY = "b".repeat(64);
 function serviceWith(rows?: Map<string, Record<string, unknown>>) {
   const made = rows ? { rows } : makePrisma();
   const prisma = {
-    system_settings: {
+    bw_platform_settings: {
       findUnique: async ({ where }: { where: { setting_key: string } }) =>
         made.rows.get(where.setting_key) ?? null,
       upsert: async ({

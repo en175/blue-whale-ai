@@ -40,7 +40,7 @@ export async function generateCreativeSkillId(
     const candidate = suffix === 0 ? base : `${base}_${suffix + 1}`;
     try {
       const rows = await prisma.$queryRawUnsafe<{ c: bigint }[]>(
-        `SELECT COUNT(*) AS c FROM creative_skill WHERE creative_skill_id = ?`,
+        `SELECT COUNT(*) AS c FROM catalog_creative_skills WHERE creative_skill_id = ?`,
         candidate,
       );
       if (Number(rows[0]?.c ?? 0) === 0) return candidate;
@@ -56,7 +56,7 @@ export async function checkPersonalNameKeyAvailable(
   userId: string,
   nameKey: string,
 ): Promise<"ok" | "conflict" | "reserved"> {
-  const officialNames = await prisma.skill.findMany({
+  const officialNames = await prisma.catalog_skills.findMany({
     where: { is_delete: 0 },
     select: { name: true },
   });
@@ -67,7 +67,7 @@ export async function checkPersonalNameKeyAvailable(
 
   try {
     const conflicts = await prisma.$queryRawUnsafe<{ c: bigint }[]>(
-      `SELECT COUNT(*) AS c FROM creative_skill WHERE owner_user_id = ? AND asset_domain = 'personal' AND name_key = ?`,
+      `SELECT COUNT(*) AS c FROM catalog_creative_skills WHERE owner_user_id = ? AND asset_domain = 'personal' AND name_key = ?`,
       BigInt(userId),
       nameKey,
     );
@@ -104,7 +104,7 @@ export async function mapCreativeSkillIds(
     const rows = await prisma.$queryRawUnsafe<
       { source_skill_id: bigint; creative_skill_id: string }[]
     >(
-      `SELECT source_skill_id, creative_skill_id FROM creative_skill WHERE source_skill_id IN (${placeholders})`,
+      `SELECT source_skill_id, creative_skill_id FROM catalog_creative_skills WHERE source_skill_id IN (${placeholders})`,
       ...skillIds,
     );
     return new Map(
@@ -183,7 +183,7 @@ export async function resolveOfficialSourceSkillId(
   let rows: { source_skill_id: bigint }[];
   try {
     rows = await prisma.$queryRawUnsafe<{ source_skill_id: bigint }[]>(
-      `SELECT source_skill_id FROM creative_skill WHERE creative_skill_id = ? AND asset_domain = 'official'`,
+      `SELECT source_skill_id FROM catalog_creative_skills WHERE creative_skill_id = ? AND asset_domain = 'official'`,
       creativeSkillId,
     );
   } catch {
@@ -191,7 +191,7 @@ export async function resolveOfficialSourceSkillId(
   }
   const sourceSkillId = rows[0]?.source_skill_id;
   if (sourceSkillId == null) return null;
-  const c = await prisma.skill.count({
+  const c = await prisma.catalog_skills.count({
     where: { id: sourceSkillId, is_delete: 0 },
   });
   return c > 0 ? sourceSkillId.toString() : null;

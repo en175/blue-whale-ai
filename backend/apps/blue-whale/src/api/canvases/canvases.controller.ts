@@ -6,6 +6,14 @@ import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js"
 import type { Response } from "express";
 import { isRecoveryControlledEnvelope } from "../recovery-envelope.js";
 
+function parseIfMatch(ifMatch: string | undefined): number | null | undefined {
+  if (ifMatch === '"missing"') return null;
+  if (ifMatch === undefined) return undefined;
+  const match = /^"([0-9]+)"$/.exec(ifMatch);
+  if (!match?.[1]) throw new NewApiError("无效的 If-Match", 400);
+  return Number(match[1]);
+}
+
 @Controller("canvases")
 export class CanvasesController {
   constructor(private readonly canvas: CanvasService) {}
@@ -35,14 +43,6 @@ export class CanvasesController {
     @Query("ids") ids?: string,
   ) {
     return this.canvas.listConversationQuotes(user.userId, projectId, ids ?? "");
-  }
-
-  @Get(":projectId/legacy-card-history")
-  listLegacyCardHistory(
-    @CurrentUser() user: AuthenticatedUser,
-    @Param("projectId") projectId: string,
-  ) {
-    return this.canvas.listLegacyCardHistory(user.userId, projectId);
   }
 
   @Get()
@@ -87,6 +87,34 @@ export class CanvasesController {
     res.status(200).json(result);
   }
 
+  @Post(":projectId/apply")
+  async applyChanges(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("projectId") projectId: string,
+    @Body() body: unknown,
+    @Headers("if-match") ifMatch: string | undefined,
+    @Res() res: Response,
+  ) {
+    const expectedVersion = parseIfMatch(ifMatch);
+    const payload = { ...((body ?? {}) as Record<string, unknown>) };
+    delete payload.expectedVersion;
+    const result = await this.canvas.apply(user.userId, projectId, {
+      ...(payload as {
+        upsert_nodes?: unknown;
+        delete_node_ids?: unknown;
+        upsert_edges?: unknown;
+        delete_edge_ids?: unknown;
+        viewport?: unknown;
+      }),
+      ...(expectedVersion !== undefined ? { expectedVersion } : {}),
+    });
+    if (CANVAS_SAVE_CONFLICT_CODES.has(result.code)) {
+      res.status(result.code).json(result);
+      return;
+    }
+    res.status(200).json(result);
+  }
+
   @Put(":projectId")
   async save(
     @CurrentUser() user: AuthenticatedUser,
@@ -95,16 +123,7 @@ export class CanvasesController {
     @Headers("if-match") ifMatch: string | undefined,
     @Res() res: Response,
   ) {
-    let expectedVersion: number | null | undefined;
-    if (ifMatch === '"missing"') {
-      expectedVersion = null;
-    } else if (ifMatch !== undefined) {
-      const match = /^"([0-9]+)"$/.exec(ifMatch);
-      if (!match?.[1]) {
-        throw new NewApiError("无效的 If-Match", 400);
-      }
-      expectedVersion = Number(match[1]);
-    }
+    const expectedVersion = parseIfMatch(ifMatch);
     const result = await this.canvas.save(user.userId, projectId, {
       ...body,
       ...(expectedVersion !== undefined ? { expectedVersion } : {}),

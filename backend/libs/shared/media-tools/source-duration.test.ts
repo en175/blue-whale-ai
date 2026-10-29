@@ -8,7 +8,7 @@ import { resolveSourceDuration } from "./source-duration.js";
 
 function makeArgs(overrides: Record<string, unknown> = {}) {
   const updateMany = vi.fn().mockResolvedValue({ count: 1 });
-  const prisma = { assets: { updateMany } };
+  const prisma = { user_assets: { updateMany } };
   const storage = { probe: vi.fn() };
   return {
     args: {

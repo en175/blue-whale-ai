@@ -7,7 +7,7 @@ import com.baomidou.mybatisplus.annotation.TableName;
 
 import java.time.LocalDateTime;
 
-@TableName("assets")
+@TableName("user_assets")
 public class AssetEntity {
     @TableId(type = IdType.AUTO)
     private Long id;

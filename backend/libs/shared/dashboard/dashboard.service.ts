@@ -75,7 +75,7 @@ export class DashboardService {
     gte: Date;
     lt: Date;
   }): Promise<{ credits: number; revenueFen: number }> {
-    const rows = await this.prisma.client.recharge_orders.groupBy({
+    const rows = await this.prisma.client.billing_recharge_orders.groupBy({
       by: ["status"],
       where: {
         is_delete: 0,

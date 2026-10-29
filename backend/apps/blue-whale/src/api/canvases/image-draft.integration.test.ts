@@ -52,7 +52,7 @@ describe.skipIf(!process.env.IKDMQQ_DATABASE_URL)("Image draft public API (IKDMQ
   beforeAll(async () => {
     process.env.DATABASE_URL = process.env.IKDMQQ_DATABASE_URL;
     const sizes = [{ id: "1024x1024", label: "1024x1024" }];
-    await prisma.client.generation_model_capability.upsert({
+    await prisma.client.catalog_models.upsert({
       where: { provider_id_model_id: { provider_id: "ikdmqq-test", model_id: MODEL_ID } },
       create: {
         provider_id: "ikdmqq-test",
@@ -238,11 +238,11 @@ describe.skipIf(!process.env.IKDMQQ_DATABASE_URL)("Image draft public API (IKDMQ
     const { createServer: createVite } = await import("../../../../../../web/node_modules/vite/dist/node/index.js");
     const projectId = (await projects.create("987654", "IKDUHM model restore")).id;
     const otherProjectId = (await projects.create("987654", "IKDUHM other project")).id;
-    await prisma.client.generation_model_capability.update({
+    await prisma.client.catalog_models.update({
       where: { provider_id_model_id: { provider_id: "ikdmqq-test", model_id: MODEL_ID } },
       data: { features: { reference_image: ref !== "incompatible", image_reference_max: 9 } },
     });
-    const asset = await prisma.client.assets.create({ data: {
+    const asset = await prisma.client.user_assets.create({ data: {
       user_id: BigInt(987654), project_id: BigInt(projectId), type: "image", url: "https://example.com/saved.png",
     } });
     const node = draftNode("saved-image", "A");
@@ -525,7 +525,7 @@ describe.skipIf(!process.env.IKDMQQ_DATABASE_URL)("Image draft public API (IKDMQ
       const jobRow = await prisma.client.generation_jobs.findFirst({
         where: { project_id: BigInt(projectId) }, orderBy: { id: "desc" },
       });
-      const outputAsset = await prisma.client.assets.create({
+      const outputAsset = await prisma.client.user_assets.create({
         data: {
           user_id: BigInt(987654),
           project_id: BigInt(projectId),

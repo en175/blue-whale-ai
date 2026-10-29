@@ -18,6 +18,7 @@ import {
 import {
   RecoveryContractError,
   type CanvasRecoveryAcceptance,
+  type JobBillingSource,
   type StoryboardPreviewRepo,
 } from "@lib/shared/persistence/index.js";
 
@@ -48,6 +49,7 @@ export async function handleStoryboardPreviewCreate(
   deps: StoryboardPreviewRepo,
   options?: {
     quotaCheck?: () => Promise<{ sufficient: boolean }>;
+    billing?: JobBillingSource;
   },
 ) {
   if (!idempotencyKey || idempotencyKey.trim().length === 0) {
@@ -105,6 +107,7 @@ export async function handleStoryboardPreviewCreate(
       base_scene_card_version: parsed.data.base_scene_card_version,
       parameters: parsed.data.parameters,
       capability_snapshot_version: parsed.data.capability_snapshot_version,
+      ...(options?.billing ? { billing: options.billing } : {}),
       ...(options?.quotaCheck ? { quotaCheck: options.quotaCheck } : {}),
       ...(canvasRecovery ? { canvasRecovery } : {}),
     });

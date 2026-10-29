@@ -178,7 +178,7 @@ spec:
         - name: VOLC_SMS_ACCOUNT
           value: "8c026cce"
         - name: VOLC_SMS_SIGN
-          value: "玄浮科技"
+          value: "杭州玄浮科技"
         - name: VOLC_SMS_TEMPLATE_ID
           value: "S1T_1y2pbbfa2t4oy"
         - name: AGENT_MODEL_DRAIN_TIMEOUT_MS

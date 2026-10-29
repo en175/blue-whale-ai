@@ -23,7 +23,7 @@ export interface MediaToolSubmissionStrategy {
   userId: string;
   input: Record<string, unknown>;
   recovery: MediaToolRecovery | null;
-  legacy?: MediaToolLegacyIdempotency;
+  legacy?: MediaToolLegacyIdempotency | null;
   createJob: (
     db: PrismaClient | Prisma.TransactionClient,
   ) => Promise<{ jobId: string; status: string }>;

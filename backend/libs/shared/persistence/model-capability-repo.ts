@@ -1,4 +1,8 @@
 import type { PrismaClient } from "@prisma/client";
+import {
+  DEFAULT_MAX_REFERENCE_IMAGE_PIXELS,
+  DEFAULT_MAX_REFERENCE_IMAGE_RATIO,
+} from "../model-capability/constants.js";
 import { capabilityDigestFromModelCapability } from "./capability-digest.js";
 import {
   getModelCapabilityList,
@@ -48,6 +52,8 @@ export interface ModelFeatures {
   audio_reference: boolean;
   audio_reference_max: number;
   image_reference_max: number;
+  max_reference_image_pixels: number;
+  max_reference_image_ratio: number;
   max_reference_duration_sec: number | null;
   task_types: Record<string, unknown> | null;
   video_dimensions: Record<string, string> | null;
@@ -131,6 +137,10 @@ type FeaturesJson = {
   audio_reference_max?: number;
   imageReferenceMax?: number;
   image_reference_max?: number;
+  maxReferenceImagePixels?: unknown;
+  max_reference_image_pixels?: unknown;
+  maxReferenceImageRatio?: unknown;
+  max_reference_image_ratio?: unknown;
   maxReferenceDurationSec?: unknown;
   max_reference_duration_sec?: unknown;
   taskTypes?: unknown;
@@ -221,6 +231,12 @@ export function toFeatures(json: unknown, capabilityType?: string): ModelFeature
       (capabilityType === "audio"
         ? DEFAULT_IMAGE_REFERENCE_MAX_FOR_AUDIO
         : DEFAULT_IMAGE_REFERENCE_MAX),
+    max_reference_image_pixels:
+      pickPositiveInt(f.maxReferenceImagePixels ?? f.max_reference_image_pixels) ??
+      DEFAULT_MAX_REFERENCE_IMAGE_PIXELS,
+    max_reference_image_ratio:
+      pickPositiveNumber(f.maxReferenceImageRatio ?? f.max_reference_image_ratio) ??
+      DEFAULT_MAX_REFERENCE_IMAGE_RATIO,
     max_reference_duration_sec: pickPositiveNumber(
       f.maxReferenceDurationSec ?? f.max_reference_duration_sec,
     ),
@@ -287,7 +303,7 @@ export function createModelCapabilityRepo(prisma: PrismaClient): ModelCapability
           supported_aspect_ratios: toAspectRatios(view.supported_aspect_ratios),
         }));
       }
-      const rows = await prisma.generation_model_capability.findMany({
+      const rows = await prisma.catalog_models.findMany({
         where: { capability_type: capabilityType, enabled: true, is_delete: false },
         orderBy: { sort_order: "asc" },
       });

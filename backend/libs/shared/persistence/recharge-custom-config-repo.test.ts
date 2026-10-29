@@ -45,7 +45,7 @@ function makeRepo(row: unknown) {
     },
   );
   const repo = createRechargeCustomConfigRepo({
-    system_settings: { findUnique, updateMany },
+    bw_platform_settings: { findUnique, updateMany },
   } as never);
   return { repo, updateMany, findUnique };
 }

@@ -11,7 +11,7 @@ import org.apache.ibatis.annotations.Select;
 public interface GenerationModelCapabilityMapper extends BaseMapper<GenerationModelCapabilityEntity> {
 
     @Select("""
-            SELECT * FROM generation_model_capability
+            SELECT * FROM catalog_models
             WHERE model_id = #{modelId}
               AND enabled = true
               AND is_delete = false

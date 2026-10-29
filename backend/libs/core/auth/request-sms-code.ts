@@ -33,6 +33,13 @@ export interface RequestSmsCodeResult {
   code: string;
 }
 
+export class SmsSendFailedError extends Error {
+  constructor(readonly failure: unknown) {
+    super("短信发送失败");
+    this.name = "SmsSendFailedError";
+  }
+}
+
 function defaultGenerateCode(): string {
   return String(randomInt(0, 1_000_000)).padStart(6, "0");
 }
@@ -54,8 +61,8 @@ export async function requestSmsCode(
   try {
     await sms.send(input.phone, code);
   } catch (error) {
-    await db.consumeCode(created.id);
-    throw error;
+    await db.consumeCode(created.id).catch(() => undefined);
+    throw new SmsSendFailedError(error);
   }
   await db.invalidateOtherCodes(input.phone, input.purpose, created.id);
   return { code };

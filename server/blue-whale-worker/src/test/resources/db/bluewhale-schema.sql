@@ -1,4 +1,4 @@
-CREATE TABLE `assets` (
+CREATE TABLE `user_assets` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `user_id` BIGINT NOT NULL,
     `project_id` BIGINT NOT NULL DEFAULT 0,
@@ -35,7 +35,7 @@ CREATE TABLE `assets` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
-CREATE TABLE `material_groups` (
+CREATE TABLE `catalog_material_groups` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `user_id` BIGINT NOT NULL,
     `material_group_id` VARCHAR(128) NOT NULL,
@@ -56,7 +56,7 @@ CREATE TABLE `material_groups` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
-CREATE TABLE `shared_assets` (
+CREATE TABLE `user_shared_asset_snapshots` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `user_id` BIGINT NOT NULL,
     `asset_type` VARCHAR(16) NOT NULL,
@@ -77,7 +77,7 @@ CREATE TABLE `shared_assets` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
-CREATE TABLE `canvas` (
+CREATE TABLE `project_canvas` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `project_id` BIGINT NOT NULL,
     `viewport_json` JSON NULL,
@@ -87,8 +87,9 @@ CREATE TABLE `canvas` (
     `gmt_modified` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
     `version` INTEGER NOT NULL DEFAULT 0,
     `is_delete` TINYINT NOT NULL DEFAULT 0,
+    `rows_authoritative` TINYINT NOT NULL DEFAULT 0,
 
-    UNIQUE INDEX `uk_canvas_project`(`project_id`),
+    UNIQUE INDEX `uk_project_canvas__project`(`project_id`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
@@ -142,7 +143,7 @@ CREATE TABLE `generation_job_extras` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
-CREATE TABLE `generation_model_capability` (
+CREATE TABLE `catalog_models` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `provider_id` VARCHAR(32) NOT NULL,
     `model_id` VARCHAR(128) NOT NULL,
@@ -202,18 +203,6 @@ CREATE TABLE `project_asset` (
     INDEX `idx_pa_asset`(`asset_id`),
     INDEX `idx_pa_project`(`project_id`),
     UNIQUE INDEX `uk_project_asset`(`user_id`, `asset_id`, `project_id`),
-    PRIMARY KEY (`id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-
-CREATE TABLE `conversations` (
-    `id` BIGINT NOT NULL AUTO_INCREMENT,
-    `project_id` BIGINT NOT NULL,
-    `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
-    `gmt_modified` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
-    `version` INTEGER NOT NULL DEFAULT 0,
-    `is_delete` TINYINT NOT NULL DEFAULT 0,
-
-    INDEX `idx_conversation_project`(`project_id`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
@@ -285,7 +274,7 @@ CREATE TABLE `agent_runs` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
-CREATE TABLE `command_idempotency` (
+CREATE TABLE `project_command_receipts` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `project_id` BIGINT NOT NULL,
     `operation` VARCHAR(64) NOT NULL,
@@ -302,42 +291,11 @@ CREATE TABLE `command_idempotency` (
     `version` INTEGER NOT NULL DEFAULT 0,
     `is_delete` TINYINT NOT NULL DEFAULT 0,
 
-    UNIQUE INDEX `uk_command_idempotency`(`project_id`, `operation`, `idempotency_key`),
+    UNIQUE INDEX `uk_project_command_receipts__key`(`project_id`, `operation`, `idempotency_key`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
-CREATE TABLE `project_event_stream` (
-    `project_id` BIGINT NOT NULL,
-    `high_watermark` BIGINT NOT NULL DEFAULT 0,
-
-    PRIMARY KEY (`project_id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-
-CREATE TABLE `project_events` (
-    `id` BIGINT NOT NULL AUTO_INCREMENT,
-    `project_id` BIGINT NOT NULL,
-    `cursor` BIGINT NOT NULL,
-    `event_id` VARCHAR(64) NOT NULL,
-    `event_type` VARCHAR(64) NOT NULL,
-    `aggregate_type` VARCHAR(32) NOT NULL,
-    `aggregate_id` VARCHAR(64) NOT NULL,
-    `aggregate_version` INTEGER NOT NULL DEFAULT 0,
-    `correlation_id` VARCHAR(128) NULL,
-    `causation_id` VARCHAR(128) NULL,
-    `occurred_at` DATETIME(0) NOT NULL,
-    `payload` JSON NULL,
-    `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
-    `gmt_modified` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
-    `version` INTEGER NOT NULL DEFAULT 0,
-    `is_delete` TINYINT NOT NULL DEFAULT 0,
-
-    UNIQUE INDEX `uk_event_id`(`event_id`),
-    INDEX `idx_project_occurred`(`project_id`, `occurred_at`),
-    UNIQUE INDEX `uk_project_cursor`(`project_id`, `cursor`),
-    PRIMARY KEY (`id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-
-CREATE TABLE `skill` (
+CREATE TABLE `catalog_skills` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `name` VARCHAR(255) NOT NULL,
     `skill_code` VARCHAR(32) NULL,
@@ -363,7 +321,7 @@ CREATE TABLE `skill` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
-CREATE TABLE `template_card` (
+CREATE TABLE `catalog_templates` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `tag_code` VARCHAR(64) NOT NULL,
     `title` VARCHAR(255) NOT NULL,
@@ -381,7 +339,7 @@ CREATE TABLE `template_card` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
-CREATE TABLE `template_card_image` (
+CREATE TABLE `catalog_template_images` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `card_id` BIGINT NOT NULL,
     `image_url` VARCHAR(512) NOT NULL,
@@ -396,7 +354,7 @@ CREATE TABLE `template_card_image` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
-CREATE TABLE `template_tag` (
+CREATE TABLE `catalog_template_tags` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `tag_code` VARCHAR(64) NOT NULL,
     `label` VARCHAR(128) NOT NULL,
@@ -410,7 +368,7 @@ CREATE TABLE `template_tag` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
-CREATE TABLE `user_skill` (
+CREATE TABLE `user_skills` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `user_id` BIGINT NOT NULL,
     `skill_id` BIGINT NOT NULL,
@@ -422,11 +380,11 @@ CREATE TABLE `user_skill` (
 
     INDEX `idx_skill`(`skill_id`),
     INDEX `idx_user`(`user_id`),
-    UNIQUE INDEX `uk_user_skill`(`user_id`, `skill_id`),
+    UNIQUE INDEX `uk_user_skills__user_skill`(`user_id`, `skill_id`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
-CREATE TABLE `homepage_hero` (
+CREATE TABLE `content_homepage_heroes` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `media_type` VARCHAR(16) NOT NULL DEFAULT 'video',
     `media_url` VARCHAR(512) NOT NULL,
@@ -443,7 +401,7 @@ CREATE TABLE `homepage_hero` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
-CREATE TABLE `creative_skill` (
+CREATE TABLE `catalog_creative_skills` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `creative_skill_id` VARCHAR(80) NOT NULL,
     `name` VARCHAR(255) NOT NULL,
@@ -457,13 +415,13 @@ CREATE TABLE `creative_skill` (
     `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
     `gmt_modified` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
 
-    UNIQUE INDEX `uk_creative_skill_id`(`creative_skill_id`),
+    UNIQUE INDEX `uk_catalog_creative_skills__creative_skill_id`(`creative_skill_id`),
     INDEX `idx_owner_domain`(`owner_user_id`, `asset_domain`),
     INDEX `idx_owner_name_key`(`owner_user_id`, `name_key`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
-CREATE TABLE `creative_skill_version` (
+CREATE TABLE `catalog_creative_skill_versions` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `creative_skill_version_id` VARCHAR(80) NOT NULL,
     `creative_skill_id` VARCHAR(80) NOT NULL,
@@ -475,8 +433,8 @@ CREATE TABLE `creative_skill_version` (
     `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
     `gmt_modified` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
 
-    UNIQUE INDEX `uk_creative_skill_version_id`(`creative_skill_version_id`),
-    UNIQUE INDEX `uk_creative_skill_version_semver`(`creative_skill_id`, `display_version`),
+    UNIQUE INDEX `uk_catalog_creative_skill_versions__creative_skill_version_id`(`creative_skill_version_id`),
+    UNIQUE INDEX `uk_catalog_creative_skill_versions__semver`(`creative_skill_id`, `display_version`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
@@ -511,7 +469,7 @@ CREATE TABLE `verification_codes` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
-CREATE TABLE `topup_tiers` (
+CREATE TABLE `billing_products` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `name` VARCHAR(100) NOT NULL DEFAULT '',
     `amount` BIGINT NOT NULL,
@@ -532,7 +490,7 @@ CREATE TABLE `topup_tiers` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
-CREATE TABLE `admin_operation_logs` (
+CREATE TABLE `bw_operation_logs` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `category` VARCHAR(32) NOT NULL DEFAULT '',
     `action` VARCHAR(64) NOT NULL,
@@ -542,16 +500,19 @@ CREATE TABLE `admin_operation_logs` (
     `operator` VARCHAR(64) NOT NULL DEFAULT '',
     `operator_id` BIGINT NULL,
     `ip_address` VARCHAR(64) NULL,
+    `status` TINYINT NOT NULL DEFAULT 0,
+    `ref` VARCHAR(64) NULL,
     `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
     `gmt_modified` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
     `version` INTEGER NOT NULL DEFAULT 0,
     `is_delete` TINYINT NOT NULL DEFAULT 0,
 
     INDEX `idx_oplog_category_created`(`category`, `gmt_create`),
+    INDEX `idx_bw_operation_logs__ref`(`ref`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
-CREATE TABLE `cost_reservations` (
+CREATE TABLE `billing_cost_reservations` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `generation_job_id` BIGINT NOT NULL,
     `user_id` BIGINT NOT NULL,
@@ -572,11 +533,11 @@ CREATE TABLE `cost_reservations` (
     `version` INTEGER NOT NULL DEFAULT 0,
     `is_delete` TINYINT NOT NULL DEFAULT 0,
 
-    UNIQUE INDEX `uk_cost_reservation_job`(`generation_job_id`),
+    UNIQUE INDEX `uk_billing_cost_reservations__job`(`generation_job_id`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
-CREATE TABLE `cost_adjustments` (
+CREATE TABLE `billing_cost_adjustments` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `batch_no` VARCHAR(64) NOT NULL,
     `generation_job_id` BIGINT NULL,
@@ -686,7 +647,7 @@ CREATE TABLE `storyboard_previews` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
-CREATE TABLE `prompt_preview_snapshots` (
+CREATE TABLE `project_prompt_preview_snapshots` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `project_id` BIGINT NOT NULL,
     `source_key` VARCHAR(64) NOT NULL,
@@ -696,7 +657,7 @@ CREATE TABLE `prompt_preview_snapshots` (
     `content_json` JSON NULL,
     `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
 
-    UNIQUE INDEX `uk_prompt_preview_source`(`project_id`, `source_key`),
+    UNIQUE INDEX `uk_project_prompt_preview_snapshots__source`(`project_id`, `source_key`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
@@ -714,22 +675,7 @@ CREATE TABLE `conversation_quote_snapshots` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
-CREATE TABLE `legacy_card_history` (
-    `id` BIGINT NOT NULL AUTO_INCREMENT,
-    `project_id` BIGINT NOT NULL,
-    `node_id` VARCHAR(128) NOT NULL,
-    `title` VARCHAR(200) NOT NULL,
-    `prompt_text` MEDIUMTEXT NOT NULL,
-    `visual_text` MEDIUMTEXT NULL,
-    `source_json` JSON NULL,
-    `card_json` JSON NOT NULL,
-    `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
-
-    UNIQUE INDEX `uk_legacy_card_history`(`project_id`, `node_id`),
-    PRIMARY KEY (`id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-
-CREATE TABLE `material_assets` (
+CREATE TABLE `catalog_material_states` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `material_id` VARCHAR(128) NOT NULL,
     `user_id` BIGINT NOT NULL,
@@ -742,9 +688,9 @@ CREATE TABLE `material_assets` (
     `gmt_modified` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
     `version` INTEGER NOT NULL DEFAULT 0,
 
-    INDEX `idx_material_assets_poll`(`status`, `gmt_create`),
-    INDEX `idx_material_assets_group`(`material_group_id`),
-    UNIQUE INDEX `uk_material_assets_material`(`material_id`),
+    INDEX `idx_catalog_material_states__poll`(`status`, `gmt_create`),
+    INDEX `idx_catalog_material_states__group`(`material_group_id`),
+    UNIQUE INDEX `uk_catalog_material_states__material`(`material_id`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
@@ -791,20 +737,6 @@ CREATE TABLE `generation_canvas_outputs` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
-CREATE TABLE `generation_canvas_node_owners` (
-    `id` BIGINT NOT NULL AUTO_INCREMENT,
-    `project_id` BIGINT NOT NULL,
-    `node_id` VARCHAR(128) NOT NULL,
-    `generation_canvas_submission_id` BIGINT NOT NULL,
-    `output_key` VARCHAR(128) NOT NULL,
-    `binding_revision` INTEGER NOT NULL,
-    `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
-    `gmt_modified` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
-
-    UNIQUE INDEX `uk_generation_canvas_node_owners__node`(`project_id`, `node_id`),
-    PRIMARY KEY (`id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-
 CREATE TABLE `generation_outbox` (
     `id`              BIGINT       NOT NULL AUTO_INCREMENT,
     `job_id`          BIGINT       NOT NULL,
@@ -819,5 +751,61 @@ CREATE TABLE `generation_outbox` (
 
     INDEX `idx_generation_outbox__pending`(`send_state`, `id`),
     INDEX `idx_generation_outbox__job`(`job_id`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+CREATE TABLE `project_nodes` (
+    `id`           BIGINT       NOT NULL AUTO_INCREMENT,
+    `project_id`   BIGINT       NOT NULL,
+    `node_id`      VARCHAR(128) NOT NULL,
+    `type`         VARCHAR(32)  NOT NULL,
+    `name`         VARCHAR(255) NULL,
+    `source`       VARCHAR(16)  NOT NULL DEFAULT 'user',
+    `pos_x`        INT          NULL,
+    `pos_y`        INT          NULL,
+    `data_json`    JSON         NULL,
+    `gmt_create`   DATETIME(0)  NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
+    `gmt_modified` DATETIME(0)  NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
+    `version`      INT          NOT NULL DEFAULT 0,
+    `is_delete`    TINYINT      NOT NULL DEFAULT 0,
+    `owner_submission_id`    BIGINT       NULL,
+    `owner_output_key`       VARCHAR(128) NULL,
+    `owner_binding_revision` INT          NOT NULL DEFAULT 0,
+    UNIQUE INDEX `uk_project_nodes__node`(`project_id`, `node_id`),
+    INDEX `idx_project_nodes__type`(`project_id`, `type`, `is_delete`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+CREATE TABLE `project_edges` (
+    `id`             BIGINT       NOT NULL AUTO_INCREMENT,
+    `project_id`     BIGINT       NOT NULL,
+    `edge_id`        VARCHAR(128) NOT NULL,
+    `source_node_id` VARCHAR(128) NOT NULL,
+    `target_node_id` VARCHAR(128) NOT NULL,
+    `ref_role`       VARCHAR(16)  NULL,
+    `data_json`      JSON         NULL,
+    `gmt_create`     DATETIME(0)  NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
+    `gmt_modified`   DATETIME(0)  NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
+    `version`        INT          NOT NULL DEFAULT 0,
+    `is_delete`      TINYINT      NOT NULL DEFAULT 0,
+    UNIQUE INDEX `uk_project_edges__edge`(`project_id`, `edge_id`),
+    UNIQUE INDEX `uk_project_edges__pair`(`project_id`, `source_node_id`, `target_node_id`),
+    INDEX `idx_project_edges__source`(`project_id`, `source_node_id`),
+    INDEX `idx_project_edges__target`(`project_id`, `target_node_id`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+CREATE TABLE `project_node_revisions` (
+    `id`         BIGINT       NOT NULL AUTO_INCREMENT,
+    `project_id` BIGINT       NOT NULL,
+    `node_id`    VARCHAR(128) NOT NULL,
+    `revision`   INT          NOT NULL,
+    `op`         VARCHAR(16)  NOT NULL,
+    `actor`      VARCHAR(16)  NOT NULL,
+    `actor_id`   VARCHAR(128) NULL,
+    `changes`    JSON         NULL,
+    `gmt_create` DATETIME(0)  NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
+    UNIQUE INDEX `uk_project_node_revisions__revision`(`project_id`, `node_id`, `revision`),
+    INDEX `idx_project_node_revisions__project_time`(`project_id`, `gmt_create`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;

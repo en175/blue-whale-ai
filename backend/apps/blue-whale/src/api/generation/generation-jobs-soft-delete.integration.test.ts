@@ -43,7 +43,7 @@ describe.skipIf(!process.env.IKG57P_DATABASE_URL)(
     beforeAll(async () => {
       process.env.DATABASE_URL = process.env.IKG57P_DATABASE_URL;
       const sizes = [{ id: "1024x1024", label: "1024x1024" }];
-      await prisma.client.generation_model_capability.upsert({
+      await prisma.client.catalog_models.upsert({
         where: {
           provider_id_model_id: {
             provider_id: "ikg57p-test",
@@ -136,7 +136,7 @@ describe.skipIf(!process.env.IKG57P_DATABASE_URL)(
     });
 
     async function createAsset() {
-      const row = await prisma.client.assets.create({
+      const row = await prisma.client.user_assets.create({
         data: {
           user_id: BigInt(987654),
           project_id: BigInt(0),
@@ -167,7 +167,7 @@ describe.skipIf(!process.env.IKG57P_DATABASE_URL)(
     it("正文标签引用的素材软删 → HTTP 400 与信封一致，通用文案拒单，不创建任务", async () => {
       const projectId = (await projects.create("987654", "IKG57P soft-delete ref")).id;
       const assetId = await createAsset();
-      await prisma.client.assets.update({
+      await prisma.client.user_assets.update({
         where: { id: BigInt(assetId) },
         data: { is_delete: true },
       });
@@ -200,7 +200,7 @@ describe.skipIf(!process.env.IKG57P_DATABASE_URL)(
     it("纯参考清单素材软删 → HTTP 400 与信封一致，通用文案拒单", async () => {
       const projectId = (await projects.create("987654", "IKG57P soft-delete plain")).id;
       const assetId = await createAsset();
-      await prisma.client.assets.update({
+      await prisma.client.user_assets.update({
         where: { id: BigInt(assetId) },
         data: { is_delete: true },
       });
@@ -225,7 +225,7 @@ describe.skipIf(!process.env.IKG57P_DATABASE_URL)(
     it("补齐素材后同一提交路径放行 → 201 创建任务", async () => {
       const projectId = (await projects.create("987654", "IKG57P soft-delete restore")).id;
       const assetId = await createAsset();
-      await prisma.client.assets.update({
+      await prisma.client.user_assets.update({
         where: { id: BigInt(assetId) },
         data: { is_delete: true },
       });
@@ -246,7 +246,7 @@ describe.skipIf(!process.env.IKG57P_DATABASE_URL)(
       const rejected = await submit(projectId, body);
       expect(rejected.status).toBe(400);
 
-      await prisma.client.assets.update({
+      await prisma.client.user_assets.update({
         where: { id: BigInt(assetId) },
         data: { is_delete: false },
       });

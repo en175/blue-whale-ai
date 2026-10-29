@@ -35,7 +35,7 @@ console.log(
 const prisma = getPrismaClient(process.env.DATABASE_URL);
 const storage = createTosStorage(config);
 
-const rows = await prisma.assets.findMany({
+const rows = await prisma.user_assets.findMany({
   where: {
     is_delete: false,
     type: { in: ["video", "audio"] },
@@ -69,7 +69,7 @@ for (const row of rows) {
         (info.height === null ? "" : ` height=${info.height}`),
     );
     if (APPLY) {
-      await prisma.assets.update({
+      await prisma.user_assets.update({
         where: { id: row.id },
         data: {
           duration_ms: info.durationMs,

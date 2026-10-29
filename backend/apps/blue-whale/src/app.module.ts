@@ -32,6 +32,7 @@ import { TopupTierModule } from "@lib/shared/topup-tier/topup-tier.module.js";
 import { AccountApiModule } from "./api/account/account.module.js";
 import { AdminModule } from "./api/admin/admin.module.js";
 import { AgentAssetsModule } from "./api/agent-assets/agent-assets.module.js";
+import { AgentCanvasModule } from "./api/agent-canvas/agent-canvas.module.js";
 import { AgentSkillsModule } from "./api/agent-skills/agent-skills.module.js";
 import { AssetsApiModule } from "./api/assets/assets.module.js";
 import { AudioSpeedsApiModule } from "./api/audio-speeds/audio-speeds.module.js";
@@ -97,6 +98,7 @@ import { IdentityModule } from "@lib/shared/identity/index.js";
     AccountApiModule,
     AssetsApiModule,
     AgentAssetsModule,
+    AgentCanvasModule,
     AgentSkillsModule,
     GenerationApiModule,
     RechargeLibModule,

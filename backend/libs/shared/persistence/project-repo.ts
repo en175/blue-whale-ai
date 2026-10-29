@@ -1,6 +1,8 @@
 import { wallClockRfc3339, wallClockRfc3339OrNull } from "@lib/core";
 import type { PrismaClient } from "@prisma/client";
 
+import { nodeFromRow } from "./canvas-repo.js";
+
 
 export interface ProjectPreview {
   url: string;
@@ -174,7 +176,7 @@ export function createProjectRepo(prisma: PrismaClient): ProjectRepo {
       select: { project_id: true, asset_id: true },
     });
     const linkedAssetIds = [...new Set(links.map((link) => link.asset_id))];
-    const mediaAssets = await prisma.assets.findMany({
+    const mediaAssets = await prisma.user_assets.findMany({
       where: {
         user_id: uid,
         type: { in: ["image", "video"] },
@@ -198,13 +200,35 @@ export function createProjectRepo(prisma: PrismaClient): ProjectRepo {
     };
     for (const asset of mediaAssets) addMember(asset.id, asset.project_id);
     for (const link of links) addMember(link.asset_id, link.project_id);
-    const canvases = await prisma.canvas.findMany({
+    const canvases = await prisma.project_canvas.findMany({
       where: { project_id: { in: projectIds }, is_delete: 0 },
-      select: { project_id: true, nodes_json: true },
+      select: { project_id: true, nodes_json: true, rows_authoritative: true },
     });
+    const rowProjectIds = canvases
+      .filter((row) => row.rows_authoritative === 1)
+      .map((row) => row.project_id);
+    const rowNodes = rowProjectIds.length === 0
+      ? []
+      : await prisma.project_nodes.findMany({
+          where: { project_id: { in: rowProjectIds }, is_delete: 0 },
+          orderBy: { id: "asc" },
+        });
+    const rowNodesByProject = new Map<bigint, Array<Record<string, unknown>>>();
+    for (const row of rowNodes) {
+      const bucket = rowNodesByProject.get(row.project_id) ?? [];
+      bucket.push(nodeFromRow(row));
+      rowNodesByProject.set(row.project_id, bucket);
+    }
     const onCanvas = new Map<bigint, { ids: Set<string>; urls: Set<string> }>();
     for (const row of canvases) {
-      onCanvas.set(row.project_id, collectCanvasMediaRefs(row.nodes_json));
+      onCanvas.set(
+        row.project_id,
+        collectCanvasMediaRefs(
+          row.rows_authoritative === 1
+            ? rowNodesByProject.get(row.project_id) ?? []
+            : row.nodes_json,
+        ),
+      );
     }
     const byProject = new Map<bigint, ProjectPreview[]>();
     for (const asset of mediaAssets) {
@@ -380,7 +404,7 @@ export function createProjectRepo(prisma: PrismaClient): ProjectRepo {
       });
       if (!owned) return false;
       await prisma.$transaction([
-        prisma.assets.updateMany({
+        prisma.user_assets.updateMany({
           where: { project_id: BigInt(id), is_delete: false },
           data: { is_delete: true, deleted_at: new Date() },
         }),
@@ -406,7 +430,7 @@ export function createProjectRepo(prisma: PrismaClient): ProjectRepo {
       const toDelete = [...ownedSet];
       if (toDelete.length > 0) {
         await prisma.$transaction([
-          prisma.assets.updateMany({
+          prisma.user_assets.updateMany({
             where: { project_id: { in: toDelete }, is_delete: false },
             data: { is_delete: true, deleted_at: new Date() },
           }),

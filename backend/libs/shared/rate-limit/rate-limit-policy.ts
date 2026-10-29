@@ -21,7 +21,11 @@ export interface RateLimitRequestLike {
 }
 
 export type RateLimitDecision =
-  | { allowed: true; allowlisted?: { kind: RateLimitKey; value: string } }
+  | {
+      allowed: true;
+      allowlisted?: { kind: RateLimitKey; value: string };
+      taken?: { scope: string; key: string; member: string }[];
+    }
   | { allowed: false; retryAfter?: number };
 
 function headerValue(
@@ -73,6 +77,7 @@ export async function enforceRateLimit(
       allowlisted: { kind: "account", value: context.account },
     };
   }
+  const taken: { scope: string; key: string; member: string }[] = [];
   for (const bucket of buckets) {
     const key = context[bucket.key];
     if (!key) continue;
@@ -87,6 +92,9 @@ export async function enforceRateLimit(
         ? { allowed: false, retryAfter: result.retryAfter }
         : { allowed: false };
     }
+    if (result.member) {
+      taken.push({ scope: bucket.scope, key, member: result.member });
+    }
   }
-  return { allowed: true };
+  return { allowed: true, taken };
 }

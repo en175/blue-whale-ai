@@ -40,7 +40,7 @@ describe("createAssetRepo.listByUser", () => {
       mime: "image/png",
     };
     const prisma = {
-      assets: {
+      user_assets: {
         count: vi.fn().mockResolvedValue(1),
         findMany: vi.fn().mockResolvedValue([row]),
       },
@@ -49,7 +49,7 @@ describe("createAssetRepo.listByUser", () => {
           { id: 7n, input: { prompt: "海浪", model_id: "seedance-2.0" } },
         ]),
       },
-      generation_model_capability: {
+      catalog_models: {
         findMany: vi
           .fn()
           .mockResolvedValue([
@@ -80,7 +80,7 @@ describe("createAssetRepo.listByUser", () => {
       height: null, duration_ms: 1000, source: "generated", gmt_create: new Date(), size: 10n,
       generation_job_id: 70n, project_id: 55n, mime: "audio/mpeg" };
     const prisma = {
-      assets: { count: vi.fn().mockResolvedValue(1), findMany: vi.fn().mockResolvedValue([row]) },
+      user_assets: { count: vi.fn().mockResolvedValue(1), findMany: vi.fn().mockResolvedValue([row]) },
       generation_jobs: { findMany: vi.fn().mockResolvedValue([{ id: 70n, type: "audio_mix", input: {} }]) },
       generation_job_extras: extrasDelegate(),
     };
@@ -90,7 +90,7 @@ describe("createAssetRepo.listByUser", () => {
 
   it("IKGOTB：listByUser 排除擦除遮罩中间素材（NOT source=mask_erase，资产列表不可见）", async () => {
     const prisma = {
-      assets: {
+      user_assets: {
         count: vi.fn().mockResolvedValue(0),
         findMany: vi.fn().mockResolvedValue([]),
       },
@@ -103,15 +103,15 @@ describe("createAssetRepo.listByUser", () => {
       type: "image",
       NOT: { source: "mask_erase" },
     };
-    expect(prisma.assets.count).toHaveBeenCalledWith({ where: expectedWhere });
-    expect(prisma.assets.findMany).toHaveBeenCalledWith(
+    expect(prisma.user_assets.count).toHaveBeenCalledWith({ where: expectedWhere });
+    expect(prisma.user_assets.findMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: expectedWhere }),
     );
   });
 
   it("IKGOTB：findOwnedByMd5 排除遮罩中间素材（用户上传同内容图不得命中隐藏遮罩资产）", async () => {
     const findFirst = vi.fn().mockResolvedValue(null);
-    const repo = createAssetRepo({ assets: { findFirst } } as never);
+    const repo = createAssetRepo({ user_assets: { findFirst } } as never);
     await repo.findOwnedByMd5("9", "d41d8cd98f00b204e9800998ecf8427e");
     expect(findFirst).toHaveBeenCalledWith({
       where: {
@@ -175,7 +175,7 @@ describe("createAssetRepo.listByUser", () => {
       },
     ];
     const prisma = {
-      assets: {
+      user_assets: {
         count: vi.fn().mockResolvedValue(3),
         findMany: vi.fn().mockResolvedValue(rows),
       },
@@ -185,7 +185,7 @@ describe("createAssetRepo.listByUser", () => {
           { id: 9n, input: { prompt: "y", model_id: "unknown-model" } },
         ]),
       },
-      generation_model_capability: {
+      catalog_models: {
         findMany: vi.fn().mockResolvedValue([]),
       },
       generation_job_extras: extrasDelegate(),
@@ -205,9 +205,9 @@ describe("createAssetRepo.listByUser", () => {
       findMany: vi.fn().mockResolvedValue([]),
     };
     const prisma = {
-      assets,
+      user_assets: assets,
       generation_jobs: { findMany: vi.fn().mockResolvedValue([]) },
-      generation_model_capability: { findMany: vi.fn().mockResolvedValue([]) },
+      catalog_models: { findMany: vi.fn().mockResolvedValue([]) },
     };
     const repo = createAssetRepo(prisma as never);
 
@@ -238,7 +238,7 @@ describe("createAssetRepo.findOwnedById", () => {
       mime: "image/png",
     };
     const prisma = {
-      assets: {
+      user_assets: {
         findFirst: vi.fn().mockResolvedValue(row),
       },
       generation_jobs: {
@@ -246,7 +246,7 @@ describe("createAssetRepo.findOwnedById", () => {
           { id: 7n, input: { prompt: "海浪", model_id: "seedance-2.0" } },
         ]),
       },
-      generation_model_capability: {
+      catalog_models: {
         findMany: vi
           .fn()
           .mockResolvedValue([
@@ -280,9 +280,9 @@ describe("createAssetRepo.findOwnedById", () => {
       findFirst: vi.fn().mockResolvedValue(null),
     };
     const prisma = {
-      assets,
+      user_assets: assets,
       generation_jobs: { findMany: vi.fn().mockResolvedValue([]) },
-      generation_model_capability: { findMany: vi.fn().mockResolvedValue([]) },
+      catalog_models: { findMany: vi.fn().mockResolvedValue([]) },
     };
     const repo = createAssetRepo(prisma as never);
 
@@ -312,9 +312,9 @@ describe("createAssetRepo.findOwnedById", () => {
       mime: "image/png",
     };
     const prisma = {
-      assets: { findFirst: vi.fn().mockResolvedValue(row) },
+      user_assets: { findFirst: vi.fn().mockResolvedValue(row) },
       generation_jobs: { findMany: vi.fn().mockResolvedValue([]) },
-      generation_model_capability: { findMany: vi.fn().mockResolvedValue([]) },
+      catalog_models: { findMany: vi.fn().mockResolvedValue([]) },
     };
     const repo = createAssetRepo(prisma as never);
 
@@ -339,13 +339,13 @@ describe("createAssetRepo.findOwnedById", () => {
       mime: "image/png",
     };
     const prisma = {
-      assets: { findFirst: vi.fn().mockResolvedValue(row) },
+      user_assets: { findFirst: vi.fn().mockResolvedValue(row) },
       generation_jobs: {
         findMany: vi.fn().mockResolvedValue([
           { id: 9n, input: { prompt: "y", model_id: "unknown-model" } },
         ]),
       },
-      generation_model_capability: { findMany: vi.fn().mockResolvedValue([]) },
+      catalog_models: { findMany: vi.fn().mockResolvedValue([]) },
       generation_job_extras: extrasDelegate(),
     };
     const repo = createAssetRepo(prisma as never);
@@ -376,9 +376,9 @@ describe("createAssetRepo.findOwnedById", () => {
       ]),
     };
     const prisma = {
-      assets: { findFirst: vi.fn().mockResolvedValue(row) },
+      user_assets: { findFirst: vi.fn().mockResolvedValue(row) },
       generation_jobs: generationJobs,
-      generation_model_capability: {
+      catalog_models: {
         findMany: vi
           .fn()
           .mockResolvedValue([{ model_id: "seedance-2.0", model_label: "Seedance 2.0" }]),
@@ -409,11 +409,11 @@ describe("createAssetRepo.findOwnedById", () => {
       mime: "audio/mpeg",
     };
     const prisma = {
-      assets: { findFirst: vi.fn().mockResolvedValue(row) },
+      user_assets: { findFirst: vi.fn().mockResolvedValue(row) },
       generation_jobs: {
         findMany: vi.fn().mockResolvedValue([{ id: 1803n, input: { source_asset_id: "6018" } }]),
       },
-      generation_model_capability: { findMany: vi.fn().mockResolvedValue([]) },
+      catalog_models: { findMany: vi.fn().mockResolvedValue([]) },
       generation_job_extras: extrasDelegate(),
     };
     const repo = createAssetRepo(prisma as never);
@@ -439,9 +439,9 @@ describe("createAssetRepo.findOwnedById", () => {
       mime: "image/png",
     };
     const prisma = {
-      assets: { findFirst: vi.fn().mockResolvedValue(row) },
+      user_assets: { findFirst: vi.fn().mockResolvedValue(row) },
       generation_jobs: { findMany: vi.fn().mockResolvedValue([]) },
-      generation_model_capability: { findMany: vi.fn().mockResolvedValue([]) },
+      catalog_models: { findMany: vi.fn().mockResolvedValue([]) },
     };
     const repo = createAssetRepo(prisma as never);
 
@@ -466,11 +466,11 @@ describe("createAssetRepo.findOwnedById", () => {
       mime: "image/png",
     };
     const prisma = {
-      assets: { findFirst: vi.fn().mockResolvedValue(row) },
+      user_assets: { findFirst: vi.fn().mockResolvedValue(row) },
       generation_jobs: {
         findMany: vi.fn().mockResolvedValue([{ id: 11n, input: { prompt: "   " } }]),
       },
-      generation_model_capability: { findMany: vi.fn().mockResolvedValue([]) },
+      catalog_models: { findMany: vi.fn().mockResolvedValue([]) },
       generation_job_extras: extrasDelegate(),
     };
     const repo = createAssetRepo(prisma as never);
@@ -496,7 +496,7 @@ describe("createAssetRepo.findOwnedById", () => {
       mime: "video/mp4",
     };
     const prisma = {
-      assets: { findFirst: vi.fn().mockResolvedValue(row) },
+      user_assets: { findFirst: vi.fn().mockResolvedValue(row) },
       generation_jobs: {
         findMany: vi.fn().mockResolvedValue([
           {
@@ -510,7 +510,7 @@ describe("createAssetRepo.findOwnedById", () => {
           },
         ]),
       },
-      generation_model_capability: { findMany: vi.fn().mockResolvedValue([]) },
+      catalog_models: { findMany: vi.fn().mockResolvedValue([]) },
       generation_job_extras: extrasDelegate(),
     };
     const repo = createAssetRepo(prisma as never);
@@ -539,9 +539,9 @@ describe("createAssetRepo.findOwnedById", () => {
       mime: "video/mp4",
     };
     const prisma = {
-      assets: { findFirst: vi.fn().mockResolvedValue(row) },
+      user_assets: { findFirst: vi.fn().mockResolvedValue(row) },
       generation_jobs: { findMany: vi.fn().mockResolvedValue([]) },
-      generation_model_capability: { findMany: vi.fn().mockResolvedValue([]) },
+      catalog_models: { findMany: vi.fn().mockResolvedValue([]) },
     };
     const repo = createAssetRepo(prisma as never);
 
@@ -567,9 +567,9 @@ describe("createAssetRepo.findOwnedById", () => {
     };
     const inputs: unknown[] = [null, "raw-string", ["array"]];
     const prisma = {
-      assets: { findFirst: vi.fn().mockResolvedValue(row) },
+      user_assets: { findFirst: vi.fn().mockResolvedValue(row) },
       generation_jobs: { findMany: vi.fn().mockResolvedValue([{ id: 13n, input: inputs[0] }]) },
-      generation_model_capability: { findMany: vi.fn().mockResolvedValue([]) },
+      catalog_models: { findMany: vi.fn().mockResolvedValue([]) },
       generation_job_extras: extrasDelegate(),
     };
     const repo = createAssetRepo(prisma as never);
@@ -599,14 +599,14 @@ describe("IKFSSO：提示词只进详情，不进列表", () => {
       mime: "image/png",
     };
     const prisma = {
-      assets: {
+      user_assets: {
         count: vi.fn().mockResolvedValue(1),
         findMany: vi.fn().mockResolvedValue([row]),
       },
       generation_jobs: {
         findMany: vi.fn().mockResolvedValue([{ id: 7n, input: { prompt: "海浪" } }]),
       },
-      generation_model_capability: { findMany: vi.fn().mockResolvedValue([]) },
+      catalog_models: { findMany: vi.fn().mockResolvedValue([]) },
       generation_job_extras: extrasDelegate(),
     };
     const repo = createAssetRepo(prisma as never);
@@ -622,7 +622,7 @@ describe("createAssetRepo 方案C（project_asset 关联）", () => {
     const assetsUpdate = vi.fn().mockResolvedValue({ count: 1 });
     const paUpdate = vi.fn().mockResolvedValue({ count: 2 });
     const tx = {
-      assets: { updateMany: assetsUpdate },
+      user_assets: { updateMany: assetsUpdate },
       project_asset: { updateMany: paUpdate },
     };
     const prisma = { $transaction: vi.fn(async (cb: (t: typeof tx) => Promise<unknown>) => cb(tx)) };
@@ -640,7 +640,7 @@ describe("createAssetRepo 方案C（project_asset 关联）", () => {
     const assetsFind = vi.fn().mockResolvedValue({ id: 3652n });
     const paUpsert = vi.fn().mockResolvedValue({});
     const prisma = {
-      assets: { findFirst: assetsFind },
+      user_assets: { findFirst: assetsFind },
       project_asset: { upsert: paUpsert },
     };
     const repo = createAssetRepo(prisma as never);
@@ -659,7 +659,7 @@ describe("createAssetRepo 方案C（project_asset 关联）", () => {
 
   it("createUploadedAsset 落库时 project_id!=0 自动建关联", async () => {
     const tx = {
-      assets: { create: vi.fn().mockResolvedValue({ id: 501n, storage_key: "k", url: "u", type: "image", mime: "image/png", size: 1n, width: null, height: null, duration_ms: null }) },
+      user_assets: { create: vi.fn().mockResolvedValue({ id: 501n, storage_key: "k", url: "u", type: "image", mime: "image/png", size: 1n, width: null, height: null, duration_ms: null }) },
       project_asset: { upsert: vi.fn().mockResolvedValue({}) },
     };
     const prisma = { $transaction: vi.fn(async (cb: (t: typeof tx) => Promise<unknown>) => cb(tx)) };
@@ -673,7 +673,7 @@ describe("createAssetRepo 方案C（project_asset 关联）", () => {
 describe("createAssetRepo.countReferencingProjects（IKCZAT）", () => {
   it("直接归属 ∪ project_asset 并集去重：重叠项目只计一次", async () => {
     const prisma = {
-      assets: {
+      user_assets: {
         groupBy: vi.fn().mockResolvedValue([
           { project_id: 55n },
           { project_id: 66n },
@@ -694,7 +694,7 @@ describe("createAssetRepo.countReferencingProjects（IKCZAT）", () => {
     const count = await repo.countReferencingProjects("42", "9");
 
     expect(count).toBe(3);
-    expect(prisma.assets.groupBy).toHaveBeenCalledWith({
+    expect(prisma.user_assets.groupBy).toHaveBeenCalledWith({
       by: ["project_id"],
       where: { id: 42n, user_id: 9n, is_delete: false, project_id: { not: 0n } },
     });
@@ -706,7 +706,7 @@ describe("createAssetRepo.countReferencingProjects（IKCZAT）", () => {
 
   it("已删除项目（is_delete=1）不计为引用：并集后与存活项目求交", async () => {
     const prisma = {
-      assets: {
+      user_assets: {
         groupBy: vi.fn().mockResolvedValue([
           { project_id: 55n },
           { project_id: 66n },
@@ -732,7 +732,7 @@ describe("createAssetRepo.countReferencingProjects（IKCZAT）", () => {
 
   it("两来源全空 → 返回 0（不触发 project 查询）", async () => {
     const prisma = {
-      assets: { groupBy: vi.fn().mockResolvedValue([]) },
+      user_assets: { groupBy: vi.fn().mockResolvedValue([]) },
       project_asset: { groupBy: vi.fn().mockResolvedValue([]) },
     };
     const repo = createAssetRepo(prisma as never);
@@ -743,7 +743,7 @@ describe("createAssetRepo.countReferencingProjects（IKCZAT）", () => {
 
   it("project_id=0 不计数（SQL 排除 + Set 兜底双保险）", async () => {
     const prisma = {
-      assets: {
+      user_assets: {
         groupBy: vi.fn().mockResolvedValue([
           { project_id: 0n },
           { project_id: 55n },
@@ -769,7 +769,7 @@ describe("createAssetRepo.findAccessible", () => {
       size: 274_779n,
       duration_ms: null,
     });
-    const repo = createAssetRepo({ assets: { findFirst } } as never);
+    const repo = createAssetRepo({ user_assets: { findFirst } } as never);
 
     const asset = await repo.findAccessible("5942", "49");
 
@@ -792,7 +792,7 @@ describe("createAssetRepo.findAccessible", () => {
 
   it("查不到返回 null", async () => {
     const findFirst = vi.fn().mockResolvedValue(null);
-    const repo = createAssetRepo({ assets: { findFirst } } as never);
+    const repo = createAssetRepo({ user_assets: { findFirst } } as never);
 
     await expect(repo.findAccessible("5942", "49")).resolves.toBeNull();
   });
@@ -817,13 +817,13 @@ describe("createAssetRepo 素材校验状态（IKFYHJ）", () => {
     ...over,
   });
   const basePrisma = (rows: unknown[], findMaterial: ReturnType<typeof vi.fn>) => ({
-    assets: {
+    user_assets: {
       count: vi.fn().mockResolvedValue(rows.length),
       findMany: vi.fn().mockResolvedValue(rows),
     },
     generation_jobs: { findMany: vi.fn().mockResolvedValue([]) },
-    generation_model_capability: { findMany: vi.fn().mockResolvedValue([]) },
-    material_assets: { findMany: findMaterial },
+    catalog_models: { findMany: vi.fn().mockResolvedValue([]) },
+    catalog_material_states: { findMany: findMaterial },
   });
 
   it("带上状态与确认时间；未关联/无状态行 → null", async () => {
@@ -907,10 +907,10 @@ describe("createAssetRepo 素材校验状态（IKFYHJ）", () => {
       },
     ]);
     const prisma = {
-      assets: { findFirst: vi.fn().mockResolvedValue(baseRow({ material_id: "asset-a" })) },
+      user_assets: { findFirst: vi.fn().mockResolvedValue(baseRow({ material_id: "asset-a" })) },
       generation_jobs: { findMany: vi.fn().mockResolvedValue([]) },
-      generation_model_capability: { findMany: vi.fn().mockResolvedValue([]) },
-      material_assets: { findMany: findMaterial },
+      catalog_models: { findMany: vi.fn().mockResolvedValue([]) },
+      catalog_material_states: { findMany: findMaterial },
     };
 
     const view = await createAssetRepo(prisma as never).findOwnedById("1", "9");
@@ -942,7 +942,7 @@ describe("createAssetRepo 两阶段资产阶段与来源投影（IKIZQH，金标
 
   it("成片资产投影 video_stage=final + source_sample_job_id 指回样片任务（列表路径）", async () => {
     const prisma = {
-      assets: {
+      user_assets: {
         count: vi.fn().mockResolvedValue(1),
         findMany: vi.fn().mockResolvedValue([videoAssetRow(88n, 305n)]),
       },
@@ -956,7 +956,7 @@ describe("createAssetRepo 两阶段资产阶段与来源投影（IKIZQH，金标
           },
         ]),
       },
-      generation_model_capability: { findMany: vi.fn().mockResolvedValue([]) },
+      catalog_models: { findMany: vi.fn().mockResolvedValue([]) },
       generation_job_extras: extrasDelegate([extraRow(305n, "video_stage", "string", "final")]),
     };
 
@@ -972,7 +972,7 @@ describe("createAssetRepo 两阶段资产阶段与来源投影（IKIZQH，金标
 
   it("样片资产投影 video_stage=sample + final_job_id 指向唯一成片任务（详情路径）", async () => {
     const prisma = {
-      assets: { findFirst: vi.fn().mockResolvedValue(videoAssetRow(61n, 302n)) },
+      user_assets: { findFirst: vi.fn().mockResolvedValue(videoAssetRow(61n, 302n)) },
       generation_jobs: {
         findMany: vi.fn().mockResolvedValue([
           {
@@ -983,7 +983,7 @@ describe("createAssetRepo 两阶段资产阶段与来源投影（IKIZQH，金标
           },
         ]),
       },
-      generation_model_capability: { findMany: vi.fn().mockResolvedValue([]) },
+      catalog_models: { findMany: vi.fn().mockResolvedValue([]) },
       generation_job_extras: extrasDelegate([
         extraRow(302n, "video_stage", "string", "sample"),
         extraRow(302n, "final_job_id", "number", "305"),
@@ -1004,14 +1004,14 @@ describe("createAssetRepo 两阶段资产阶段与来源投影（IKIZQH，金标
     const legacyRow = videoAssetRow(5n, 7n);
     const uploadedRow = { ...videoAssetRow(6n, null), type: "image" };
     const prisma = {
-      assets: {
+      user_assets: {
         count: vi.fn().mockResolvedValue(2),
         findMany: vi.fn().mockResolvedValue([legacyRow, uploadedRow]),
       },
       generation_jobs: {
         findMany: vi.fn().mockResolvedValue([{ id: 7n, type: "video", input: {} }]),
       },
-      generation_model_capability: { findMany: vi.fn().mockResolvedValue([]) },
+      catalog_models: { findMany: vi.fn().mockResolvedValue([]) },
       generation_job_extras: extrasDelegate(),
     };
 
@@ -1035,7 +1035,7 @@ describe("createAssetRepo 两阶段资产阶段与来源投影（IKIZQH，金标
     const paUpdate = vi.fn().mockResolvedValue({ count: 1 });
     const generationJobs = { updateMany: vi.fn(), update: vi.fn(), findFirst: vi.fn() };
     const tx = {
-      assets: { updateMany: assetsUpdate },
+      user_assets: { updateMany: assetsUpdate },
       project_asset: { updateMany: paUpdate },
       generation_jobs: generationJobs,
     };
@@ -1053,15 +1053,15 @@ describe("createAssetRepo 两阶段资产阶段与来源投影（IKIZQH，金标
   });
 });
 
-describe("AssetRepo.clearMaterialGroupLink（ADR-0126 改走 material_assets）", () => {
+describe("AssetRepo.clearMaterialGroupLink（ADR-0126 改走 catalog_material_states）", () => {
   function repoWith(rows: Array<{ material_id: string }>) {
     const updateMany = vi.fn().mockResolvedValue({ count: rows.length });
     const findMany = vi.fn().mockResolvedValue(rows);
-    const prisma = { assets: { updateMany }, material_assets: { findMany } };
+    const prisma = { user_assets: { updateMany }, catalog_material_states: { findMany } };
     return { repo: createAssetRepo(prisma as never), updateMany, findMany };
   }
 
-  it("先按组反查 material_assets，再清这批资产的 material_id", async () => {
+  it("先按组反查 catalog_material_states，再清这批资产的 material_id", async () => {
     const { repo, updateMany, findMany } = repoWith([
       { material_id: "asset-a" },
       { material_id: "asset-b" },

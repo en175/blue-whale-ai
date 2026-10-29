@@ -96,12 +96,12 @@ describe.skipIf(!databaseUrl)("audio video mux creation when enqueue fails", () 
         : originalFetch(input, init));
     const project = await prisma.client.project.create({ data: { owner_id: 9n, name: "IKIHPJ enqueue failure" } });
     projectId = project.id;
-    const audio = await prisma.client.assets.create({ data: {
+    const audio = await prisma.client.user_assets.create({ data: {
       user_id: 9n, project_id: projectId, type: "audio", source: "uploaded", status: "normal",
       storage_key: "uploads/9/audio/source.mp3", url: "https://audio-video-mux.test/source.mp3", duration_ms: 10_000,
     } });
     audioId = audio.id;
-    const video = await prisma.client.assets.create({ data: {
+    const video = await prisma.client.user_assets.create({ data: {
       user_id: 9n, project_id: projectId, type: "video", source: "uploaded", status: "normal",
       storage_key: "uploads/9/video/source.mp4", url: "https://audio-video-mux.test/source.mp4", duration_ms: 33_000,
     } });
@@ -113,7 +113,7 @@ describe.skipIf(!databaseUrl)("audio video mux creation when enqueue fails", () 
     await app?.close();
     if (prisma && projectId) {
       await prisma.client.generation_jobs.deleteMany({ where: { project_id: projectId, type: "audio_video_mux" } });
-      await prisma.client.assets.deleteMany({ where: { id: { in: [audioId, videoId] } } });
+      await prisma.client.user_assets.deleteMany({ where: { id: { in: [audioId, videoId] } } });
       await prisma.client.project.delete({ where: { id: projectId } });
       await prisma.client.$disconnect();
     }

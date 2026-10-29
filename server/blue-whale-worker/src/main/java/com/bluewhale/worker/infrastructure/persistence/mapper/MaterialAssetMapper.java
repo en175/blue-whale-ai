@@ -15,7 +15,7 @@ public interface MaterialAssetMapper extends BaseMapper<MaterialAssetEntity> {
 
     @Select("""
             SELECT id, material_id, user_id
-            FROM material_assets
+            FROM catalog_material_states
             WHERE status = 'Processing'
               AND gmt_create > DATE_SUB(NOW(), INTERVAL #{maxAgeMinutes} MINUTE)
             ORDER BY id ASC
@@ -27,7 +27,7 @@ public interface MaterialAssetMapper extends BaseMapper<MaterialAssetEntity> {
     );
 
     @Update("""
-            UPDATE material_assets
+            UPDATE catalog_material_states
             SET status = #{status},
                 error_code = #{errorCode},
                 error_message = #{errorMessage},
@@ -47,7 +47,7 @@ public interface MaterialAssetMapper extends BaseMapper<MaterialAssetEntity> {
     );
 
     @Update("""
-            UPDATE assets
+            UPDATE user_assets
             SET material_id = NULL,
                 gmt_modified = NOW(),
                 version = version + 1

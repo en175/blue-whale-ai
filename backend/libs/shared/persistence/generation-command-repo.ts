@@ -46,7 +46,7 @@ import {
   resolveLogicalSlots,
   type OutputSlotStatus,
 } from "./generation-output-slot-repo.js";
-import { appendProjectEvent } from "./product-event-repo.js";
+import { nextSnowflake } from "./snowflake.js";
 import {
   extraString,
   loadJobExtrasOne,
@@ -164,7 +164,7 @@ function costReservationCreateData(
   userId: string,
   projectId: string,
   input: CreateJobInput,
-): Prisma.cost_reservationsCreateArgs["data"] {
+): Prisma.billing_cost_reservationsCreateArgs["data"] {
   return {
     generation_job_id: jobId,
     user_id: BigInt(userId),
@@ -197,10 +197,10 @@ export async function createJobWithinTx(
   }
   if (input.input.prompt_plan_snapshot !== undefined) {
     const snapshot = promptPlanSnapshotSchema.parse(input.input.prompt_plan_snapshot);
-    const rows = await tx.$queryRaw<Array<{ version: number }>>`SELECT version FROM canvas WHERE project_id = ${BigInt(input.projectId)} FOR UPDATE`;
+    const rows = await tx.$queryRaw<Array<{ version: number }>>`SELECT version FROM project_canvas WHERE project_id = ${BigInt(input.projectId)} FOR UPDATE`;
     if (rows[0]?.version !== snapshot.canvasVersion) throw new NewApiError("Canvas 版本冲突，请保存后重新提交", 412);
     for (const image of [...snapshot.images.map(i => ({ ...i, type: "image", providerUrl: i.url })), ...(snapshot.videoReferences ?? [])].filter((ref): ref is typeof ref & { assetId: string } => Boolean(ref.assetId)).sort((a, b) => a.assetId.localeCompare(b.assetId))) {
-      const assets = await tx.$queryRaw<Array<{ id: bigint; project_id: bigint; material_id: string | null }>>`SELECT id, project_id, material_id FROM assets WHERE id = ${BigInt(image.assetId)} AND user_id = ${BigInt(input.userId)} AND is_delete = false AND status = 'normal' AND type = ${image.type} AND url = ${image.url} FOR UPDATE`;
+      const assets = await tx.$queryRaw<Array<{ id: bigint; project_id: bigint; material_id: string | null }>>`SELECT id, project_id, material_id FROM user_assets WHERE id = ${BigInt(image.assetId)} AND user_id = ${BigInt(input.userId)} AND is_delete = false AND status = 'normal' AND type = ${image.type} AND url = ${image.url} FOR UPDATE`;
       const asset = assets[0];
       const links = asset && asset.project_id !== 0n && asset.project_id !== BigInt(input.projectId)
         ? await tx.$queryRaw<Array<{ asset_id: bigint }>>`SELECT asset_id FROM project_asset WHERE asset_id = ${BigInt(image.assetId)} AND project_id = ${BigInt(input.projectId)} AND user_id = ${BigInt(input.userId)} AND is_delete = 0 FOR UPDATE`
@@ -258,7 +258,7 @@ export async function createJobWithinTx(
       });
     }
   }
-  await tx.cost_reservations.create({
+  await tx.billing_cost_reservations.create({
     data: costReservationCreateData(
       null,
       job.id,
@@ -281,31 +281,16 @@ export async function createJobWithinTx(
       },
     } as never,
   });
-  const event = await appendProjectEvent(tx, {
-    projectId: input.projectId,
-    eventType: "generation_job.created",
-    aggregateType: "generation_job",
-    aggregateId: job.id.toString(),
-    aggregateVersion: job.version,
-    correlationId: input.actionIdentity,
-    payload: {
-      job_id: job.id.toString(),
-      type: job.type,
-      source: job.source,
-      status: job.status,
-      progress: job.progress,
-      output_asset_ids: [],
-    },
-  });
+  const cursor = nextSnowflake();
   await writeCreateIdempotency(
     tx,
-    { projectId: input.projectId, jobId: job.id, acceptedCursor: event.cursor },
+    { projectId: input.projectId, jobId: job.id, acceptedCursor: cursor.toString() },
     idempotency,
   );
   if (recoveryPlan) await writeCanvasRecoveryRows(tx, recoveryPlan, job.id);
   return {
     generation_job_id: job.id.toString(),
-    cursor: Number(event.cursor),
+    cursor: Number(cursor),
   };
 }
 
@@ -437,7 +422,7 @@ export function createGenerationCommandRepo(
 
         const operation = "generation.retry";
         const existing = idempotencyKey
-          ? await tx.command_idempotency.findUnique({
+          ? await tx.project_command_receipts.findUnique({
               where: {
                 project_id_operation_idempotency_key: {
                   project_id: pid,
@@ -658,23 +643,11 @@ export function createGenerationCommandRepo(
             }
           }
           for (const recordId of recordIds) {
-            const record = await tx.scene_card_generation_records.update({
+            await tx.scene_card_generation_records.update({
               where: { id: recordId },
               data: {
                 summary_status: "generating",
                 version: { increment: 1 },
-              },
-            });
-            await appendProjectEvent(tx, {
-              projectId: record.project_id.toString(),
-              eventType: "scene_card_generation_record.summary_changed",
-              aggregateType: "scene_card_generation_record",
-              aggregateId: recordId.toString(),
-              aggregateVersion: record.version,
-              correlationId: `record_${recordId.toString()}`,
-              payload: {
-                record_id: recordId.toString(),
-                summary_status: "generating",
               },
             });
           }
@@ -690,25 +663,9 @@ export function createGenerationCommandRepo(
             });
           }
         }
-        const event = await appendProjectEvent(tx, {
-          projectId,
-          eventType: "generation_job.created",
-          aggregateType: "generation_job",
-          aggregateId: retry.id.toString(),
-          aggregateVersion: retry.version,
-          correlationId: idempotencyKey || `retry:${originalJobId}`,
-          payload: {
-            job_id: retry.id.toString(),
-            type: retry.type,
-            source: retry.source,
-            status: retry.status,
-            progress: retry.progress,
-            output_asset_ids: [],
-            retry_of_job_id: originalJobId,
-          },
-        });
+        const cursor = nextSnowflake();
         if (idempotencyKey) {
-          await tx.command_idempotency.create({
+          await tx.project_command_receipts.create({
             data: {
               project_id: pid,
               operation,
@@ -716,7 +673,7 @@ export function createGenerationCommandRepo(
               request_hash: requestHash,
               generation_job_id: retry.id,
               resource_id: BigInt(originalJobId),
-              accepted_cursor: BigInt(event.cursor),
+              accepted_cursor: cursor,
             },
           });
         }
@@ -731,7 +688,7 @@ export function createGenerationCommandRepo(
         if (recoveryPlan) await writeCanvasRecoveryRows(tx, recoveryPlan, retry.id);
         return {
           generation_job_id: retry.id.toString(),
-          cursor: Number(event.cursor),
+          cursor: Number(cursor),
           type: original.type as "image" | "video" | "audio",
         };
         },

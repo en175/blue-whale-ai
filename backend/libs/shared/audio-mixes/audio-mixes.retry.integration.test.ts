@@ -67,7 +67,7 @@ describe.skipIf(!databaseUrl)("audio mix retry in an isolated MySQL database", (
   afterAll(async () => {
     if (!prisma) return;
     await app?.close();
-    await prisma.client.command_idempotency.deleteMany({ where: { project_id: BigInt(projectId) } });
+    await prisma.client.project_command_receipts.deleteMany({ where: { project_id: BigInt(projectId) } });
     await prisma.client.generation_jobs.deleteMany({ where: { project_id: BigInt(projectId) } });
     await prisma.client.project.delete({ where: { id: BigInt(projectId) } });
     await prisma.client.$disconnect();

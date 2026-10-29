@@ -86,7 +86,7 @@ async function assembleCards(
 ): Promise<AdminTemplateCardView[]> {
   if (cards.length === 0) return [];
   const cardIds = cards.map((c) => c.id);
-  const images = await prisma.template_card_image.findMany({
+  const images = await prisma.catalog_template_images.findMany({
     where: { card_id: { in: cardIds }, is_delete: 0 },
     orderBy: [{ sort_order: "asc" }, { id: "asc" }],
   });
@@ -117,7 +117,7 @@ async function assembleCards(
 export function createTemplateAdminRepo(prisma: PrismaClient): TemplateAdminRepo {
   return {
     async renameTag(tagCode, label) {
-      const result = await prisma.template_tag.updateMany({
+      const result = await prisma.catalog_template_tags.updateMany({
         where: { tag_code: tagCode, is_delete: 0 },
         data: { label, gmt_modified: new Date() },
       });
@@ -125,7 +125,7 @@ export function createTemplateAdminRepo(prisma: PrismaClient): TemplateAdminRepo
     },
 
     async setTagVisibility(tagCode, visible) {
-      const result = await prisma.template_tag.updateMany({
+      const result = await prisma.catalog_template_tags.updateMany({
         where: { tag_code: tagCode, is_delete: 0 },
         data: { visible, gmt_modified: new Date() },
       });
@@ -134,7 +134,7 @@ export function createTemplateAdminRepo(prisma: PrismaClient): TemplateAdminRepo
 
     async createTag(tagCode, label, sortOrder) {
       try {
-        await prisma.template_tag.create({
+        await prisma.catalog_template_tags.create({
           data: { tag_code: tagCode, label, sort_order: sortOrder },
         });
         return true;
@@ -152,7 +152,7 @@ export function createTemplateAdminRepo(prisma: PrismaClient): TemplateAdminRepo
     },
 
     async listCards(tagCode?) {
-      const cards = await prisma.template_card.findMany({
+      const cards = await prisma.catalog_templates.findMany({
         where: { is_delete: 0, ...(tagCode ? { tag_code: tagCode } : {}) },
         orderBy: [{ tag_code: "asc" }, { sort_order: "asc" }, { id: "asc" }],
       });
@@ -160,7 +160,7 @@ export function createTemplateAdminRepo(prisma: PrismaClient): TemplateAdminRepo
     },
 
     async getCard(id) {
-      const card = await prisma.template_card.findFirst({
+      const card = await prisma.catalog_templates.findFirst({
         where: { id, is_delete: 0 },
       });
       if (!card) return null;
@@ -171,7 +171,7 @@ export function createTemplateAdminRepo(prisma: PrismaClient): TemplateAdminRepo
     async createCard(input) {
       return prisma.$transaction(async (tx) => {
         const now = new Date();
-        const card = await tx.template_card.create({
+        const card = await tx.catalog_templates.create({
           data: {
             tag_code: input.tag_code,
             title: input.title,
@@ -184,7 +184,7 @@ export function createTemplateAdminRepo(prisma: PrismaClient): TemplateAdminRepo
           },
         });
         if (input.images.length > 0) {
-          await tx.template_card_image.createMany({
+          await tx.catalog_template_images.createMany({
             data: input.images.map((img, i) => ({
               card_id: card.id,
               image_url: img.image_url,
@@ -199,13 +199,13 @@ export function createTemplateAdminRepo(prisma: PrismaClient): TemplateAdminRepo
 
     async updateCard(id, input) {
       return prisma.$transaction(async (tx) => {
-        const existing = await tx.template_card.findFirst({
+        const existing = await tx.catalog_templates.findFirst({
           where: { id, is_delete: 0 },
         });
         if (!existing) return false;
 
         const now = new Date();
-        await tx.template_card.update({
+        await tx.catalog_templates.update({
           where: { id },
           data: {
             tag_code: input.tag_code,
@@ -222,7 +222,7 @@ export function createTemplateAdminRepo(prisma: PrismaClient): TemplateAdminRepo
         const keepIds = input.images
           .filter((img) => img.id !== undefined)
           .map((img) => BigInt(img.id as string));
-        const current = await tx.template_card_image.findMany({
+        const current = await tx.catalog_template_images.findMany({
           where: { card_id: id, is_delete: 0 },
         });
         const currentIds = new Set(current.map((img) => img.id.toString()));
@@ -236,7 +236,7 @@ export function createTemplateAdminRepo(prisma: PrismaClient): TemplateAdminRepo
         }
         const toDelete = current.filter((img) => !keepIds.includes(img.id));
         if (toDelete.length > 0) {
-          await tx.template_card_image.updateMany({
+          await tx.catalog_template_images.updateMany({
             where: { id: { in: toDelete.map((img) => img.id) } },
             data: { is_delete: 1, gmt_modified: now },
           });
@@ -244,7 +244,7 @@ export function createTemplateAdminRepo(prisma: PrismaClient): TemplateAdminRepo
         await Promise.all(
           input.images.map((img, i) =>
             img.id !== undefined
-              ? tx.template_card_image.update({
+              ? tx.catalog_template_images.update({
                   where: { id: BigInt(img.id) },
                   data: {
                     image_url: img.image_url,
@@ -252,7 +252,7 @@ export function createTemplateAdminRepo(prisma: PrismaClient): TemplateAdminRepo
                     gmt_modified: now,
                   },
                 })
-              : tx.template_card_image.create({
+              : tx.catalog_template_images.create({
                   data: {
                     card_id: id,
                     image_url: img.image_url,
@@ -267,7 +267,7 @@ export function createTemplateAdminRepo(prisma: PrismaClient): TemplateAdminRepo
     },
 
     async softDeleteCard(id) {
-      const result = await prisma.template_card.updateMany({
+      const result = await prisma.catalog_templates.updateMany({
         where: { id, is_delete: 0 },
         data: { is_delete: 1, gmt_modified: new Date() },
       });
@@ -276,12 +276,12 @@ export function createTemplateAdminRepo(prisma: PrismaClient): TemplateAdminRepo
 
     async moveCard(id, direction) {
       return prisma.$transaction(async (tx) => {
-        const target = await tx.template_card.findFirst({
+        const target = await tx.catalog_templates.findFirst({
           where: { id, is_delete: 0 },
         });
         if (!target) return { ok: false, reason: "not_found" as const };
 
-        const siblings = await tx.template_card.findMany({
+        const siblings = await tx.catalog_templates.findMany({
           where: { tag_code: target.tag_code, is_delete: 0 },
           orderBy: [{ sort_order: "asc" }, { id: "asc" }],
         });
@@ -292,7 +292,7 @@ export function createTemplateAdminRepo(prisma: PrismaClient): TemplateAdminRepo
           swapped.map((c, i) =>
             c.sort_order === i
               ? Promise.resolve()
-              : tx.template_card.update({
+              : tx.catalog_templates.update({
                   where: { id: c.id },
                   data: {
                     sort_order: i,
@@ -307,12 +307,12 @@ export function createTemplateAdminRepo(prisma: PrismaClient): TemplateAdminRepo
 
     async moveImage(imageId, direction) {
       return prisma.$transaction(async (tx) => {
-        const target = await tx.template_card_image.findFirst({
+        const target = await tx.catalog_template_images.findFirst({
           where: { id: imageId, is_delete: 0 },
         });
         if (!target) return { ok: false, reason: "not_found" as const };
 
-        const siblings = await tx.template_card_image.findMany({
+        const siblings = await tx.catalog_template_images.findMany({
           where: { card_id: target.card_id, is_delete: 0 },
           orderBy: [{ sort_order: "asc" }, { id: "asc" }],
         });
@@ -323,7 +323,7 @@ export function createTemplateAdminRepo(prisma: PrismaClient): TemplateAdminRepo
           swapped.map((img, i) =>
             img.sort_order === i
               ? Promise.resolve()
-              : tx.template_card_image.update({
+              : tx.catalog_template_images.update({
                   where: { id: img.id },
                   data: {
                     sort_order: i,

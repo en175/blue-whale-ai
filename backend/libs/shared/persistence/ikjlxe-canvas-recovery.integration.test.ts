@@ -1,3 +1,4 @@
+import { findEffectiveRecoveryOwners, clearEffectiveRecoveryOwners, effectiveCanvasRow } from "./recovery-owner-test-helpers.js";
 
 
 
@@ -46,7 +47,7 @@ describe.skipIf(!databaseUrl)("首次 primary 必须原子转换目标（IKJLXE�
 
   async function seed(mode: "missing" | "unmarked") {
     if (mode === "unmarked") {
-      await prisma.canvas.create({ data: {
+      await prisma.project_canvas.create({ data: {
         project_id: BigInt(PROJECT_ID), viewport_json: {}, edges_json: [],
         nodes_json: [{ id: NODE_ID, type: "mediaNode", position: { x: 0, y: 0 }, data: { fileName: "已保存原卡" } }],
       } });
@@ -68,7 +69,7 @@ describe.skipIf(!databaseUrl)("首次 primary 必须原子转换目标（IKJLXE�
       await writeCanvasRecoveryRows(tx, locked.plan, BigInt(created.generation_job_id));
       return created;
     });
-    await prisma.assets.create({ data: {
+    await prisma.user_assets.create({ data: {
       id: BigInt(ASSET_ID), project_id: BigInt(PROJECT_ID), user_id: BigInt(USER_ID),
       generation_job_id: BigInt(job.generation_job_id), type: "image", url: "https://example.test/ikjlxe.png",
     } });
@@ -80,13 +81,13 @@ describe.skipIf(!databaseUrl)("首次 primary 必须原子转换目标（IKJLXE�
     const project_id = BigInt(PROJECT_ID);
     const submissions = await prisma.generation_canvas_submissions.findMany({ where: { project_id } });
     return {
-      canvas: await prisma.canvas.findUnique({ where: { project_id } }),
+      canvas: await effectiveCanvasRow(prisma, project_id),
       submissions,
       outputs: await prisma.generation_canvas_outputs.findMany({ where: { generation_canvas_submission_id: { in: submissions.map(row => row.id) } } }),
-      owners: await prisma.generation_canvas_node_owners.findMany({ where: { project_id } }),
-      assets: await prisma.assets.findMany({ where: { project_id } }),
+      owners: await findEffectiveRecoveryOwners(prisma, project_id),
+      assets: await prisma.user_assets.findMany({ where: { project_id } }),
       links: await prisma.project_asset.findMany({ where: { project_id } }),
-      receipts: await prisma.command_idempotency.findMany({ where: { project_id, operation: SAVE_CANVAS_RECOVERY_OPERATION } }),
+      receipts: await prisma.project_command_receipts.findMany({ where: { project_id, operation: SAVE_CANVAS_RECOVERY_OPERATION } }),
     };
   }
 
@@ -99,13 +100,15 @@ describe.skipIf(!databaseUrl)("首次 primary 必须原子转换目标（IKJLXE�
   beforeEach(async () => {
     const project_id = BigInt(PROJECT_ID);
     const submissions = await prisma.generation_canvas_submissions.findMany({ where: { project_id }, select: { id: true } });
-    await prisma.generation_canvas_node_owners.deleteMany({ where: { project_id } });
+    await clearEffectiveRecoveryOwners(prisma, project_id);
     await prisma.generation_canvas_outputs.deleteMany({ where: { generation_canvas_submission_id: { in: submissions.map(row => row.id) } } });
     await prisma.generation_canvas_submissions.deleteMany({ where: { project_id } });
-    await prisma.command_idempotency.deleteMany({ where: { project_id } });
+    await prisma.project_command_receipts.deleteMany({ where: { project_id } });
     await prisma.project_asset.deleteMany({ where: { project_id } });
-    await prisma.assets.deleteMany({ where: { project_id } });
-    await prisma.canvas.deleteMany({ where: { project_id } });
+    await prisma.user_assets.deleteMany({ where: { project_id } });
+    await prisma.project_canvas.deleteMany({ where: { project_id } });
+    await prisma.project_edges.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
+    await prisma.project_nodes.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
     await prisma.generation_jobs.deleteMany({ where: { project_id } });
   });
   afterAll(async () => {

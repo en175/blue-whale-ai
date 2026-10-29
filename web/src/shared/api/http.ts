@@ -71,7 +71,7 @@ export function readApiErrorMessage(
   return `请求失败（${status}）`;
 }
 
-async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
+async function apiFetch(path: string, init?: RequestInit): Promise<{ res: Response; token: string | null }> {
   if (import.meta.env.DEV) {
     const realUrl = BACKEND_BASE ? `${BACKEND_BASE}${path}` : path;
     console.info(`[api] ${init?.method ?? 'GET'} ${realUrl}`);
@@ -107,7 +107,7 @@ async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
     init?.signal?.removeEventListener('abort', onExternalAbort);
   }
 
-  return res;
+  return { res, token: token ?? null };
 }
 
 const inflight = new Map<string, Promise<{ data: unknown; warning?: string }>>();
@@ -122,8 +122,9 @@ function dedupKey(path: string, init?: ApiRequestInit): string {
 async function doRequest<T>(path: string, init?: ApiRequestInit): Promise<{ data: T; warning?: string }> {
   const silent = init?.silent === true;
   let res: Response;
+  let requestToken: string | null;
   try {
-    res = await apiFetch(path, toFetchInit(init));
+    ({ res, token: requestToken } = await apiFetch(path, toFetchInit(init)));
   } catch (error) {
     const err = isApiError(error)
       ? error
@@ -149,7 +150,7 @@ async function doRequest<T>(path: string, init?: ApiRequestInit): Promise<{ data
       !path.startsWith(`${API_PREFIX}/auth/`) &&
       path !== `${API_PREFIX}/admin/session`
     ) {
-      handleUnauthorized(err.errorCode);
+      handleUnauthorized(err.errorCode, requestToken);
     }
     if (!silent && err.status !== 401 && err.errorCode !== 'account_disabled') toast.error(err.message);
     throw err;

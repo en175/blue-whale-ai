@@ -399,7 +399,7 @@ public class VideoJobProcessor implements JobProcessor {
             failVideo(claim, GenerationError.ERROR_PROVIDER_FAILED, "视频结果转存不可用，已按失败处理");
             return false;
         } else {
-            log.warn("[video] TOS 未配置，降级直存供应商 URL：assets.md5 将为空（IKGS73 已知边界）");
+            log.warn("[video] TOS 未配置，降级直存供应商 URL：user_assets.md5 将为空（IKGS73 已知边界）");
             stored = new StoredVideo(observation.url(), null, null, null, null);
         }
         log.info("[video] 转存完成 jobId={} storageKey={} size={}", claim.id(), stored.storageKey(), stored.size());

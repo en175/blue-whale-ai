@@ -89,29 +89,15 @@ export function sceneCardAsset(
 export function buildTx(
   overrides: Record<string, Record<string, ReturnType<typeof vi.fn>>>,
 ) {
-  const projectEventsCreate = vi.fn().mockImplementation(({ data }) => ({
-    id: 1n,
-    event_id: "evt_x",
-    event_type: data.event_type,
-    cursor: 100n,
-    project_id: data.project_id,
-    aggregate_type: data.aggregate_type,
-    aggregate_id: data.aggregate_id,
-    aggregate_version: data.aggregate_version,
-    correlation_id: data.correlation_id ?? null,
-    causation_id: data.causation_id ?? null,
-    occurred_at: new Date(),
-    payload: data.payload,
-  }));
   return {
     project: {
       findFirst: vi.fn().mockResolvedValue({ id: 42n }),
       ...overrides.project,
     },
-    command_idempotency: {
+    project_command_receipts: {
       findUnique: vi.fn().mockResolvedValue(null),
       create: vi.fn().mockResolvedValue({}),
-      ...overrides.command_idempotency,
+      ...overrides.project_command_receipts,
     },
     scene_cards: {
       findFirst: vi.fn().mockResolvedValue({
@@ -134,19 +120,19 @@ export function buildTx(
       create: vi.fn().mockResolvedValue({ id: 8001n }),
       ...overrides.scene_card_generation_records,
     },
-    generation_model_capability: {
+    catalog_models: {
       findUnique: vi.fn().mockResolvedValue(buildCapabilityRow()),
-      ...overrides.generation_model_capability,
+      ...overrides.catalog_models,
     },
     conversation_message_mentions: {
       findMany: vi.fn().mockResolvedValue([]),
       ...overrides.conversation_message_mentions,
     },
-    assets: {
+    user_assets: {
       findMany: vi.fn().mockResolvedValue([]),
-      ...overrides.assets,
+      ...overrides.user_assets,
     },
-    canvas: {
+    project_canvas: {
       findFirst: vi.fn().mockResolvedValue({
         viewport_json: { x: 0, y: 0, zoom: 1 },
         nodes_json: [
@@ -159,7 +145,7 @@ export function buildTx(
           },
         ],
       }),
-      ...overrides.canvas,
+      ...overrides.project_canvas,
     },
     generation_jobs: {
       create: vi.fn().mockResolvedValue({
@@ -178,9 +164,9 @@ export function buildTx(
       deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
       ...overrides.generation_job_extras,
     },
-    cost_reservations: {
+    billing_cost_reservations: {
       create: vi.fn().mockResolvedValue({}),
-      ...overrides.cost_reservations,
+      ...overrides.billing_cost_reservations,
     },
     generation_output_slots: {
       create: vi.fn().mockResolvedValue({}),
@@ -195,10 +181,6 @@ export function buildTx(
     generation_job_logs: {
       create: vi.fn().mockResolvedValue({}),
       ...overrides.generation_job_logs,
-    },
-    project_events: {
-      create: projectEventsCreate,
-      ...overrides.project_events,
     },
   };
 }

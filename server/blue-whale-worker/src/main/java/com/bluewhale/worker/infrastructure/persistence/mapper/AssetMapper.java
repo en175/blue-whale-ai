@@ -25,7 +25,7 @@ public interface AssetMapper extends BaseMapper<AssetEntity> {
     );
 
     @Select("""
-            SELECT id FROM assets
+            SELECT id FROM user_assets
             WHERE generation_job_id = #{generationJobId}
               AND storage_key = #{storageKey}
             LIMIT 1
@@ -37,7 +37,7 @@ public interface AssetMapper extends BaseMapper<AssetEntity> {
 
     @Select("""
             <script>
-            SELECT storage_key, url, mime, type FROM assets
+            SELECT storage_key, url, mime, type FROM user_assets
             WHERE id = #{assetId}
               AND user_id = #{userId}
               AND status = 'normal'
@@ -64,7 +64,7 @@ public interface AssetMapper extends BaseMapper<AssetEntity> {
     @Select("""
             <script>
             SELECT id, type, url, mime, size, width, height, duration_ms, material_id
-            FROM assets
+            FROM user_assets
             WHERE id IN
             <foreach item="aid" collection="assetIds" open="(" separator="," close=")">#{aid}</foreach>
               AND user_id = #{userId}

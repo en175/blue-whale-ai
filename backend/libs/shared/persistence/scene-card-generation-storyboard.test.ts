@@ -17,7 +17,7 @@ describe("SceneCardGenerationRepo.regenerateSceneCard storyboard frames", () => 
   it("IK70LQ 画格作首帧：slot→asset_id 解析并入 job.input 扁平字段（AC#3/#4）", async () => {
     const capFields = { ...CAP_FIELDS, features: { first_frame: true } };
     const tx = buildTx({
-      generation_model_capability: {
+      catalog_models: {
         findUnique: vi.fn().mockResolvedValue({
           version: 3,
           enabled: true,
@@ -40,7 +40,7 @@ describe("SceneCardGenerationRepo.regenerateSceneCard storyboard frames", () => 
           .fn()
           .mockResolvedValue([{ first_generation_job_id: 8001n }]),
       },
-      assets: {
+      user_assets: {
         findMany: vi.fn().mockResolvedValue([{ id: 3001n }]),
       },
     });
@@ -68,7 +68,7 @@ describe("SceneCardGenerationRepo.regenerateSceneCard storyboard frames", () => 
   it("IK70LQ 画格组允许改 role，mention 组身份锁不拦画格（AC#5）", async () => {
     const capFields = { ...CAP_FIELDS, features: { first_frame: true } };
     const tx = buildTx({
-      generation_model_capability: {
+      catalog_models: {
         findUnique: vi.fn().mockResolvedValue({
           version: 3,
           enabled: true,
@@ -100,7 +100,7 @@ describe("SceneCardGenerationRepo.regenerateSceneCard storyboard frames", () => 
           .fn()
           .mockResolvedValue([{ first_generation_job_id: 8001n }]),
       },
-      assets: {
+      user_assets: {
         findMany: vi.fn().mockResolvedValue([{ id: 3001n }]),
       },
     });
@@ -173,7 +173,7 @@ describe("SceneCardGenerationRepo.regenerateSceneCard storyboard frames", () => 
           .fn()
           .mockResolvedValue([{ first_generation_job_id: 8001n }]),
       },
-      assets: {
+      user_assets: {
         findMany: vi.fn().mockResolvedValue([{ id: 3001n }]),
       },
     });

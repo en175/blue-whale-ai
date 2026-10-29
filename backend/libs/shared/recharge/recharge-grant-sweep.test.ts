@@ -375,7 +375,7 @@ describe("RechargeService — 主动对账一轮", () => {
     const { service, orders, prisma } = await makeService();
     const created = await service.createOrder({ userId: 9001, tierId: TIER.id });
     backdate(orders, created.tradeNo);
-    vi.spyOn(prisma.recharge_orders, "count").mockRejectedValue(new Error("count 挂了"));
+    vi.spyOn(prisma.billing_recharge_orders, "count").mockRejectedValue(new Error("count 挂了"));
 
     const result = await service.sweepStaleGrants({ claimMs: 60_000 });
 

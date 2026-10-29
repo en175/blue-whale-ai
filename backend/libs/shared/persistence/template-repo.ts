@@ -46,7 +46,7 @@ export interface TemplateRepo {
 export function createTemplateRepo(prisma: PrismaClient): TemplateRepo {
   return {
     async listTags() {
-      const tags = await prisma.template_tag.findMany({
+      const tags = await prisma.catalog_template_tags.findMany({
         where: { is_delete: 0, visible: 1 },
         orderBy: { sort_order: "asc" },
       });
@@ -54,7 +54,7 @@ export function createTemplateRepo(prisma: PrismaClient): TemplateRepo {
     },
 
     async listAllTags() {
-      const tags = await prisma.template_tag.findMany({
+      const tags = await prisma.catalog_template_tags.findMany({
         where: { is_delete: 0 },
         orderBy: { sort_order: "asc" },
       });
@@ -72,8 +72,8 @@ export function createTemplateRepo(prisma: PrismaClient): TemplateRepo {
         ...(query.isFeatured ? { is_featured: 1 } : {}),
       };
       const [total, cards] = await Promise.all([
-        prisma.template_card.count({ where }),
-        prisma.template_card.findMany({
+        prisma.catalog_templates.count({ where }),
+        prisma.catalog_templates.findMany({
           where,
           orderBy: [{ sort_order: "asc" }, { id: "asc" }],
           skip: (query.current - 1) * query.size,
@@ -85,7 +85,7 @@ export function createTemplateRepo(prisma: PrismaClient): TemplateRepo {
       const images =
         cardIds.length === 0
           ? []
-          : await prisma.template_card_image.findMany({
+          : await prisma.catalog_template_images.findMany({
               where: { card_id: { in: cardIds }, is_delete: 0 },
               orderBy: { sort_order: "asc" },
             });

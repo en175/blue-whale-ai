@@ -839,6 +839,65 @@ describe("IKJGE6 画布文本带入合并报价口径", () => {
     return { quoteDeps, createDeps, createJob, getByProject, resolveInputAssets };
   }
 
+  it("★ 结构化 references（无 target_node_id）也计入参考秒（IKR4O5）", async () => {
+    const { client, charge, quote } = fakeBilling();
+    const resolveTier = vi.fn().mockResolvedValue("free");
+    const models = vi.fn().mockResolvedValue([TEXT_REF_ROW]);
+    const resolveInputAssets = vi.fn(async (ids: string[]) =>
+      ids.map((id) => ({ id, type: "video" as const, duration: 4.4 })),
+    );
+    const body = {
+      type: "video",
+      expected_output_count: 1,
+      references: [{ role: "reference", type: "video", asset_id: "8496" }],
+      parameters: {
+        prompt: "人物走过街角",
+        model_id: MODEL_25_ID,
+        aspect_ratio: "16:9",
+        resolution: "480p",
+        duration: 5,
+      },
+    };
+    const createJob = vi.fn(
+      async (
+        _input: unknown,
+        options?: { billing?: { charge: (jobId: number) => Promise<void> } },
+      ) => {
+        await options?.billing?.charge(1);
+        return { generation_job_id: "1", cursor: 1 };
+      },
+    );
+    const quoteDeps = {
+      projects: { findOwnedById: ownedProject() },
+      models: { listEnabledByType: models },
+      canvas: { getByProject: vi.fn() },
+      assets: { resolveInputAssets },
+      quote: createBillingQuote({ client, resolveTier, logger }),
+    } as unknown as QuoteGenerationJobDeps;
+    const createDeps = {
+      projects: { findOwnedById: ownedProject() },
+      models: { listEnabledByType: models },
+      command: { createJob },
+      assets: { resolveInputAssets },
+      billing: {
+        charge: createBillingCharge({ client, resolveTier, logger }),
+        release: vi.fn(async () => {}),
+      },
+      quote: createBillingQuote({ client, resolveTier, logger }),
+    } as unknown as Parameters<typeof handleCreateGenerationJob>[4];
+
+    const created = await handleCreateGenerationJob(USER_ID, PROJECT_ID, body, null, createDeps);
+    expect(created.code).toBe(200);
+    const result = await handleQuoteGenerationJob(USER_ID, PROJECT_ID, body, quoteDeps);
+
+    const holdArg = charge.mock.calls[0]?.[0] as unknown as HoldArgs;
+    const quoteArg = quote.mock.calls[0]?.[0] as unknown as QuoteArgs;
+    expect(holdArg.specs.reference_seconds).toBe("4");
+    expect(quoteArg.specs.reference_seconds).toBe("4");
+    expect(quoteArg.specs.duration).toBe(holdArg.specs.duration);
+    expect(result.data?.credits).toBe(42);
+  });
+
   it("★ 触发场景：预览计价时长 = 源视频时长（edit 口径），报价与 Hold specs 同口径、带源时长标记", async () => {
     const { client, charge, quote } = fakeBilling();
     const resolveTier = vi.fn().mockResolvedValue("pro");

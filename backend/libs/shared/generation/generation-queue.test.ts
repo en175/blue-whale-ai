@@ -3,6 +3,7 @@ import type { Producer } from "rocketmq-client-nodejs";
 
 import {
   AUDIO_GENERATION_TAG,
+  GENERATION_TASK_QUEUE,
   IMAGE_GENERATION_TAG,
   MEDIA_EXTRACT_TAG,
   VIDEO_ENHANCE_TAG,
@@ -22,7 +23,7 @@ describe("createRocketMqGenerationProducer image tag", () => {
     const producer = createRocketMqGenerationProducer(rmqProducer, IMAGE_GENERATION_TAG);
     await producer.enqueue("301");
     expect(send).toHaveBeenCalledWith({
-      topic: "generation-task",
+      topic: GENERATION_TASK_QUEUE,
       tag: "image",
       body: Buffer.from(JSON.stringify({ jobId: "301" })),
       delay: GENERATION_MIN_DELAY_MS,
@@ -54,7 +55,7 @@ describe("createRocketMqGenerationProducer", () => {
     const producer = createRocketMqGenerationProducer(rmqProducer, "video");
     await producer.enqueue("42");
     expect(send).toHaveBeenCalledWith({
-      topic: "generation-task",
+      topic: GENERATION_TASK_QUEUE,
       tag: "video",
       body: Buffer.from(JSON.stringify({ jobId: "42" })),
       delay: GENERATION_MIN_DELAY_MS,
@@ -65,7 +66,7 @@ describe("createRocketMqGenerationProducer", () => {
     const producer = createRocketMqGenerationProducer(rmqProducer, "video");
     await producer.enqueue("43", { delayMs: 2000 });
     expect(send).toHaveBeenCalledWith({
-      topic: "generation-task",
+      topic: GENERATION_TASK_QUEUE,
       tag: "video",
       body: Buffer.from(JSON.stringify({ jobId: "43" })),
       delay: 2000,

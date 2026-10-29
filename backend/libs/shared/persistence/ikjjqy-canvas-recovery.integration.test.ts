@@ -1,3 +1,4 @@
+import { clearEffectiveRecoveryOwners, findEffectiveRecoveryOwner } from "./recovery-owner-test-helpers.js";
 
 
 
@@ -194,22 +195,24 @@ describe.skipIf(!databaseUrl)("多结果任务逐项恢复与删除（IKJJQY）"
 
   afterAll(async () => {
     if (!prisma) return;
-    await prisma.assets.deleteMany({ where: { user_id: { in: [BigInt(USER_ID), BigInt(USER_ID) + 1n] } } });
+    await prisma.user_assets.deleteMany({ where: { user_id: { in: [BigInt(USER_ID), BigInt(USER_ID) + 1n] } } });
     await prisma.project.deleteMany({ where: { id: BigInt(PROJECT_ID) } });
     await raw.end();
     await prisma.$disconnect();
   });
 
   beforeEach(async () => {
-    await prisma.generation_canvas_node_owners.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
+    await clearEffectiveRecoveryOwners(prisma, BigInt(PROJECT_ID));
     await prisma.generation_canvas_outputs.deleteMany({});
     await prisma.generation_canvas_submissions.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
-    await prisma.command_idempotency.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
-    await prisma.canvas.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
+    await prisma.project_command_receipts.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
+    await prisma.project_canvas.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
+    await prisma.project_edges.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
+    await prisma.project_nodes.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
     await prisma.generation_output_slots.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
     await prisma.generation_job_logs.deleteMany({});
-    await prisma.cost_reservations.deleteMany({});
-    await prisma.assets.deleteMany({ where: { user_id: { in: [BigInt(USER_ID), BigInt(USER_ID) + 1n] } } });
+    await prisma.billing_cost_reservations.deleteMany({});
+    await prisma.user_assets.deleteMany({ where: { user_id: { in: [BigInt(USER_ID), BigInt(USER_ID) + 1n] } } });
     await prisma.generation_jobs.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
   });
 
@@ -241,9 +244,7 @@ describe.skipIf(!databaseUrl)("多结果任务逐项恢复与删除（IKJJQY）"
     });
 
     expect(await prisma.generation_canvas_submissions.count({ where: { project_id: BigInt(PROJECT_ID) } })).toBe(1);
-    const owner = await prisma.generation_canvas_node_owners.findUnique({
-      where: { project_id_node_id: { project_id: BigInt(PROJECT_ID), node_id: "scene-node-1" } },
-    });
+    const owner = await findEffectiveRecoveryOwner(prisma, BigInt(PROJECT_ID), "scene-node-1");
     expect(owner && Number(owner.binding_revision)).toBe(1);
 
     const replay = await service.create(USER_ID, PROJECT_ID, {
@@ -400,9 +401,7 @@ describe.skipIf(!databaseUrl)("多结果任务逐项恢复与删除（IKJJQY）"
     ]));
 
     for (const node of [seg1, seg2]) {
-      const owner = await prisma.generation_canvas_node_owners.findUnique({
-        where: { project_id_node_id: { project_id: BigInt(PROJECT_ID), node_id: node } },
-      });
+      const owner = await findEffectiveRecoveryOwner(prisma, BigInt(PROJECT_ID), node);
       expect(owner && Number(owner.binding_revision)).toBe(1);
     }
 
@@ -506,7 +505,7 @@ describe.skipIf(!databaseUrl)("多结果任务逐项恢复与删除（IKJJQY）"
 
     expect((await outputsOfSubmission(UUID_A)).map(row => [row.output_key, row.asset_id?.toString() ?? null, row.state]))
       .toEqual([["segment:1", "701", "present"], ["segment:2", "702", "present"]]);
-    expect(await prisma.canvas.count({ where: { project_id: BigInt(PROJECT_ID) } })).toBe(1);
+    expect(await prisma.project_canvas.count({ where: { project_id: BigInt(PROJECT_ID) } })).toBe(1);
   });
 
   it("★ 5. 部分删除：1 apply + 1 remove 同笔扇出，removed 项独立、任务/资产不受影响", async () => {
@@ -559,9 +558,7 @@ describe.skipIf(!databaseUrl)("多结果任务逐项恢复与删除（IKJJQY）"
     });
     expect(version.recoveryReceipt.changes[0]).toMatchObject({ state: "removed", revision: 1, nodeBindingRevision: 1 });
 
-    const owner = await prisma.generation_canvas_node_owners.findUnique({
-      where: { project_id_node_id: { project_id: BigInt(PROJECT_ID), node_id: multiResultNodeId(UUID_A, "segment:2") } },
-    });
+    const owner = await findEffectiveRecoveryOwner(prisma, BigInt(PROJECT_ID), multiResultNodeId(UUID_A, "segment:2"));
     expect(owner && Number(owner.binding_revision)).toBe(1);
 
     version = await save({
@@ -632,7 +629,7 @@ describe.skipIf(!databaseUrl)("多结果任务逐项恢复与删除（IKJJQY）"
     expect(oldRecord.items.filter(item => item.state === "present").map(item => item.output_key))
       .toEqual(["segment:1", "segment:2"]);
 
-    const version = await prisma.canvas.findFirst({ where: { project_id: BigInt(PROJECT_ID) } });
+    const version = await prisma.project_canvas.findFirst({ where: { project_id: BigInt(PROJECT_ID) } });
     await save({
       commandId: UUID_E, version: version!.version,
       nodes: [markerNode(seg1, UUID_A, "segment:1", "701")],
@@ -718,7 +715,7 @@ describe.skipIf(!databaseUrl)("多结果任务逐项恢复与删除（IKJJQY）"
       409, RECOVERY_REASONS.itemConflict,
     );
     expect(await prisma.generation_canvas_outputs.count({})).toBe(0);
-    expect(await prisma.canvas.count({ where: { project_id: BigInt(PROJECT_ID) } })).toBe(0);
+    expect(await prisma.project_canvas.count({ where: { project_id: BigInt(PROJECT_ID) } })).toBe(0);
     const submission = await prisma.generation_canvas_submissions.findUnique({
       where: { project_id_submission_id: { project_id: BigInt(PROJECT_ID), submission_id: UUID_A } },
     });
@@ -956,7 +953,7 @@ describe.skipIf(!databaseUrl)("多结果任务逐项恢复与删除（IKJJQY）"
   });
 
   it("★ 17. 读取区分服务端确认软删除与暂时不可确认（归属/缺行不算删除）", async () => {
-    await prisma.assets.createMany({
+    await prisma.user_assets.createMany({
       data: [
         { id: 8215n, user_id: BigInt(USER_ID), type: "video", url: "https://example.test/8215.mp4" },
         { id: 8216n, user_id: BigInt(USER_ID), type: "video", url: "https://example.test/8216.mp4", is_delete: true, deleted_at: new Date() },
@@ -1021,7 +1018,7 @@ describe.skipIf(!databaseUrl)("多结果任务逐项恢复与删除（IKJJQY）"
   });
 
   it("★ 19. 单段场景切分：输出行写入段资产，读取的软删事实随资产状态变化", async () => {
-    await prisma.assets.create({
+    await prisma.user_assets.create({
       data: { id: 8415n, user_id: BigInt(USER_ID), type: "video", url: "https://example.test/8415.mp4" },
     });
     const created = await acceptJob({
@@ -1053,7 +1050,7 @@ describe.skipIf(!databaseUrl)("多结果任务逐项恢复与删除（IKJJQY）"
       [TARGET_OUTPUT_KEY, null, null],
       ["segment:1", "8415", false],
     ]);
-    await prisma.assets.update({ where: { id: 8415n }, data: { is_delete: true, deleted_at: new Date() } });
+    await prisma.user_assets.update({ where: { id: 8415n }, data: { is_delete: true, deleted_at: new Date() } });
     expect(await readItems()).toEqual([
       [TARGET_OUTPUT_KEY, null, null],
       ["segment:1", "8415", true],
@@ -1061,7 +1058,7 @@ describe.skipIf(!databaseUrl)("多结果任务逐项恢复与删除（IKJJQY）"
   });
 
   it("★ 20. 人声分离：track: 键按 job.output_asset_ids 写入对应轨道资产，读取的软删事实一一对应", async () => {
-    await prisma.assets.createMany({
+    await prisma.user_assets.createMany({
       data: [
         { id: 8511n, user_id: BigInt(USER_ID), type: "audio", url: "https://example.test/8511.flac" },
         { id: 8512n, user_id: BigInt(USER_ID), type: "audio", url: "https://example.test/8512.flac" },
@@ -1100,7 +1097,7 @@ describe.skipIf(!databaseUrl)("多结果任务逐项恢复与删除（IKJJQY）"
     });
     expect((await outputsOfSubmission(UUID_A)).map(row => [row.output_key, row.asset_id?.toString() ?? null]))
       .toEqual([["track:background", "8512"], ["track:voice", "8511"]]);
-    await prisma.assets.update({ where: { id: 8512n }, data: { is_delete: true, deleted_at: new Date() } });
+    await prisma.user_assets.update({ where: { id: 8512n }, data: { is_delete: true, deleted_at: new Date() } });
     expect(await readItems()).toEqual([
       [TARGET_OUTPUT_KEY, null, null],
       ["track:background", "8512", true],
@@ -1109,7 +1106,7 @@ describe.skipIf(!databaseUrl)("多结果任务逐项恢复与删除（IKJJQY）"
   });
 
   it("★ 21. 部分软删：转换自动补齐全部段（含软删资产），显式 remove 可原子删除并稳定回读", async () => {
-    await prisma.assets.createMany({
+    await prisma.user_assets.createMany({
       data: [
         { id: 8615n, user_id: BigInt(USER_ID), type: "video", url: "https://example.test/8615.mp4" },
         { id: 8616n, user_id: BigInt(USER_ID), type: "video", url: "https://example.test/8616.mp4", is_delete: true, deleted_at: new Date() },
@@ -1150,7 +1147,7 @@ describe.skipIf(!databaseUrl)("多结果任务逐项恢复与删除（IKJJQY）"
     });
     expect((await outputsOfSubmission(UUID_A)).map(row => [row.output_key, row.asset_id?.toString() ?? null, row.state]))
       .toEqual([["segment:1", "8615", "present"], ["segment:2", "8616", "present"]]);
-    expect((await prisma.assets.findUnique({ where: { id: 8616n } }))!.is_delete).toBe(true);
+    expect((await prisma.user_assets.findUnique({ where: { id: 8616n } }))!.is_delete).toBe(true);
 
     const nodes = [source, placeholder, survivor];
     const saved = await save({
@@ -1162,7 +1159,7 @@ describe.skipIf(!databaseUrl)("多结果任务逐项恢复与删除（IKJJQY）"
     ]);
     expect((await outputsOfSubmission(UUID_A)).map(row => [row.output_key, row.asset_id?.toString() ?? null, row.state]))
       .toEqual([["segment:1", "8615", "present"], ["segment:2", "8616", "removed"]]);
-    expect((await prisma.assets.findUnique({ where: { id: 8616n } }))!.is_delete).toBe(true);
+    expect((await prisma.user_assets.findUnique({ where: { id: 8616n } }))!.is_delete).toBe(true);
 
     for (let refresh = 0; refresh < 3; refresh += 1) {
       expect(await readItems()).toEqual([
@@ -1171,7 +1168,9 @@ describe.skipIf(!databaseUrl)("多结果任务逐项恢复与删除（IKJJQY）"
         ["segment:2", "8616", true, "removed", 2],
       ]);
       const document = await createCanvasRepo(prisma).getByProject(PROJECT_ID);
-      expect(JSON.parse(document.nodes ?? "null")).toEqual(JSON.parse(JSON.stringify(nodes)));
+      const byNodeId = (list: Array<{ id?: unknown }>) =>
+        [...list].sort((left, right) => String(left.id) < String(right.id) ? -1 : String(left.id) > String(right.id) ? 1 : 0);
+      expect(byNodeId(JSON.parse(document.nodes ?? "null"))).toEqual(byNodeId(JSON.parse(JSON.stringify(nodes))));
       expect(document.version).toBe(saved.version);
       const resolved = await resolveCanvasRecoveryItems(prisma, PROJECT_ID, [recoveryItemId(UUID_A, "segment:2")]);
       expect(resolved[0]!.items).toEqual([expect.objectContaining({ state: "removed", revision: 2 })]);
@@ -1185,7 +1184,7 @@ describe.skipIf(!databaseUrl)("多结果任务逐项恢复与删除（IKJJQY）"
     assetIds: string[];
     applyCommandId: string;
   }) {
-    await prisma.assets.createMany({
+    await prisma.user_assets.createMany({
       data: args.assetIds.map((id, index) => ({
         id: BigInt(id), user_id: BigInt(USER_ID), type: "video", url: `https://example.test/${id}.mp4`,
         ...(index === 1 ? { is_delete: true, deleted_at: new Date() } : {}),
@@ -1259,7 +1258,7 @@ describe.skipIf(!databaseUrl)("多结果任务逐项恢复与删除（IKJJQY）"
       ]);
       expect((await outputsOfSubmission(UUID_A)).map(row => [row.output_key, row.state, row.revision]))
         .toEqual([["segment:1", "present", 1], ["segment:2", "removed", 2], ["segment:3", "present", 1], ["segment:4", "present", 1]]);
-      expect((await prisma.assets.findUnique({ where: { id: BigInt(ASSETS[1]!) } }))!.is_delete).toBe(true);
+      expect((await prisma.user_assets.findUnique({ where: { id: BigInt(ASSETS[1]!) } }))!.is_delete).toBe(true);
     }
   });
 

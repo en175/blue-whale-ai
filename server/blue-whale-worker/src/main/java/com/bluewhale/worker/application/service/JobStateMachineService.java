@@ -7,7 +7,6 @@ import com.bluewhale.worker.domain.entity.GenerationJobLogEntity;
 import com.bluewhale.worker.domain.contract.JobStatusEnum;
 import com.bluewhale.worker.infrastructure.persistence.mapper.GenerationJobMapper;
 import com.bluewhale.worker.infrastructure.persistence.mapper.AssetMapper;
-import com.bluewhale.worker.infrastructure.persistence.mapper.ProjectEventMapper;
 import com.bluewhale.worker.infrastructure.persistence.mapper.GenerationJobLogMapper;
 import com.bluewhale.worker.infrastructure.persistence.mapper.GenerationOutputSlotMapper;
 import com.bluewhale.worker.infrastructure.persistence.mapper.SceneCardGenerationRecordMapper;
@@ -50,7 +49,6 @@ public class JobStateMachineService {
             GenerationJobMapper jobMapper,
             AssetMapper assetMapper,
             GenerationJobLogMapper jobLogMapper,
-            ProjectEventMapper projectEventMapper,
             GenerationOutputSlotMapper slotMapper,
             SceneCardGenerationRecordMapper sceneCardRecordMapper,
             StoryboardPreviewMapper storyboardPreviewMapper,
@@ -59,11 +57,8 @@ public class JobStateMachineService {
         this(jobMapper, jobLogMapper,
                 new JobClaimService(jobMapper, extraMapper),
                 new JobFinalizer(jobMapper, assetMapper, jobLogMapper, slotMapper, extraMapper,
-                        new SceneCardGenerationRecordSync(slotMapper, sceneCardRecordMapper,
-                                new ProjectEventPublisher(projectEventMapper)),
-                        new StoryboardPreviewSync(slotMapper, storyboardPreviewMapper,
-                                new ProjectEventPublisher(projectEventMapper)),
-                        new ProjectEventPublisher(projectEventMapper),
+                        new SceneCardGenerationRecordSync(slotMapper, sceneCardRecordMapper),
+                        new StoryboardPreviewSync(slotMapper, storyboardPreviewMapper),
                         TerminalEventOutbox.noop()));
     }
 

@@ -4,7 +4,6 @@ import com.bluewhale.worker.application.service.JobClaimService;
 import com.bluewhale.worker.application.service.JobFinalizer;
 import com.bluewhale.worker.application.service.TerminalEventOutbox;
 import com.bluewhale.worker.application.service.JobStateMachineService;
-import com.bluewhale.worker.application.service.ProjectEventPublisher;
 import com.bluewhale.worker.application.service.SceneCardGenerationRecordSync;
 import com.bluewhale.worker.application.service.StoryboardPreviewSync;
 import com.bluewhale.worker.infrastructure.config.NewApiUpstreamConfig.UpstreamCredential;
@@ -17,7 +16,6 @@ import com.bluewhale.worker.infrastructure.persistence.mapper.GenerationJobExtra
 import com.bluewhale.worker.infrastructure.persistence.mapper.GenerationJobLogMapper;
 import com.bluewhale.worker.infrastructure.persistence.mapper.GenerationJobMapper;
 import com.bluewhale.worker.infrastructure.persistence.mapper.GenerationOutputSlotMapper;
-import com.bluewhale.worker.infrastructure.persistence.mapper.ProjectEventMapper;
 import com.bluewhale.worker.infrastructure.persistence.mapper.SceneCardGenerationRecordMapper;
 import com.bluewhale.worker.infrastructure.persistence.mapper.StoryboardPreviewMapper;
 import com.bluewhale.worker.infrastructure.mq.GenerationMessageProducer;
@@ -144,11 +142,6 @@ class AudioVideoMuxCancelQueryErrorMySqlIntegrationTest {
         }
 
         @Bean
-        ProjectEventMapper projectEventMapper(SqlSessionFactory sf) throws Exception {
-            return factory(ProjectEventMapper.class, sf).getObject();
-        }
-
-        @Bean
         GenerationOutputSlotMapper slotMapper(SqlSessionFactory sf) throws Exception {
             return factory(GenerationOutputSlotMapper.class, sf).getObject();
         }
@@ -171,23 +164,20 @@ class AudioVideoMuxCancelQueryErrorMySqlIntegrationTest {
         @Bean
         JobStateMachineService service(
                 GenerationJobMapper jm, AssetMapper am, GenerationJobLogMapper jlm,
-                ProjectEventMapper pem, GenerationOutputSlotMapper sm,
+                GenerationOutputSlotMapper sm,
                 SceneCardGenerationRecordMapper rm, StoryboardPreviewMapper pm,
                 GenerationJobExtraMapper em) {
-            return new JobStateMachineService(jm, am, jlm, pem, sm, rm, pm, em);
+            return new JobStateMachineService(jm, am, jlm, sm, rm, pm, em);
         }
 
         @Bean
         JobFinalizer finalizer(
                 GenerationJobMapper jm, AssetMapper am, GenerationJobLogMapper jlm,
                 GenerationOutputSlotMapper sm, GenerationJobExtraMapper em,
-                ProjectEventMapper pem,
                 SceneCardGenerationRecordMapper rm, StoryboardPreviewMapper pm) {
-            ProjectEventPublisher events = new ProjectEventPublisher(pem);
             return new JobFinalizer(jm, am, jlm, sm, em,
-                    new SceneCardGenerationRecordSync(sm, rm, events),
-                    new StoryboardPreviewSync(sm, pm, events),
-                    events,
+                    new SceneCardGenerationRecordSync(sm, rm),
+                    new StoryboardPreviewSync(sm, pm),
                     TerminalEventOutbox.noop());
         }
 
@@ -264,7 +254,7 @@ class AudioVideoMuxCancelQueryErrorMySqlIntegrationTest {
 
     private int countAssets(long jobId, String storageKey) {
         Integer count = jdbc.queryForObject(
-                "SELECT COUNT(*) FROM assets WHERE generation_job_id=? AND storage_key=?",
+                "SELECT COUNT(*) FROM user_assets WHERE generation_job_id=? AND storage_key=?",
                 Integer.class, jobId, storageKey);
         return count != null ? count : 0;
     }

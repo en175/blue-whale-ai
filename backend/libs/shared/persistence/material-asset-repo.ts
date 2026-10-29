@@ -69,7 +69,7 @@ export function createMaterialAssetRepo(
 ): MaterialAssetRepo {
   return {
     async upsertProcessing({ userId, materialId, materialGroupId }) {
-      await prisma.material_assets.upsert({
+      await prisma.catalog_material_states.upsert({
         where: { material_id: materialId },
         update: {
           material_group_id: materialGroupId,
@@ -88,7 +88,7 @@ export function createMaterialAssetRepo(
       });
     },
     async findByMaterialId(userId, materialId) {
-      const row = await prisma.material_assets.findFirst({
+      const row = await prisma.catalog_material_states.findFirst({
         where: { material_id: materialId, user_id: BigInt(userId) },
       });
       return row ? toView(row) : null;
@@ -101,7 +101,7 @@ export function createMaterialAssetRepo(
       errorMessage,
       checkedAt,
     }) {
-      await prisma.material_assets.updateMany({
+      await prisma.catalog_material_states.updateMany({
         where: {
           material_id: materialId,
           user_id: BigInt(userId),
@@ -118,12 +118,12 @@ export function createMaterialAssetRepo(
       });
     },
     async deleteByMaterialId(userId, materialId) {
-      await prisma.material_assets.deleteMany({
+      await prisma.catalog_material_states.deleteMany({
         where: { material_id: materialId, user_id: BigInt(userId) },
       });
     },
     async deleteByGroupId(userId, materialGroupId) {
-      await prisma.material_assets.deleteMany({
+      await prisma.catalog_material_states.deleteMany({
         where: { material_group_id: materialGroupId, user_id: BigInt(userId) },
       });
     },

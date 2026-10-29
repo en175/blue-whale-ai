@@ -107,7 +107,11 @@ function frameOverrides(
       status: "succeeded",
       generation_job_id: 9001n,
     });
-    assetRows.push({ id: assetId, type, duration_ms: durationsMs[index] ?? null });
+    assetRows.push({
+      id: assetId,
+      type,
+      duration_ms: durationsMs[index] ?? (type === "video" ? 1000 : null),
+    });
   });
   return {
     frames,
@@ -116,14 +120,14 @@ function frameOverrides(
       storyboard_previews: {
         findMany: vi.fn().mockResolvedValue([{ first_generation_job_id: 9001n }]),
       },
-      assets: { findMany: vi.fn().mockResolvedValue(assetRows) },
+      user_assets: { findMany: vi.fn().mockResolvedValue(assetRows) },
     },
   };
 }
 
 function capabilityWith(features: Record<string, unknown>, base = CAP_FIELDS) {
   return {
-    generation_model_capability: {
+    catalog_models: {
       findUnique: vi.fn().mockResolvedValue({
         version: 3,
         enabled: true,
@@ -138,29 +142,15 @@ function capabilityWith(features: Record<string, unknown>, base = CAP_FIELDS) {
 function buildTx(
   overrides: Record<string, Record<string, ReturnType<typeof vi.fn>>>,
 ) {
-  const projectEventsCreate = vi.fn().mockImplementation(({ data }) => ({
-    id: 1n,
-    event_id: "evt_x",
-    event_type: data.event_type,
-    cursor: 100n,
-    project_id: data.project_id,
-    aggregate_type: data.aggregate_type,
-    aggregate_id: data.aggregate_id,
-    aggregate_version: data.aggregate_version,
-    correlation_id: data.correlation_id ?? null,
-    causation_id: data.causation_id ?? null,
-    occurred_at: new Date(),
-    payload: data.payload,
-  }));
   return {
     project: {
       findFirst: vi.fn().mockResolvedValue({ id: 42n }),
       ...overrides.project,
     },
-    command_idempotency: {
+    project_command_receipts: {
       findUnique: vi.fn().mockResolvedValue(null),
       create: vi.fn().mockResolvedValue({}),
-      ...overrides.command_idempotency,
+      ...overrides.project_command_receipts,
     },
     scene_cards: {
       findFirst: vi
@@ -183,11 +173,11 @@ function buildTx(
       create: vi.fn().mockResolvedValue({ id: 8001n }),
       ...overrides.scene_card_generation_records,
     },
-    generation_model_capability: {
+    catalog_models: {
       findUnique: vi.fn().mockResolvedValue(buildCapabilityRow()),
-      ...overrides.generation_model_capability,
+      ...overrides.catalog_models,
     },
-    canvas: {
+    project_canvas: {
       findFirst: vi.fn().mockResolvedValue({
         viewport_json: { x: 0, y: 0, zoom: 1 },
         nodes_json: [
@@ -200,7 +190,7 @@ function buildTx(
           },
         ],
       }),
-      ...overrides.canvas,
+      ...overrides.project_canvas,
     },
     generation_jobs: {
       create: vi
@@ -221,9 +211,9 @@ function buildTx(
       deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
       ...overrides.generation_job_extras,
     },
-    cost_reservations: {
+    billing_cost_reservations: {
       create: vi.fn().mockResolvedValue({}),
-      ...overrides.cost_reservations,
+      ...overrides.billing_cost_reservations,
     },
     generation_output_slots: {
       create: vi.fn().mockResolvedValue({}),
@@ -231,9 +221,9 @@ function buildTx(
       findMany: vi.fn().mockResolvedValue([]),
       ...overrides.generation_output_slots,
     },
-    assets: {
+    user_assets: {
       findMany: vi.fn().mockResolvedValue([]),
-      ...overrides.assets,
+      ...overrides.user_assets,
     },
     storyboard_previews: {
       findMany: vi.fn().mockResolvedValue([]),
@@ -242,10 +232,6 @@ function buildTx(
     generation_job_logs: {
       create: vi.fn().mockResolvedValue({}),
       ...overrides.generation_job_logs,
-    },
-    project_events: {
-      create: projectEventsCreate,
-      ...overrides.project_events,
     },
   };
 }
@@ -328,7 +314,7 @@ describe("SceneCardGenerationRepo.regenerateSceneCard", () => {
         status: "pending",
       }),
     });
-    expect(tx.command_idempotency.create).toHaveBeenCalledOnce();
+    expect(tx.project_command_receipts.create).toHaveBeenCalledOnce();
   });
 
   it("新 record 不再写 plan 溯源列（计划通道已退役）", async () => {
@@ -359,7 +345,7 @@ describe("SceneCardGenerationRepo.regenerateSceneCard", () => {
 
   it("重复 CommandId 命中则重放，不再写入（AC 幂等）", async () => {
     const tx = buildTx({
-      command_idempotency: {
+      project_command_receipts: {
         findUnique: vi.fn().mockResolvedValue({
           request_hash: baseInput.requestHash,
           resource_id: 5001n,
@@ -379,7 +365,7 @@ describe("SceneCardGenerationRepo.regenerateSceneCard", () => {
 
   it("同 CommandId 不同内容返回 idempotency_conflict", async () => {
     const tx = buildTx({
-      command_idempotency: {
+      project_command_receipts: {
         findUnique: vi.fn().mockResolvedValue({
           request_hash: "b".repeat(64),
           resource_id: 5001n,
@@ -439,7 +425,7 @@ describe("SceneCardGenerationRepo.regenerateSceneCard", () => {
 
   it("能力漂移（行版本变化）零写入（AC#4）", async () => {
     const tx = buildTx({
-      generation_model_capability: {
+      catalog_models: {
         findUnique: vi.fn().mockResolvedValue(buildCapabilityRow(99)),
       },
     });
@@ -455,7 +441,7 @@ describe("SceneCardGenerationRepo.regenerateSceneCard", () => {
   it("参数越界（aspect_ratio 不在能力支持）返回 capability_limit 零写入（AC#1）", async () => {
     const limitCapFields = { ...CAP_FIELDS, supported_aspect_ratios: ["9:16"] };
     const tx = buildTx({
-      generation_model_capability: {
+      catalog_models: {
         findUnique: vi.fn().mockResolvedValue({
           version: 3,
           enabled: true,
@@ -485,7 +471,7 @@ describe("SceneCardGenerationRepo.regenerateSceneCard", () => {
       supported_aspect_ratios: [{ id: "16:9", label: "横屏 16:9" }],
     };
     const tx = buildTx({
-      generation_model_capability: {
+      catalog_models: {
         findUnique: vi.fn().mockResolvedValue({
           version: 3,
           enabled: true,
@@ -522,7 +508,7 @@ describe("SceneCardGenerationRepo.regenerateSceneCard", () => {
       scene_card_generation_presets: {
         findFirst: vi.fn().mockResolvedValue({ id: 6001n, version: 1, reference_assets: frames }),
       },
-      generation_model_capability: {
+      catalog_models: {
         findUnique: vi.fn().mockResolvedValue({
           version: 3,
           enabled: true,
@@ -562,7 +548,7 @@ describe("SceneCardGenerationRepo.regenerateSceneCard", () => {
       scene_card_generation_presets: {
         findFirst: vi.fn().mockResolvedValue({ id: 6001n, version: 1, reference_assets: frames }),
       },
-      generation_model_capability: {
+      catalog_models: {
         findUnique: vi.fn().mockResolvedValue({
           version: 3,
           enabled: true,
@@ -590,7 +576,7 @@ describe("SceneCardGenerationRepo.regenerateSceneCard", () => {
   it("参数越界（duration 不在档位数组）返回 capability_limit 零写入（AC#1）", async () => {
     const limitCapFields = { ...CAP_FIELDS, supported_durations: [3, 5, 10] };
     const tx = buildTx({
-      generation_model_capability: {
+      catalog_models: {
         findUnique: vi.fn().mockResolvedValue({
           version: 3,
           enabled: true,
@@ -617,7 +603,7 @@ describe("SceneCardGenerationRepo.regenerateSceneCard", () => {
   it("duration 在档位数组内放行（数组形态不误拒）", async () => {
     const capFields = { ...CAP_FIELDS, supported_durations: [3, 5, 10] };
     const tx = buildTx({
-      generation_model_capability: {
+      catalog_models: {
         findUnique: vi.fn().mockResolvedValue({
           version: 3,
           enabled: true,
@@ -700,7 +686,7 @@ describe("SceneCardGenerationRepo.regenerateSceneCard", () => {
   it("场景卡素材声明为首帧时前置拒绝并零写入（AC#4 不静默降级）", async () => {
     const capFields = { ...CAP_FIELDS, features: { first_frame: true } };
     const tx = buildTx({
-      generation_model_capability: {
+      catalog_models: {
         findUnique: vi.fn().mockResolvedValue({
           version: 3,
           enabled: true,
@@ -791,7 +777,7 @@ describe("SceneCardGenerationRepo.regenerateSceneCard", () => {
   it("模型声明 camelCase 首尾帧能力时通过能力校验，但 mention 引用 fail-closed 零写入（IKEEFV）", async () => {
     const capFields = { ...CAP_FIELDS, features: { firstLastFrame: true } };
     const tx = buildTx({
-      generation_model_capability: {
+      catalog_models: {
         findUnique: vi.fn().mockResolvedValue({
           version: 3,
           enabled: true,
@@ -875,7 +861,7 @@ describe("SceneCardGenerationRepo.regenerateSceneCard", () => {
       kind: "validation_failed",
       reason: "参考素材列表只能修改角色",
     });
-    expect(tx.generation_model_capability.findUnique).not.toHaveBeenCalled();
+    expect(tx.catalog_models.findUnique).not.toHaveBeenCalled();
     expect(tx.scene_card_generation_presets.updateMany).not.toHaveBeenCalled();
   });
 
@@ -906,7 +892,7 @@ describe("SceneCardGenerationRepo.regenerateSceneCard", () => {
       kind: "validation_failed",
       reason: "参考素材列表只能修改角色",
     });
-    expect(tx.generation_model_capability.findUnique).not.toHaveBeenCalled();
+    expect(tx.catalog_models.findUnique).not.toHaveBeenCalled();
     expect(tx.scene_card_generation_presets.updateMany).not.toHaveBeenCalled();
   });
 
@@ -920,7 +906,7 @@ describe("SceneCardGenerationRepo.regenerateSceneCard", () => {
     });
 
     expect(result).toEqual({ kind: "capability_drift" });
-    expect(tx.generation_model_capability.findUnique).not.toHaveBeenCalled();
+    expect(tx.catalog_models.findUnique).not.toHaveBeenCalled();
     expect(tx.scene_card_generation_presets.updateMany).not.toHaveBeenCalled();
   });
 
@@ -1128,5 +1114,177 @@ describe("SceneCardGenerationRepo.regenerateSceneCard 素材门（IKFYHJ）", ()
       kind: "capability_limit",
       reason: "参考素材总时长超过 15 秒，请减少素材",
     });
+  });
+});
+
+function repoWithProbe(tx: ReturnType<typeof buildTx>) {
+  const transaction = vi.fn(
+    async (callback: (tx: unknown) => Promise<unknown>) => callback(tx),
+  );
+  const findUnique = vi.fn().mockResolvedValue(null);
+  const prisma = {
+    $transaction: transaction,
+    generation_jobs: { findUnique },
+  } as unknown as PrismaClient;
+  return { repo: createSceneCardGenerationRepo(prisma), transaction, findUnique };
+}
+
+function billingStub() {
+  return {
+    charge: vi.fn().mockResolvedValue(undefined),
+    release: vi.fn().mockResolvedValue(undefined),
+  };
+}
+
+describe("SceneCardGenerationRepo.regenerateSceneCard 计费（IKR60U）", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("成功建单后在事务内扣费一次，计价键按视频口径", async () => {
+    const tx = buildTx({});
+    const billing = billingStub();
+    const { repo } = repoWith(tx);
+
+    const result = await repo.regenerateSceneCard({ ...baseInput, billing });
+
+    expect(result.kind).toBe("applied");
+    expect(billing.charge).toHaveBeenCalledTimes(1);
+    expect(billing.charge.mock.calls[0]![0]).toMatchObject({
+      userId: "100",
+      jobId: 9001,
+      commandId: "cmd-1",
+      modelId: "doubao-seedance-1.0",
+      taskType: "video",
+      input: {
+        resolution: "1280x720",
+        aspect_ratio: "16:9",
+        duration: 5,
+        expected_output_count: 1,
+      },
+    });
+    expect(billing.release).not.toHaveBeenCalled();
+  });
+
+  it("幂等重放不重复扣费", async () => {
+    const tx = buildTx({
+      project_command_receipts: {
+        findUnique: vi.fn().mockResolvedValue({
+          request_hash: baseInput.requestHash,
+          resource_id: 7001n,
+          generation_job_id: 9001n,
+        }),
+      },
+    });
+    const billing = billingStub();
+    const { repo } = repoWith(tx);
+
+    const result = await repo.regenerateSceneCard({ ...baseInput, billing });
+
+    expect(result).toMatchObject({ kind: "replayed", generation_job_id: "9001" });
+    expect(billing.charge).not.toHaveBeenCalled();
+  });
+
+  it("扣费后事务失败 → 释放这笔扣款", async () => {
+    const tx = buildTx({
+      scene_card_generation_records: {
+        create: vi.fn().mockRejectedValue(new Error("commit failed")),
+      },
+    });
+    const billing = billingStub();
+    const { repo } = repoWithProbe(tx);
+
+    await expect(
+      repo.regenerateSceneCard({ ...baseInput, billing }),
+    ).rejects.toThrow("commit failed");
+
+    expect(billing.charge).toHaveBeenCalledTimes(1);
+    expect(billing.release).toHaveBeenCalledTimes(1);
+    expect(billing.release).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: "100", jobId: 9001 }),
+    );
+  });
+
+  it("唯一键重试：先释放上一笔，再按新任务扣一次", async () => {
+    const firstTx = buildTx({});
+    const secondTx = buildTx({
+      generation_jobs: {
+        create: vi.fn().mockResolvedValue({
+          id: 9002n,
+          type: "video",
+          source: "scene_card",
+          status: "queued",
+          progress: 0,
+          version: 0,
+        }),
+      },
+    });
+    let attempt = 0;
+    const transaction = vi.fn(
+      async (callback: (tx: unknown) => Promise<unknown>) => {
+        attempt += 1;
+        const result = await callback(attempt === 1 ? firstTx : secondTx);
+        if (attempt === 1) {
+          throw Object.assign(new Error("unique clash"), { code: "P2002" });
+        }
+        return result;
+      },
+    );
+    const prisma = {
+      $transaction: transaction,
+      generation_jobs: { findUnique: vi.fn().mockResolvedValue(null) },
+    } as unknown as PrismaClient;
+    const repo = createSceneCardGenerationRepo(prisma);
+    const billing = billingStub();
+
+    const result = await repo.regenerateSceneCard({ ...baseInput, billing });
+
+    expect(result).toMatchObject({ kind: "applied", generation_job_id: "9002" });
+    expect(billing.charge.mock.calls.map((call) => call[0].jobId)).toEqual([
+      9001, 9002,
+    ]);
+    expect(billing.release).toHaveBeenCalledTimes(1);
+    expect(billing.release).toHaveBeenCalledWith(
+      expect.objectContaining({ jobId: 9001 }),
+    );
+  });
+
+  it("参考视频缺时长 → 拒绝提交，不按缺参考秒的价格扣费", async () => {
+    const tx = buildTx({
+      ...capabilityWith({ video_reference: true, video_reference_max: 3 }),
+      generation_output_slots: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            id: 9101n,
+            asset_id: 3001n,
+            status: "succeeded",
+            generation_job_id: 8001n,
+          },
+        ]),
+      },
+      storyboard_previews: {
+        findMany: vi
+          .fn()
+          .mockResolvedValue([{ first_generation_job_id: 8001n }]),
+      },
+      user_assets: {
+        findMany: vi
+          .fn()
+          .mockResolvedValue([{ id: 3001n, type: "video", duration_ms: null }]),
+      },
+    });
+    const billing = billingStub();
+    const { repo } = repoWith(tx);
+
+    const result = await repo.regenerateSceneCard({
+      ...baseInput,
+      reference_mode: "text_to_video",
+      reference_assets: [
+        { slot_id: "9101", type: "storyboard_frame", role: "reference" },
+      ],
+    });
+
+    expect(result).toMatchObject({ kind: "validation_failed" });
+    expect(billing.charge).not.toHaveBeenCalled();
   });
 });

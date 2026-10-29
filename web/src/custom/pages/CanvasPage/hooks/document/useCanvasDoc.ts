@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Edge, Node, Viewport } from '@xyflow/react';
 import { fetchProjectSnapshot, type SnapshotAsset } from '@/custom/api/projects';
-import { fetchCanvasDoc, type CanvasDoc, type LegacyMigrationReport } from '@/custom/api/canvas';
+import { fetchCanvasDoc, type CanvasDoc } from '@/custom/api/canvas';
 
 const EMPTY_DOC: CanvasDoc = {
   id: null,
@@ -36,7 +36,6 @@ export function useCanvasDoc(projectId: string) {
   const [assets, setAssets] = useState<Record<string, SnapshotAsset>>({});
   const [loading, setLoading] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
-  const [legacyMigration, setLegacyMigration] = useState<LegacyMigrationReport | null>(null);
   const activeProjectRef = useRef(projectId);
   activeProjectRef.current = projectId;
   const loadSerialRef = useRef(0);
@@ -49,7 +48,6 @@ export function useCanvasDoc(projectId: string) {
       setDoc(null);
       setDocProjectId(null);
       setAssets({});
-      setLegacyMigration(null);
       setLoadFailed(false);
       return Promise.resolve([]);
     }
@@ -65,7 +63,6 @@ export function useCanvasDoc(projectId: string) {
         setLoadFailed(false);
         setAssets(snap.assets ?? {});
         const canvas = snap.canvas;
-        setLegacyMigration(snap.legacy_migration ?? null);
         if (import.meta.env.DEV) {
           console.info('[canvas] snapshot canvas 字段形态:', {
             exists: !!canvas,
@@ -84,7 +81,6 @@ export function useCanvasDoc(projectId: string) {
             if (import.meta.env.DEV) {
               console.info('[canvas] canvases 回退结果:', { version: rec.version, nodeCount: rec.nodes.length });
             }
-            setLegacyMigration(rec.legacyMigration ?? null);
             setLoadFailed(false);
             setDocProjectId(projectId);
             setDoc(rec);
@@ -167,5 +163,5 @@ export function useCanvasDoc(projectId: string) {
     });
   }, []);
 
-  return { doc: docProjectId === projectId ? doc : null, assets, loading, loadFailed, refetch, acceptDoc: setDoc, legacyMigration, patchAsset, upsertAssets };
+  return { doc: docProjectId === projectId ? doc : null, assets, loading, loadFailed, refetch, acceptDoc: setDoc, patchAsset, upsertAssets };
 }

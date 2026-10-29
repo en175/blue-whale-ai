@@ -1,33 +1,16 @@
-import { timingSafeEqual } from "node:crypto";
 import { Body, Controller, Headers, Post } from "@nestjs/common";
 import {
   agentAssetResolveRequestSchema,
   resolveAgentAsset,
 } from "@lib/shared/assets/agent-asset-resolver.js";
 import { NewApiError } from "@lib/core";
+import { authorizedAgentService, requiredDecimalHeader } from "@lib/shared/agent/internal-auth.js";
 import { BypassTransform } from "@lib/infra/decorators/bypass-transform.decorator.js";
 import { Public } from "@lib/infra/decorators/public.decorator.js";
 import { AssetService } from "@lib/shared/assets/assets.service.js";
 import { AssetStorageService } from "@lib/shared/assets/storage.service.js";
 
-function authorizedService(header: string | undefined): boolean {
-  const expected = process.env.AGENT_SERVICE_TOKEN?.trim();
-  const supplied = header?.startsWith("Bearer ")
-    ? header.slice("Bearer ".length)
-    : "";
-  if (!expected || !supplied) return false;
-  const expectedBytes = Buffer.from(expected);
-  const suppliedBytes = Buffer.from(supplied);
-  return (
-    expectedBytes.length === suppliedBytes.length &&
-    timingSafeEqual(expectedBytes, suppliedBytes)
-  );
-}
 
-function requiredDecimalHeader(value: string | undefined): string | null {
-  const normalized = value?.trim();
-  return normalized && /^[1-9][0-9]*$/.test(normalized) ? normalized : null;
-}
 
 @Public()
 @BypassTransform()
@@ -46,7 +29,7 @@ export class InternalAgentAssetsController {
     @Headers("x-blue-whale-project-id") projectHeader: string | undefined,
     @Body() body: unknown,
   ) {
-    if (!authorizedService(authorization)) {
+    if (!authorizedAgentService(authorization)) {
       throw new NewApiError("服务凭证无效", 401, "unauthorized");
     }
     const userId = requiredDecimalHeader(userHeader);

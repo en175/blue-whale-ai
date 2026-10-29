@@ -8,8 +8,8 @@ function prismaWith(cards: Array<Record<string, unknown>>, images: Array<Record<
   const count = vi.fn().mockResolvedValue(cards.length);
   return {
     prisma: {
-      template_card: { findMany, count },
-      template_card_image: { findMany: vi.fn().mockResolvedValue(images) },
+      catalog_templates: { findMany, count },
+      catalog_template_images: { findMany: vi.fn().mockResolvedValue(images) },
     } as unknown as PrismaClient,
     findMany,
   };

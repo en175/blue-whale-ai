@@ -26,7 +26,7 @@ export async function writeCreateIdempotency(
   operation: string = CREATE_GENERATION_JOB_OPERATION,
 ): Promise<void> {
   if (!idempotency) return;
-  await tx.command_idempotency.create({
+  await tx.project_command_receipts.create({
     data: {
       project_id: BigInt(write.projectId),
       operation,
@@ -44,7 +44,7 @@ export async function readCreateIdempotency(
   idempotency: CreateJobIdempotency,
   operation: string = CREATE_GENERATION_JOB_OPERATION,
 ): Promise<CreateJobResult | null> {
-  const row = await prisma.command_idempotency.findUnique({
+  const row = await prisma.project_command_receipts.findUnique({
     where: {
       project_id_operation_idempotency_key: {
         project_id: BigInt(projectId),

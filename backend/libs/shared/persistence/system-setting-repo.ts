@@ -15,7 +15,7 @@ export interface SystemSettingRepo {
 export function createSystemSettingRepo(prisma: PrismaClient): SystemSettingRepo {
   return {
     async get(key) {
-      const row = await prisma.system_settings.findUnique({
+      const row = await prisma.bw_platform_settings.findUnique({
         where: { setting_key: key },
       });
       if (!row) return null;
@@ -23,7 +23,7 @@ export function createSystemSettingRepo(prisma: PrismaClient): SystemSettingRepo
     },
 
     async put(key, value, isSecret) {
-      await prisma.system_settings.upsert({
+      await prisma.bw_platform_settings.upsert({
         where: { setting_key: key },
         create: { setting_key: key, setting_value: value, is_secret: isSecret },
         update: {

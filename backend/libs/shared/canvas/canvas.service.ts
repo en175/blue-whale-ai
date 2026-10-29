@@ -4,12 +4,10 @@ import { nodeAssetId, planError } from "./prompt-target.js";
 import { BadRequestException, ConflictException, Injectable } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import { readPromptPreview, sourceKey } from "./prompt-preview.js";
-import { planLegacyCardMigration, type CanvasNodeLike } from "./legacy-card-migration.js";
-import { CANVAS_EDGE_LIMITS, CANVAS_RECOVERY_PROTOCOL_VERSION, CONVERSATION_QUOTE_LIST_LIMIT, DATA_NOT_EXIST_CODE, DomainError, canvasEdgeSchema, fail, ok, applyPreviewSchema, conversationQuoteCreateSchema, previewSourceSchema, PROMPT_TEXT_LIMITS as limits, RECOVERY_PAGE_LIMIT_DEFAULT, RECOVERY_PAGE_LIMIT_MAX, RECOVERY_PAGE_LIMIT_MIN, RECOVERY_REASONS, RECOVERY_RESOLVE_IDS_MAX, recoverySaveFieldsSchema, type LegacyCardHistoryItem, type LegacyMigrationReport } from "@lib/contracts";
+import { CANVAS_EDGE_LIMITS, CANVAS_RECOVERY_PROTOCOL_VERSION, CONVERSATION_QUOTE_LIST_LIMIT, DATA_NOT_EXIST_CODE, DomainError, canvasEdgeSchema, fail, ok, applyPreviewSchema, conversationQuoteCreateSchema, previewSourceSchema, PROMPT_TEXT_LIMITS as limits, RECOVERY_PAGE_LIMIT_DEFAULT, RECOVERY_PAGE_LIMIT_MAX, RECOVERY_PAGE_LIMIT_MIN, RECOVERY_REASONS, RECOVERY_RESOLVE_IDS_MAX, recoverySaveFieldsSchema } from "@lib/contracts";
 import {
   createCanvasRepo,
   createConversationQuoteRepo,
-  createLegacyCardHistoryRepo,
   RecoveryContractError,
   decodeRecoveryCursor,
   guardLegacyCanvasWrite,
@@ -19,9 +17,7 @@ import {
   recoveryMarkerOfNode,
   resolveCanvasRecoveryItems,
   saveCanvasWithRecovery,
-  type CanvasView,
   type ConversationQuoteRow,
-  type LegacyCardHistoryRow,
   type RecoveryRecordView,
 } from "@lib/shared/persistence/index.js";
 
@@ -29,6 +25,87 @@ import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";
 import { promptMentionSchema, validPromptMentions, mediaMentionSchema, mediaRefSchema, validMediaMentions, mediaRefsCoverMentions, mediaAndPromptMentionsDisjoint, TEXT_INDEX_EDGE_MARKER, type PromptPreviewContent, type PromptPreviewSource } from "@lib/contracts";
 import { PromptMaterialUnavailableError } from "@lib/shared/persistence/canvas-repo.js";
+import { CanvasRowsWriteError } from "@lib/shared/persistence/canvas-rows-replace.js";
+import {
+  CanvasApplyConflictError,
+  CanvasApplyVersionError,
+  applyCanvasChanges,
+} from "@lib/shared/persistence/project-canvas-apply-repo.js";
+import {
+  CanvasRowsImportError,
+  ensureCanvasRowsImported,
+} from "@lib/shared/persistence/canvas-json-import.js";
+import { validateMediaIndexShape, validateNodePayload, validatePromptSourcePayload } from "./node-validation.js";
+
+function parseIdList(raw: unknown, field: string): string[] {
+  if (raw === undefined || raw === null) return [];
+  if (!Array.isArray(raw) || raw.some((item) => typeof item !== "string" || item.length === 0 || item.length > 128)) {
+    throw new BadRequestException(`${field} 格式无效`);
+  }
+  if (raw.length > CANVAS_EDGE_LIMITS.maxEdges) throw new BadRequestException(`${field} 数量超限`);
+  return [...new Set(raw as string[])];
+}
+
+function parseApplyNodes(raw: unknown): Array<{ id: string; type: string; position?: { x?: unknown; y?: unknown }; data?: Record<string, unknown> }> {
+  if (raw === undefined || raw === null) return [];
+  if (!Array.isArray(raw)) throw new BadRequestException("画布节点格式无效");
+  if (raw.length > 5000) throw new BadRequestException("节点数量超过 5000 上限，原内容未改动");
+  if (Buffer.byteLength(JSON.stringify(raw), "utf8") > limits.canvasBytes) {
+    throw new BadRequestException("画布内容超过 4 MiB，原内容未改动");
+  }
+  for (const item of raw) {
+    if (!item || typeof item !== "object" || typeof (item as { id?: unknown }).id !== "string" || typeof (item as { type?: unknown }).type !== "string") {
+      throw new BadRequestException("画布节点格式无效");
+    }
+  }
+  return raw as Array<{ id: string; type: string; position?: { x?: unknown; y?: unknown }; data?: Record<string, unknown> }>;
+}
+
+function parseApplyEdges(raw: unknown): Array<{ id: string; source: string; target: string; [key: string]: unknown }> {
+  if (raw === undefined || raw === null) return [];
+  if (!Array.isArray(raw)) throw new BadRequestException("画布连线格式无效");
+  if (Buffer.byteLength(JSON.stringify(raw), "utf8") > CANVAS_EDGE_LIMITS.edgesBytes) {
+    throw new BadRequestException("连线内容超过 256 KiB，原内容未改动");
+  }
+  if (raw.length > CANVAS_EDGE_LIMITS.maxEdges) {
+    throw new BadRequestException(`连线数量超过 ${CANVAS_EDGE_LIMITS.maxEdges} 条上限，原内容未改动`);
+  }
+  const pairs = new Set<string>();
+  return raw.map((item) => {
+    const parsed = canvasEdgeSchema.safeParse(item);
+    if (!parsed.success) throw new BadRequestException("画布连线格式无效，原内容未改动");
+    const pair = `${parsed.data.source}\0${parsed.data.target}`;
+    if (pairs.has(pair)) throw new BadRequestException("同一对节点之间只允许一条连线，原内容未改动");
+    pairs.add(pair);
+    return item as { id: string; source: string; target: string; [key: string]: unknown };
+  });
+}
+
+function parseApplyViewport(raw: unknown): { x: number; y: number; zoom: number } | null | undefined {
+  if (raw === undefined) return undefined;
+  if (raw === null) return null;
+  let value = raw;
+  if (typeof raw === "string") {
+    try {
+      value = JSON.parse(raw);
+    } catch {
+      throw new BadRequestException("viewport 格式无效");
+    }
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new BadRequestException("viewport 格式无效");
+  }
+  const record = value as Record<string, unknown>;
+  const { x, y, zoom } = record;
+  if (
+    typeof x !== "number" || !Number.isFinite(x) ||
+    typeof y !== "number" || !Number.isFinite(y) ||
+    typeof zoom !== "number" || !Number.isFinite(zoom) || zoom <= 0
+  ) {
+    throw new BadRequestException("viewport 格式无效");
+  }
+  return { x, y, zoom };
+}
 
 function isReusableApplyMediaNode(item: { type?: string; data?: Record<string, unknown> }): boolean {
   if (item.type !== "mediaNode") return false;
@@ -49,20 +126,6 @@ function toQuoteView(row: ConversationQuoteRow) {
   };
 }
 
-function toHistoryItem(row: LegacyCardHistoryRow): LegacyCardHistoryItem {
-  const source = previewSourceSchema.nullable().safeParse(row.source_json ?? null);
-  return {
-    historyId: row.id.toString(),
-    nodeId: row.node_id,
-    title: row.title,
-    promptText: row.prompt_text,
-    visualText: row.visual_text ?? null,
-    source: source.success ? source.data : null,
-    cardJson: row.card_json ?? null,
-    migratedAt: wallClockRfc3339(row.gmt_create),
-  };
-}
-
 function canvasVersionConflict(version: number | null) {
   return { code: 412, msg: "Canvas 版本冲突", data: { version } } as const;
 }
@@ -73,7 +136,6 @@ export const CANVAS_SAVE_CONFLICT_CODES: ReadonlySet<number> = new Set([400, 404
 export class CanvasService {
   private repoInstance?: ReturnType<typeof createCanvasRepo>;
   private quoteRepoInstance?: ReturnType<typeof createConversationQuoteRepo>;
-  private historyRepoInstance?: ReturnType<typeof createLegacyCardHistoryRepo>;
 
   private get repo(): ReturnType<typeof createCanvasRepo> {
     if (!this.repoInstance) {
@@ -89,13 +151,6 @@ export class CanvasService {
     return this.quoteRepoInstance;
   }
 
-  private get historyRepo(): ReturnType<typeof createLegacyCardHistoryRepo> {
-    if (!this.historyRepoInstance) {
-      this.historyRepoInstance = createLegacyCardHistoryRepo(this.prisma.client);
-    }
-    return this.historyRepoInstance;
-  }
-
   constructor(
     private readonly prisma: PrismaService,
     private readonly project: ProjectService,
@@ -104,58 +159,11 @@ export class CanvasService {
   async get(ownerId: string, projectId: string) {
     const owned = await this.project.findOwnedById(projectId, ownerId);
     if (!owned) return fail(DATA_NOT_EXIST_CODE, "项目不存在");
-    const { canvas, report } = await this.migrateLegacyCards(projectId);
-    if (report.migrated.length > 0 || report.failed.length > 0) {
-      return ok({ ...canvas, legacy_migration: report });
-    }
-    return ok(canvas);
+    return ok(await this.repo.getByProject(projectId));
   }
 
   getByProject(projectId: string) {
     return this.repo.getByProject(projectId);
-  }
-
-  async migrateLegacyCards(projectId: string): Promise<{ canvas: CanvasView; report: LegacyMigrationReport }> {
-    for (let attempt = 0; attempt < 5; attempt += 1) {
-      const canvas = await this.repo.getByProject(projectId);
-      let nodes: CanvasNodeLike[];
-      try {
-        const parsed = JSON.parse(canvas.nodes ?? "[]") as unknown;
-        if (!Array.isArray(parsed)) throw new Error();
-        nodes = parsed as CanvasNodeLike[];
-      } catch {
-        return { canvas, report: { migrated: [], failed: [] } };
-      }
-      const history = await this.historyRepo.listByProject(projectId);
-      const plan = planLegacyCardMigration(nodes, history);
-      if (!plan) return { canvas, report: { migrated: [], failed: [] } };
-      if (plan.migrated.length === 0) {
-        return { canvas, report: { migrated: [], failed: plan.failed } };
-      }
-      try {
-        const saved = await this.historyRepo.migrate(projectId, canvas.version!, JSON.stringify(plan.nodes), plan.historyDrafts);
-        if (saved) return { canvas: await this.repo.getByProject(projectId), report: { migrated: plan.migrated, failed: plan.failed } };
-      } catch (error) {
-        const code = (error as { code?: unknown })?.code;
-        if (code !== "P2034") throw error;
-      }
-    }
-    const canvas = await this.repo.getByProject(projectId);
-    try {
-      const parsed = JSON.parse(canvas.nodes ?? "[]") as unknown;
-      const nodes = (Array.isArray(parsed) ? parsed : []) as CanvasNodeLike[];
-      const history = await this.historyRepo.listByProject(projectId);
-      const plan = planLegacyCardMigration(nodes, history);
-      return { canvas, report: { migrated: [], failed: plan?.failed ?? [] } };
-    } catch {
-      return { canvas, report: { migrated: [], failed: [] } };
-    }
-  }
-
-  async listLegacyCardHistory(ownerId: string, projectId: string) {
-    if (!await this.project.findOwnedById(projectId, ownerId)) return fail(DATA_NOT_EXIST_CODE, "项目不存在");
-    const rows = await this.historyRepo.listByProject(projectId);
-    return ok({ items: rows.map(toHistoryItem) });
   }
 
   async createConversationQuote(ownerId: string, projectId: string, body: unknown) {
@@ -203,7 +211,7 @@ export class CanvasService {
         ? new Set((existing.data.promptMentions as Array<{ assetId: string }>).map(mention => mention.assetId)) : undefined;
       for (const material of content.promptMaterials ?? []) {
         if (requiredIds && !requiredIds.has(material.assetId)) continue;
-        const asset = await this.prisma.client.assets.findFirst({ where: {
+        const asset = await this.prisma.client.user_assets.findFirst({ where: {
           id: BigInt(material.assetId), user_id: BigInt(ownerId), is_delete: false, status: "normal", type: material.mediaType,
         } });
         const indices = content.promptMentions?.filter(mention => mention.assetId === material.assetId).map(mention => `#${mention.index}`).join("、");
@@ -238,7 +246,16 @@ export class CanvasService {
       guardLegacyCanvasWrite(nodes as Array<Record<string, unknown>>, [...nodes, ...additions, node] as Array<Record<string, unknown>>);
       if (Buffer.byteLength(serialized, "utf8") > limits.canvasBytes) throw new BadRequestException("画布内容超过 4 MiB，原内容未改动");
       try {
-        const saved = await this.repo.saveIfVersion(projectId, canvas.version, canvas.viewport, serialized, serializedEdges, { ownerId, items: content.promptMaterials ?? [] });
+        const saved = await this.saveRows(
+          projectId,
+          { expectedVersion: canvas.version },
+          canvas,
+          canvas.viewport,
+          serialized,
+          serializedEdges,
+          ownerId,
+          content.promptMaterials ?? [],
+        );
         if (saved) return ok({ node, canvas: saved, reused: false });
       } catch (error) {
         if (error instanceof PromptMaterialUnavailableError) {
@@ -249,6 +266,162 @@ export class CanvasService {
       }
     }
     throw new ConflictException("画布正在被修改，请重试应用");
+  }
+
+  async apply(
+    ownerId: string,
+    projectId: string,
+    body: {
+      upsert_nodes?: unknown;
+      delete_node_ids?: unknown;
+      upsert_edges?: unknown;
+      delete_edge_ids?: unknown;
+      viewport?: unknown;
+      expectedVersion?: number | null;
+    },
+  ) {
+    const owned = await this.project.findOwnedById(projectId, ownerId);
+    if (!owned) throw new DomainError(DATA_NOT_EXIST_CODE, "项目不存在");
+    await this.ensureRows(projectId);
+    const nodes = parseApplyNodes(body.upsert_nodes);
+    const edges = parseApplyEdges(body.upsert_edges);
+    const deleteNodeIds = parseIdList(body.delete_node_ids, "delete_node_ids");
+    const deleteEdgeIds = parseIdList(body.delete_edge_ids, "delete_edge_ids");
+    const viewport = parseApplyViewport(body.viewport);
+    const batchNodeIds = new Set(nodes.map((node) => node.id));
+    const seenSources = new Set<string>();
+    for (const node of nodes) {
+      validateNodePayload(node, limits);
+      validateMediaIndexShape(node);
+      validatePromptSourcePayload(node);
+      if (node.data?.promptSource !== undefined) {
+        const parsedSource = previewSourceSchema.safeParse(node.data.promptSource);
+        if (!parsedSource.success) {
+          throw new BadRequestException("预览来源不可修改或重复，请使用应用入口");
+        }
+        const key = sourceKey(parsedSource.data);
+        if (!key || seenSources.has(key)) {
+          throw new BadRequestException("预览来源不可修改或重复，请使用应用入口");
+        }
+        seenSources.add(key);
+        const mentions = promptMentionSchema.array().safeParse(node.data?.promptMentions ?? []);
+        if (!mentions.success || !validPromptMentions(String(node.data?.text ?? ""), mentions.data)) {
+          throw new BadRequestException("正文素材索引无效，原内容未改动");
+        }
+      }
+    }
+    const promptSourceIds = nodes
+      .filter((node) => node.data?.promptSource !== undefined)
+      .map((node) => node.id);
+    if (promptSourceIds.length > 0) {
+      const previousRows = await this.prisma.client.project_nodes.findMany({
+        where: { project_id: BigInt(projectId), node_id: { in: promptSourceIds } },
+        select: { node_id: true, data_json: true },
+      });
+      for (const row of previousRows) {
+        const previousTitle = (row.data_json as Record<string, unknown> | null)?.promptOriginalTitle;
+        const next = nodes.find((node) => node.id === row.node_id);
+        if (previousTitle !== undefined && next?.data?.promptOriginalTitle !== previousTitle) {
+          throw new BadRequestException("方案原始标题不可修改");
+        }
+      }
+    }
+    const removed = new Set(deleteNodeIds.filter((id) => !batchNodeIds.has(id)));
+    const referenced = [...new Set(edges.flatMap((edge) => [edge.source, edge.target]))].filter(
+      (id) => !batchNodeIds.has(id),
+    );
+    if (referenced.length > 0) {
+      const alive = await this.prisma.client.project_nodes.findMany({
+        where: { project_id: BigInt(projectId), node_id: { in: referenced }, is_delete: 0 },
+        select: { node_id: true },
+      });
+      const aliveIds = new Set(alive.map((row) => row.node_id));
+      if (referenced.some((id) => !aliveIds.has(id) || removed.has(id))) {
+        throw new BadRequestException("连线端点必须引用存在的画布节点，原内容未改动");
+      }
+    }
+    const materials = await this.collectApplyMaterials(ownerId, nodes);
+    let result;
+    try {
+      result = await applyCanvasChanges(this.prisma.client, {
+        projectId,
+        nodes,
+        deleteNodeIds,
+        edges,
+        deleteEdgeIds,
+        ...(viewport !== undefined ? { viewport } : {}),
+        ...(body.expectedVersion !== undefined ? { expectedVersion: body.expectedVersion } : {}),
+        actorId: ownerId,
+        ...(materials.length > 0 ? { materials: { ownerId, items: materials } } : {}),
+      });
+    } catch (error) {
+      if (error instanceof CanvasApplyVersionError) {
+        return canvasVersionConflict(error.version);
+      }
+      if (error instanceof CanvasApplyConflictError) {
+        if (error.reason === "duplicate_edge_pair") {
+          throw new BadRequestException("同一对节点之间只允许一条连线，原内容未改动");
+        }
+        if (error.reason === "missing_endpoint") {
+          throw new BadRequestException("连线端点必须引用存在的画布节点，原内容未改动");
+        }
+        throw new BadRequestException("节点或连线 id 在请求内重复");
+      }
+      if (error instanceof CanvasRowsImportError) {
+        throw this.rowsImportConflict(error);
+      }
+      if (error instanceof PromptMaterialUnavailableError) {
+        throw new BadRequestException("素材已删除、无权访问或身份不一致，原内容未改动");
+      }
+      throw error;
+    }
+    return ok(result);
+  }
+
+  private rowsImportConflict(error: CanvasRowsImportError): ConflictException {
+    return new ConflictException(
+      error.reason === "parse_failure"
+        ? "画布存量数据无法自动转换，请联系管理员处理"
+        : "画布行数据与迁移标记不一致，请联系管理员处理",
+    );
+  }
+
+  private async ensureRows(projectId: string) {
+    if (await this.repo.isRowsAuthoritative(projectId)) return;
+    try {
+      await ensureCanvasRowsImported(this.prisma.client, BigInt(projectId));
+    } catch (error) {
+      if (error instanceof CanvasRowsImportError) throw this.rowsImportConflict(error);
+      throw error;
+    }
+  }
+
+  private async collectApplyMaterials(
+    ownerId: string,
+    nodes: Array<{ data?: Record<string, unknown> }>,
+  ): Promise<Array<{ assetId: string; mediaType: "image" | "video" | "audio" }>> {
+    const byAsset = new Map<string, { assetId: string; mediaType: string; url: string }>();
+    for (const node of nodes) {
+      if (node.data?.promptSource === undefined) continue;
+      const list = Array.isArray(node.data.promptMaterials)
+        ? (node.data.promptMaterials as Array<{ assetId: string; mediaType: string; url: string }>)
+        : [];
+      for (const item of list) byAsset.set(item.assetId, item);
+    }
+    const items: Array<{ assetId: string; mediaType: "image" | "video" | "audio" }> = [];
+    for (const item of byAsset.values()) {
+      if (!/^[1-9][0-9]*$/.test(item.assetId)) {
+        throw new BadRequestException("方案素材身份无效或重复");
+      }
+      const asset = await this.prisma.client.user_assets.findFirst({
+        where: { id: BigInt(item.assetId), user_id: BigInt(ownerId), is_delete: false, status: "normal" },
+      });
+      if (!asset || asset.type !== item.mediaType || asset.url !== item.url || !["image", "video", "audio"].includes(asset.type)) {
+        throw new BadRequestException("素材已删除、无权访问或身份不一致，原内容未改动");
+      }
+      items.push({ assetId: item.assetId, mediaType: asset.type as "image" | "video" | "audio" });
+    }
+    return items;
   }
 
   async save(
@@ -382,7 +555,7 @@ export class CanvasService {
           }
           continue;
         }
-        const asset = await this.prisma.client.assets.findFirst({ where: { id: BigInt(ref.assetId), user_id: BigInt(ownerId), is_delete: false, status: "normal" } });
+        const asset = await this.prisma.client.user_assets.findFirst({ where: { id: BigInt(ref.assetId), user_id: BigInt(ownerId), is_delete: false, status: "normal" } });
         if (!asset || asset.type !== ref.mediaType || asset.url !== ref.url) {
           throw new BadRequestException("媒体素材已删除、无权访问或身份不一致，原内容未改动");
         }
@@ -430,7 +603,7 @@ export class CanvasService {
               if (!/^[1-9][0-9]*$/.test(assetId) || !incoming.some(n => n.type === "mediaNode" && nodeAssetId(n) === assetId)) {
                 planError(node.id, indices, "请从画布选择明确的素材");
               }
-              const asset = await this.prisma.client.assets.findFirst({ where: { id: BigInt(assetId), user_id: BigInt(ownerId), is_delete: false, status: "normal" } });
+              const asset = await this.prisma.client.user_assets.findFirst({ where: { id: BigInt(assetId), user_id: BigInt(ownerId), is_delete: false, status: "normal" } });
               const material = materials.find(m => m.assetId === assetId);
               if (!asset || !material || material.mediaType !== asset.type || material.url !== asset.url || !["image", "video", "audio"].includes(asset.type)) {
                 planError(node.id, indices, "素材已删除、无权访问或身份不一致");
@@ -443,19 +616,39 @@ export class CanvasService {
         }
       }
     }
-    const saved = await this.repo.saveIfVersion(
-      projectId,
-      body.expectedVersion === undefined ? current.version : body.expectedVersion,
-      viewport,
-      nodes,
-      edgesProvided ? JSON.stringify(releaseRemovedPromptSources(JSON.parse(current.edges ?? "[]") as CanvasEdge[], incomingEdges as CanvasEdge[])) : current.edges,
-      { ownerId, items: editedMaterials },
-    );
+    const saved = await this.saveRows(projectId, body, current, viewport, nodes, edgesProvided ? JSON.stringify(releaseRemovedPromptSources(JSON.parse(current.edges ?? "[]") as CanvasEdge[], incomingEdges as CanvasEdge[])) : current.edges, ownerId, editedMaterials);
     if (!saved) {
       const latest = await this.repo.getByProject(projectId);
       return canvasVersionConflict(latest.version);
     }
     return ok(saved);
+  }
+
+  private async saveRows(
+    projectId: string,
+    body: { expectedVersion?: number | null },
+    current: { version: number | null },
+    viewport: string | null,
+    nodes: string | null,
+    edges: string | null,
+    ownerId: string,
+    materials: Array<{ assetId: string; mediaType: "image" | "video" | "audio" }>,
+  ) {
+    try {
+      return await this.repo.saveIfVersion(
+        projectId,
+        body.expectedVersion === undefined ? current.version : body.expectedVersion,
+        viewport,
+        nodes,
+        edges,
+        { ownerId, items: materials },
+      );
+    } catch (error) {
+      if (error instanceof CanvasRowsWriteError) {
+        throw new BadRequestException("画布文档格式无效，原内容未改动");
+      }
+      throw error;
+    }
   }
 
   async listGenerationRecovery(ownerId: string, projectId: string, limitParam: string, cursorParam: string) {

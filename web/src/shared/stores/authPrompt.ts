@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { useAuthStore } from '@/shared/stores/auth';
+import { useLoginDialogStore } from '@/shared/stores/loginDialog';
 import { SESSION_EXPIRED_MESSAGE } from '@/shared/utils/sessionNotice';
 
 interface AuthPromptState {
@@ -42,3 +43,11 @@ export const useAuthPromptStore = create<AuthPromptState>((set, get) => ({
 
   reset: () => set({ open: false, resumes: [], notice: null }),
 }));
+
+useAuthPromptStore.subscribe((state) => {
+  if (state.open) {
+    useLoginDialogStore.getState().openLogin({ notice: state.notice ?? undefined });
+    return;
+  }
+  useLoginDialogStore.getState().closeLogin();
+});

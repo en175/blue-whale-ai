@@ -152,6 +152,26 @@ const RULINGS: Record<string, Ruling> = {
       "由 toFeatures(json, capabilityType) 选",
     configWinsTest: "backend/libs/shared/persistence/model-capability-repo.test.ts",
   },
+  max_reference_image_pixels: {
+    consumer:
+      "backend/libs/shared/generation-runtime/image-reference-validation.ts（validateReferenceImages：单张参考图总像素上限）；" +
+      "经 handle-create-generation-job 在提交前拒绝，不建任务、不扣费。写侧形态闸门在 " +
+      "backend/libs/shared/model-capability/constants.ts（featuresFieldErr）",
+    fallback:
+      "DEFAULT_MAX_REFERENCE_IMAGE_PIXELS = 36,000,000（火山方舟图片生成 API 单张输入图总像素上限 6000×6000；IKQYEH）",
+    configWinsTest:
+      "backend/libs/shared/generation-runtime/image-reference-validation.test.ts",
+  },
+  max_reference_image_ratio: {
+    consumer:
+      "backend/libs/shared/generation-runtime/image-reference-validation.ts（validateReferenceImages：单张参考图宽高比 [1/N, N]）；" +
+      "经 handle-create-generation-job 在提交前拒绝。写侧形态闸门在 " +
+      "backend/libs/shared/model-capability/constants.ts（featuresFieldErr）",
+    fallback:
+      "DEFAULT_MAX_REFERENCE_IMAGE_RATIO = 16（火山方舟图片生成 API 单张输入图宽高比 [1/16, 16]；IKQYEH）",
+    configWinsTest:
+      "backend/libs/shared/generation-runtime/image-reference-validation.test.ts",
+  },
   max_reference_duration_sec: {
     consumer:
       "backend/libs/shared/generation-runtime/reference-limits.ts（参考素材已知总时长）；" +

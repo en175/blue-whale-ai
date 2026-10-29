@@ -1,6 +1,7 @@
 export {
   checkGenerationParamLimit,
   toGenerationParamCheckInput,
+  canonicalSizeValue,
   resolveVideoMode,
   VIDEO_MODES,
   EDIT_MODE_VIDEO_REFERENCE_MAX,
@@ -26,14 +27,6 @@ export {
 export { previewSourceSchema, applyPreviewSchema, promptMentionSchema, validPromptMentions, type PromptPreviewSource, type PromptPreviewContent, type PromptMention, type PromptMaterial } from "./prompt-preview.js";
 export { mediaMentionSchema, mediaRefSchema, validMediaMentions, mediaRefsCoverMentions, mediaAndPromptMentionsDisjoint, deriveMediaMentionLabels, deriveMediaMentionLabelsInOrder, invalidMediaMentionLabel, imageMentionSendToken, replaceImageMentionsWithAssetTokens, MEDIA_TYPE_LABEL, MEDIA_MENTION_LIMITS, TEXT_INDEX_EDGE_MARKER, type MediaMention, type MediaRef, type MediaMentionType } from "./text-node-media.js";
 export { AUDIO_TEXT_INDEX_ACCEPTED_MEDIA_TYPES, IMAGE_TEXT_INDEX_ACCEPTED_MEDIA_TYPES, TEXT_INDEX_INVALID_MESSAGE, TEXT_INDEX_UNSUPPORTED_MEDIA_MESSAGE, VIDEO_TEXT_INDEX_FRAME_CONFLICT_MESSAGE, textIndexOverflowMessage, checkAudioTextIndexSyncInput, checkTextIndexSyncInput, checkVideoTextIndexSyncInput, mergeTextProvidedReferences, textProvidedAudioReferences, textProvidedVideoReferences, textIndexOfTarget, textInputSignatureOf, type AudioTextIndexSyncError, type TargetTextIndex, type TargetTextInputEntry, type TextIndexCanvasNode, type TextIndexSyncError, type TextProvidedAudioReference, type TextProvidedRef, type TextProvidedVideoReference, type VideoReferenceLikeItem, type VideoTextIndexSyncError } from "./text-index-sync.js";
-export {
-  legacyCardHistoryItemSchema,
-  legacyMigrationFailureSchema,
-  legacyMigrationReportSchema,
-  type LegacyCardHistoryItem,
-  type LegacyMigrationFailure,
-  type LegacyMigrationReport,
-} from "./legacy-card-migration.js";
 export {
   conversationQuoteCreateSchema,
   CONVERSATION_QUOTE_LIST_LIMIT,
@@ -185,6 +178,9 @@ export {
   ACCOUNT_ERROR_CAPTCHA_REQUIRED,
   ACCOUNT_ERROR_CAPTCHA_INVALID,
   ACCOUNT_ERROR_CAPTCHA_EXPIRED,
+  ACCOUNT_ERROR_OPERATION_NOT_FOUND,
+  ACCOUNT_ERROR_OPERATION_FORBIDDEN,
+  ACCOUNT_ERROR_SMS_SEND_FAILED,
   ACCOUNT_ERROR_NUMERIC_CODES,
   accountErrorToNumeric,
   accountMessageFor,

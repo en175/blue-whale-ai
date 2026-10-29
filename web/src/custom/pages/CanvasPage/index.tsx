@@ -135,7 +135,6 @@ export default function CanvasPage() {
     pendingDeleteGroup, setPendingDeleteGroup,
     submittingNodeId, setSubmittingNodeId,
     editingTargetRef, selectRequest, setSelectRequest, selectManyRequest, setSelectManyRequest,
-    showLegacyHistory, setShowLegacyHistory,
   } = useCanvasWorkbenchChrome();
   const {
     hoveredAssetNodeId,
@@ -345,6 +344,8 @@ export default function CanvasPage() {
     projects,
     setProjects,
     setCurrentId,
+    navigate,
+    location,
   });
   useCanvasProjectRoute({
     currentId,
@@ -371,10 +372,9 @@ export default function CanvasPage() {
     canvasLoadFailed,
     refetch,
     acceptDoc,
-    legacyHistory,
     patchAsset,
     upsertAssets,
-  } = useCanvasPageDocument(currentId, showToast);
+  } = useCanvasPageDocument(currentId);
   const {
     hydratedDocRef,
     hydratedProjectRef,
@@ -1533,7 +1533,7 @@ export default function CanvasPage() {
       }}
       projectHandlers={{
         projects, handleSelect, handleRename, handleDelete, handleToggleProjectPin,
-        handleNewProject, legacyHistory, showLegacyHistory, setShowLegacyHistory,
+        handleNewProject,
       }}
       overlays={{
         assetDetailTarget, assetDetailLoading, handleCloseAssetDetail,

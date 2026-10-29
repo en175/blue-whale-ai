@@ -28,8 +28,8 @@ describe("SkillRepo — 我的技能与个人技能生命周期", () => {
         { skill_id: 3n, gmt_create: new Date("2026-02-01T00:00:00Z") },
       ]);
     const prisma = {
-      user_skill: { findMany: userSkillFindMany },
-      skill: {
+      user_skills: { findMany: userSkillFindMany },
+      catalog_skills: {
         findMany: vi.fn().mockResolvedValue([
           {
             id: 3n,
@@ -64,10 +64,10 @@ describe("SkillRepo — 我的技能与个人技能生命周期", () => {
 
   it("listMine 官方引用 name_zh/name_en 均缺失时回退单语 name，不返回空", async () => {
     const prisma = {
-      user_skill: {
+      user_skills: {
         findMany: vi.fn().mockResolvedValue([{ skill_id: 3n, gmt_create: new Date("2026-02-01T00:00:00Z") }]),
       },
-      skill: {
+      catalog_skills: {
         findMany: vi.fn().mockResolvedValue([
           {
             id: 3n,
@@ -158,8 +158,8 @@ describe("SkillRepo — 我的技能与个人技能生命周期", () => {
 
   it("listMine 空结果返回 pages = 0（hasMore 恒 false）", async () => {
     const prisma = {
-      user_skill: { findMany: vi.fn().mockResolvedValue([]) },
-      skill: { findMany: vi.fn().mockResolvedValue([]) },
+      user_skills: { findMany: vi.fn().mockResolvedValue([]) },
+      catalog_skills: { findMany: vi.fn().mockResolvedValue([]) },
       $queryRawUnsafe: vi.fn().mockResolvedValue([]),
     } as unknown as PrismaClient;
 
@@ -175,7 +175,7 @@ describe("SkillRepo — 我的技能与个人技能生命周期", () => {
     const executeRawUnsafe = vi.fn().mockResolvedValue(1);
     const tx = { $executeRawUnsafe: executeRawUnsafe };
     const prisma = {
-      skill: { findMany: vi.fn().mockResolvedValue([]) },
+      catalog_skills: { findMany: vi.fn().mockResolvedValue([]) },
       $queryRawUnsafe: vi
         .fn()
         .mockResolvedValueOnce([{ c: 0n }])
@@ -196,18 +196,18 @@ describe("SkillRepo — 我的技能与个人技能生命周期", () => {
     const [skillSql, ...skillParams] = executeRawUnsafe.mock.calls[0];
     const [versionSql, versionId] = executeRawUnsafe.mock.calls[1];
     expect(skillSql).toContain("active_version_id");
-    expect(versionSql).toContain("creative_skill_version");
+    expect(versionSql).toContain("catalog_creative_skill_versions");
     expect(skillParams).toContain(versionId);
   });
 
-  it("deletePersonal 命中时物理删除本体及其 creative_skill_version 行", async () => {
+  it("deletePersonal 命中时物理删除本体及其 catalog_creative_skill_versions 行", async () => {
     const queryRawUnsafe = vi.fn().mockImplementation((sql: string) => {
-      if (sql.includes("SELECT name FROM creative_skill")) return [{ name: "故事板助手" }];
+      if (sql.includes("SELECT name FROM catalog_creative_skills")) return [{ name: "故事板助手" }];
       if (sql.includes("COUNT(*) AS c FROM agent_runs")) return [{ c: 0n }];
       return [];
     });
     const executeRawUnsafe = vi.fn().mockImplementation((sql: string) => {
-      if (sql.includes("creative_skill_version")) return 2;
+      if (sql.includes("catalog_creative_skill_versions")) return 2;
       return 1;
     });
     const prisma = {
@@ -223,7 +223,7 @@ describe("SkillRepo — 我的技能与个人技能生命周期", () => {
     expect(countCalls).toHaveLength(2);
     expect(executeRawUnsafe).toHaveBeenCalledTimes(2);
     expect(executeRawUnsafe).toHaveBeenCalledWith(
-      expect.stringContaining("DELETE FROM creative_skill_version"),
+      expect.stringContaining("DELETE FROM catalog_creative_skill_versions"),
       "my_personal",
     );
     for (const call of executeRawUnsafe.mock.calls) {
@@ -259,21 +259,21 @@ describe("SkillRepo — 我的技能与个人技能生命周期", () => {
       createSkillRepo(prisma).deletePersonal("0", "deep_writing"),
     ).resolves.toBe(false);
     const [sql, ...params] = queryRawUnsafe.mock.calls[0];
-    expect(sql).toContain("SELECT name FROM creative_skill");
+    expect(sql).toContain("SELECT name FROM catalog_creative_skills");
     expect(sql).toContain("asset_domain = 'personal'");
     expect(sql).toContain("owner_user_id = ?");
     expect(params).toEqual(["deep_writing", 0n]);
     expect(executeRawUnsafe).not.toHaveBeenCalled();
   });
 
-  it("creative_skill 读查询失败时容错为空（表不存在不阻塞主路径）；deletePersonal 写失败则抛错", async () => {
+  it("catalog_creative_skills 读查询失败时容错为空（表不存在不阻塞主路径）；deletePersonal 写失败则抛错", async () => {
     const queryRawUnsafe = vi.fn().mockRejectedValue(new Error("table missing"));
     const executeRawUnsafe = vi.fn().mockRejectedValue(new Error("table missing"));
     const prisma = {
-      user_skill: {
+      user_skills: {
         findMany: vi.fn().mockResolvedValue([{ skill_id: 3n }]),
       },
-      skill: {
+      catalog_skills: {
         findMany: vi.fn().mockResolvedValue([
           {
             id: 3n,
@@ -313,7 +313,7 @@ describe("SkillRepo — 我的技能与个人技能生命周期", () => {
 
   it("deletePersonal 存在进行中 run 引用时抛 SkillInUseError，不执行任何删除", async () => {
     const queryRawUnsafe = vi.fn().mockImplementation((sql: string) => {
-      if (sql.includes("SELECT name FROM creative_skill")) {
+      if (sql.includes("SELECT name FROM catalog_creative_skills")) {
         return [{ name: "故事板助手" }];
       }
       return [{ c: 1n }];
@@ -343,7 +343,7 @@ describe("SkillRepo — 我的技能与个人技能生命周期", () => {
   it("deletePersonal 终态 scrub：引用技能的历史 run 移除正文供应并重算 digest", async () => {
     const targetPin = pinWithSkills([TARGET_RESOURCE]);
     const queryRawUnsafe = vi.fn().mockImplementation((sql: string) => {
-      if (sql.includes("SELECT name FROM creative_skill")) {
+      if (sql.includes("SELECT name FROM catalog_creative_skills")) {
         return [{ name: "故事板助手" }];
       }
       if (sql.includes("COUNT(*) AS c FROM agent_runs")) return [{ c: 0n }];
@@ -384,7 +384,7 @@ describe("SkillRepo — 我的技能与个人技能生命周期", () => {
   it("deletePersonal 多技能 pin 只删目标技能，其他技能正文条目保留", async () => {
     const bothPin = pinWithSkills([TARGET_RESOURCE, OTHER_RESOURCE]);
     const queryRawUnsafe = vi.fn().mockImplementation((sql: string) => {
-      if (sql.includes("SELECT name FROM creative_skill")) {
+      if (sql.includes("SELECT name FROM catalog_creative_skills")) {
         return [{ name: "故事板助手" }];
       }
       if (sql.includes("COUNT(*) AS c FROM agent_runs")) return [{ c: 0n }];
@@ -420,7 +420,7 @@ describe("SkillRepo — 我的技能与个人技能生命周期", () => {
   it("deletePersonal 终态引用无可 scrub 内容（NULL run_pin/不含目标技能）时不写库", async () => {
     const otherPin = pinWithSkills([OTHER_RESOURCE]);
     const queryRawUnsafe = vi.fn().mockImplementation((sql: string) => {
-      if (sql.includes("SELECT name FROM creative_skill")) {
+      if (sql.includes("SELECT name FROM catalog_creative_skills")) {
         return [{ name: "故事板助手" }];
       }
       if (sql.includes("COUNT(*) AS c FROM agent_runs")) return [{ c: 0n }];
@@ -453,7 +453,7 @@ describe("SkillRepo — 我的技能与个人技能生命周期", () => {
   it("deletePersonal X 锁后复检命中进行中引用时整体回滚（版本行未删）", async () => {
     const activeCounts = [0n, 1n];
     const queryRawUnsafe = vi.fn().mockImplementation((sql: string) => {
-      if (sql.includes("SELECT name FROM creative_skill")) {
+      if (sql.includes("SELECT name FROM catalog_creative_skills")) {
         return [{ name: "故事板助手" }];
       }
       if (sql.includes("COUNT(*) AS c FROM agent_runs")) {
@@ -473,7 +473,7 @@ describe("SkillRepo — 我的技能与个人技能生命周期", () => {
     await expect(promise).rejects.toThrow(SkillInUseError);
     expect(
       executeRawUnsafe.mock.calls.some((call) =>
-        (call[0] as string).includes("DELETE FROM creative_skill_version"),
+        (call[0] as string).includes("DELETE FROM catalog_creative_skill_versions"),
       ),
     ).toBe(false);
   });
@@ -496,7 +496,7 @@ describe("SkillRepo — 我的技能与个人技能生命周期", () => {
     const [sql, ...params] = queryRawUnsafe.mock.calls[0];
     expect(sql).toContain("asset_domain = 'personal'");
     expect(sql).toContain("owner_user_id = ?");
-    expect(sql).toContain("creative_skill_version");
+    expect(sql).toContain("catalog_creative_skill_versions");
     expect(params).toEqual([9n, "my_personal"]);
   });
 

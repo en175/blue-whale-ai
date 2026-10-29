@@ -121,17 +121,17 @@ export class LocalCanvasRecoveryService {
     ownerId: string,
     references: AssetReference[],
     targetProjectId?: string,
-    client: Pick<PrismaService["client"], "assets" | "material_assets"> = this.prisma.client,
+    client: Pick<PrismaService["client"], "user_assets" | "catalog_material_states"> = this.prisma.client,
   ): Promise<PromptMaterial[]> {
     if (references.length === 0) return [];
     const ids = references.flatMap(ref => [ref.assetId, ref.resolvedAssetId].flatMap(id => id && /^[1-9][0-9]{0,18}$/.test(id) ? [BigInt(id)] : []));
     const materialIds = references.flatMap(ref => ref.assetId && /^asset-.{1,128}$/i.test(ref.assetId) ? [ref.assetId] : []);
-    const activeMaterials = materialIds.length === 0 ? [] : await client.material_assets.findMany({ where: {
+    const activeMaterials = materialIds.length === 0 ? [] : await client.catalog_material_states.findMany({ where: {
       user_id: BigInt(ownerId), material_id: { in: materialIds }, status: "Active",
     }, select: { material_id: true } });
     const activeMaterialIds = new Set(activeMaterials.map(material => material.material_id));
     const urls = references.flatMap(ref => ref.url ? [ref.url] : []);
-    const assets = await client.assets.findMany({ where: {
+    const assets = await client.user_assets.findMany({ where: {
       user_id: BigInt(ownerId), is_delete: false, status: "normal", type: { in: ["image", "video", "audio"] },
       OR: [{ id: { in: ids } }, { url: { in: urls } }, { material_id: { in: [...activeMaterialIds] } }],
     }, select: { id: true, url: true, type: true, material_id: true } });
@@ -167,7 +167,7 @@ export class LocalCanvasRecoveryService {
       where: { user_id: BigInt(ownerId), project_id: BigInt(targetProjectId), is_delete: 0 }, select: { asset_id: true },
     });
     if (links.length === 0) return new Map();
-    const linked = await this.prisma.client.assets.findMany({ where: { id: { in: links.map(link => link.asset_id) }, url: { in: urls } }, select: { id: true, url: true } });
+    const linked = await this.prisma.client.user_assets.findMany({ where: { id: { in: links.map(link => link.asset_id) }, url: { in: urls } }, select: { id: true, url: true } });
     const byUrl = new Map<string, Set<string>>();
     for (const asset of linked) byUrl.set(asset.url, (byUrl.get(asset.url) ?? new Set()).add(asset.id.toString()));
     const proven = new Map<string, string>();
@@ -190,7 +190,7 @@ export class LocalCanvasRecoveryService {
 
   async get(ownerId: string, sourceProjectId: string, operationId: string) {
     const key = await this.key(ownerId, sourceProjectId, operationId);
-    const row = await this.prisma.client.command_idempotency.findUnique({ where: { project_id_operation_idempotency_key: key } });
+    const row = await this.prisma.client.project_command_receipts.findUnique({ where: { project_id_operation_idempotency_key: key } });
     const receipt = receiptSchema.safeParse(row?.result_payload);
     if (!row || row.is_delete !== 0 || !row.resource_id || !receipt.success || receipt.data.ownerId !== ownerId) {
       reject(404, "local_recovery_not_found", "恢复操作不存在");
@@ -207,7 +207,7 @@ export class LocalCanvasRecoveryService {
         reject(409, "local_recovery_target_changed", "恢复目标已被修改，请保留本地副本并复核");
       }
       version = saved.version;
-      await this.prisma.client.command_idempotency.update({ where: { id: row.id }, data: { result_payload: { ...receipt.data, version } } });
+      await this.prisma.client.project_command_receipts.update({ where: { id: row.id }, data: { result_payload: { ...receipt.data, version } } });
     }
     return ok({ operationId, sourceProjectId, targetProjectId, stage: version === undefined ? "created" : "complete", version: version ?? null });
   }
@@ -230,19 +230,19 @@ export class LocalCanvasRecoveryService {
     await this.prisma.client.$transaction(async tx => {
       const owned = await tx.$queryRaw<Array<{ id: bigint }>>`SELECT id FROM project WHERE id = ${key.project_id} AND owner_id = ${BigInt(ownerId)} AND is_delete = 0 FOR UPDATE`;
       if (owned.length !== 1) reject(404, "local_recovery_not_found", "恢复项目不存在");
-      const existing = await tx.command_idempotency.findUnique({ where: { project_id_operation_idempotency_key: key } });
+      const existing = await tx.project_command_receipts.findUnique({ where: { project_id_operation_idempotency_key: key } });
       if (existing) {
         if (existing.request_hash !== requestHash) reject(409, "local_recovery_payload_mismatch", "同一恢复操作的内容已变化，请使用原请求继续");
         return;
       }
       await this.validateAssets(ownerId, assets, undefined, tx);
       const target = await tx.project.create({ data: { owner_id: BigInt(ownerId), name: payload.name } });
-      await tx.command_idempotency.create({ data: { ...key, request_hash: requestHash, resource_id: target.id, accepted_cursor: 0n, result_payload: { ownerId, documentHash: hash(content), assets } } });
+      await tx.project_command_receipts.create({ data: { ...key, request_hash: requestHash, resource_id: target.id, accepted_cursor: 0n, result_payload: { ownerId, documentHash: hash(content), assets } } });
     });
     const current = await this.get(ownerId, sourceProjectId, operationId);
     if (current.data?.stage === "complete") return current;
     const targetProjectId = current.data!.targetProjectId;
-    const stored = receiptSchema.safeParse((await this.prisma.client.command_idempotency.findUnique({ where: { project_id_operation_idempotency_key: key } }))?.result_payload);
+    const stored = receiptSchema.safeParse((await this.prisma.client.project_command_receipts.findUnique({ where: { project_id_operation_idempotency_key: key } }))?.result_payload);
     if (!stored.success) reject(404, "local_recovery_not_found", "恢复操作不存在");
     const result = await this.canvas.save(ownerId, targetProjectId, { ...payload, expectedVersion: null }, await this.validateAssets(ownerId, stored.data.assets, targetProjectId));
     if (result.code !== 200 && result.code !== 412) throw new HttpException(result, result.code);

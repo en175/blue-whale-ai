@@ -11,7 +11,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class GenerationWatermarkPolicyTest {
 
     @Test
-    @DisplayName("读的键固定为 system_settings.watermark")
+    @DisplayName("读的键固定为 bw_platform_settings.watermark")
     void readsFixedSettingKey() {
         AtomicReference<String> seen = new AtomicReference<>();
         GenerationWatermarkPolicy policy = new GenerationWatermarkPolicy(key -> {

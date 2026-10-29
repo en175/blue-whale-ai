@@ -120,7 +120,7 @@ describe("自定义充值配置迁入 system_settings — 070 drop", () => {
 describe("schema.prisma 与全仓残留", () => {
   it("Prisma 模型已删除，system_settings 仍在", () => {
     expect(schemaPrisma).not.toMatch(/\bmodel\s+recharge_custom_config\s*\{/);
-    expect(schemaPrisma).toMatch(/\bmodel\s+system_settings\s*\{/);
+    expect(schemaPrisma).toMatch(/\bmodel\s+bw_platform_settings\s*\{/);
     expect(schemaPrisma).toMatch(/setting_key\s+String\s+@id/);
   });
 

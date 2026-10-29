@@ -72,7 +72,7 @@ describe.skipIf(!process.env.IKDMQV_DATABASE_URL)("Generation failure retry publ
   beforeAll(async () => {
     process.env.DATABASE_URL = process.env.IKDMQV_DATABASE_URL;
     const imageSizes = [{ id: "1024x1024", label: "1024x1024" }];
-    await prisma.client.generation_model_capability.upsert({
+    await prisma.client.catalog_models.upsert({
       where: { provider_id_model_id: { provider_id: "ikdmqv-test", model_id: IMAGE_MODEL } },
       create: {
         provider_id: "ikdmqv-test",
@@ -90,7 +90,7 @@ describe.skipIf(!process.env.IKDMQV_DATABASE_URL)("Generation failure retry publ
       },
       update: { features: {} },
     });
-    await prisma.client.generation_model_capability.upsert({
+    await prisma.client.catalog_models.upsert({
       where: { provider_id_model_id: { provider_id: "ikdmqv-test", model_id: VIDEO_MODEL } },
       create: {
         provider_id: "ikdmqv-test",
@@ -128,12 +128,12 @@ describe.skipIf(!process.env.IKDMQV_DATABASE_URL)("Generation failure retry publ
         default_size: "480p", default_aspect_ratio: "adaptive", default_duration: 5,
         supported_durations: { min: 4, max: 30, step: 1 }, features, channel: "seedream-video",
       };
-      await prisma.client.generation_model_capability.upsert({
+      await prisma.client.catalog_models.upsert({
         where: { provider_id_model_id: { provider_id: data.provider_id, model_id: modelId } },
         create: data, update: data,
       });
     }
-    await prisma.client.generation_model_capability.upsert({
+    await prisma.client.catalog_models.upsert({
       where: { provider_id_model_id: { provider_id: "ikdmqv-test", model_id: AUDIO_MODEL } },
       create: {
         provider_id: "ikdmqv-test",
@@ -213,7 +213,7 @@ describe.skipIf(!process.env.IKDMQV_DATABASE_URL)("Generation failure retry publ
     return { id, type: "textNode", position: { x: 560, y: 80 }, data: { title, text } };
   }
   async function createAsset(projectId: string, type: "image" | "video" | "audio", url: string) {
-    const row = await prisma.client.assets.create({
+    const row = await prisma.client.user_assets.create({
       data: {
         user_id: BigInt(987654),
         project_id: BigInt(projectId),
@@ -279,7 +279,7 @@ describe.skipIf(!process.env.IKDMQV_DATABASE_URL)("Generation failure retry publ
     const scene = await prisma.client.scene_cards.create({ data: {
       project_id: BigInt(projectId), title: "场景", content_markdown: "画一只蓝鲸",
     } });
-    const capability = await prisma.client.generation_model_capability.findUniqueOrThrow({
+    const capability = await prisma.client.catalog_models.findUniqueOrThrow({
       where: { provider_id_model_id: { provider_id: "ikdmqv-test", model_id: VIDEO_25_MODEL } },
     });
     const parameters = {
@@ -454,7 +454,7 @@ describe.skipIf(!process.env.IKDMQV_DATABASE_URL)("Generation failure retry publ
   ])("重新报价提交的 $model / $mode 冻结明确模式和时长，再次失败仍可合法重试", async ({ model, mode, duration, ratio, allowed }) => {
     const projectId = (await projects.create("987654", "IKNB97 confirmed video")).id;
     const video = await createAsset(projectId, "video", "https://example.com/confirmed.mp4");
-    await prisma.client.assets.update({ where: { id: BigInt(video) }, data: { duration_ms: 11000 } });
+    await prisma.client.user_assets.update({ where: { id: BigInt(video) }, data: { duration_ms: 11000 } });
     const body = {
       type: "video", expected_output_count: 1,
       parameters: { model_id: model, prompt: "保留人物，更换背景并加入手提袋", mode, duration, aspect_ratio: ratio, resolution: "480p" },
@@ -773,7 +773,7 @@ describe.skipIf(!process.env.IKDMQV_DATABASE_URL)("Generation failure retry publ
       ]);
 
 
-      const outputAsset = await prisma.client.assets.create({
+      const outputAsset = await prisma.client.user_assets.create({
         data: {
           user_id: BigInt(987654),
           project_id: BigInt(projectId),
