@@ -16,16 +16,17 @@ UPDATE `catalog_skills` s
     SET s.creative_skill_id = cs.creative_skill_id,
         s.name_key = cs.name_key,
         s.body = (SELECT v.body FROM `catalog_creative_skill_versions` v WHERE v.creative_skill_id = cs.creative_skill_id ORDER BY (v.creative_skill_version_id = cs.active_version_id) DESC, v.id DESC LIMIT 1);
-INSERT INTO `catalog_skills` (`creative_skill_id`, `owner_user_id`, `asset_domain`, `name`, `description`, `name_key`, `body`, `source`, `category`, `sort_order`, `is_delete`)
+INSERT INTO `catalog_skills` (`creative_skill_id`, `owner_user_id`, `asset_domain`, `name`, `description`, `name_key`, `body`, `source`, `category`, `sort_order`, `is_delete`, `gmt_create`, `gmt_modified`)
     SELECT cs.creative_skill_id, cs.owner_user_id, cs.asset_domain, cs.name, cs.description, cs.name_key,
            (SELECT v.body FROM `catalog_creative_skill_versions` v WHERE v.creative_skill_id = cs.creative_skill_id ORDER BY (v.creative_skill_version_id = cs.active_version_id) DESC, v.id DESC LIMIT 1),
            CASE WHEN cs.asset_domain = 'personal' THEN 'personal' ELSE 'official' END,
-           'other', 0, 0
+           'other', 0, 0, cs.gmt_create, cs.gmt_modified
       FROM `catalog_creative_skills` cs
      WHERE cs.creative_skill_id NOT IN (
            SELECT creative_skill_id FROM (SELECT `creative_skill_id` FROM `catalog_skills` WHERE `creative_skill_id` IS NOT NULL) t);
 UPDATE `catalog_skills` SET `body` = `content` WHERE `body` IS NULL AND `content` IS NOT NULL;
 UPDATE `catalog_skills` SET `content_digest` = CONCAT('sha256:', SHA2(`body`, 256)) WHERE `body` IS NOT NULL AND `content_digest` IS NULL;
+SELECT COUNT(*) AS `skills_without_body` FROM `catalog_skills` WHERE `body` IS NULL;
 ALTER TABLE `catalog_skills` DROP COLUMN `content`;
 DROP TABLE IF EXISTS `catalog_creative_skill_versions`;
 DROP TABLE IF EXISTS `catalog_creative_skills`;

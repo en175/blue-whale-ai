@@ -184,8 +184,11 @@ export class AdminSkillsController {
       throw new AdminException(400, "没有可更新的字段");
     }
     try {
-      const ok = await this.skillAdmin.updateOfficialSkill(id, input);
-      if (!ok) throw new AdminException(404, "技能不存在");
+      const result = await this.skillAdmin.updateOfficialSkill(id, input);
+      if (result === "conflict") {
+        throw new AdminException(409, "官方技能名称已被占用");
+      }
+      if (result === "not_found") throw new AdminException(404, "技能不存在");
       return { success: true, data: { id: idRaw } };
     } catch (error) {
       if (error instanceof AdminException) throw error;

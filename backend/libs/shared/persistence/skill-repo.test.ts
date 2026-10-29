@@ -1,6 +1,7 @@
 import type {PrismaClient} from "@prisma/client";
 import {describe, expect, it, vi} from "vitest";
 import {createSkillRepo, SkillNameConflictError, SkillNameReservedError} from "./skill-repo.js";
+import {createSkillAdminRepo} from "./skill-admin-repo.js";
 
 import {expectWhitelistOnly} from "./skill-repo.testlib.js";
 
@@ -617,5 +618,81 @@ describe("SkillRepo — findAgentSkill 上下架守卫（IKRJP7）", () => {
     await expect(
       createSkillRepo(prisma).findAgentSkill("deep_writing", "9"),
     ).resolves.toMatchObject({ creative_skill_id: "deep_writing", body: "技能正文" });
+  });
+});
+
+describe("SkillRepo — 管理端编辑传播到解析（IKRJO3）", () => {
+  it("管理端改简介与正文后，解析端点取到同一行的新值", async () => {
+    const rows = [
+      {
+        id: 1n,
+        creative_skill_id: "deep_writing",
+        owner_user_id: 0n,
+        asset_domain: "official",
+        name: "深度写作",
+        name_zh: "深度写作",
+        description: "旧简介",
+        body: "旧正文",
+        name_key: "深度写作",
+        is_delete: 0,
+        category: "other",
+      },
+    ];
+    const prisma = {
+      catalog_skills: {
+        updateMany: vi.fn(
+          async (args: {
+            where: { id: bigint; owner_user_id: bigint; is_delete: number };
+            data: Record<string, unknown>;
+          }) => {
+            const targets = rows.filter(
+              (row) =>
+                row.id === args.where.id &&
+                row.owner_user_id === args.where.owner_user_id &&
+                row.is_delete === args.where.is_delete,
+            );
+            for (const target of targets) Object.assign(target, args.data);
+            return { count: targets.length };
+          },
+        ),
+      },
+      $queryRawUnsafe: vi.fn(
+        async (_sql: string, creativeSkillId: string, ownerUserId: bigint) => {
+          const row = rows.find(
+            (candidate) =>
+              candidate.creative_skill_id === creativeSkillId &&
+              candidate.body !== null &&
+              ((candidate.asset_domain === "official" &&
+                candidate.is_delete === 0) ||
+                (candidate.asset_domain === "personal" &&
+                  candidate.owner_user_id === ownerUserId)),
+          );
+          if (!row) return [];
+          return [
+            {
+              creative_skill_id: row.creative_skill_id,
+              name: row.name_zh || row.name,
+              description: row.description,
+              asset_domain: row.asset_domain,
+              body: row.body,
+            },
+          ];
+        },
+      ),
+    } as unknown as PrismaClient;
+
+    const result = await createSkillAdminRepo(prisma).updateOfficialSkill(1n, {
+      description: "新简介",
+      body: "新正文",
+    });
+    expect(result).toBe("ok");
+
+    await expect(
+      createSkillRepo(prisma).findAgentSkill("deep_writing", "9"),
+    ).resolves.toMatchObject({
+      creative_skill_id: "deep_writing",
+      description: "新简介",
+      body: "新正文",
+    });
   });
 });

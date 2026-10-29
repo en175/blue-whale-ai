@@ -33,6 +33,8 @@ export interface AdminSkillUpdateInput {
   category?: string;
 }
 
+export type AdminSkillUpdateResult = "ok" | "not_found" | "conflict";
+
 export interface AdminSkillCategoryView {
   name: string;
   count: number;
@@ -41,7 +43,10 @@ export interface AdminSkillCategoryView {
 export interface SkillAdminRepo {
   listOfficialSkills(): Promise<AdminSkillView[]>;
   getOfficialSkill(id: bigint): Promise<AdminSkillDetailView | null>;
-  updateOfficialSkill(id: bigint, input: AdminSkillUpdateInput): Promise<boolean>;
+  updateOfficialSkill(
+    id: bigint,
+    input: AdminSkillUpdateInput,
+  ): Promise<AdminSkillUpdateResult>;
   listCategories(): Promise<AdminSkillCategoryView[]>;
   setCategory(id: bigint, category: string): Promise<boolean>;
   assignCategory(ids: bigint[], category: string): Promise<number>;
@@ -108,8 +113,14 @@ export function createSkillAdminRepo(prisma: PrismaClient): SkillAdminRepo {
     async updateOfficialSkill(id, input) {
       const data: Prisma.catalog_skillsUpdateManyMutationInput = {};
       if (input.name !== undefined) {
+        const nameKey = normalizeNameKey(input.name);
+        const conflict = await prisma.catalog_skills.findFirst({
+          where: { ...OFFICIAL, name_key: nameKey, id: { not: id } },
+          select: { id: true },
+        });
+        if (conflict) return "conflict";
         data.name = input.name;
-        data.name_key = normalizeNameKey(input.name);
+        data.name_key = nameKey;
       }
       if (input.description !== undefined) data.description = input.description;
       if (input.body !== undefined) {
@@ -119,13 +130,13 @@ export function createSkillAdminRepo(prisma: PrismaClient): SkillAdminRepo {
           : null;
       }
       if (input.category !== undefined) data.category = input.category;
-      if (Object.keys(data).length === 0) return true;
+      if (Object.keys(data).length === 0) return "ok";
       data.gmt_modified = new Date();
       const result = await prisma.catalog_skills.updateMany({
         where: { id, ...OFFICIAL },
         data,
       });
-      return result.count > 0;
+      return result.count > 0 ? "ok" : "not_found";
     },
 
     async listCategories() {

@@ -229,16 +229,20 @@ export function createSkillRepo(prisma: PrismaClient): SkillRepo {
     },
 
     async findAssetDomainInfo(creativeSkillId) {
-      const row = await prisma.catalog_skills.findFirst({
-        where: { creative_skill_id: creativeSkillId },
-        select: { asset_domain: true, owner_user_id: true },
-      });
-      return row
-        ? {
-            asset_domain: row.asset_domain,
-            owner_user_id: row.owner_user_id.toString(),
-          }
-        : null;
+      try {
+        const row = await prisma.catalog_skills.findFirst({
+          where: { creative_skill_id: creativeSkillId },
+          select: { asset_domain: true, owner_user_id: true },
+        });
+        return row
+          ? {
+              asset_domain: row.asset_domain,
+              owner_user_id: row.owner_user_id.toString(),
+            }
+          : null;
+      } catch {
+        return null;
+      }
     },
 
     async addReference(userId, skillId) {

@@ -91,4 +91,87 @@ describe("SkillAdminRepo — 官方技能分类管理", () => {
       expect.objectContaining({ where: { owner_user_id: 0n, is_delete: 0 } }),
     );
   });
+
+  it("getOfficialSkill 读官方行并映射为详情", async () => {
+    const prisma = mockPrisma({
+      findFirst: vi.fn().mockResolvedValue({
+        id: 3n,
+        creative_skill_id: "deep_writing",
+        name: "深度写作",
+        description: "简介",
+        body: "正文",
+        category: "film",
+        skill_code: "dw01",
+        cover_url: null,
+        sort_order: 2,
+      }),
+    });
+    const detail = await createSkillAdminRepo(prisma).getOfficialSkill(3n);
+    expect(detail).toEqual({
+      id: "3",
+      creative_skill_id: "deep_writing",
+      name: "深度写作",
+      description: "简介",
+      body: "正文",
+      category: "film",
+      skill_code: "dw01",
+      cover_url: null,
+      sort_order: 2,
+    });
+    expect(prisma.catalog_skills.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 3n, owner_user_id: 0n, is_delete: 0 },
+      }),
+    );
+  });
+
+  it("updateOfficialSkill 写名称、简介、正文与摘要，限定官方行", async () => {
+    const prisma = mockPrisma({
+      findFirst: vi.fn().mockResolvedValue(null),
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+    });
+    const result = await createSkillAdminRepo(prisma).updateOfficialSkill(3n, {
+      name: "深度写作二",
+      description: "新简介",
+      body: "新正文",
+      category: "film",
+    });
+    expect(result).toBe("ok");
+    expect(prisma.catalog_skills.updateMany).toHaveBeenCalledWith({
+      where: { id: 3n, owner_user_id: 0n, is_delete: 0 },
+      data: expect.objectContaining({
+        name: "深度写作二",
+        name_key: "深度写作二",
+        description: "新简介",
+        body: "新正文",
+        content_digest: expect.stringMatching(/^sha256:[0-9a-f]{64}$/),
+        category: "film",
+      }),
+    });
+  });
+
+  it("updateOfficialSkill 改名撞其他官方技能 → conflict，不写库", async () => {
+    const updateMany = vi.fn();
+    const prisma = mockPrisma({
+      findFirst: vi.fn().mockResolvedValue({ id: 9n }),
+      updateMany,
+    });
+    const result = await createSkillAdminRepo(prisma).updateOfficialSkill(3n, {
+      name: "同名技能",
+    });
+    expect(result).toBe("conflict");
+    expect(updateMany).not.toHaveBeenCalled();
+  });
+
+  it("updateOfficialSkill 未命中官方行 → not_found", async () => {
+    const prisma = mockPrisma({
+      findFirst: vi.fn().mockResolvedValue(null),
+      updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+    });
+    expect(
+      await createSkillAdminRepo(prisma).updateOfficialSkill(99n, {
+        body: "x",
+      }),
+    ).toBe("not_found");
+  });
 });
