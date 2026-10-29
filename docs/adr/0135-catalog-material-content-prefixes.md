@@ -44,5 +44,7 @@ ADR-0117 §2 把前缀空间收敛为 `identity_ / billing_ / generation_`，§6
 
 - IKRGTJ `086`：`user_shared_asset_snapshots` 整表退役，后端 `shared-assets` 模块、路由与契约，前端共享资产弹窗与保存入口一并删除；`catalog_material_groups` 曾临时改名为 `user_material_info`。
 - IKRIFX `088` 修正素材域口径：`user_material_info` → `user_material_groups`（按 `user_id` 存用户人像库分组，归属是用户）；`catalog_material_states` → `user_material_info`（镜像上游素材状态）。三条含旧表名的索引随表改名为 `uk_user_material_info__material`、`idx_user_material_info__poll`、`idx_user_material_info__group`；`user_material_groups` 的三条索引不含旧表名，按决策 3 不改。
-- 破坏性窗口：新镜像先上线、迁移尚未执行时，它会按新表名访问仍是旧表名的库，素材组与素材状态相关接口会直接 500；迁移执行后旧镜像立即读不到表。镜像发布与 `086` / `088` 必须在同一维护窗口内完成，先镜像后 DDL，且新镜像不得长时间空跑。worker-java 的 `MaterialAssetMapper` 读 `user_material_info`，必须与 backend 同批。
-- 回滚：先按 `088` 逆序改回（`user_material_groups` → `user_material_info`，`user_material_info` → `catalog_material_states`），再按 `086` 逆序（`user_material_info` → `catalog_material_groups`）；并按 `008` + `078` 重建 `user_shared_asset_snapshots`。删表不可恢复，迁移前备份。
+- 破坏性窗口：新镜像先上线、迁移尚未执行时，它会按新表名访问仍是旧表名的库，素材组与素材状态相关接口会直接 500；迁移执行后旧镜像立即读不到表。镜像发布与 `086` / `088` 必须在同一维护窗口内完成，先镜像后 DDL，且新镜像不得长时间空跑；迁移必须按 `078` → `086` → `088` 顺序执行，`088` 依赖 `086` 产出的 `user_material_info`。worker-java 的 `MaterialAssetMapper` 读 `user_material_info`，必须与 backend 同批。
+- 回滚：先按 `088` 逆序，必须让状态表先让出 `user_material_info`：
+  `RENAME TABLE user_material_info TO catalog_material_states, user_material_groups TO user_material_info;`
+  再把三条索引改回 `uk_catalog_material_states__material`、`idx_catalog_material_states__poll`、`idx_catalog_material_states__group`；然后按 `086` 逆序 `RENAME TABLE user_material_info TO catalog_material_groups`；并按 `008` + `078` 重建 `user_shared_asset_snapshots`。删表不可恢复，迁移前备份。

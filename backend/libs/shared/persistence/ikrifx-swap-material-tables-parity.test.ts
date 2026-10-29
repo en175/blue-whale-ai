@@ -58,14 +58,18 @@ describe("素材域表名对调修正（IKRIFX）", () => {
       const statements = statementsOf(sql);
       expect(statements).toHaveLength(3);
       expect(statements[1].startsWith("ALTER TABLE `catalog_material_states`")).toBe(true);
-      expect(statements[2]).toContain("RENAME TABLE `user_material_info` TO `user_material_groups`");
-      expect(statements[2]).toContain("`catalog_material_states` TO `user_material_info`");
+      const first = statements[2].indexOf("RENAME TABLE `user_material_info` TO `user_material_groups`");
+      const second = statements[2].indexOf("`catalog_material_states` TO `user_material_info`");
+      expect(first).toBeGreaterThanOrEqual(0);
+      expect(second).toBeGreaterThan(first);
+      expect(statements[2].match(/ TO /g)).toHaveLength(2);
       expect(sql.indexOf("RENAME TABLE")).toBeGreaterThan(sql.lastIndexOf("RENAME INDEX"));
     }
   });
 
-  it("三条旧索引名逐条改到新表名下", () => {
+  it("三条旧索引名逐条改到新表名下，且不改其他索引", () => {
     for (const sql of TRACKS) {
+      expect(sql.match(/RENAME INDEX/g)).toHaveLength(3);
       for (const [from, to] of [
         ["uk_catalog_material_states__material", "uk_user_material_info__material"],
         ["idx_catalog_material_states__poll", "idx_user_material_info__poll"],
@@ -83,6 +87,12 @@ describe("素材域表名对调修正（IKRIFX）", () => {
     expect(schemaPrisma).toContain('"uk_user_material_info__material"');
     expect(schemaPrisma).toContain('"idx_user_material_info__poll"');
     expect(schemaPrisma).toContain('"idx_user_material_info__group"');
+    expect(schemaPrisma).toContain('"uk_material_group_user_upstream"');
+    expect(schemaPrisma).toContain('"idx_material_group_user_kind"');
+    expect(schemaPrisma).toContain('"idx_material_group_user_alive"');
+    expect(javaSchemaSql).not.toContain("uk_catalog_material_states__material");
+    expect(javaSchemaSql).not.toContain("idx_catalog_material_states__poll");
+    expect(javaSchemaSql).not.toContain("idx_catalog_material_states__group");
     expect(javaSchemaSql).toContain("CREATE TABLE `user_material_groups`");
     expect(javaSchemaSql).toContain("CREATE TABLE `user_material_info`");
     expect(javaSchemaSql).not.toContain("CREATE TABLE `catalog_material_states`");
