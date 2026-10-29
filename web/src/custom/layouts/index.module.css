@@ -5,6 +5,10 @@
   overflow: hidden;
 }
 
+.layoutWideSidebar {
+  --sidebar-width: 240px;
+}
+
 .main {
   flex: 1;
   margin-left: var(--sidebar-width);
@@ -12,6 +16,7 @@
   overflow: hidden;
   position: relative;
   background-color: var(--color-bg-primary);
+  transition: margin-left var(--transition-normal);
 }
 
 .mainFull {

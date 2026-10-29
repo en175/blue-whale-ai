@@ -36,8 +36,45 @@
 
 .tabBar {
   display: flex;
+  align-items: center;
+  justify-content: space-between;
   gap: var(--spacing-lg);
   position: relative;
+}
+
+.tabBarItems {
+  display: flex;
+  gap: var(--spacing-lg);
+  position: relative;
+}
+
+.workspaceSwitch {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--radius-full);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.workspaceItem {
+  padding: 4px var(--spacing-md);
+  border: none;
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: var(--chat-fg-muted);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+  transition: color var(--transition-fast), background-color var(--transition-fast);
+}
+
+.workspaceItem:hover {
+  color: var(--chat-fg);
+}
+
+.workspaceItemActive {
+  color: var(--chat-fg);
+  background: rgba(255, 255, 255, 0.16);
 }
 
 .tabItem {

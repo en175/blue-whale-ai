@@ -235,3 +235,22 @@
   flex-shrink: 0;
   text-shadow: 0 1px 10px rgba(0, 0, 0, 0.7);
 }
+
+.purposeTag {
+  position: absolute;
+  left: var(--spacing-sm);
+  bottom: var(--spacing-sm);
+  z-index: 6;
+  max-width: calc(100% - var(--spacing-lg));
+  padding: 2px var(--spacing-sm);
+  border-radius: var(--radius-full);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(0, 0, 0, 0.52);
+  color: rgba(255, 255, 255, 0.86);
+  font-size: var(--font-size-sm);
+  line-height: 1.5;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}

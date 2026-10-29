@@ -38,35 +38,27 @@ async function mountGallery(onCardClick?: (text: string, mediaType: 'video' | 'i
   await act(async () => {
     await Promise.resolve();
     await Promise.resolve();
+    await Promise.resolve();
   });
+}
+
+function cards(): HTMLElement[] {
+  return [...mountNode.querySelectorAll<HTMLElement>('[data-testid="gallery-card"]')];
 }
 
 beforeEach(() => {
   api.fetchTemplateTags.mockResolvedValue([
-    { tag_code: 'picture', label: '图片' },
-    { tag_code: 'video', label: '视频' },
+    { tag_code: 'marketing', label: '商品展示' },
+    { tag_code: 'video', label: '人物种草' },
   ]);
   api.fetchTemplatePage.mockImplementation(async (tagCode: string) => {
-    if (tagCode === 'picture') {
+    if (tagCode === 'marketing') {
       return pageOf([
-        {
-          title: '空图模板',
-          video: 'https://example.com/should-not-play.mp4',
-          images: [],
-          layout: 'wide',
-          content: null,
-        },
+        { title: '商品图一', video: '', images: [], layout: 'wide', content: '填写商品正文' },
+        { title: '测试20260828144946', video: '', images: [], layout: 'wide', content: '测试正文' },
       ]);
     }
-    return pageOf([
-      {
-        title: '视频模板',
-        video: 'https://example.com/clip.mp4',
-        images: [],
-        layout: 'wide',
-        content: null,
-      },
-    ]);
+    return pageOf([{ title: '种草短片', video: 'https://example.com/clip.mp4', images: [], layout: 'wide', content: null }]);
   });
 });
 
@@ -77,59 +69,52 @@ afterEach(async () => {
 });
 
 describe('CardGallery', () => {
-  it('图片 tab 空 images 不展示视频播放 UI，点击仍切到 image', async () => {
+  it('图片与视频按场景混排在同一条网格，不再分层', async () => {
+    await mountGallery();
+
+    const kinds = cards().map((card) => card.getAttribute('data-media-kind'));
+    expect(kinds).toEqual(['image', 'video']);
+    expect(mountNode.querySelectorAll('[data-testid="gallery-card-grid"]')).toHaveLength(1);
+    expect([...mountNode.querySelectorAll('button')].some((b) => b.textContent?.includes('图片'))).toBe(false);
+  });
+
+  it('两类卡都显示用途标签', async () => {
+    await mountGallery();
+
+    const labels = cards().map((card) => card.textContent);
+    expect(labels[0]).toContain('商品展示');
+    expect(labels[1]).toContain('人物种草');
+  });
+
+  it('过滤「测试20260828144946」', async () => {
+    await mountGallery();
+
+    expect(mountNode.textContent).not.toContain('测试20260828144946');
+    expect(cards()).toHaveLength(2);
+  });
+
+  it('点击只把正文与模式回填，不提交', async () => {
     const onCardClick = vi.fn();
     await mountGallery(onCardClick);
 
-    const card = mountNode.querySelector('[data-testid="gallery-card"]') as HTMLElement;
-    expect(card).toBeTruthy();
-    expect(card.getAttribute('data-media-kind')).toBe('image');
-    expect(card.textContent).toContain('空图模板');
-    expect(mountNode.querySelector('[data-testid="gallery-play-overlay"]')).toBeNull();
-    expect(mountNode.querySelector('[data-testid="gallery-hover-video"]')).toBeNull();
-    expect(mountNode.querySelector('[data-testid="gallery-image-placeholder"]')).toBeTruthy();
+    await act(async () => {
+      cards()[0].click();
+    });
+    expect(onCardClick).toHaveBeenCalledTimes(1);
+    expect(onCardClick).toHaveBeenCalledWith('填写商品正文', 'image');
 
     await act(async () => {
-      card.click();
+      cards()[1].click();
     });
-    expect(onCardClick).toHaveBeenCalledWith('空图模板', 'image');
+    expect(onCardClick).toHaveBeenCalledWith('种草短片', 'video');
+    expect(api.fetchTemplatePage).toHaveBeenCalledTimes(2);
   });
 
-  it('图片 tab 与视频 tab 共用同一行 4 卡网格', async () => {
+  it('只有视频卡展示播放 UI', async () => {
     await mountGallery();
 
-    const pictureGrid = mountNode.querySelector('[data-testid="gallery-card-grid"]');
-    expect(pictureGrid).toBeTruthy();
-    expect(pictureGrid?.className.split(/\s+/).filter(Boolean)).toHaveLength(1);
-
-    const videoTab = [...mountNode.querySelectorAll('button')].find((btn) =>
-      btn.textContent?.includes('视频'),
-    );
-    await act(async () => {
-      videoTab?.click();
-      await Promise.resolve();
-    });
-
-    const videoGrid = mountNode.querySelector('[data-testid="gallery-card-grid"]');
-    expect(videoGrid?.className).toBe(pictureGrid?.className);
-  });
-
-  it('视频 tab 才展示播放按钮，形态不由 images 是否为空决定', async () => {
-    await mountGallery();
-
-    const videoTab = [...mountNode.querySelectorAll('button')].find((btn) =>
-      btn.textContent?.includes('视频'),
-    );
-    expect(videoTab).toBeTruthy();
-    await act(async () => {
-      videoTab?.click();
-      await Promise.resolve();
-    });
-
-    const card = mountNode.querySelector('[data-testid="gallery-card"]') as HTMLElement;
-    expect(card.getAttribute('data-media-kind')).toBe('video');
-    expect(card.textContent).toContain('视频模板');
-    expect(mountNode.querySelector('[data-testid="gallery-play-overlay"]')).toBeTruthy();
-    expect(api.fetchTemplatePage).toHaveBeenCalledWith('video');
+    const [image, video] = cards();
+    expect(image.querySelector('[data-testid="gallery-play-overlay"]')).toBeNull();
+    expect(video.querySelector('[data-testid="gallery-play-overlay"]')).toBeTruthy();
   });
 });

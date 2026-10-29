@@ -1,14 +1,6 @@
 import { type GalleryMediaKind } from '@/custom/enums';
-import { useEffect, useState } from 'react';
-import {
-  Megaphone,
-  Clapperboard,
-  Copy,
-  Share2,
-  Palette,
-  Sparkles,
-  type LucideIcon,
-} from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+
 import styles from './index.module.css';
 import {
   fetchTemplateTags,
@@ -18,31 +10,6 @@ import {
 } from '@/custom/api/agent';
 import { remoteImageCrossOrigin, resolveMediaSrc } from '@/shared/utils/remoteImageCors';
 import { galleryCoverSrc, mediaKindFromTagCode, shouldShowVideoChrome } from './galleryCardModel';
-
-const TAG_ICON_BY_CODE: Record<string, LucideIcon> = {
-  marketing: Megaphone,
-  short: Clapperboard,
-  replicate: Copy,
-  clone: Copy,
-  social: Share2,
-  image: Palette,
-  design: Palette,
-  video: Clapperboard,
-  picture: Palette,
-};
-
-const TAG_ICON_BY_LABEL: Record<string, LucideIcon> = {
-  营销视频: Megaphone,
-  微短片: Clapperboard,
-  视频复刻: Copy,
-  社媒视频: Share2,
-  图片设计: Palette,
-};
-
-const DEFAULT_TAG_ICON = Sparkles;
-
-const iconForTag = (tag: TemplateTag): LucideIcon =>
-  TAG_ICON_BY_CODE[tag.tag_code] ?? TAG_ICON_BY_LABEL[tag.label] ?? DEFAULT_TAG_ICON;
 
 const FALLBACK_TAGS: TemplateTag[] = [
   { tag_code: 'video', label: '视频' },
@@ -54,6 +21,8 @@ const LAYOUT_CLASS: Record<string, string> = {
   social: styles.cardSocial,
 };
 
+const HIDDEN_CASE_TITLES = new Set(['测试20260828144946']);
+
 function truncate(text: string, max = 30) {
   return text.length > max ? text.slice(0, max) + '...' : text;
 }
@@ -61,10 +30,12 @@ function truncate(text: string, max = 30) {
 function GalleryCard({
   record,
   mediaKind,
+  purposeLabel,
   onClick,
 }: {
   record: TemplateRecord;
   mediaKind: GalleryMediaKind;
+  purposeLabel: string;
   onClick?: () => void;
 }) {
   const [hovered, setHovered] = useState(false);
@@ -103,6 +74,7 @@ function GalleryCard({
             <span className={styles.playIcon}>▶</span>
           </div>
         )}
+        <span className={styles.purposeTag}>{purposeLabel}</span>
       </div>
       {playingHoverVideo && (
         <video
@@ -121,72 +93,61 @@ function GalleryCard({
 }
 
 export default function CardGallery({ onCardClick }: { onCardClick?: (text: string, mediaType: 'video' | 'image') => void }) {
-  const [tags, setTags] = useState<TemplateTag[]>(FALLBACK_TAGS);
-  const [activeTag, setActiveTag] = useState('');
-  const [records, setRecords] = useState<TemplateRecord[]>([]);
+  const [records, setRecords] = useState<{ tag: TemplateTag; records: TemplateRecord[] }[]>([]);
 
   useEffect(() => {
-    fetchTemplateTags()
-      .then((list) => {
-        if (!list.length) return;
-        setTags(list);
-        setActiveTag((prev) =>
-          list.some((t) => t.tag_code === prev) ? prev : list[0].tag_code
-        );
-      })
-      .catch(() => setActiveTag((prev) => prev || FALLBACK_TAGS[0].tag_code));
-  }, []);
-
-  useEffect(() => {
-    if (!activeTag) return;
     let alive = true;
-    fetchTemplatePage(activeTag)
-      .then((page) => {
-        if (alive) setRecords(page.records ?? []);
-      })
-      .catch(() => {
-        if (alive) setRecords([]);
-      });
+    const load = async () => {
+      const tags = await fetchTemplateTags().catch(() => FALLBACK_TAGS);
+      const list = tags.length ? tags : FALLBACK_TAGS;
+      const loaded = await Promise.all(
+        list.map(async (tag) => ({
+          tag,
+          records: await fetchTemplatePage(tag.tag_code).then((page) => page.records ?? []).catch(() => []),
+        })),
+      );
+      if (alive) setRecords(loaded);
+    };
+    void load();
     return () => {
       alive = false;
     };
-  }, [activeTag]);
+  }, []);
+
+  const cards = useMemo(() => {
+    const groups = records
+      .map(({ tag, records: list }) => ({
+        tag,
+        list: list.filter((record) => !HIDDEN_CASE_TITLES.has(record.title)),
+      }))
+      .filter((group) => group.list.length > 0);
+    const longest = Math.max(0, ...groups.map((group) => group.list.length));
+    const mixed: { record: TemplateRecord; tag: TemplateTag; mediaKind: GalleryMediaKind }[] = [];
+    for (let index = 0; index < longest; index += 1) {
+      groups.forEach((group) => {
+        const record = group.list[index];
+        if (record) mixed.push({ record, tag: group.tag, mediaKind: mediaKindFromTagCode(group.tag.tag_code) });
+      });
+    }
+    return mixed;
+  }, [records]);
 
   return (
     <div className={styles.gallery}>
       {}
-      <div className={styles.tabBar}>
-        {tags.map((tag) => {
-          const Icon = iconForTag(tag);
-          return (
-            <button
-              key={tag.tag_code}
-              className={`${styles.tabBtn} ${activeTag === tag.tag_code ? styles.tabBtnActive : ''}`}
-              onClick={() => setActiveTag(tag.tag_code)}
-            >
-              <Icon size={16} strokeWidth={2} />
-              <span>{tag.label}</span>
-            </button>
-          );
-        })}
-      </div>
-
-      {}
       <div className={styles.cardGrid} data-testid="gallery-card-grid">
-        {records.map((record, idx) => {
-          const mediaKind = mediaKindFromTagCode(activeTag);
-          return (
-            <GalleryCard
-              key={`${record.title}-${idx}`}
-              record={record}
-              mediaKind={mediaKind}
-              onClick={() => {
-                const text = record.content?.trim() || record.title;
-                onCardClick?.(text, mediaKind);
-              }}
-            />
-          );
-        })}
+        {cards.map(({ record, tag, mediaKind }, idx) => (
+          <GalleryCard
+            key={`${record.title}-${idx}`}
+            record={record}
+            mediaKind={mediaKind}
+            purposeLabel={tag.label}
+            onClick={() => {
+              const text = record.content?.trim() || record.title;
+              onCardClick?.(text, mediaKind);
+            }}
+          />
+        ))}
       </div>
     </div>
   );

@@ -96,12 +96,12 @@ const imageAsset = { id: 2, type: 'image', url: 'http://x/i.png', width: null, h
 let root: Root;
 let mountNode: HTMLDivElement;
 
-async function renderChatBox() {
+async function renderChatBox(props: { workspace?: 'create' | 'canvas'; onWorkspaceChange?: (next: 'create' | 'canvas') => void } = {}) {
   mountNode = document.createElement('div');
   document.body.appendChild(mountNode);
   root = createRoot(mountNode);
   await act(async () => {
-    root.render(createElement(ChatBox, { draft: null }));
+    root.render(createElement(ChatBox, { draft: null, ...props }));
   });
   await act(async () => {
     await Promise.resolve();
@@ -118,7 +118,7 @@ function refCard(): HTMLDivElement {
 }
 
 async function switchToVideoTabAndInject(assets: unknown[]) {
-  await act(async () => { buttonByLabel('AI 视频').click(); });
+  await act(async () => { buttonByLabel('视频').click(); });
   await act(async () => { refCard().click(); });
   const fromAssets = [...document.body.querySelectorAll<HTMLButtonElement>('button')]
     .find((b) => b.textContent === '从资产中选择')!;
@@ -146,7 +146,7 @@ describe('IKJ794 全能参考被动提示行（ChatBox）', () => {
 
   it('首尾帧模式 → 不显示（首帧挂图片也不显示）', async () => {
     await renderChatBox();
-    await act(async () => { buttonByLabel('AI 视频').click(); });
+    await act(async () => { buttonByLabel('视频').click(); });
     await act(async () => { buttonByLabel('文生视频').click(); });
     await act(async () => {
       selectOptionByText('首尾帧')!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
@@ -176,7 +176,7 @@ describe('IKJ794 全能参考被动提示行（ChatBox）', () => {
 describe('IKJ794 adaptive 档文案（ChatBox，沿用上游 IKJ4W6 auto 显示名）', () => {
   it('比例下拉 adaptive 档显示 auto 且无 adaptive 黑话，选中后按钮同文案（取值与图标不变）', async () => {
     await renderChatBox();
-    await act(async () => { buttonByLabel('AI 视频').click(); });
+    await act(async () => { buttonByLabel('视频').click(); });
     const ratioBtn = [...mountNode.querySelectorAll<HTMLButtonElement>('button')]
       .find((b) => b.textContent === 'auto')!;
     expect(ratioBtn).toBeTruthy();
@@ -216,5 +216,54 @@ describe('IKLUVP 首页延长时长', () => {
     await clickSelectOption('全能参考');
     expect(mountNode.textContent).not.toContain('⏱ 自动');
     expect(mountNode.textContent).not.toContain('-1s');
+  });
+});
+
+describe('V1.3.0 首页主切换', () => {
+  it('生成下显示 生成/画布 主切换与 Agent/图片/视频 三模式', async () => {
+    await renderChatBox();
+
+    expect(buttonByLabel('生成')).toBeTruthy();
+    expect(buttonByLabel('画布')).toBeTruthy();
+    expect(buttonByLabel('Agent')).toBeTruthy();
+    expect(buttonByLabel('图片')).toBeTruthy();
+    expect(buttonByLabel('视频')).toBeTruthy();
+    expect(mountNode.textContent).not.toContain('视频智能体');
+    expect(mountNode.textContent).not.toContain('AI 视频');
+  });
+
+  it('切到画布时 Agent 自动改为视频，并回传工作方式', async () => {
+    const onWorkspaceChange = vi.fn();
+    await renderChatBox({ onWorkspaceChange });
+
+    await act(async () => { buttonByLabel('画布').click(); });
+    expect(onWorkspaceChange).toHaveBeenCalledWith('canvas');
+
+    await act(async () => { buttonByLabel('Agent').click(); });
+    await act(async () => { buttonByLabel('画布').click(); });
+    expect(onWorkspaceChange).toHaveBeenLastCalledWith('canvas');
+  });
+
+  it('画布工作方式下不再提供 Agent 模式', async () => {
+    const onWorkspaceChange = vi.fn();
+    await renderChatBox({ workspace: 'create', onWorkspaceChange });
+
+    await act(async () => { buttonByLabel('画布').click(); });
+    expect(onWorkspaceChange).toHaveBeenCalledWith('canvas');
+  });
+
+  it('空白输入时发送按钮禁用', async () => {
+    await renderChatBox();
+
+    const textarea = mountNode.querySelector('textarea')!;
+    const send = mountNode.querySelector<HTMLButtonElement>(`button[class*="sendBtn"]`)!;
+    expect(send.disabled).toBe(true);
+
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;
+      setter.call(textarea, '  ');
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(mountNode.querySelector<HTMLButtonElement>(`button[class*="sendBtn"]`)!.disabled).toBe(true);
   });
 });

@@ -11,15 +11,31 @@ vi.mock('@/custom/components/UserDropdown', () => ({
   },
 }));
 
-vi.mock('./components/ChatBox', () => ({
-  default: function MockChatBox() {
-    return null;
+vi.mock('./components/CardGallery', () => ({
+  default: function MockCardGallery() {
+    return createElement('div', { 'data-testid': 'card-gallery' });
   },
 }));
 
-vi.mock('./components/CardGallery', () => ({
-  default: function MockCardGallery() {
-    return null;
+vi.mock('./components/CanvasEntry', () => ({
+  default: function MockCanvasEntry() {
+    return createElement('div', { 'data-testid': 'canvas-entry' });
+  },
+}));
+
+vi.mock('./components/ChatBox', () => ({
+  default: function MockChatBox({
+    workspace,
+    onWorkspaceChange,
+  }: {
+    workspace: string;
+    onWorkspaceChange: (next: 'create' | 'canvas') => void;
+  }) {
+    return createElement(
+      'div',
+      { 'data-testid': 'chat-box', 'data-workspace': workspace },
+      createElement('button', { onClick: () => onWorkspaceChange(workspace === 'create' ? 'canvas' : 'create') }, '切换'),
+    );
   },
 }));
 
@@ -75,5 +91,33 @@ describe('Home 顶栏', () => {
     const topBar = mountNode.firstElementChild?.firstElementChild;
     expect(topBar?.querySelector('[data-testid="user-dropdown"]')).not.toBeNull();
     expect(topBar?.textContent).toBe('');
+  });
+});
+
+describe('Home 主语与切换', () => {
+  it('标语为两行「让想象有画面」「让表达有回响」，无句号', async () => {
+    await renderHome();
+
+    const title = mountNode.querySelector('h1');
+    expect(title?.textContent).toBe('让想象有画面让表达有回响');
+    expect(title?.querySelectorAll('br')).toHaveLength(1);
+    expect(title?.textContent).not.toMatch(/[。.]$/);
+  });
+
+  it('只在「生成」下展示案例，「画布」下换成新建与最近项目位', async () => {
+    await renderHome();
+
+    expect(mountNode.querySelector('[data-testid="chat-box"]')?.getAttribute('data-workspace')).toBe('create');
+    expect(mountNode.querySelector('[data-testid="card-gallery"]')).not.toBeNull();
+    expect(mountNode.querySelector('[data-testid="canvas-entry"]')).toBeNull();
+
+    const toggle = [...mountNode.querySelectorAll('button')].find((b) => b.textContent === '切换');
+    await act(async () => {
+      toggle?.click();
+    });
+
+    expect(mountNode.querySelector('[data-testid="chat-box"]')?.getAttribute('data-workspace')).toBe('canvas');
+    expect(mountNode.querySelector('[data-testid="card-gallery"]')).toBeNull();
+    expect(mountNode.querySelector('[data-testid="canvas-entry"]')).not.toBeNull();
   });
 });

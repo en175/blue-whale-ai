@@ -43,11 +43,14 @@ import DurationSlider from './DurationSlider';
 import { resolveHomeLoginResume, type HomePendingAction } from './homeLoginResume';
 import { limitPromptInput } from './promptInput';
 
-const tabItems = [
-  { key: 'agent', label: '视频智能体' },
-  { key: 'video', label: 'AI 视频' },
-  { key: 'image', label: 'AI 图片' },
-];
+const modeItems = [
+  { key: 'agent', label: 'Agent' },
+  { key: 'image', label: '图片' },
+  { key: 'video', label: '视频' },
+] as const;
+
+type ChatMode = (typeof modeItems)[number]['key'];
+type Workspace = 'create' | 'canvas';
 
 type KeyframeRefItem = { file?: File; preview: string; type: 'image'; assetId?: string | number };
 
@@ -66,14 +69,30 @@ async function navigateToNewProject(navigate: ReturnType<typeof useNavigate>, st
   }
 }
 
-export default function ChatBox({ draft }: { draft?: { text: string; ts: number; mediaType: 'video' | 'image' } | null }) {
+export default function ChatBox({
+  draft,
+  workspace = 'create',
+  onWorkspaceChange,
+}: {
+  draft?: { text: string; ts: number; mediaType: 'video' | 'image' } | null;
+  workspace?: 'create' | 'canvas';
+  onWorkspaceChange?: (workspace: 'create' | 'canvas') => void;
+}) {
   const showToast = (msg: string) => pushToast('warn', msg);
-  const [activeTab, setActiveTab] = useState('agent');
+  const [activeTab, setActiveTab] = useState<ChatMode>('agent');
   const [inputValue, setInputValue] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const navigate = useNavigate();
   const location = useLocation();
   const user = useSyncExternalStore(subscribe, getCurrentUser);
+
+  const visibleModes = modeItems.filter((item) => workspace === 'create' || item.key !== 'agent');
+
+  const changeWorkspace = (next: Workspace) => {
+    if (next === workspace) return;
+    if (next === 'canvas' && activeTab === 'agent') setActiveTab('video');
+    onWorkspaceChange?.(next);
+  };
 
   const [showLogin, setShowLogin] = useState(false);
 
@@ -906,20 +925,35 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
     <>
       <div className={styles.chatBox}>
         { }
-        <div className={styles.tabBar} ref={tabBarRef}>
-          {tabItems.map((tab) => (
-            <button
-              key={tab.key}
-              ref={(el) => {
-                if (el) tabRefs.current.set(tab.key, el);
-              }}
-              className={`${styles.tabItem} ${activeTab === tab.key ? styles.tabItemActive : ''}`}
-              onClick={() => setActiveTab(tab.key)}
-            >
-              {tab.label}
-            </button>
-          ))}
-          <span className={styles.tabUnderline} style={underlineStyle} />
+        <div className={styles.tabBar}>
+          <div className={styles.workspaceSwitch} role="group" aria-label="工作方式">
+            {(['create', 'canvas'] as const).map((key) => (
+              <button
+                key={key}
+                type="button"
+                className={`${styles.workspaceItem} ${workspace === key ? styles.workspaceItemActive : ''}`}
+                aria-pressed={workspace === key}
+                onClick={() => changeWorkspace(key)}
+              >
+                {key === 'create' ? '生成' : '画布'}
+              </button>
+            ))}
+          </div>
+          <div className={styles.tabBarItems} ref={tabBarRef}>
+            {visibleModes.map((tab) => (
+              <button
+                key={tab.key}
+                ref={(el) => {
+                  if (el) tabRefs.current.set(tab.key, el);
+                }}
+                className={`${styles.tabItem} ${activeTab === tab.key ? styles.tabItemActive : ''}`}
+                onClick={() => setActiveTab(tab.key)}
+              >
+                {tab.label}
+              </button>
+            ))}
+            <span className={styles.tabUnderline} style={underlineStyle} />
+          </div>
         </div>
 
         {isVideoTab ? (
