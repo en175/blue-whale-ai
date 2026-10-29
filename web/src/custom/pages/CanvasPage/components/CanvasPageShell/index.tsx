@@ -583,7 +583,6 @@ export default function CanvasPageShell(props: CanvasPageShellProps) {
       {overlays.showAssetsModal && (
         <SharedAssetsModal
           onClose={() => overlays.setShowAssetsModal(false)}
-          projectId={shellTop.currentId ?? ''}
           onAddItem={(item) => overlays.handleAddSharedAsset(item).then((ok) => {
             if (ok) overlays.setShowAssetsModal(false);
             return ok;

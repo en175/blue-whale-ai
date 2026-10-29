@@ -46,8 +46,6 @@ class JobFinalizerTerminalTest {
             logMapper,
             slotMapper,
             mock(GenerationJobExtraMapper.class),
-            mock(SceneCardGenerationRecordSync.class),
-            mock(StoryboardPreviewSync.class),
             new TerminalEventOutbox(outboxMapper, jobMapper, BillingEventPublisher.noop(),
                     new MockEnvironment()));
 

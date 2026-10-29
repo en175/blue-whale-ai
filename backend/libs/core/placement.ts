@@ -14,8 +14,6 @@ export const DEFAULT_NODE_WIDTH = 200;
 export const DEFAULT_NODE_HEIGHT = 200;
 export const DEFAULT_GAP = 24;
 export const DEFAULT_MAX_PER_ROW = 3;
-export const SCENE_CARD_WIDTH = 400;
-export const SCENE_CARD_FALLBACK_HEIGHT = 1080;
 const SEARCH_ROWS = 50;
 
 export function intersects(a: Rect, b: Rect): boolean {

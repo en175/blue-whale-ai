@@ -103,12 +103,6 @@ export function computeFactDigest(snapshot) {
     messages: (snapshot?.conversation_messages ?? [])
       .map((m) => `${m.message_id}:${m.role}:${m.sequence_no}`)
       .sort(),
-    sceneCards: (snapshot?.scene_cards ?? [])
-      .map((c) => `${c.scene_card_id}:${c.version}`)
-      .sort(),
-    records: (snapshot?.scene_card_generation_records ?? [])
-      .map((r) => `${r.record_id}:${r.summary_status}`)
-      .sort(),
     jobs: (snapshot?.generation_jobs ?? [])
       .map((j) => `${j.job_id}:${j.status}:${j.source}`)
       .sort(),
@@ -121,8 +115,6 @@ export function diffFactDigests(expected, actual) {
   const problems = [];
   const fields = [
     "messages",
-    "sceneCards",
-    "records",
     "jobs",
     "assets",
     "canvasNodeIds",
@@ -179,10 +171,8 @@ export function checkStorageIdentity(accessUrl, userId, type) {
 }
 
 
-function outputNodeId(slotId, isStoryboardFrame) {
-  return isStoryboardFrame
-    ? `storyboard-frame:${slotId}`
-    : `generation-output:${slotId}`;
+function outputNodeId(slotId) {
+  return `generation-output:${slotId}`;
 }
 
 function isWireInteger(value) {
@@ -200,7 +190,6 @@ export function findPendingOutputPlacements(snapshot) {
       job.input && typeof job.input === "object" && !Array.isArray(job.input)
         ? job.input
         : {};
-    const isStoryboardFrame = input.storyboard_preview === true;
     for (const slot of Array.isArray(job.output_slots)
       ? job.output_slots
       : []) {
@@ -220,10 +209,6 @@ export function findPendingOutputPlacements(snapshot) {
         slot_index: slot.slot_index,
         asset_id: String(slot.asset_id),
         type: job.type,
-        is_storyboard_frame: isStoryboardFrame,
-        scene_card_id: isWireInteger(input.scene_card_id)
-          ? String(input.scene_card_id)
-          : null,
         placement_anchor: placementAnchor(input),
       });
     }
@@ -239,16 +224,6 @@ function placementAnchor(input) {
   return [x, y, width, height].every((v) => typeof v === "number")
     ? { x, y, width, height }
     : null;
-}
-
-function sceneCardIdOf(node) {
-  if (node?.sceneCardId) return String(node.sceneCardId);
-  if (node?.scene_card_id != null) return String(node.scene_card_id);
-  const data = node?.data;
-  if (data && typeof data === "object" && !Array.isArray(data)) {
-    if (data.sceneCardId != null) return String(data.sceneCardId);
-  }
-  return null;
 }
 
 export function viewportAnchorPoint(viewport) {
@@ -302,13 +277,11 @@ function findFreePosition(occupied, anchor, dims) {
 export function buildOutputCanvasNode(output, position) {
   const dims = output.type === "video" ? VIDEO_OUTPUT_SIZE : IMAGE_OUTPUT_SIZE;
   return {
-    id: outputNodeId(output.slot_id, output.is_storyboard_frame === true),
+    id: outputNodeId(output.slot_id),
     type: output.type,
     assetId: String(output.asset_id),
     taskId: String(output.generation_job_id),
     slotIndex: output.slot_index,
-    ...(output.is_storyboard_frame === true ? { storyboardFrame: true } : {}),
-    ...(output.scene_card_id ? { sceneCardId: output.scene_card_id } : {}),
     position,
     width: dims.width,
     height: dims.height,
@@ -321,10 +294,7 @@ export function planOutputCanvasNodes(existingNodes, pendingOutputs, viewport) {
   const occupied = nodes.map(nodeRect);
   const additions = [];
   for (const output of pendingOutputs) {
-    const nodeId = outputNodeId(
-      output.slot_id,
-      output.is_storyboard_frame === true,
-    );
+    const nodeId = outputNodeId(output.slot_id);
     if (
       nodes.some((n) => n?.id === nodeId) ||
       additions.some((n) => n.id === nodeId)
@@ -334,17 +304,7 @@ export function planOutputCanvasNodes(existingNodes, pendingOutputs, viewport) {
     const dims =
       output.type === "video" ? VIDEO_OUTPUT_SIZE : IMAGE_OUTPUT_SIZE;
     let base = null;
-    if (output.scene_card_id) {
-      const card = [...nodes, ...additions].find(
-        (n) =>
-          n?.type === "scene_card" && sceneCardIdOf(n) === output.scene_card_id,
-      );
-      if (card) {
-        const rect = nodeRect(card);
-        base = { x: rect.x, y: rect.y + rect.height + OUTPUT_GAP };
-      }
-    }
-    if (!base && output.placement_anchor) {
+    if (output.placement_anchor) {
       base = {
         x: output.placement_anchor.x,
         y:
@@ -797,10 +757,7 @@ async function placeOutputsOnCanvas(projectId, token, snapshot) {
   const after = await fetchSnapshot(projectId, token);
   const afterNodes = after.canvas?.nodes ? JSON.parse(after.canvas.nodes) : [];
   for (const output of pending) {
-    const nodeId = outputNodeId(
-      output.slot_id,
-      output.is_storyboard_frame === true,
-    );
+    const nodeId = outputNodeId(output.slot_id);
     const job = (after.generation_jobs ?? []).find(
       (item) => String(item?.job_id) === output.generation_job_id,
     );

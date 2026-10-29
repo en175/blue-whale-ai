@@ -62,7 +62,6 @@ class CancelBeforeDispatchMySqlIntegrationTest {
     @EnableTransactionManagement
     @MapperScan("com.bluewhale.worker.infrastructure.persistence.mapper")
     @Import({JobStateMachineService.class, JobClaimService.class, JobFinalizer.class,
-            SceneCardGenerationRecordSync.class, StoryboardPreviewSync.class,
             TerminalEventOutbox.class})
     static class Config {
         @Bean

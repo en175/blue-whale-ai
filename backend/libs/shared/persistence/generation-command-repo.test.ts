@@ -102,11 +102,11 @@ function expectExtraWrite(
 }
 
 describe("generation command placement anchor", () => {
-  it("freezes the SceneCard output anchor in the job input", async () => {
+  it("freezes the viewport anchor in the job input when none was supplied", async () => {
     const createJob = vi.fn().mockResolvedValue({
       id: 300n,
       type: "video",
-      source: "scene_card",
+      source: "bottom_dock",
       status: "queued",
       progress: 0,
       version: 1,
@@ -114,16 +114,9 @@ describe("generation command placement anchor", () => {
     const tx = {
       project_canvas: {
         findFirst: vi.fn().mockResolvedValue({
-          viewport_json: { x: 0, y: 0, zoom: 1 },
-          nodes_json: [
-            {
-              type: "scene_card",
-              scene_card_id: "66",
-              position: { x: 100, y: 200 },
-              width: 400,
-              height: 320,
-            },
-          ],
+          viewport_json: { x: 100, y: -200, zoom: 2 },
+          nodes_json: [],
+          rows_authoritative: 1,
         }),
       },
       generation_jobs: { create: createJob },
@@ -141,123 +134,66 @@ describe("generation command placement anchor", () => {
       input: { prompt: "whale" },
       actionIdentity: "generate-300",
       actionType: "video.generate",
-      source: "scene_card",
-      sceneCardId: "66",
+      source: "bottom_dock",
     });
 
     expect(createJob).toHaveBeenCalledWith({
       data: expect.objectContaining({
         input: {
           prompt: "whale",
-          placement_anchor: { x: 100, y: 200, width: 400, height: 320 },
+          placement_anchor: { x: -50, y: 100, width: 0, height: 0 },
           expected_output_count: 1,
         },
       }),
     });
   });
 
-  it("SceneCard 尚未落库时把无尺寸卡片视为完整兼容矩形", async () => {
+  it("keeps the caller-supplied anchor untouched", async () => {
     const createJob = vi.fn().mockResolvedValue({
       id: 300n,
       type: "video",
-      source: "scene_card",
+      source: "bottom_dock",
       status: "queued",
       progress: 0,
       version: 1,
     });
     const tx = {
-      project_canvas: {
-        findFirst: vi.fn().mockResolvedValue({
-          viewport_json: { x: 0, y: 0, zoom: 1 },
-          nodes_json: [
-            {
-              id: "blocker",
-              type: "scene_card",
-              position: { x: -624, y: -1104 },
-            },
-          ],
-        }),
+      project_canvas: { findFirst: vi.fn() },
+      generation_jobs: { create: createJob },
+      generation_job_extras: extrasDelegate(),
+      generation_output_slots: { create: vi.fn().mockResolvedValue({}) },
+      billing_cost_reservations: { create: vi.fn().mockResolvedValue({}) },
+      generation_job_logs: { create: vi.fn().mockResolvedValue({}) },
+    };
+
+    await createJobWithinTx(tx as never, {
+      projectId: "55",
+      userId: "9",
+      type: "video",
+      expectedOutputCount: 1,
+      input: {
+        prompt: "whale",
+        placement_anchor: { x: 10, y: 20, width: 400, height: 300 },
       },
-      generation_jobs: { create: createJob },
-      generation_job_extras: extrasDelegate(),
-      generation_output_slots: { create: vi.fn().mockResolvedValue({}) },
-      billing_cost_reservations: { create: vi.fn().mockResolvedValue({}) },
-      generation_job_logs: { create: vi.fn().mockResolvedValue({}) },
-    };
-
-    await createJobWithinTx(tx as never, {
-      projectId: "55",
-      userId: "9",
-      type: "video",
-      expectedOutputCount: 1,
-      input: { prompt: "whale" },
       actionIdentity: "generate-300",
       actionType: "video.generate",
-      source: "scene_card",
-      sceneCardId: "66",
+      source: "bottom_dock",
     });
 
+    expect(tx.project_canvas.findFirst).not.toHaveBeenCalled();
     expect(createJob).toHaveBeenCalledWith({
       data: expect.objectContaining({
-        input: {
-          prompt: "whale",
-          placement_anchor: { x: 0, y: -1104, width: 400, height: 1080 },
-          expected_output_count: 1,
-        },
-      }),
-    });
-  });
-
-  it("Canvas 行不存在时也冻结非零的兼容矩形", async () => {
-    const createJob = vi.fn().mockResolvedValue({
-      id: 300n,
-      type: "video",
-      source: "scene_card",
-      status: "queued",
-      progress: 0,
-      version: 1,
-    });
-    const tx = {
-      project_canvas: { findFirst: vi.fn().mockResolvedValue(null) },
-      generation_jobs: { create: createJob },
-      generation_job_extras: extrasDelegate(),
-      generation_output_slots: { create: vi.fn().mockResolvedValue({}) },
-      billing_cost_reservations: { create: vi.fn().mockResolvedValue({}) },
-      generation_job_logs: { create: vi.fn().mockResolvedValue({}) },
-    };
-
-    await createJobWithinTx(tx as never, {
-      projectId: "55",
-      userId: "9",
-      type: "video",
-      expectedOutputCount: 1,
-      input: { prompt: "whale" },
-      actionIdentity: "generate-300",
-      actionType: "video.generate",
-      source: "scene_card",
-      sceneCardId: "66",
-    });
-
-    expect(createJob).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        input: {
-          prompt: "whale",
-          placement_anchor: { x: -424, y: -1104, width: 400, height: 1080 },
-          expected_output_count: 1,
-        },
+        input: expect.objectContaining({
+          placement_anchor: { x: 10, y: 20, width: 400, height: 300 },
+        }),
       }),
     });
   });
 });
 
 describe("generation command repo retry", () => {
-  it("keeps the logical slot index and marks its record generating", async () => {
+  it("keeps the logical slot index on retry", async () => {
     const createSlot = vi.fn().mockResolvedValue({});
-    const updateRecord = vi.fn().mockResolvedValue({
-      id: 88n,
-      project_id: 55n,
-      version: 2,
-    });
     const tx = {
       generation_jobs: {
         findFirst: vi.fn().mockResolvedValue({
@@ -265,14 +201,14 @@ describe("generation command repo retry", () => {
           project_id: 55n,
           user_id: 9n,
           type: "video",
-          source: "scene_card",
+          source: "bottom_dock",
           status: "failed",
           input: RETRY_VIDEO_INPUT,
         }),
         create: vi.fn().mockResolvedValue({
           id: 301n,
           type: "video",
-          source: "scene_card",
+          source: "bottom_dock",
           status: "queued",
           progress: 0,
           version: 1,
@@ -287,12 +223,10 @@ describe("generation command repo retry", () => {
             slot_index: 3,
             status: "failed",
             retry_of_slot_id: null,
-            scene_card_generation_record_id: 88n,
           },
         ]),
         create: createSlot,
       },
-      scene_card_generation_records: { update: updateRecord },
       generation_job_extras: extrasDelegate(),
       billing_cost_reservations: {
         findFirst: vi.fn().mockResolvedValue({
@@ -335,10 +269,6 @@ describe("generation command repo retry", () => {
     expect(createSlot).toHaveBeenCalledWith({
       data: expect.objectContaining({ slot_index: 3, retry_of_slot_id: 77n }),
     });
-    expect(updateRecord).toHaveBeenCalledWith({
-      where: { id: 88n },
-      data: { summary_status: "generating", version: { increment: 1 } },
-    });
     expect(tx.project_command_receipts.create).toHaveBeenCalledWith({
       data: expect.objectContaining({ accepted_cursor: expect.any(BigInt) }),
     });
@@ -354,14 +284,14 @@ describe("generation command repo retry", () => {
           project_id: 55n,
           user_id: 9n,
           type: "video",
-          source: "scene_card",
+          source: "bottom_dock",
           status: "failed",
           input: RETRY_VIDEO_INPUT,
         }),
         create: vi.fn().mockResolvedValue({
           id: 301n,
           type: "video",
-          source: "scene_card",
+          source: "bottom_dock",
           status: "queued",
           progress: 0,
           version: 1,
@@ -428,14 +358,14 @@ describe("generation command repo retry", () => {
           project_id: 55n,
           user_id: 9n,
           type: "video",
-          source: "scene_card",
+          source: "bottom_dock",
           status: "failed",
           input: RETRY_VIDEO_INPUT,
         }),
         create: vi.fn().mockResolvedValue({
           id: 301n,
           type: "video",
-          source: "scene_card",
+          source: "bottom_dock",
           status: "queued",
           progress: 0,
           version: 1,
@@ -496,7 +426,6 @@ describe("generation command repo retry", () => {
         slot_index: 0,
         status: "failed",
         retry_of_slot_id: null,
-        scene_card_generation_record_id: null,
       },
       {
         id: 79n,
@@ -505,7 +434,6 @@ describe("generation command repo retry", () => {
         slot_index: 1,
         status: "failed",
         retry_of_slot_id: null,
-        scene_card_generation_record_id: null,
       },
       {
         id: 78n,
@@ -514,7 +442,6 @@ describe("generation command repo retry", () => {
         slot_index: 0,
         status: "succeeded",
         retry_of_slot_id: 77n,
-        scene_card_generation_record_id: null,
       },
     ];
     const createSlot = vi.fn().mockResolvedValue({});
@@ -614,7 +541,6 @@ describe("generation command repo retry", () => {
             slot_index: 0,
             status: "failed",
             retry_of_slot_id: null,
-            scene_card_generation_record_id: null,
           },
           {
             id: 78n,
@@ -623,7 +549,6 @@ describe("generation command repo retry", () => {
             slot_index: 0,
             status: "succeeded",
             retry_of_slot_id: 77n,
-            scene_card_generation_record_id: null,
           },
         ]),
         create: createSlot,
@@ -708,7 +633,7 @@ describe("generation command repo retry", () => {
       project_id: 55n,
       user_id: 9n,
       type: "video",
-      source: "scene_card",
+      source: "bottom_dock",
       status: "failed",
       input: RETRY_VIDEO_INPUT,
     };
@@ -718,7 +643,7 @@ describe("generation command repo retry", () => {
         create: vi.fn().mockResolvedValue({
           id: 301n,
           type: "video",
-          source: "scene_card",
+          source: "bottom_dock",
           status: "queued",
           progress: 0,
           version: 1,
@@ -803,7 +728,7 @@ describe("generation command repo retry", () => {
       const createJob = vi.fn().mockResolvedValue({
         id: 302n,
         type: "video",
-        source: "scene_card",
+        source: "bottom_dock",
         status: "queued",
         progress: 0,
         version: 1,
@@ -849,7 +774,7 @@ describe("generation command repo retry", () => {
       project_id: 55n,
       user_id: 9n,
       type: "video",
-      source: "scene_card",
+      source: "bottom_dock",
       status: "failed",
       input: { ...RETRY_VIDEO_INPUT, video_mode: "image_reference", references: [{ material_id: "asset-abc", role: "reference", type: "image" }], expected_output_count: 1 },
       strategy_version: "seedance-2.0-v1",
@@ -973,14 +898,14 @@ describe("retryJob 计费快照（IKL406：重试的 charge 必须带 rule_snaps
           project_id: 55n,
           user_id: 9n,
           type,
-          source: "scene_card",
+          source: "bottom_dock",
           status: "failed",
           input: type === "video" ? RETRY_VIDEO_INPUT : { prompt: "whale", model_id: "image-model", size: "1024x1024", aspect_ratio: "1:1" },
         }),
         create: vi.fn().mockResolvedValue({
           id: 301n,
           type,
-          source: "scene_card",
+          source: "bottom_dock",
           status: "queued",
           progress: 0,
           version: 1,

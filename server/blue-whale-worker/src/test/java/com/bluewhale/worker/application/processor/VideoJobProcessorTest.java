@@ -1286,8 +1286,8 @@ class VideoJobProcessorTest {
     }
 
     @Test
-    @DisplayName("scene_card 路径冻结的 video_reference_max 决定执行期上限（旧常量 3 拦不住第 4 条）")
-    void frozenVideoLimitDrivesSceneCardPath() {
+    @DisplayName("冻结的 video_reference_max 决定执行期上限（旧常量 3 拦不住第 4 条）")
+    void frozenVideoLimitDrivesExecution() {
         doAnswer(inv -> {
             List<String> ids = inv.getArgument(0);
             Map<String, AssetEntity> map = new HashMap<>();

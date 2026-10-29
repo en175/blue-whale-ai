@@ -11,8 +11,6 @@ import com.bluewhale.worker.infrastructure.persistence.mapper.GenerationJobExtra
 import com.bluewhale.worker.infrastructure.persistence.mapper.GenerationJobLogMapper;
 import com.bluewhale.worker.infrastructure.persistence.mapper.GenerationJobMapper;
 import com.bluewhale.worker.infrastructure.persistence.mapper.GenerationOutputSlotMapper;
-import com.bluewhale.worker.infrastructure.persistence.mapper.SceneCardGenerationRecordMapper;
-import com.bluewhale.worker.infrastructure.persistence.mapper.StoryboardPreviewMapper;
 import com.bluewhale.worker.infrastructure.mq.GenerationMessageProducer;
 import com.bluewhale.worker.infrastructure.storage.TosAudioMediaRelay;
 import com.sun.net.httpserver.HttpServer;
@@ -79,18 +77,12 @@ class AudioMixCrossRuntimeMySqlIntegrationTest {
                 mapper(AssetMapper.class, session),
                 mapper(GenerationJobLogMapper.class, session),
                 mapper(GenerationOutputSlotMapper.class, session),
-                mapper(SceneCardGenerationRecordMapper.class, session),
-                mapper(StoryboardPreviewMapper.class, session),
                 extraMapper);
 
         var assetMapper = mapper(AssetMapper.class, session);
         var jobLogMapper = mapper(GenerationJobLogMapper.class, session);
         var slotMapper = mapper(GenerationOutputSlotMapper.class, session);
         finalizer = new JobFinalizer(jobMapper, assetMapper, jobLogMapper, slotMapper, extraMapper,
-                new SceneCardGenerationRecordSync(slotMapper,
-                        mapper(SceneCardGenerationRecordMapper.class, session)),
-                new StoryboardPreviewSync(slotMapper,
-                        mapper(StoryboardPreviewMapper.class, session)),
                 TerminalEventOutbox.noop());
     }
 

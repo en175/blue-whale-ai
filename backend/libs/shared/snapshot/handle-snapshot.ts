@@ -51,9 +51,6 @@ export interface SnapshotData {
     version: number | null;
   };
   conversation_messages: readonly unknown[];
-  scene_cards: readonly unknown[];
-  scene_card_generation_records: readonly unknown[];
-  storyboard_previews: readonly unknown[];
   generation_jobs: SnapshotGenerationJob[];
   assets: Record<string, SnapshotAssetSummary>;
 }
@@ -140,23 +137,6 @@ export async function handleGetSnapshot(
         })),
       }),
     ),
-    scene_cards: conversation.scene_cards.map((card) => ({
-      ...card,
-      scene_card_id: wireInteger(card.scene_card_id),
-    })),
-    scene_card_generation_records:
-      conversation.scene_card_generation_records.map((record) => ({
-        ...record,
-        record_id: wireInteger(record.record_id),
-        scene_card_id: wireInteger(record.scene_card_id),
-        first_generation_job_id: wireInteger(record.first_generation_job_id),
-      })),
-    storyboard_previews: conversation.storyboard_previews.map((preview) => ({
-      ...preview,
-      preview_id: wireInteger(preview.preview_id),
-      scene_card_id: wireInteger(preview.scene_card_id),
-      first_generation_job_id: wireInteger(preview.first_generation_job_id),
-    })),
     generation_jobs: generation_jobs.map(toWireJob),
     assets: assetMap,
   });

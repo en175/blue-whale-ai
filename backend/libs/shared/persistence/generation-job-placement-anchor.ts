@@ -1,13 +1,6 @@
-import {
-  findPlacement,
-  SCENE_CARD_FALLBACK_HEIGHT,
-  SCENE_CARD_WIDTH,
-  type Rect,
-} from "@lib/core";
 import type { Prisma } from "@prisma/client";
 
 import type { CreateJobInput } from "./generation-command-repo.js";
-import { nodeFromRow } from "./canvas-repo.js";
 
 function validAnchor(value: unknown): value is {
   x: number;
@@ -34,25 +27,14 @@ export async function freezePlacementAnchor(
     project_canvas?: {
       findFirst(args: unknown): Promise<{
         viewport_json: unknown;
-        nodes_json: unknown;
-        rows_authoritative: number;
       } | null>;
-    };
-    project_nodes?: {
-      findMany(args: unknown): Promise<Array<{
-        node_id: string;
-        type: string;
-        pos_x: number | null;
-        pos_y: number | null;
-        data_json: unknown;
-      }>>;
     };
   };
   if (!ports.project_canvas?.findFirst) return input.input;
 
   const canvas = await ports.project_canvas.findFirst({
     where: { project_id: BigInt(input.projectId) },
-    select: { viewport_json: true, nodes_json: true, rows_authoritative: true },
+    select: { viewport_json: true },
   });
   const viewport =
     canvas?.viewport_json &&
@@ -62,110 +44,12 @@ export async function freezePlacementAnchor(
       : {};
   const zoom =
     typeof viewport.zoom === "number" && viewport.zoom > 0 ? viewport.zoom : 1;
-  let anchor = {
+  const anchor = {
     x: -(typeof viewport.x === "number" ? viewport.x : 0) / zoom,
     y: -(typeof viewport.y === "number" ? viewport.y : 0) / zoom,
     width: 0,
     height: 0,
   };
 
-  if (input.sceneCardId) {
-    const nodes = canvas?.rows_authoritative === 1 && ports.project_nodes?.findMany
-      ? (await ports.project_nodes.findMany({
-          where: { project_id: BigInt(input.projectId), is_delete: 0 },
-          orderBy: { id: "asc" },
-        })).map((row) => nodeFromRow(row))
-      : Array.isArray(canvas?.nodes_json) ? canvas.nodes_json : [];
-    const sceneCardNode = nodes.find((node) => {
-      if (!node || typeof node !== "object" || Array.isArray(node)) {
-        return false;
-      }
-      const candidate = node as Record<string, unknown>;
-      const data =
-        candidate.data &&
-        typeof candidate.data === "object" &&
-        !Array.isArray(candidate.data)
-          ? (candidate.data as Record<string, unknown>)
-          : {};
-      return (
-        candidate.type === "scene_card" &&
-        String(candidate.scene_card_id ?? data.sceneCardId) ===
-          input.sceneCardId
-      );
-    });
-    let hasActualAnchor = false;
-    if (sceneCardNode && typeof sceneCardNode === "object") {
-      const node = sceneCardNode as Record<string, unknown>;
-      const position = node.position;
-      if (
-        position &&
-        typeof position === "object" &&
-        !Array.isArray(position)
-      ) {
-        const point = position as Record<string, unknown>;
-        if (typeof point.x === "number" && typeof point.y === "number") {
-          anchor = {
-            x: point.x,
-            y: point.y,
-            width:
-              typeof node.width === "number" ? node.width : SCENE_CARD_WIDTH,
-            height:
-              typeof node.height === "number"
-                ? node.height
-                : SCENE_CARD_FALLBACK_HEIGHT,
-          };
-          hasActualAnchor = true;
-        }
-      }
-    }
-    if (!hasActualAnchor) {
-      const existing: Rect[] = nodes.flatMap((candidate) => {
-        if (
-          !candidate ||
-          typeof candidate !== "object" ||
-          Array.isArray(candidate)
-        ) {
-          return [];
-        }
-        const node = candidate as Record<string, unknown>;
-        const isSceneCard = node.type === "scene_card";
-        const position =
-          node.position &&
-          typeof node.position === "object" &&
-          !Array.isArray(node.position)
-            ? (node.position as Record<string, unknown>)
-            : {};
-        return [
-          {
-            x: typeof position.x === "number" ? position.x : 0,
-            y: typeof position.y === "number" ? position.y : 0,
-            width:
-              typeof node.width === "number"
-                ? node.width
-                : isSceneCard
-                  ? SCENE_CARD_WIDTH
-                  : 200,
-            height:
-              typeof node.height === "number"
-                ? node.height
-                : isSceneCard
-                  ? SCENE_CARD_FALLBACK_HEIGHT
-                  : 200,
-          },
-        ];
-      });
-      const position = findPlacement({
-        existing,
-        anchor,
-        nodeWidth: SCENE_CARD_WIDTH,
-        nodeHeight: SCENE_CARD_FALLBACK_HEIGHT,
-      });
-      anchor = {
-        ...position,
-        width: SCENE_CARD_WIDTH,
-        height: SCENE_CARD_FALLBACK_HEIGHT,
-      };
-    }
-  }
   return { ...input.input, placement_anchor: anchor };
 }

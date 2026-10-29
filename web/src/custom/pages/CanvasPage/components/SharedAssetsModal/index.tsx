@@ -20,7 +20,7 @@ import {
   AlertCircle,
   RefreshCw,
 } from 'lucide-react';
-import { fetchSharedAssetList, removeSharedAsset, addSceneToProject, type SharedAssetView, type SharedAssetKind, type SharedAssetListQuery, type SharedAssetMediaSnapshot, type SharedAssetCardSnapshot, type SharedAssetGoodsSnapshot, type SharedAssetTextSnapshot, type SharedAssetSceneSnapshot } from '@/custom/api/sharedAssets';
+import { fetchSharedAssetList, removeSharedAsset, type SharedAssetView, type SharedAssetKind, type SharedAssetListQuery, type SharedAssetMediaSnapshot, type SharedAssetCardSnapshot, type SharedAssetGoodsSnapshot, type SharedAssetTextSnapshot, type SharedAssetSceneSnapshot } from '@/custom/api/sharedAssets';
 import { isApiError } from '@/shared/api/http';
 import { remoteImageCrossOrigin, resolveMediaSrc } from '@/shared/utils/remoteImageCors';
 import Empty from '@/custom/components/Empty';
@@ -77,8 +77,6 @@ type ToastFn = (type: 'success' | 'error' | 'warn', msg: string) => void;
 
 interface SharedAssetsModalProps {
   onClose: () => void;
-
-  projectId: string;
 
   onAddItem: (item: SharedAssetView) => Promise<boolean>;
 
@@ -159,7 +157,6 @@ function badgeText(item: SharedAssetView): string {
 
 export default function SharedAssetsModal({
   onClose,
-  projectId,
   onAddItem,
   onToast,
   defaultTab,
@@ -269,21 +266,7 @@ export default function SharedAssetsModal({
     if (addItemId) return;
 
     if (item.assetType === 'scene') {
-      if (!projectId) {
-        onToast('error', '请先选择项目');
-        return;
-      }
-      setAddItemId(item.id);
-      try {
-        const result = await addSceneToProject(item.id, projectId);
-
-        onToast('success', `场景卡已添加（ID: ${result.sceneCardId}）`);
-        onClose();
-      } catch (e) {
-        if (!isApiError(e)) onToast('error', '添加失败');
-      } finally {
-        setAddItemId(null);
-      }
+      onToast('warn', '场景卡已退役，无法添加到画布');
       return;
     }
 

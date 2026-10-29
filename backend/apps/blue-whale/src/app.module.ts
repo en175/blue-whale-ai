@@ -17,7 +17,6 @@ import { RechargeLibModule } from "@lib/shared/recharge/recharge.module.js";
 import { RechargeCustomLibModule } from "@lib/shared/recharge-custom/recharge-custom.module.js";
 import { SystemSettingsModule } from "@lib/shared/system-settings/index.js";
 import { ProjectModule } from "@lib/shared/project/project.module.js";
-import { SceneCardModule } from "@lib/shared/scene-card/scene-card.module.js";
 import { SessionModule } from "@lib/shared/session/session.module.js";
 import { CaptchaModule } from "@lib/shared/auth/captcha.module.js";
 import { PhoneVerificationModule } from "@lib/shared/auth/phone-verification.module.js";
@@ -54,7 +53,6 @@ import { AudioVideoMuxesApiModule } from "./api/audio-video-muxes/audio-video-mu
 import { ProjectAssetsModule } from "./api/project-assets/project-assets.module.js";
 import { ProjectsApiModule } from "./api/projects/projects.module.js";
 import { RechargeModule } from "./api/recharge/recharge.module.js";
-import { SceneCardsApiModule } from "./api/scene-cards/scene-cards.module.js";
 import { SharedAssetsApiModule } from "./api/shared-assets/shared-assets.module.js";
 import { SiteHomepageHeroesModule } from "./api/site/homepage-heroes.module.js";
 import { SkillsApiModule } from "./api/skills/skills.module.js";
@@ -86,7 +84,6 @@ import { IdentityModule } from "@lib/shared/identity/index.js";
     DashboardModule,
     GenerationModule,
     SkillModule,
-    SceneCardModule,
     SharedAssetsModule,
     SnapshotModule,
     SessionModule,
@@ -129,7 +126,6 @@ import { IdentityModule } from "@lib/shared/identity/index.js";
     ProjectsApiModule,
     ProjectAssetsModule,
     SkillsApiModule,
-    SceneCardsApiModule,
     SharedAssetsApiModule,
     SiteHomepageHeroesModule,
     AgentTemplatesModule,

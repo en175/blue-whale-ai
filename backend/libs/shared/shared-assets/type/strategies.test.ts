@@ -1,12 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   ASSET_UNAVAILABLE_CODE,
-  RESOURCE_NOT_FOUND_CODE,
   SHARED_ASSET_EMPTY_CARD_CODE,
 } from "@lib/contracts";
 import { StyleCardStrategy } from "./card-strategies.js";
 import { MediaStrategy } from "./media-strategies.js";
-import { SceneStrategy } from "./scene-strategy.js";
 import { GoodsStrategy } from "./goods-strategy.js";
 import { TextStrategy } from "./text-strategy.js";
 import { sha256 } from "./shared-asset-type.strategy.js";
@@ -113,49 +111,6 @@ describe("MediaStrategy（assetType=media，kind=image/video/audio）", () => {
     expect(plan.thumbnailUrl).toBe("https://x/a.png");
     expect(plan.name).toBe("图.png");
     expect(plan.dedupKey).toBe(`media:${sha256("https://x/a.png")}`);
-  });
-});
-
-describe("SceneStrategy（assetType=scene）", () => {
-  const source = {
-    findOwnedSceneCard: vi.fn(),
-  } as unknown as SharedAssetSourcePort;
-  const strategy = new SceneStrategy(source);
-  expect(strategy.assetType).toBe("scene");
-  expect(strategy.kind).toBeNull();
-
-  it("源场景卡缺失 → 拒绝", async () => {
-    source.findOwnedSceneCard = vi.fn().mockResolvedValue({ kind: "not_found" });
-    await expect(
-      strategy.buildSavePlan(user, {
-        assetType: "scene",
-        sourceSceneCardId: "7",
-      }),
-    ).rejects.toMatchObject({ code: RESOURCE_NOT_FOUND_CODE });
-  });
-
-  it("合法 → 内容 + 生成预设快照", async () => {
-    source.findOwnedSceneCard = vi.fn().mockResolvedValue({
-      kind: "found",
-      scene_card: {
-        title: "开场",
-        summary: "summary",
-        content_markdown: "# 开场\n镜头一",
-        generation_preset: {
-          parameters: { size: "16:9" },
-          reference_mode: "first_frame",
-          reference_assets: [{ mention_id: "1" }],
-          capability_snapshot_version: { schema_version: 1 },
-        },
-      },
-    });
-    const plan = await strategy.buildSavePlan(user, {
-      assetType: "scene",
-      sourceSceneCardId: "7",
-    });
-    expect(plan.snapshot.title).toBe("开场");
-    expect(plan.snapshot.generationPreset?.referenceMode).toBe("first_frame");
-    expect(plan.dedupKey).toBe(`scene:${sha256("# 开场\n镜头一")}`);
   });
 });
 

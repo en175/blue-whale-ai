@@ -4,8 +4,6 @@ import com.bluewhale.worker.application.processor.VideoJobProcessor;
 import com.bluewhale.worker.infrastructure.persistence.mapper.GenerationJobMapper;
 import com.bluewhale.worker.infrastructure.persistence.mapper.GenerationJobLogMapper;
 import com.bluewhale.worker.infrastructure.persistence.mapper.GenerationOutputSlotMapper;
-import com.bluewhale.worker.infrastructure.persistence.mapper.SceneCardGenerationRecordMapper;
-import com.bluewhale.worker.infrastructure.persistence.mapper.StoryboardPreviewMapper;
 import com.bluewhale.worker.domain.entity.GenerationJobEntity;
 import com.bluewhale.worker.domain.entity.GenerationOutputSlotEntity;
 import org.apache.ibatis.annotations.Update;
@@ -32,8 +30,6 @@ class VideoWriteFenceGoldenTest {
     @Mock private com.bluewhale.worker.infrastructure.persistence.mapper.AssetMapper assetMapper;
     @Mock private GenerationJobLogMapper jobLogMapper;
     @Mock private GenerationOutputSlotMapper slotMapper;
-    @Mock private SceneCardGenerationRecordMapper sceneCardRecordMapper;
-    @Mock private StoryboardPreviewMapper storyboardPreviewMapper;
     @Mock private com.bluewhale.worker.infrastructure.persistence.mapper.GenerationJobExtraMapper extraMapper;
 
     private JobStateMachineService service;
@@ -42,11 +38,8 @@ class VideoWriteFenceGoldenTest {
     @BeforeEach
     void setUp() {
         service = new JobStateMachineService(jobMapper, assetMapper, jobLogMapper,
-                slotMapper, sceneCardRecordMapper, storyboardPreviewMapper,
-                extraMapper);
+                slotMapper, extraMapper);
         finalizer = new JobFinalizer(jobMapper, assetMapper, jobLogMapper, slotMapper, extraMapper,
-                new SceneCardGenerationRecordSync(slotMapper, sceneCardRecordMapper),
-                new StoryboardPreviewSync(slotMapper, storyboardPreviewMapper),
                 TerminalEventOutbox.noop());
     }
 
@@ -125,8 +118,8 @@ class VideoWriteFenceGoldenTest {
     }
 
     @Test
-    @DisplayName("G74: publishVideoResult 单槽语义——slot 无 record FK 零 summary 回写；绝不触碰 StoryboardPreview（评审 I1/I2）")
-    void g74_publishSingleSlotConditionalSync() {
+    @DisplayName("G74: publishVideoResult 单槽语义——单槽成功即写回资产")
+    void g74_publishSingleSlot() {
         GenerationJobEntity job = new GenerationJobEntity();
         job.setId(300L); job.setProjectId(42L); job.setType("video");
         job.setSource("bottom_dock"); job.setStatus("succeeded"); job.setVersion(7);
@@ -134,7 +127,6 @@ class VideoWriteFenceGoldenTest {
 
         GenerationOutputSlotEntity slot = new GenerationOutputSlotEntity();
         slot.setId(88L); slot.setSlotIndex(0);
-        slot.setSceneCardGenerationRecordId(null);
 
         when(jobMapper.publishVideoGuard(300L, "w1", 5L)).thenReturn(1);
         when(slotMapper.findByJobId(300L)).thenReturn(List.of(slot));
@@ -150,8 +142,6 @@ class VideoWriteFenceGoldenTest {
 
         assertThat(ok).isTrue();
         verify(slotMapper).updateSlot(88L, "succeeded", 777L);
-        verifyNoInteractions(sceneCardRecordMapper);
-        verifyNoInteractions(storyboardPreviewMapper);
     }
 
     @Test

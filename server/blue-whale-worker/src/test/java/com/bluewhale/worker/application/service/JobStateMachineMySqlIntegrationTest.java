@@ -25,8 +25,6 @@ import com.bluewhale.worker.infrastructure.persistence.mapper.GenerationJobLogMa
 import com.bluewhale.worker.infrastructure.persistence.mapper.GenerationJobMapper;
 import com.bluewhale.worker.infrastructure.persistence.mapper.GenerationOutputSlotMapper;
 import com.bluewhale.worker.infrastructure.persistence.mapper.GenerationOutboxMapper;
-import com.bluewhale.worker.infrastructure.persistence.mapper.SceneCardGenerationRecordMapper;
-import com.bluewhale.worker.infrastructure.persistence.mapper.StoryboardPreviewMapper;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitMixAudioClient;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitExtractAudioClient;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitExtractAudioClient.ExtractAudioTaskObservation;
@@ -176,16 +174,6 @@ class JobStateMachineMySqlIntegrationTest {
         }
 
         @Bean
-        SceneCardGenerationRecordMapper recordMapper(SqlSessionFactory sf) throws Exception {
-            return factory(SceneCardGenerationRecordMapper.class, sf).getObject();
-        }
-
-        @Bean
-        StoryboardPreviewMapper previewMapper(SqlSessionFactory sf) throws Exception {
-            return factory(StoryboardPreviewMapper.class, sf).getObject();
-        }
-
-        @Bean
         GenerationJobExtraMapper extraMapper(SqlSessionFactory sf) throws Exception {
             return factory(GenerationJobExtraMapper.class, sf).getObject();
         }
@@ -199,20 +187,16 @@ class JobStateMachineMySqlIntegrationTest {
         JobStateMachineService service(
                 GenerationJobMapper jm, AssetMapper am, GenerationJobLogMapper jlm,
                 GenerationOutputSlotMapper sm,
-                SceneCardGenerationRecordMapper rm, StoryboardPreviewMapper pm,
                 GenerationJobExtraMapper em) {
-            return new JobStateMachineService(jm, am, jlm, sm, rm, pm, em);
+            return new JobStateMachineService(jm, am, jlm, sm, em);
         }
 
         @Bean
         JobFinalizer finalizer(
                 GenerationJobMapper jm, AssetMapper am, GenerationJobLogMapper jlm,
                 GenerationOutputSlotMapper sm, GenerationJobExtraMapper em,
-                SceneCardGenerationRecordMapper rm, StoryboardPreviewMapper pm,
                 GenerationOutboxMapper om) {
             return new JobFinalizer(jm, am, jlm, sm, em,
-                    new SceneCardGenerationRecordSync(sm, rm),
-                    new StoryboardPreviewSync(sm, pm),
                     new TerminalEventOutbox(om, jm, BillingEventPublisher.noop(), new MockEnvironment()));
         }
 
@@ -297,28 +281,12 @@ class JobStateMachineMySqlIntegrationTest {
     }
 
     private long seedSlot(long jobId, long projectId, int slotIndex, String status) {
-        return seedSlot(jobId, projectId, slotIndex, status, null);
-    }
-
-    private long seedSlot(long jobId, long projectId, int slotIndex, String status, Long recordId) {
         jdbc.update("""
                 INSERT INTO generation_output_slots
                   (generation_job_id, project_id, slot_index, status,
-                   scene_card_generation_record_id, gmt_create, gmt_modified)
-                VALUES (?,?,?,?,?,NOW(),NOW())
-                """, jobId, projectId, slotIndex, status, recordId);
-        Long id = jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
-        return id != null ? id : -1;
-    }
-
-    private long seedStoryboardPreview(long jobId, long projectId) {
-        jdbc.update("""
-                INSERT INTO storyboard_previews
-                  (scene_card_id, project_id, first_generation_job_id, command_id,
-                   summary_status, capability_snapshot_version,
-                   gmt_create, gmt_modified, version, is_delete)
-                VALUES (1,?,?,?,  'generating','{}',NOW(),NOW(),1,0)
-                """, projectId, jobId, "cmd-" + jobId);
+                   gmt_create, gmt_modified)
+                VALUES (?,?,?,?,NOW(),NOW())
+                """, jobId, projectId, slotIndex, status);
         Long id = jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
         return id != null ? id : -1;
     }
@@ -762,7 +730,6 @@ class JobStateMachineMySqlIntegrationTest {
             long jobId = seedClaimedJob(9L, "image", "bottom_dock", "worker-1", 1L);
             long slot0 = seedSlot(jobId, 99L, 0, "pending");
             long slot1 = seedSlot(jobId, 99L, 1, "pending");
-            seedStoryboardPreview(jobId, 99L);
 
             long assetA = 2001L, assetB = 2002L;
             boolean ok = finalizer.completeJob(

@@ -25,12 +25,6 @@ describe("acceptConversationMessage", () => {
           reply_to_input_request_id: null,
           mentions: [
             { type: "asset", asset_id: "9", display_name: "蓝鲸参考图" },
-            {
-              type: "scene_card",
-              scene_card_id: 12,
-              scene_card_version: 3,
-              display_name: "开场分镜",
-            },
           ],
         },
       },
@@ -47,12 +41,6 @@ describe("acceptConversationMessage", () => {
         content: "做一张蓝鲸海报",
         mentions: [
           { type: "asset", asset_id: "9", display_name: "蓝鲸参考图" },
-          {
-            type: "scene_card",
-            scene_card_id: "12",
-            scene_card_version: 3,
-            display_name: "开场分镜",
-          },
         ],
         forcedCreativeSkillId: null,
         requestHash: expect.stringMatching(/^[0-9a-f]{64}$/),
@@ -74,6 +62,17 @@ describe("acceptConversationMessage", () => {
         ],
       },
       { ...validBody, referenced_asset_ids: [9] },
+      {
+        ...validBody,
+        mentions: [
+          {
+            type: "scene_card",
+            scene_card_id: 12,
+            scene_card_version: 3,
+            display_name: "开场分镜",
+          },
+        ],
+      },
     ]) {
       const acceptMessage = vi.fn();
       await expect(
@@ -96,20 +95,10 @@ describe("acceptConversationMessage", () => {
     for (const mentions of [
       [
         { type: "asset", asset_id: 9, display_name: "A" },
-        {
-          type: "scene_card",
-          scene_card_id: 12,
-          scene_card_version: 3,
-          display_name: "B",
-        },
+        { type: "asset", asset_id: 12, display_name: "B" },
       ],
       [
-        {
-          type: "scene_card",
-          scene_card_id: 12,
-          scene_card_version: 3,
-          display_name: "B",
-        },
+        { type: "asset", asset_id: 12, display_name: "B" },
         { type: "asset", asset_id: 9, display_name: "A" },
       ],
     ]) {

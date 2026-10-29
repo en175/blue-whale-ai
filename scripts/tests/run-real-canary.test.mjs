@@ -80,10 +80,6 @@ function makeSnapshot() {
         command_id: "cmd-1",
       },
     ],
-    scene_cards: [{ scene_card_id: "41", version: 2 }],
-    scene_card_generation_records: [
-      { record_id: "51", summary_status: "ready" },
-    ],
     generation_jobs: [
       { job_id: "101", status: "succeeded", source: "direct" },
       { job_id: "102", status: "succeeded", source: "direct" },
@@ -104,7 +100,6 @@ test("factDigest：数字与字符串 id 归一化后 digest 相同", () => {
   const a = makeSnapshot();
   const b = makeSnapshot();
   b.generation_jobs[0].job_id = 101;
-  b.scene_cards[0].scene_card_id = 41;
   assert.deepEqual(computeFactDigest(a), computeFactDigest(b));
 });
 
@@ -112,8 +107,6 @@ test("factDigest：字段清单与取值符合预期", () => {
   const digest = computeFactDigest(makeSnapshot());
   assert.deepEqual(digest, {
     messages: ["11:user:1"],
-    sceneCards: ["41:2"],
-    records: ["51:ready"],
     jobs: ["101:succeeded:direct", "102:succeeded:direct"],
     assets: ["201", "202"],
     canvasNodeIds: ["generation-output:301"],
@@ -304,25 +297,6 @@ test("放置规划：避开既有节点占位", () => {
     rect.y < blocked.y + blocked.height &&
     blocked.y < rect.y + rect.height;
   assert.equal(overlap, false, "新节点不得与既有 SceneCard 重叠");
-});
-
-test("放置规划：视频槽带 SceneCard 时挂到卡下方", () => {
-  const snapshot = makePlacementSnapshot();
-  snapshot.generation_jobs[1].input.scene_card_id = "9";
-  const pending = findPendingOutputPlacements(snapshot);
-  const card = {
-    id: "scene_card_9",
-    type: "scene_card",
-    scene_card_id: "9",
-    position: { x: 500, y: 500 },
-    width: 400,
-    height: 300,
-    status: "placed",
-  };
-  const additions = planOutputCanvasNodes([card], [pending[1]], null);
-  assert.equal(additions[0].sceneCardId, "9");
-  assert.equal(additions[0].position.x, 500);
-  assert.ok(additions[0].position.y >= 500 + 300, "应位于 SceneCard 下方");
 });
 
 test("视口锚点：{x,y,zoom} 反投，非法输入回退原点", () => {

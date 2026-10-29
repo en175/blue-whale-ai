@@ -1,15 +1,11 @@
 import { wallClockRfc3339 } from "@lib/core";
-import { Inject, Injectable } from "@nestjs/common";
+import { Injectable } from "@nestjs/common";
 import {
   createSharedAssetRepo,
   type SharedAssetRepo,
   type SharedAssetRow,
 } from "@lib/shared/persistence/index.js";
 import {
-  RESOURCE_NOT_FOUND_CODE,
-  SHARED_ASSET_EMPTY_CARD_CODE,
-  SHARED_ASSET_TYPE_UNSUPPORTED_CODE,
-  sharedAssetSceneSnapshotSchema,
   type SaveSharedAssetRequest,
   type SaveSharedAssetResult,
   type SharedAssetListQuery,
@@ -18,12 +14,7 @@ import {
 } from "@lib/contracts";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 import { SharedAssetTypeRegistry } from "./type/shared-asset-type.registry.js";
-import { SharedAssetError } from "./shared-asset-error.js";
-import {
-  SHARED_ASSET_SOURCE_PORT,
-  sharedAssetKindOf,
-} from "./type/shared-asset-type.strategy.js";
-import type { SharedAssetSourcePort } from "./shared-asset-source.port.js";
+import { sharedAssetKindOf } from "./type/shared-asset-type.strategy.js";
 
 @Injectable()
 export class SharedAssetService {
@@ -39,8 +30,6 @@ export class SharedAssetService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly registry: SharedAssetTypeRegistry,
-    @Inject(SHARED_ASSET_SOURCE_PORT)
-    private readonly source: SharedAssetSourcePort,
   ) {}
 
   async save(
@@ -116,51 +105,6 @@ export class SharedAssetService {
 
   async delete(user: { userId: string }, id: string): Promise<boolean> {
     return this.repo.softDeleteOwned(id, user.userId);
-  }
-
-  async addSceneToProject(
-    user: { userId: string },
-    sharedAssetId: string,
-    projectId: string,
-  ): Promise<{ sceneCardId: string }> {
-    const row = await this.repo.findById(user.userId, sharedAssetId);
-    if (!row) {
-      throw new SharedAssetError(RESOURCE_NOT_FOUND_CODE, "共享资产不存在");
-    }
-    if (row.asset_type !== "scene") {
-      throw new SharedAssetError(
-        SHARED_ASSET_TYPE_UNSUPPORTED_CODE,
-        "仅场景卡支持复制到项目",
-      );
-    }
-    const parsed = sharedAssetSceneSnapshotSchema.safeParse(row.snapshot);
-    if (!parsed.success) {
-      throw new SharedAssetError(
-        SHARED_ASSET_EMPTY_CARD_CODE,
-        "场景卡快照数据不完整",
-      );
-    }
-    const snapshot = parsed.data;
-    const result = await this.source.copySceneCardToProject({
-      userId: user.userId,
-      projectId,
-      title: snapshot.title,
-      summary: snapshot.summary ?? null,
-      content_markdown: snapshot.contentMarkdown,
-      generation_preset: snapshot.generationPreset
-        ? {
-            parameters: snapshot.generationPreset.parameters,
-            reference_mode: snapshot.generationPreset.referenceMode,
-            reference_assets: snapshot.generationPreset.referenceAssets,
-            capability_snapshot_version:
-              snapshot.generationPreset.capabilitySnapshotVersion,
-          }
-        : null,
-    });
-    if (result.kind !== "copied") {
-      throw new SharedAssetError(RESOURCE_NOT_FOUND_CODE, "目标项目不存在");
-    }
-    return { sceneCardId: result.scene_card_id };
   }
 
   private toView(row: SharedAssetRow): SharedAssetView {

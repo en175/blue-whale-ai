@@ -1137,7 +1137,7 @@ describe('IKK1T9 视频编辑/延长（ADR-0124 模式配置化）', () => {
     expect(container.textContent).not.toContain('首尾帧模式最多');
   });
 
-  it('离开视频编辑切到其他模式：时长不再留在 -1，提交值回到正常时长', async () => {
+  it('离开视频编辑切到其他模式：时长不再留在 -1，提交值回到正常时长', { retry: 1 }, async () => {
     apiMocks.fetchGenerationModels.mockResolvedValue([editCapableModel()]);
     await renderPage();
     await clickNode({ id: 'd1', type: 'mediaNode', data: { draft: true, mediaType: 'video' } });

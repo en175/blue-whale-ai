@@ -315,10 +315,6 @@ export function useCanvasNodeFactories(host: CanvasNodeFactoriesHost) {
           setTextNodes((prev) => [...prev, node]);
           return true;
         }
-        case 'scene': {
-          showToast('warn', '场景卡需通过场景卡面板添加');
-          return false;
-        }
         default:
           return false;
       }

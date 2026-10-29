@@ -110,8 +110,6 @@ export {
   DEFAULT_NODE_HEIGHT,
   DEFAULT_GAP,
   DEFAULT_MAX_PER_ROW,
-  SCENE_CARD_WIDTH,
-  SCENE_CARD_FALLBACK_HEIGHT,
   type Rect,
   type FindPlacementOptions,
 } from "./placement.js";

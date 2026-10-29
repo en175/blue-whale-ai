@@ -59,9 +59,6 @@ export {
   type SnapshotConversationState,
   type SnapshotMentionView,
   type SnapshotAssetRow,
-  type SnapshotSceneCardView,
-  type SnapshotSceneCardGenerationRecordView,
-  type SnapshotStoryboardPreviewView,
 } from "./snapshot-repo.js";
 export {
   transactionWithUniqueRetry,
@@ -222,43 +219,14 @@ export {
 } from "./generation-finalize-repo.js";
 export type { JobBilling, JobBillingSource } from "./job-billing.js";
 export {
-  aggregateSlotStatus,
   resolveLogicalSlots,
   type OutputSlotStatus,
-  type SlotSummaryStatus,
 } from "./generation-output-slot-repo.js";
 export {
   validateDerivedReferences,
   type CapabilitySnapshot,
   type DerivedReference,
 } from "./plan-application-repo.js";
-export {
-  createSceneCardGenerationRepo,
-  type SceneCardGenerationRepo,
-  type RegenerateSceneCardInput,
-  type RegenerateSceneCardResult,
-  type SceneCardGenerationPresetView,
-  type SceneCardGenerationPresetViewResult,
-} from "./scene-card-generation-repo.js";
-export {
-  createSceneCardResourceRepo,
-  type SceneCardResourceRepo,
-  type SceneCardResourceResult,
-  type DeleteSceneCardResourceInput,
-  type DeleteSceneCardResourceResult,
-  type SceneCardSharedSnapshotSource,
-  type FindOwnedSceneCardWithPresetResult,
-  type CopySceneCardToProjectInput,
-  type CopySceneCardToProjectResult,
-} from "./scene-card-resource-repo.js";
-export {
-  createStoryboardPreviewRepo,
-  type StoryboardPreviewRepo,
-  type CreateStoryboardPreviewInput,
-  type CreateStoryboardPreviewResult,
-  type StoryboardPreviewView,
-  type ListStoryboardPreviewsResult,
-} from "./storyboard-preview-repo.js";
 export { createAssetOwnershipOps } from "./asset-ownership-repo.js";
 export type { AssetOwnershipOps, WorkerInputAsset } from "./asset-ownership-types.js";
 export {

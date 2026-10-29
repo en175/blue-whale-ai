@@ -106,12 +106,6 @@ export const saveSharedAssetRequestSchema = z.discriminatedUnion("assetType", [
     .strict(),
   z
     .object({
-      assetType: z.literal("scene"),
-      sourceSceneCardId: z.string().regex(/^[1-9][0-9]*$/),
-    })
-    .strict(),
-  z
-    .object({
       assetType: z.literal("text"),
       snapshot: sharedAssetTextSnapshotSchema,
     })
@@ -152,19 +146,3 @@ export const sharedAssetPageViewSchema = z.object({
   current: z.number().int(),
 });
 export type SharedAssetPageView = z.infer<typeof sharedAssetPageViewSchema>;
-
-export const addSharedAssetToProjectRequestSchema = z
-  .object({
-    projectId: z.string().regex(/^[1-9][0-9]*$/),
-  })
-  .strict();
-export type AddSharedAssetToProjectRequest = z.infer<
-  typeof addSharedAssetToProjectRequestSchema
->;
-
-export const addSharedAssetToProjectResultSchema = z.object({
-  sceneCardId: z.string(),
-});
-export type AddSharedAssetToProjectResult = z.infer<
-  typeof addSharedAssetToProjectResultSchema
->;

@@ -500,9 +500,7 @@ export {
 } from "./agent-runtime.js";
 export {
   assetContextProjectionSchema,
-  sceneCardContextProjectionSchema,
   type AssetContextProjection,
-  type SceneCardContextProjection,
 } from "./context-projection.js";
 export type {
   MentionAvailability,
@@ -520,31 +518,8 @@ export {
 } from "./plan-message.js";
 export {
   videoReferenceModeSchema,
-  sceneCardGenerationRecordStatusSchema,
   type VideoReferenceMode,
-  type SceneCardGenerationRecordStatus,
 } from "./plan-application.js";
-export {
-  sceneCardRegenerationRequestSchema,
-  sceneCardGenerationRecordViewSchema,
-  deriveVideoReferenceMode,
-  referenceModeToRequiredFeature,
-  validateVideoReferenceConfiguration,
-  type SceneCardRegenerationRequest,
-  type SceneCardGenerationRecordView,
-} from "./scene-card-generation.js";
-export {
-  storyboardPreviewParametersSchema,
-  storyboardPreviewCreateRequestSchema,
-  storyboardPreviewSchema,
-  storyboardPreviewViewSchema,
-  storyboardFrameViewSchema,
-  type StoryboardPreviewParameters,
-  type StoryboardPreviewCreateRequest,
-  type StoryboardPreview,
-  type StoryboardPreviewView,
-  type StoryboardFrameView,
-} from "./storyboard-preview.js";
 export {
   SHARED_ASSET_TYPES,
   SHARED_ASSET_KINDS,
@@ -563,8 +538,6 @@ export {
   saveSharedAssetResultSchema,
   sharedAssetListQuerySchema,
   sharedAssetPageViewSchema,
-  addSharedAssetToProjectRequestSchema,
-  addSharedAssetToProjectResultSchema,
   type SharedAssetType,
   type SharedAssetKind,
   type SharedAssetCardSnapshot,
@@ -578,8 +551,6 @@ export {
   type SaveSharedAssetResult,
   type SharedAssetListQuery,
   type SharedAssetPageView,
-  type AddSharedAssetToProjectRequest,
-  type AddSharedAssetToProjectResult,
 } from "./shared-asset.js";
 
 export { releaseRemovedPromptSources, promptBindingList, promptBindingsSchema, promptPlanSnapshotSchema, type PromptBinding, type PromptInputSources, type PromptPlanSnapshot } from "./prompt-target.js";

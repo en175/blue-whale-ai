@@ -27,9 +27,6 @@ public class GenerationOutputSlotEntity {
     @TableField("retry_of_slot_id")
     private Long retryOfSlotId;
 
-    @TableField("scene_card_generation_record_id")
-    private Long sceneCardGenerationRecordId;
-
     @TableField("gmt_create")
     private LocalDateTime gmtCreate;
 
@@ -54,8 +51,6 @@ public class GenerationOutputSlotEntity {
     public void setAssetId(Long assetId) { this.assetId = assetId; }
     public Long getRetryOfSlotId() { return retryOfSlotId; }
     public void setRetryOfSlotId(Long retryOfSlotId) { this.retryOfSlotId = retryOfSlotId; }
-    public Long getSceneCardGenerationRecordId() { return sceneCardGenerationRecordId; }
-    public void setSceneCardGenerationRecordId(Long id) { this.sceneCardGenerationRecordId = id; }
     public LocalDateTime getGmtCreate() { return gmtCreate; }
     public void setGmtCreate(LocalDateTime v) { this.gmtCreate = v; }
     public LocalDateTime getGmtModified() { return gmtModified; }

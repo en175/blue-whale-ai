@@ -385,21 +385,6 @@ model conversation_messages {
   @@index([project_id], map: "idx_message_project")
 }
 
-/// SceneCard 稳定身份与当前版本。T04 仅建立引用所需的最小资源边界；创建/应用行为由 T11 交付。
-model scene_cards {
-  id               BigInt   @id @default(autoincrement())
-  project_id       BigInt
-  title            String   @db.VarChar(255)
-  summary          String?  @db.Text
-  content_markdown String   @db.LongText
-  gmt_create       DateTime @default(now()) @db.DateTime(0)
-  gmt_modified     DateTime @default(now()) @db.DateTime(0)
-  version          Int      @default(1)
-  is_delete        Int      @default(0) @db.TinyInt
-
-  @@index([project_id], map: "idx_scene_card_project")
-}
-
 /// 旧内嵌 Agent 引擎运行表（已退役，IKCKOW 保留）：支撑「个人技能删除时进行中引用禁删」
 /// 保护（SkillInUseError + run_pin scrub，见 skill-repo deletePersonal），不再有写入方。
 model agent_runs {
@@ -898,55 +883,10 @@ model generation_job_logs {
   @@index([generation_job_id, occurred_at], map: "idx_gen_job_log_job_time")
 }
 
-/// 场景卡生成预设（IK67H9，CONTEXT L49-58）：SceneCard 1:1 持久拥有的视频生成参数，
-/// 首次应用从 PlanMessage 冻结参数创建。必有时长与视频参考模式；首/尾帧角色存 reference_assets。
-model scene_card_generation_presets {
-  id                          BigInt   @id @default(autoincrement())
-  scene_card_id               BigInt   @unique(map: "uk_preset_scene")
-  project_id                  BigInt
-  parameters                  Json
-  reference_mode              String   @db.VarChar(32)
-  reference_assets            Json
-  capability_snapshot_version Json
-  gmt_create                  DateTime @default(now()) @db.DateTime(0)
-  gmt_modified                DateTime @default(now()) @db.DateTime(0)
-  version                     Int      @default(1)
-  is_delete                   Int      @default(0) @db.TinyInt
-
-  @@index([project_id], map: "idx_preset_project")
-}
-
-/// 场景卡生成记录（IK67H9，CONTEXT L82-86）：User 从 SceneCard 发起的一次新生成及重试的聚合。
-/// summary_status 四态：generating/partial/success/failed。
-/// plan_message_id / application_receipt_id 两列随计划通道退役（写入方在 IKCKOW/IKD806 已删）；
-/// 列保留以留住历史行的溯源，但放宽为 NULL-able，新行不再写入。
-model scene_card_generation_records {
-  id                      BigInt   @id @default(autoincrement())
-  scene_card_id           BigInt
-  project_id              BigInt
-  summary_status          String   @db.VarChar(16)
-  plan_message_id         BigInt?
-  application_receipt_id  BigInt?
-  first_generation_job_id BigInt
-  gmt_create              DateTime @default(now()) @db.DateTime(0)
-  gmt_modified            DateTime @default(now()) @db.DateTime(0)
-  version                 Int      @default(1)
-  is_delete               Int      @default(0) @db.TinyInt
-
-  @@index([scene_card_id], map: "idx_record_scene")
-  @@index([project_id], map: "idx_record_project")
-  @@index([summary_status], map: "idx_record_status")
-}
-
-/// 生成输出槽位（IK67HE/T14，spec §4.4 / ADR-0026）：每次生成在提交时固定数量的槽，
-/// 身份与顺序稳定（slot_index）。成功 Asset 永久占据原槽；重试只补 failed/missing 槽，
-/// 不覆盖成功输出。scene_card_generation_record_id 关联 SceneCard 视频聚合（视频路径）；
-/// 图片路径留空。retry_of_slot_id 指向被重试的原始槽，形成同槽位重试链。
 model generation_output_slots {
   id                              BigInt   @id @default(autoincrement())
   project_id                      BigInt
   generation_job_id               BigInt
-  scene_card_generation_record_id BigInt?
   slot_index                      Int
   status                          String   @db.VarChar(24)
   asset_id                        BigInt?
@@ -956,32 +896,8 @@ model generation_output_slots {
   gmt_modified                    DateTime @default(now()) @db.DateTime(0)
 
   @@index([generation_job_id], map: "idx_slot_job")
-  @@index([scene_card_generation_record_id], map: "idx_slot_record")
   @@index([project_id, initial_placement_status], map: "idx_slot_placement")
   @@unique([generation_job_id, slot_index], map: "uk_slot_job_index")
-}
-
-/// StoryboardPreview（IK67HF/T15，CONTEXT L43-47）：User 从 SceneCard 显式触发的分镜预览会话聚合根 +
-/// SceneCard 绑定 + 幂等键。一次预览 = 一个 type=image 的 GenerationJob（first_generation_job_id），
-/// 其 N 个 output_slot（按 slot_index 升序）即有序画格。可选旁路：不自动创建视频 job、不改 Preset、
-/// 不切媒体类型（CONTEXT _Avoid_ L47）。画格本身复用 generation_output_slots + assets，本表只聚合会话。
-/// command_id 兜底幂等（uk_storyboard_command，operation=scene_card.storyboard_preview）。
-model storyboard_previews {
-  id                          BigInt   @id @default(autoincrement())
-  scene_card_id               BigInt
-  project_id                  BigInt
-  first_generation_job_id     BigInt
-  command_id                  String   @db.VarChar(128)
-  summary_status              String   @db.VarChar(16)
-  capability_snapshot_version Json
-  gmt_create                  DateTime @default(now()) @db.DateTime(0)
-  gmt_modified                DateTime @default(now()) @db.DateTime(0)
-  version                     Int      @default(1)
-  is_delete                   Int      @default(0) @db.TinyInt
-
-  @@unique([project_id, command_id], map: "uk_storyboard_command")
-  @@index([scene_card_id], map: "idx_storyboard_scene")
-  @@index([project_id], map: "idx_storyboard_project")
 }
 
 /// Immutable first-applied preview content, retained when its Canvas node is deleted.

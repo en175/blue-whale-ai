@@ -204,7 +204,7 @@ describe("toGenerationParamCheckInput", () => {
     ).toEqual({ size: "1080p", aspect_ratio: "16:9", duration: 5 });
   });
 
-  it("size 缺省回退（plan/scene_card 兼容）", () => {
+  it("size 缺省回退（无 resolution 时用 size 直传）", () => {
     expect(
       toGenerationParamCheckInput({ size: "2k", aspect_ratio: "1:1" }),
     ).toEqual({ size: "2k", aspect_ratio: "1:1", duration: undefined });
