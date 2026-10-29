@@ -43,7 +43,7 @@ export interface CanvasUploadDropHandles {
   ) => Promise<{ asset_id: string; url: string; nodeId: string }>;
   handleUploadFiles: (
     files: File[],
-    opts?: { screen?: { x: number; y: number }; placement?: BatchAnchor['placement']; focus?: SpawnBatchOptions['focus'] },
+    opts?: { screen?: { x: number; y: number }; placement?: BatchAnchor['placement']; anchor?: { x: number; y: number }; focus?: SpawnBatchOptions['focus'] },
   ) => void;
   handleUploadFile: (files: File[]) => void;
   handleCopyImage: (id: string) => Promise<void>;
@@ -226,7 +226,7 @@ export function useCanvasUploadDrop(host: CanvasUploadDropHost): CanvasUploadDro
 
   const handleUploadFiles = (
     files: File[],
-    opts?: { screen?: { x: number; y: number }; placement?: BatchAnchor['placement']; focus?: SpawnBatchOptions['focus'] },
+    opts?: { screen?: { x: number; y: number }; placement?: BatchAnchor['placement']; anchor?: { x: number; y: number }; focus?: SpawnBatchOptions['focus'] },
   ) => {
     const accepted = files.filter((file) => {
       try {
@@ -238,16 +238,13 @@ export function useCanvasUploadDrop(host: CanvasUploadDropHost): CanvasUploadDro
       }
     });
     if (accepted.length === 0) return;
-    const items: BatchItemLayout[] = accepted.map((file) => ({
-      mediaType: file.type.startsWith('video/') ? 'video' : file.type.startsWith('audio/') ? 'audio' : 'image',
-    }));
-    const positions = spawnBatch(items, { screen: opts?.screen, placement: opts?.placement, focus: opts?.focus });
     void (async () => {
-      for (const file of accepted) {
-        const item = await probeItem(file);
-        items.push(item);
-        void placeFileOnCanvas(file, { position: positions[items.length - 1], batchItem: item }).catch(() => undefined);
-      }
+      const items: BatchItemLayout[] = [];
+      for (const file of accepted) items.push(await probeItem(file));
+      const positions = spawnBatch(items, { screen: opts?.screen, placement: opts?.placement, anchor: opts?.anchor, focus: opts?.focus });
+      accepted.forEach((file, index) => {
+        void placeFileOnCanvas(file, { position: positions[index], batchItem: items[index] }).catch(() => undefined);
+      });
     })();
   };
 

@@ -114,7 +114,7 @@ interface CanvasPageShellProps {
     paneUploadPosRef: RefObject<{ x: number; y: number } | null>;
     placeFileOnCanvas: (file: File, options?: { position?: { x: number; y: number } }) => Promise<unknown>;
     handleToolMenuSelect: ToolbarProps['onMenuSelect'];
-    handleUploadFiles: (files: File[], opts?: { screen?: { x: number; y: number }; placement?: 'stack' | 'drop'; focus?: (viewport: Viewport) => void }) => void;
+    handleUploadFiles: (files: File[], opts?: { screen?: { x: number; y: number }; placement?: 'stack' | 'drop'; anchor?: { x: number; y: number }; focus?: (viewport: Viewport) => void }) => void;
     placeNodeFile: NonNullable<AgentProps['onPlaceFileOnCanvas']>;
     findCanvasNode: (id: string) => Node | undefined;
     showToast: (type: 'success' | 'error' | 'warn', msg: string) => void;
@@ -411,6 +411,9 @@ export default function CanvasPageShell(props: CanvasPageShellProps) {
           onConnectGroupDrop={groupActions.handleConnectGroupDrop}
           onConnectSourceToGroup={groupActions.handleConnectSourceToGroup}
           onPaneContextMenu={(pt) => menus.setPaneMenu({ x: pt.clientX, y: pt.clientY })}
+          onDropFiles={(files, flowPoint) =>
+            menus.handleUploadFiles(files, { placement: 'drop', anchor: flowPoint, focus: canvas.setFocusViewport })
+          }
           onAnchoredOverlayDragHideChange={canvas.setAnchoredOverlayHiddenIds}
           onUpdateGenerate={canvas.onUpdateGenerate}
         />
