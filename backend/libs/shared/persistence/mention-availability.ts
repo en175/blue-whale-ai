@@ -9,7 +9,7 @@ export interface MentionClassification {
 }
 
 export interface MentionClassificationInput {
-  type: "asset" | "scene_card";
+  type: "asset";
   targetVersion: number | null;
   acceptedUserId: bigint;
   asset?:
@@ -20,13 +20,6 @@ export interface MentionClassificationInput {
         is_delete: boolean;
       }
     | undefined;
-  sceneCard?:
-    | {
-        project_id: bigint;
-        version: number;
-        is_delete: number;
-      }
-    | undefined;
   projectId: bigint;
   userId: bigint;
 }
@@ -34,32 +27,14 @@ export interface MentionClassificationInput {
 export function classifyMentionAvailability(
   input: MentionClassificationInput,
 ): MentionClassification {
-  const { type, targetVersion, acceptedUserId, asset, sceneCard, projectId, userId } =
-    input;
-  if (type === "asset") {
-    const reason: MentionFailureReason | null =
-      !asset || asset.is_delete || asset.status !== "normal"
-        ? "deleted"
-        : asset.project_id !== projectId
-          ? "wrong_project"
-          : asset.user_id !== userId || acceptedUserId !== userId
-            ? "permission_lost"
-            : null;
-    return { availability: reason ? "unavailable" : "available", reason };
-  }
+  const { acceptedUserId, asset, projectId, userId } = input;
   const reason: MentionFailureReason | null =
-    !sceneCard || sceneCard.is_delete !== 0
+    !asset || asset.is_delete || asset.status !== "normal"
       ? "deleted"
-      : sceneCard.project_id !== projectId
+      : asset.project_id !== projectId
         ? "wrong_project"
-        : acceptedUserId !== userId
+        : asset.user_id !== userId || acceptedUserId !== userId
           ? "permission_lost"
-          : sceneCard.version !== targetVersion
-            ? "stale"
-            : null;
-  return {
-    availability:
-      reason === "stale" ? "stale" : reason ? "unavailable" : "available",
-    reason,
-  };
+          : null;
+  return { availability: reason ? "unavailable" : "available", reason };
 }

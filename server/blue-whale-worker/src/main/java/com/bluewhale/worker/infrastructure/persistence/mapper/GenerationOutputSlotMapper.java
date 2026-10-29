@@ -45,10 +45,4 @@ public interface GenerationOutputSlotMapper extends BaseMapper<GenerationOutputS
             """)
     int updateSlotStatus(@Param("slotId") Long slotId, @Param("status") String status);
 
-    @Select("""
-            SELECT * FROM generation_output_slots
-            WHERE scene_card_generation_record_id = #{recordId}
-            ORDER BY id ASC
-            """)
-    List<GenerationOutputSlotEntity> findBySceneCardRecordId(@Param("recordId") Long recordId);
 }

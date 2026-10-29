@@ -19,8 +19,6 @@ import com.bluewhale.worker.infrastructure.persistence.mapper.AssetMapper;
 import com.bluewhale.worker.infrastructure.persistence.mapper.GenerationJobLogMapper;
 import com.bluewhale.worker.infrastructure.persistence.mapper.GenerationOutputSlotMapper;
 
-import com.bluewhale.worker.domain.entity.SceneCardGenerationRecordEntity;
-import com.bluewhale.worker.domain.entity.StoryboardPreviewEntity;
 import com.bluewhale.worker.infrastructure.persistence.mapper.*;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -60,12 +58,6 @@ class JobStateMachineServiceGoldenMirrorTest {
     private GenerationOutputSlotMapper slotMapper;
 
     @Mock
-    private SceneCardGenerationRecordMapper sceneCardRecordMapper;
-
-    @Mock
-    private StoryboardPreviewMapper storyboardPreviewMapper;
-
-    @Mock
     private GenerationJobExtraMapper extraMapper;
 
     private JobStateMachineService service;
@@ -77,11 +69,8 @@ class JobStateMachineServiceGoldenMirrorTest {
     @BeforeEach
     void setUp() {
         service = new JobStateMachineService(jobMapper, assetMapper, jobLogMapper,
-                slotMapper, sceneCardRecordMapper, storyboardPreviewMapper,
-                extraMapper);
+                slotMapper, extraMapper);
         finalizer = new JobFinalizer(jobMapper, assetMapper, jobLogMapper, slotMapper, extraMapper,
-                new SceneCardGenerationRecordSync(slotMapper, sceneCardRecordMapper),
-                new StoryboardPreviewSync(slotMapper, storyboardPreviewMapper),
                 TerminalEventOutbox.noop());
         claimService = new JobClaimService(jobMapper, extraMapper);
     }
@@ -861,150 +850,6 @@ class JobStateMachineServiceGoldenMirrorTest {
         verify(jobMapper).updateJobStatus(300L, "failed");
     }
 
-
-    @Test
-    @DisplayName("G42: completeJob 全槽成功 + record 关联 → summary_status='success'")
-    void syncRecord_allSucceeded() {
-        when(jobMapper.completeJobGuard(eq(300L), eq("worker-1"), eq(5L), anyString())).thenReturn(1);
-
-        GenerationOutputSlotEntity slot0 = makeSlot(10L, 0, "succeeded", 99L);
-        GenerationOutputSlotEntity slot1 = makeSlot(11L, 1, "succeeded", 98L);
-        slot0.setSceneCardGenerationRecordId(500L);
-        slot1.setSceneCardGenerationRecordId(500L);
-        when(slotMapper.findByJobId(300L)).thenReturn(List.of(slot0, slot1));
-        when(jobMapper.selectById(300L)).thenReturn(createJob(300L, 42L, "image", "succeeded", 100));
-
-        when(slotMapper.findBySceneCardRecordId(500L)).thenReturn(List.of(slot0, slot1));
-        when(sceneCardRecordMapper.updateSummaryStatus(500L, "success")).thenReturn(1);
-
-        boolean result = finalizer.completeJob("300", List.of("99", "98"), "worker-1", 5L);
-
-        assertThat(result).isTrue();
-        verify(sceneCardRecordMapper).updateSummaryStatus(500L, "success");
-        verify(jobMapper, never()).updateJobStatus(anyLong(), anyString());
-    }
-
-    @Test
-    @DisplayName("G43: completeJob 部分成功 + record → summary_status='partial'")
-    void syncRecord_partiallySucceeded() {
-        when(jobMapper.completeJobGuard(eq(300L), eq("worker-1"), eq(5L), anyString())).thenReturn(1);
-
-        GenerationOutputSlotEntity slot0 = makeSlot(10L, 0, "succeeded", 99L);
-        GenerationOutputSlotEntity slot1 = makeSlot(11L, 1, "failed", null);
-        slot0.setSceneCardGenerationRecordId(500L);
-        slot1.setSceneCardGenerationRecordId(500L);
-        when(slotMapper.findByJobId(300L)).thenReturn(List.of(slot0, slot1));
-        when(jobMapper.selectById(300L)).thenReturn(createJob(300L, 42L, "image", "succeeded", 100));
-
-        when(slotMapper.findBySceneCardRecordId(500L)).thenReturn(List.of(slot0, slot1));
-        when(sceneCardRecordMapper.updateSummaryStatus(500L, "partial")).thenReturn(1);
-
-        finalizer.completeJob("300", List.of("99"), "worker-1", 5L);
-
-        verify(sceneCardRecordMapper).updateSummaryStatus(500L, "partial");
-        verify(jobMapper).updateJobStatus(300L, "partially_succeeded");
-    }
-
-    @Test
-    @DisplayName("G44: completeJob 无 record 关联 → 零副作用")
-    void syncRecord_noRecord_noSideEffect() {
-        when(jobMapper.completeJobGuard(eq(300L), eq("worker-1"), eq(5L), anyString())).thenReturn(1);
-
-        GenerationOutputSlotEntity slot0 = makeSlot(10L, 0, "succeeded", 99L);
-        when(slotMapper.findByJobId(300L)).thenReturn(List.of(slot0));
-        when(jobMapper.selectById(300L)).thenReturn(createJob(300L, 42L, "audio", "succeeded", 100));
-
-        finalizer.completeJob("300", List.of("99"), "worker-1", 5L);
-
-        verify(sceneCardRecordMapper, never()).updateSummaryStatus(anyLong(), anyString());
-        verify(slotMapper, never()).findBySceneCardRecordId(anyLong());
-    }
-
-    @Test
-    @DisplayName("G45: completeJob + storyboard_preview 关联 → summary_status 同步")
-    void syncStoryboard_happy() {
-        when(jobMapper.completeJobGuard(eq(300L), eq("worker-1"), eq(5L), anyString())).thenReturn(1);
-
-        GenerationOutputSlotEntity slot0 = makeSlot(10L, 0, "succeeded", 99L);
-        when(slotMapper.findByJobId(300L)).thenReturn(List.of(slot0));
-        when(jobMapper.selectById(300L)).thenReturn(createJob(300L, 42L, "image", "succeeded", 100));
-
-        StoryboardPreviewEntity preview = new StoryboardPreviewEntity();
-        preview.setId(700L); preview.setProjectId(42L); preview.setVersion(1);
-        when(storyboardPreviewMapper.findByFirstGenerationJobId(300L)).thenReturn(preview);
-        when(storyboardPreviewMapper.updateSummaryStatus(700L, "success")).thenReturn(1);
-
-        finalizer.completeJob("300", List.of("99"), "worker-1", 5L);
-
-        verify(storyboardPreviewMapper).findByFirstGenerationJobId(300L);
-        verify(storyboardPreviewMapper).updateSummaryStatus(700L, "success");
-    }
-
-    @Test
-    @DisplayName("G46: completeJob 无 storyboard_preview 关联 → 零副作用")
-    void syncStoryboard_noPreview_noSideEffect() {
-        when(jobMapper.completeJobGuard(eq(300L), eq("worker-1"), eq(5L), anyString())).thenReturn(1);
-
-        GenerationOutputSlotEntity slot0 = makeSlot(10L, 0, "succeeded", 99L);
-        when(slotMapper.findByJobId(300L)).thenReturn(List.of(slot0));
-        when(jobMapper.selectById(300L)).thenReturn(createJob(300L, 42L, "image", "succeeded", 100));
-
-        when(storyboardPreviewMapper.findByFirstGenerationJobId(300L)).thenReturn(null);
-
-        finalizer.completeJob("300", List.of("99"), "worker-1", 5L);
-
-        verify(storyboardPreviewMapper).findByFirstGenerationJobId(300L);
-        verify(storyboardPreviewMapper, never()).updateSummaryStatus(anyLong(), anyString());
-    }
-
-
-    @Test
-    @DisplayName("aggregateSlotStatus: 全 succeeded → 'success'")
-    void aggregate_allSucceeded() {
-        var slots = List.of(makeSlot(1L, 0, "succeeded", null), makeSlot(2L, 1, "succeeded", null));
-        assertThat(JobStateMachineService.aggregateSlotStatus(
-                JobStateMachineService.resolveLogicalSlots(slots))).isEqualTo("success");
-    }
-
-    @Test
-    @DisplayName("aggregateSlotStatus: 全 failed → 'failed'")
-    void aggregate_allFailed() {
-        var slots = List.of(makeSlot(1L, 0, "failed", null), makeSlot(2L, 1, "failed", null));
-        assertThat(JobStateMachineService.aggregateSlotStatus(
-                JobStateMachineService.resolveLogicalSlots(slots))).isEqualTo("failed");
-    }
-
-    @Test
-    @DisplayName("aggregateSlotStatus: 混合 → 'partial'")
-    void aggregate_partial() {
-        var slots = List.of(makeSlot(1L, 0, "succeeded", null), makeSlot(2L, 1, "failed", null));
-        assertThat(JobStateMachineService.aggregateSlotStatus(
-                JobStateMachineService.resolveLogicalSlots(slots))).isEqualTo("partial");
-    }
-
-    @Test
-    @DisplayName("aggregateSlotStatus: 含 pending → 'generating'")
-    void aggregate_hasPending() {
-        var slots = List.of(makeSlot(1L, 0, "succeeded", null), makeSlot(2L, 1, "pending", null));
-        assertThat(JobStateMachineService.aggregateSlotStatus(
-                JobStateMachineService.resolveLogicalSlots(slots))).isEqualTo("generating");
-    }
-
-    @Test
-    @DisplayName("aggregateSlotStatus: 空列表 → 'failed'")
-    void aggregate_empty() {
-        assertThat(JobStateMachineService.aggregateSlotStatus(List.of())).isEqualTo("failed");
-    }
-
-    @Test
-    @DisplayName("resolveLogicalSlots: 同 slot_index 重试 → succeeded 优先")
-    void resolveSlots_succeededWins() {
-        var s1 = makeSlot(1L, 0, "failed", null);
-        var s2 = makeSlot(2L, 0, "succeeded", null);
-        var resolved = JobStateMachineService.resolveLogicalSlots(List.of(s1, s2));
-        assertThat(resolved).hasSize(1);
-        assertThat(resolved.get(0).getStatus()).isEqualTo("succeeded");
-    }
 
     private GenerationOutputSlotEntity makeSlot(Long id, int slotIndex, String status, Long assetId) {
         GenerationOutputSlotEntity slot = new GenerationOutputSlotEntity();

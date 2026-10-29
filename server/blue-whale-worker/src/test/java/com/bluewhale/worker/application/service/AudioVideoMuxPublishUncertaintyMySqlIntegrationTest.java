@@ -13,8 +13,6 @@ import com.bluewhale.worker.infrastructure.persistence.mapper.GenerationJobExtra
 import com.bluewhale.worker.infrastructure.persistence.mapper.GenerationJobLogMapper;
 import com.bluewhale.worker.infrastructure.persistence.mapper.GenerationJobMapper;
 import com.bluewhale.worker.infrastructure.persistence.mapper.GenerationOutputSlotMapper;
-import com.bluewhale.worker.infrastructure.persistence.mapper.SceneCardGenerationRecordMapper;
-import com.bluewhale.worker.infrastructure.persistence.mapper.StoryboardPreviewMapper;
 import com.bluewhale.worker.infrastructure.mq.GenerationMessageProducer;
 import com.bluewhale.worker.infrastructure.storage.TosVideoMediaRelay;
 import com.baomidou.mybatisplus.extension.spring.MybatisSqlSessionFactoryBean;
@@ -154,16 +152,6 @@ class AudioVideoMuxPublishUncertaintyMySqlIntegrationTest {
         }
 
         @Bean
-        SceneCardGenerationRecordMapper recordMapper(SqlSessionFactory sf) throws Exception {
-            return factory(SceneCardGenerationRecordMapper.class, sf).getObject();
-        }
-
-        @Bean
-        StoryboardPreviewMapper previewMapper(SqlSessionFactory sf) throws Exception {
-            return factory(StoryboardPreviewMapper.class, sf).getObject();
-        }
-
-        @Bean
         GenerationJobExtraMapper extraMapper(SqlSessionFactory sf) throws Exception {
             return factory(GenerationJobExtraMapper.class, sf).getObject();
         }
@@ -172,20 +160,15 @@ class AudioVideoMuxPublishUncertaintyMySqlIntegrationTest {
         JobStateMachineService service(
                 GenerationJobMapper jm, AssetMapper am, GenerationJobLogMapper jlm,
                 GenerationOutputSlotMapper sm,
-                SceneCardGenerationRecordMapper rm, StoryboardPreviewMapper pm,
                 GenerationJobExtraMapper em) {
-            return new JobStateMachineService(jm, am, jlm, sm, rm, pm, em);
+            return new JobStateMachineService(jm, am, jlm, sm, em);
         }
 
         @Bean
         JobFinalizer finalizer(
                 GenerationJobMapper jm, AssetMapper am, GenerationJobLogMapper jlm,
-                GenerationOutputSlotMapper sm, GenerationJobExtraMapper em,
-                SceneCardGenerationRecordMapper rm, StoryboardPreviewMapper pm) {
-            return new JobFinalizer(jm, am, jlm, sm, em,
-                    new SceneCardGenerationRecordSync(sm, rm),
-                    new StoryboardPreviewSync(sm, pm),
-                    TerminalEventOutbox.noop());
+                GenerationOutputSlotMapper sm, GenerationJobExtraMapper em) {
+            return new JobFinalizer(jm, am, jlm, sm, em, TerminalEventOutbox.noop());
         }
 
         private static <T> MapperFactoryBean<T> factory(Class<T> mapperIf, SqlSessionFactory sf)

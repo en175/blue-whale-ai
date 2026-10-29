@@ -2,7 +2,6 @@ import { Body, Controller, Delete, Get, Param, Post, Query } from "@nestjs/commo
 import {
   FAILURE_CODE,
   RESOURCE_NOT_FOUND_CODE,
-  addSharedAssetToProjectRequestSchema,
   fail,
   ok,
   saveSharedAssetRequestSchema,
@@ -54,27 +53,6 @@ export class SharedAssetsController {
     return item
       ? ok(item)
       : fail(RESOURCE_NOT_FOUND_CODE, "共享资产不存在");
-  }
-
-  @Post(":id/add-to-project")
-  async addToProject(
-    @CurrentUser() user: AuthenticatedUser,
-    @Param("id") id: string,
-    @Body() body: unknown,
-  ) {
-    if (!isDecimalId(id)) return fail(RESOURCE_NOT_FOUND_CODE, "共享资产不存在");
-    const parsed = addSharedAssetToProjectRequestSchema.safeParse(body);
-    if (!parsed.success) return fail(FAILURE_CODE, "参数不合法");
-    try {
-      return ok(
-        await this.sharedAssets.addSceneToProject(user, id, parsed.data.projectId),
-      );
-    } catch (error) {
-      if (error instanceof SharedAssetError) {
-        return fail(error.code, error.message);
-      }
-      throw error;
-    }
   }
 
   @Delete(":id")

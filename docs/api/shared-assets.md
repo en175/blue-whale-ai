@@ -12,7 +12,6 @@
 | POST | `/api/shared-assets/save` | 保存到共享资产（双入口：画布右键 / 资产库页） |
 | GET | `/api/shared-assets` | 面板列表（类型过滤 + 分页） |
 | GET | `/api/shared-assets/:id` | 详情（添加回画布取快照） |
-| POST | `/api/shared-assets/:id/add-to-project` | 场景卡添加回画布（后端复制实体到目标项目） |
 | DELETE | `/api/shared-assets/:id` | 移除共享条目 |
 | POST | `/api/agent/assets/uploads/presign` | **上传素材**（复用既有；参考图/商品图/音色等取 URL 用） |
 | POST | `/api/agent/assets/uploads/complete` | **上传完成**（复用既有；返回 url + asset_id） |
@@ -26,7 +25,7 @@
 | `card` | `style` / `character` / `object` / `environment` / `custom` | assetNode.data.kind | 卡片（带参考图/描述/音色） |
 | `media` | `image` / `video` / `audio` | mediaNode.data.mediaType | 媒体文件 |
 | `goods` | —（null） | productNode | 商品 |
-| `scene` | —（null） | scene_card | 场景卡 |
+| `scene` | —（null） | scene_card | 场景卡（已退役，仅历史条目可读，无新增） |
 | `text` | —（null） | textNode | 文本 |
 
 ---
@@ -118,20 +117,13 @@ POST /api/shared-assets/save
 ```
 - 对齐画布 productNode.data
 
-### 2.4 场景卡（scene）
-
-```json
-{ "assetType": "scene", "sourceSceneCardId": "7" }
-```
-- `sourceSceneCardId` = 场景卡 id（后端抓取内容 + 生成预设快照）
-
-### 2.5 文本（text）
+### 2.4 文本（text）
 
 ```json
 { "assetType": "text", "snapshot": { "html": "<p>文案</p>" } }
 ```
 
-### 2.6 响应
+### 2.5 响应
 
 ```json
 {
@@ -165,7 +157,7 @@ GET /api/shared-assets?assetType=card&kind=style&page=1&size=20
 
 | 参数 | 取值 | 说明 |
 |---|---|---|
-| `assetType` | `card`/`media`/`goods`/`scene`/`text` | 第一层过滤；缺省 = 全部 |
+| `assetType` | `card`/`media`/`goods`/`scene`/`text` | 第一层过滤；缺省 = 全部（`scene` 仅剩历史条目） |
 | `kind` | `style`/`character`/`object`/`environment`/`custom`/`image`/`video`/`audio` | 第二层过滤；缺省 = 全部 |
 | `page` | ≥1，默认 1 | 分页 |
 | `size` | 1–100，默认 20 | 分页 |
@@ -195,35 +187,16 @@ GET /api/shared-assets/:id
 
 响应 `data`：完整 `SharedAssetView`（含 `snapshot` 全量）。
 
-**添加回画布**（除场景卡外的类型，前端据此拼节点，无后端写）：
+**添加回画布**（前端据此拼节点，无后端写）：
 - `card` → 构造 assetNode：`{ type:"assetNode", data:{ kind: item.kind, referenceImages: snapshot.referenceImages, description: snapshot.description, voice: snapshot.voice } }`
 - `media` → 构造 mediaNode：`{ type:"mediaNode", data:{ src: snapshot.url, mediaType: item.kind, fileName: item.name } }`
 - `goods` → 构造 productNode：`{ type:"productNode", data:{ name: snapshot.name, detail: snapshot.detail, images: snapshot.images } }`
 - `text` → 构造 textNode：`{ type:"textNode", data:{ html: snapshot.html } }`
-- **`scene` → 走接口 5**（需要后端复制实体）
+- **`scene` → 已退役**：场景卡功能下线（IKRDNK），历史条目只读展示，不再支持添加回画布
 
 ---
 
-## 5. 场景卡添加回画布
-
-```
-POST /api/shared-assets/:id/add-to-project
-```
-
-请求：
-```json
-{ "projectId": "169" }
-```
-
-响应 `data`：
-```json
-{ "sceneCardId": "77" }
-```
-- 后端在目标项目复制 `scene_cards` + `generation_presets`，返回新场景卡 id；前端再放 `scene_card` 画布节点引用它。
-
----
-
-## 6. 移除共享条目
+## 5. 移除共享条目
 
 ```
 DELETE /api/shared-assets/:id
@@ -233,7 +206,7 @@ DELETE /api/shared-assets/:id
 
 ---
 
-## 7. 错误码
+## 6. 错误码
 
 | code | 含义 | 处理 |
 |---|---|---|
@@ -245,7 +218,7 @@ DELETE /api/shared-assets/:id
 
 ---
 
-## 8. 完整流程示例
+## 7. 完整流程示例
 
 **保存风格卡**：
 1. （可选）上传参考图 → 拿 `url`
@@ -262,4 +235,4 @@ DELETE /api/shared-assets/:id
 1. `GET /api/shared-assets` 拿列表（含 `snapshot`）
 2. 点击 → `GET /api/shared-assets/:id` 拿全量快照（或直接用列表项）
 3. card/media/goods/text → 按 §4 拼节点 → 走既有 `PUT /api/canvases/:projectId` 保存画布
-4. scene → `POST /api/shared-assets/:id/add-to-project` `{projectId}` → 拿 `sceneCardId` → 放 `scene_card` 节点
+4. scene → 已退役（IKRDNK），历史条目不可添加回画布

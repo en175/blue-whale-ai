@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  addSharedAssetToProjectRequestSchema,
   saveSharedAssetRequestSchema,
   sharedAssetListQuerySchema,
 } from "./shared-asset.js";
@@ -49,14 +48,12 @@ describe("saveSharedAssetRequestSchema（assetType + kind 两层判别联合）"
     ).toThrow();
   });
 
-  it("场景卡：assetType=scene + sourceSceneCardId", () => {
-    const req = saveSharedAssetRequestSchema.parse({
-      assetType: "scene",
-      sourceSceneCardId: "7",
-    });
-    expect(req.sourceSceneCardId).toBe("7");
+  it("场景卡已退役：保存请求不再接受 assetType=scene", () => {
     expect(() =>
-      saveSharedAssetRequestSchema.parse({ assetType: "scene" }),
+      saveSharedAssetRequestSchema.parse({
+        assetType: "scene",
+        sourceSceneCardId: "7",
+      }),
     ).toThrow();
   });
 
@@ -105,17 +102,6 @@ describe("sharedAssetListQuerySchema（assetType/kind 双维过滤，缺省=全�
   it("非法值 → 拒绝", () => {
     expect(() =>
       sharedAssetListQuerySchema.parse({ kind: "foo" }),
-    ).toThrow();
-  });
-});
-
-describe("addSharedAssetToProjectRequestSchema", () => {
-  it("合法 projectId 通过", () => {
-    expect(
-      addSharedAssetToProjectRequestSchema.parse({ projectId: "9" }).projectId,
-    ).toBe("9");
-    expect(() =>
-      addSharedAssetToProjectRequestSchema.parse({ projectId: "abc" }),
     ).toThrow();
   });
 });

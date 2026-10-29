@@ -62,12 +62,7 @@ describe("计划通道退役（plan_messages / plan_application_receipts）", ()
     expect(schemaPrisma).not.toContain("model plan_application_receipts");
   });
 
-  it("schema.prisma 的两列已放宽为可空（与迁移一致）", () => {
-    const model = schemaPrisma.match(
-      /model scene_card_generation_records \{[^}]*\}/,
-    )?.[0];
-    expect(model).toBeDefined();
-    expect(model).toMatch(/plan_message_id\s+BigInt\?/);
-    expect(model).toMatch(/application_receipt_id\s+BigInt\?/);
+  it("承接放宽的 scene_card_generation_records 已随场景卡退役删除（IKRDNK）", () => {
+    expect(schemaPrisma).not.toContain("model scene_card_generation_records");
   });
 });

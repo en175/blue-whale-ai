@@ -439,7 +439,6 @@ describe("§3.3 completeJob CAS data 完整字段", () => {
       cb({
         generation_jobs: { updateMany, findUnique },
         generation_output_slots: { findMany: vi.fn().mockResolvedValue([]) },
-        storyboard_previews: { findFirst: vi.fn().mockResolvedValue(null) },
       }),
     );
     const repo = createWorkerRepo({ $transaction: transaction } as never);

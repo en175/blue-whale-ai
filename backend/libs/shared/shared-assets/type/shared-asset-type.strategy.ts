@@ -60,12 +60,6 @@ export function sharedAssetSourceAssetIdOf(
   return input.assetType === "media" ? input.sourceAssetId : null;
 }
 
-export function sharedAssetSourceSceneCardIdOf(
-  input: SaveSharedAssetRequest,
-): string | null {
-  return input.assetType === "scene" ? input.sourceSceneCardId : null;
-}
-
 export function sharedAssetRequestNameOf(
   input: SaveSharedAssetRequest,
 ): string | undefined {

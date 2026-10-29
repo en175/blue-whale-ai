@@ -21,9 +21,6 @@ import { AssetService } from "@lib/shared/assets/assets.service.js";
 import { AssetStorageService } from "@lib/shared/assets/storage.service.js";
 import { AccountDirectoryService } from "@lib/shared/identity/account-directory.service.js";
 import { AllExceptionsFilter } from "@lib/infra/filters/all-exceptions.filter.js";
-import { createSceneCardGenerationRepo } from "@lib/shared/persistence/scene-card-generation-repo.js";
-import { capabilityDigestFromModelCapability } from "@lib/shared/persistence/capability-digest.js";
-import type { ProviderPromptAsset } from "@lib/contracts";
 
 const { charge, queueSend } = vi.hoisted(() => ({
   charge: vi.fn(async () => ({ chargedCredits: 1, catalogVersion: 1, duplicated: false })),
@@ -268,80 +265,6 @@ describe.skipIf(!process.env.IKDMQV_DATABASE_URL)("Generation failure retry publ
     });
     await prisma.client.generation_jobs.update({ where: { id: BigInt(jobId) }, data: { status: "failed" } });
   }
-
-  it.each([
-    { label: "纯文", mode: "text_to_video", refs: [], code: 200 },
-    { label: "图片参考", mode: "text_to_video", refs: [{ type: "image", role: "reference" }], code: 200 },
-    { label: "首尾帧", mode: "first_and_last_frame", refs: [{ type: "image", role: "first_frame" }, { type: "image", role: "last_frame" }], code: 200 },
-    { label: "缺少明确模式的视频参考", mode: "text_to_video", refs: [{ type: "video", role: "reference" }], code: 1060 },
-  ] as const)("场景卡真实创建的嵌套$label快照公开重试返回$code并保留原输入", async ({ mode, refs, code }) => {
-    const projectId = (await projects.create("987654", "IKNB97 scene card retry")).id;
-    const scene = await prisma.client.scene_cards.create({ data: {
-      project_id: BigInt(projectId), title: "场景", content_markdown: "画一只蓝鲸",
-    } });
-    const capability = await prisma.client.catalog_models.findUniqueOrThrow({
-      where: { provider_id_model_id: { provider_id: "ikdmqv-test", model_id: VIDEO_25_MODEL } },
-    });
-    const parameters = {
-      capability_type: "video" as const, model_id: VIDEO_25_MODEL, provider_id: "ikdmqv-test",
-      size: "480p", aspect_ratio: "16:9", format: "mp4", duration: 5, count: 1,
-    };
-    const snapshot = {
-      schema_version: 1 as const, capability_type: "video" as const,
-      model_id: VIDEO_25_MODEL, provider_id: "ikdmqv-test", row_version: capability.version,
-      digest: capabilityDigestFromModelCapability(capability),
-    };
-    const referenceAssets: ProviderPromptAsset[] = [];
-    if (refs.length > 0) {
-      const previewJob = await prisma.client.generation_jobs.create({ data: {
-        project_id: BigInt(projectId), user_id: BigInt(987654), type: "image", source: "storyboard_preview", status: "succeeded", input: {},
-      } });
-      await prisma.client.storyboard_previews.create({ data: {
-        scene_card_id: scene.id, project_id: BigInt(projectId), first_generation_job_id: previewJob.id,
-        command_id: `preview-${scene.id}`, summary_status: "success", capability_snapshot_version: snapshot,
-      } });
-      for (const [index, reference] of refs.entries()) {
-        const assetId = await createAsset(projectId, reference.type, `https://example.com/scene-${index}`);
-        const slot = await prisma.client.generation_output_slots.create({ data: {
-          project_id: BigInt(projectId), generation_job_id: previewJob.id, slot_index: index, status: "succeeded", asset_id: BigInt(assetId),
-        } });
-        referenceAssets.push({ type: "storyboard_frame", slot_id: slot.id.toString(), role: reference.role });
-      }
-    }
-    await prisma.client.scene_card_generation_presets.create({ data: {
-      scene_card_id: scene.id, project_id: BigInt(projectId), parameters,
-      reference_mode: mode, reference_assets: referenceAssets, capability_snapshot_version: snapshot,
-    } });
-    const created = await createSceneCardGenerationRepo(prisma.client).regenerateSceneCard({
-      userId: "987654", projectId, sceneCardId: scene.id.toString(), idempotencyKey: `scene-${scene.id}`,
-      requestHash: `scene-${scene.id}`, base_scene_card_version: 1, base_preset_version: 1,
-      parameters, reference_mode: mode, reference_assets: referenceAssets, capability_snapshot_version: snapshot,
-    });
-    expect(created.kind).toBe("applied");
-    if (created.kind !== "applied") throw new Error("场景卡生成未接纳");
-    const jobId = created.generation_job_id;
-    const original = (await readJob(jobId))!.input;
-    expect(original.model_id).toBeUndefined();
-    expect(original.parameters).toEqual(parameters);
-    await failJob(jobId);
-    charge.mockClear();
-    queueSend.mockClear();
-    const retried = await retryJob(projectId, jobId);
-    expect(retried.code).toBe(code);
-    if (code === 200) {
-      expect((await readJob(retried.data.generation_job_id))!.input).toEqual(original);
-      expect(charge).toHaveBeenCalledWith(expect.objectContaining({
-        modelId: VIDEO_25_MODEL, taskType: "video",
-        specs: expect.objectContaining({ duration: "5", size: "480p", aspect_ratio: "16:9" }),
-      }));
-      expect(queueSend).toHaveBeenCalledTimes(1);
-    } else {
-      expect(retried.msg).toContain("重新编辑");
-      expect(charge).not.toHaveBeenCalled();
-      expect(queueSend).not.toHaveBeenCalled();
-    }
-    expect((await readJob(jobId))!.input).toEqual(original);
-  });
 
   it("旧视频缺少明确模式时，重复和并发重试要求重新编辑且保留画布，不新增任务、扣款或派发", async () => {
     const projectId = (await projects.create("987654", "IKNB97 legacy retry")).id;

@@ -1,6 +1,5 @@
 import type {Prisma, PrismaClient} from "@prisma/client";
 
-import {syncRecordSummary, syncStoryboardPreviewSummary} from "./generation-worker-internals.js";
 import type {WorkerRepo} from "./generation-worker-types.js";
 
 function fenceWhere(input: {jobId: string; workerId: string; fencingToken: number}) {
@@ -107,15 +106,6 @@ async function completeJobInTx(
   if (!job) {
     throw new Error(`completeJob 守卫通过后任务 ${jobId} 不存在，数据损坏`);
   }
-  if (job.project_id === null) return true;
-  const firstSlot = slots[0];
-  if (firstSlot?.scene_card_generation_record_id) {
-    await syncRecordSummary(
-      tx,
-      firstSlot.scene_card_generation_record_id,
-    );
-  }
-  await syncStoryboardPreviewSummary(tx, job.id);
   return true;
 }
 
@@ -182,14 +172,6 @@ export function createWorkerSettleOps(prisma: PrismaClient): Pick<WorkerRepo, "c
             message: `${errorCode}: ${errorMessage}`,
           },
         });
-        const firstSlot = slots[0];
-        if (firstSlot?.scene_card_generation_record_id) {
-          await syncRecordSummary(
-            tx,
-            firstSlot.scene_card_generation_record_id,
-          );
-        }
-        await syncStoryboardPreviewSummary(tx, job.id);
         await releaseReservationInTx(tx, jobId, input.releaseNote);
         return true;
       });

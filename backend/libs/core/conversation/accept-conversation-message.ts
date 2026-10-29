@@ -5,14 +5,7 @@ export type ConversationMentionInput =
       type: "asset";
       asset_id: string;
       display_name: string;
-    }
-  | {
-      type: "scene_card";
-      scene_card_id: string;
-      scene_card_version: number;
-      display_name: string;
     };
-
 export type ConversationMentionType = ConversationMentionInput["type"];
 export type MentionFailureReason =
   "deleted" | "stale" | "permission_lost" | "wrong_project";
@@ -138,27 +131,6 @@ function parseMentions(
       mentions.push({
         type: "asset",
         asset_id: assetId,
-        display_name: displayName,
-      });
-      continue;
-    }
-    if (mention.type === "scene_card") {
-      const sceneCardId = positiveId(mention.scene_card_id);
-      const sceneCardVersion = mention.scene_card_version;
-      if (
-        !sceneCardId ||
-        typeof sceneCardVersion !== "number" ||
-        !Number.isSafeInteger(sceneCardVersion) ||
-        sceneCardVersion <= 0 ||
-        identities.has(`scene_card:${sceneCardId}`)
-      ) {
-        return null;
-      }
-      identities.add(`scene_card:${sceneCardId}`);
-      mentions.push({
-        type: "scene_card",
-        scene_card_id: sceneCardId,
-        scene_card_version: sceneCardVersion,
         display_name: displayName,
       });
       continue;

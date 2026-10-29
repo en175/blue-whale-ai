@@ -1,7 +1,6 @@
 import { Module } from "@nestjs/common";
 import { GenerationJobsController } from "./generation-jobs.controller.js";
 import { GenerationModelsController } from "./models.controller.js";
-import { SceneCardGenerateController } from "./scene-card-generate.controller.js";
 import { MaterialApiModule } from "../material/material.module.js";
 
 @Module({
@@ -9,7 +8,6 @@ import { MaterialApiModule } from "../material/material.module.js";
   controllers: [
     GenerationJobsController,
     GenerationModelsController,
-    SceneCardGenerateController,
   ],
 })
 export class GenerationApiModule {}

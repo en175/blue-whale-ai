@@ -31,12 +31,10 @@ const RULINGS: Record<string, Ruling> = {
     inert: "目录透出键：仓库内无任何消费方，不驱动行为，故无「配置赢」可言",
   },
   quantity_max: {
-    consumer:
-      "backend/libs/shared/persistence/storyboard-preview-repo.ts（checkImageCapabilityLimit：分镜预览 count 上限）；" +
-      "注意它读的是**库中原始 JSON**，自带一份 `?? 1` 归一，未走 toFeatures",
+    consumer: "当前无读取点（唯一消费方分镜预览随场景卡退役删除，IKRDNK）",
     fallback: "1（语义缺省，单张）",
     configWinsTest: null,
-    gapReason: "消费方存在但无测试改变该配置证明胜负（现有用例都只走缺省值）",
+    inert: "目录透出键：仓库内无任何消费方，不驱动行为",
   },
   sequential_image_generation: {
     consumer: "当前无读取点（出站由 input.sequential_image_generation 驱动，见 new-api-generation-ops）",
@@ -57,28 +55,22 @@ const RULINGS: Record<string, Ruling> = {
     inert: "目录透出键：仓库内无任何消费方，不驱动行为",
   },
   first_frame: {
-    consumer:
-      "backend/libs/shared/persistence/scene-card-generation-repo.ts（checkCapabilityLimit → referenceModeToRequiredFeature，" +
-      "不支持时报「当前模型不支持首帧参考模式」）；web/src/pages/CanvasPage/modelCaps.ts → canAddRefRole 首帧槽",
+    consumer: "web/src/pages/CanvasPage/modelCaps.ts → canAddRefRole 首帧槽",
     fallback: "false",
     configWinsTest: null,
-    gapReason:
-      "无测试把该位配成 false 证明会拒（scene-card 现有用例只把它配成 true）",
+    gapReason: "无测试把该位配成 false 证明会拒",
   },
   last_frame: {
-    consumer:
-      "同 first_frame（referenceModeToRequiredFeature 的 last_frame 分支）；web modelCaps → canAddRefRole 尾帧槽",
+    consumer: "web modelCaps → canAddRefRole 尾帧槽",
     fallback: "false",
     configWinsTest: null,
     gapReason: "无测试把该位配成 false 证明会拒",
   },
   first_last_frame: {
-    consumer:
-      "同 first_frame（referenceModeToRequiredFeature 的 first_last_frame 分支）；web modelCaps → canAddRefRole",
+    consumer: "web modelCaps → canAddRefRole",
     fallback: "false",
     configWinsTest: null,
-    gapReason:
-      "无测试把该位配成 false 证明会拒（scene-card 用例只配 true 走通）",
+    gapReason: "无测试把该位配成 false 证明会拒",
   },
   audio: {
     consumer:
@@ -183,10 +175,10 @@ const RULINGS: Record<string, Ruling> = {
   task_types: {
     consumer:
       "backend/libs/contracts/capability-param-validation.ts（checkGenerationParamLimit：按任务类型的 allowed_ratios；" +
-      "allowed_durations 已退役，见 ADR-0086 修订段）经 handle-create-generation-job 与 scene-card-generation-repo 消费",
+      "allowed_durations 已退役，见 ADR-0086 修订段）经 handle-create-generation-job 消费",
     fallback: "null（未配 = 只看基础行的 supported_aspect_ratios / supported_durations）",
     configWinsTest:
-      "backend/libs/shared/persistence/scene-card-generation-repo.test.ts",
+      "backend/libs/contracts/capability-param-validation.test.ts",
   },
   video_dimensions: {
     consumer:

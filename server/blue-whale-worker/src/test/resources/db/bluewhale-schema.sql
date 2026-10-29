@@ -226,21 +226,6 @@ CREATE TABLE `conversation_messages` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
-CREATE TABLE `scene_cards` (
-    `id` BIGINT NOT NULL AUTO_INCREMENT,
-    `project_id` BIGINT NOT NULL,
-    `title` VARCHAR(255) NOT NULL,
-    `summary` TEXT NULL,
-    `content_markdown` LONGTEXT NOT NULL,
-    `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
-    `gmt_modified` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
-    `version` INTEGER NOT NULL DEFAULT 1,
-    `is_delete` TINYINT NOT NULL DEFAULT 0,
-
-    INDEX `idx_scene_card_project`(`project_id`),
-    PRIMARY KEY (`id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-
 CREATE TABLE `agent_runs` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `project_id` BIGINT NOT NULL,
@@ -571,48 +556,10 @@ CREATE TABLE `generation_job_logs` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
-CREATE TABLE `scene_card_generation_presets` (
-    `id` BIGINT NOT NULL AUTO_INCREMENT,
-    `scene_card_id` BIGINT NOT NULL,
-    `project_id` BIGINT NOT NULL,
-    `parameters` JSON NOT NULL,
-    `reference_mode` VARCHAR(32) NOT NULL,
-    `reference_assets` JSON NOT NULL,
-    `capability_snapshot_version` JSON NOT NULL,
-    `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
-    `gmt_modified` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
-    `version` INTEGER NOT NULL DEFAULT 1,
-    `is_delete` TINYINT NOT NULL DEFAULT 0,
-
-    UNIQUE INDEX `uk_preset_scene`(`scene_card_id`),
-    INDEX `idx_preset_project`(`project_id`),
-    PRIMARY KEY (`id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-
-CREATE TABLE `scene_card_generation_records` (
-    `id` BIGINT NOT NULL AUTO_INCREMENT,
-    `scene_card_id` BIGINT NOT NULL,
-    `project_id` BIGINT NOT NULL,
-    `summary_status` VARCHAR(16) NOT NULL,
-    `plan_message_id` BIGINT NULL,
-    `application_receipt_id` BIGINT NULL,
-    `first_generation_job_id` BIGINT NOT NULL,
-    `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
-    `gmt_modified` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
-    `version` INTEGER NOT NULL DEFAULT 1,
-    `is_delete` TINYINT NOT NULL DEFAULT 0,
-
-    INDEX `idx_record_scene`(`scene_card_id`),
-    INDEX `idx_record_project`(`project_id`),
-    INDEX `idx_record_status`(`summary_status`),
-    PRIMARY KEY (`id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-
 CREATE TABLE `generation_output_slots` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `project_id` BIGINT NOT NULL,
     `generation_job_id` BIGINT NOT NULL,
-    `scene_card_generation_record_id` BIGINT NULL,
     `slot_index` INTEGER NOT NULL,
     `status` VARCHAR(24) NOT NULL,
     `asset_id` BIGINT NULL,
@@ -622,28 +569,8 @@ CREATE TABLE `generation_output_slots` (
     `gmt_modified` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
 
     INDEX `idx_slot_job`(`generation_job_id`),
-    INDEX `idx_slot_record`(`scene_card_generation_record_id`),
     INDEX `idx_slot_placement`(`project_id`, `initial_placement_status`),
     UNIQUE INDEX `uk_slot_job_index`(`generation_job_id`, `slot_index`),
-    PRIMARY KEY (`id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-
-CREATE TABLE `storyboard_previews` (
-    `id` BIGINT NOT NULL AUTO_INCREMENT,
-    `scene_card_id` BIGINT NOT NULL,
-    `project_id` BIGINT NOT NULL,
-    `first_generation_job_id` BIGINT NOT NULL,
-    `command_id` VARCHAR(128) NOT NULL,
-    `summary_status` VARCHAR(16) NOT NULL,
-    `capability_snapshot_version` JSON NOT NULL,
-    `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
-    `gmt_modified` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
-    `version` INTEGER NOT NULL DEFAULT 1,
-    `is_delete` TINYINT NOT NULL DEFAULT 0,
-
-    INDEX `idx_storyboard_scene`(`scene_card_id`),
-    INDEX `idx_storyboard_project`(`project_id`),
-    UNIQUE INDEX `uk_storyboard_command`(`project_id`, `command_id`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 

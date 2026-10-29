@@ -283,13 +283,12 @@
 
 ### 5.1 素材校验门（v2 新增，必读）
 
-**只有 `Status:"Active"` 的素材能用作视频生成参考。** 三条视频创建路径都会校验，不通过直接 400 拒绝、零写入（不建任务）：
+**只有 `Status:"Active"` 的素材能用作视频生成参考。** 两条视频创建路径都会校验，不通过直接 400 拒绝、零写入（不建任务）：
 
 | 入口 | 说明 |
 |---|---|
 | `POST /api/projects/:id/generation-jobs` | 创建期 |
 | `POST /api/projects/:id/generation-jobs/:jobId/retry` | 重试期 |
-| `POST /api/projects/:id/scene-cards/:sceneCardId/generate` | **场景卡再生成**（第三条路径） |
 
 **校验范围**——以下两批素材 id 都会被查：
 

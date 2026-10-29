@@ -9,7 +9,6 @@ import {
   promptPlanSnapshotSchema,
   toGenerationParamCheckInput,
   type RecoveryErrorEnvelope,
-  type VideoMode,
 } from "@lib/contracts";
 import type { Prisma, PrismaClient } from "@prisma/client";
 
@@ -64,8 +63,6 @@ export interface CreateJobInput {
   actionType: string;
   source?: string;
   planMessageId?: string;
-  sceneCardGenerationRecordId?: string;
-  sceneCardId?: string;
   videoStage?: "sample";
   canvasRecovery?: CanvasRecoveryAcceptance;
 }
@@ -245,13 +242,6 @@ export async function createJobWithinTx(
         data: {
           project_id: BigInt(input.projectId),
           generation_job_id: job.id,
-          ...(input.sceneCardGenerationRecordId
-            ? {
-                scene_card_generation_record_id: BigInt(
-                  input.sceneCardGenerationRecordId,
-                ),
-              }
-            : {}),
           slot_index: i,
           status: "pending",
         },
@@ -498,10 +488,7 @@ export function createGenerationCommandRepo(
             : readInputCount(original.input);
 
         const input = (original.input ?? {}) as Record<string, unknown>;
-        const sceneParameters = original.source === "scene_card" &&
-          typeof input.parameters === "object" && input.parameters !== null && !Array.isArray(input.parameters)
-          ? input.parameters : null;
-        const retryParameters: Record<string, unknown> = sceneParameters ? { ...sceneParameters, ...input } : input;
+        const retryParameters: Record<string, unknown> = input;
         const capability = original.type === "video" || billing
           ? (await createModelCapabilityRepo(prisma).listEnabledByType(original.type))
               .find((model) => model.model_id === retryParameters.model_id)
@@ -520,24 +507,11 @@ export function createGenerationCommandRepo(
               ? [{ type: asset.type, ...(asset.duration !== null ? { duration: asset.duration } : {}) }]
               : []),
           ];
-          let legacySceneMode: VideoMode | null = null;
-          if (sceneParameters &&
-            input.video_mode === undefined && input.video_task_type === undefined &&
-            input.omni_reference_task_type_allowed === undefined &&
-            ordinaryReferences.every((reference) => reference.type === "image")) {
-            if (input.reference_mode === "first_and_last_frame" && input.first_frame_asset_id && input.last_frame_asset_id && ordinaryReferences.length === 0) {
-              legacySceneMode = "first_last_frame";
-            } else if (input.reference_mode === "first_frame" && input.first_frame_asset_id && !input.last_frame_asset_id && ordinaryReferences.length === 0) {
-              legacySceneMode = "first_frame";
-            } else if (input.reference_mode === "text_to_video" && !input.first_frame_asset_id && !input.last_frame_asset_id) {
-              legacySceneMode = ordinaryReferences.length > 0 ? "image_reference" : "text2video";
-            }
-          }
-          const mode = normalizeVideoMode(input.video_mode ?? input.video_task_type) ?? legacySceneMode;
+          const mode = normalizeVideoMode(input.video_mode ?? input.video_task_type);
           if (
             !capability || !mode || !params || params.duration === undefined ||
-            (!legacySceneMode && (typeof input.omni_reference_task_type_allowed !== "boolean" ||
-              input.omni_reference_task_type_allowed !== capability.features.omni_reference_task_type)) ||
+            typeof input.omni_reference_task_type_allowed !== "boolean" ||
+            input.omni_reference_task_type_allowed !== capability.features.omni_reference_task_type ||
             !hasModeConstraint(capability.features.task_types, mode) ||
             checkGenerationParamLimit({ ...capability, task_types: capability.features.task_types }, { ...params, mode }) ||
             checkReferenceLimits(capability.features, ordinaryReferences, "video", mode)
@@ -621,33 +595,14 @@ export function createGenerationCommandRepo(
           await billing.charge(Number(retry.id));
         }
         if (failedSlots.length > 0) {
-          const recordIds = new Set<bigint>();
           for (const orig of failedSlots) {
             await tx.generation_output_slots.create({
               data: {
                 project_id: pid,
                 generation_job_id: retry.id,
-                ...(orig.scene_card_generation_record_id
-                  ? {
-                      scene_card_generation_record_id:
-                        orig.scene_card_generation_record_id,
-                    }
-                  : {}),
                 slot_index: orig.slot_index,
                 status: "pending",
                 retry_of_slot_id: orig.id,
-              },
-            });
-            if (orig.scene_card_generation_record_id) {
-              recordIds.add(orig.scene_card_generation_record_id);
-            }
-          }
-          for (const recordId of recordIds) {
-            await tx.scene_card_generation_records.update({
-              where: { id: recordId },
-              data: {
-                summary_status: "generating",
-                version: { increment: 1 },
               },
             });
           }

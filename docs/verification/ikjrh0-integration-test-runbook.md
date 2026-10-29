@@ -32,7 +32,7 @@ IKHJ0Q_DATABASE_URL="$BW_INTEGRATION_DATABASE_URL" \
 | [ikjjqw-media-tool-recovery](../../backend/libs/shared/persistence/ikjjqw-media-tool-recovery.integration.test.ts) | `IKJJQW_DATABASE_URL` | `3308 / bw_gate_ikjjqw` | 单结果媒体工具受理、虚拟输出、重试与冲突前零写入 |
 | [ikjjqy-canvas-recovery](../../backend/libs/shared/persistence/ikjjqy-canvas-recovery.integration.test.ts) | `IKJJQY_DATABASE_URL` | `3309 / bw_gate_ikjjqy` | 多结果逐项恢复与删除、输出归属、原子保存和历史关联 |
 | [ikjjqz-mix-mux-canvas-recovery](../../backend/libs/shared/audio-mixes/ikjjqz-mix-mux-canvas-recovery.integration.test.ts) | `IKJJQZ_DATABASE_URL` | `3310 / bw_gate_ikjjqz` | 混合与合成的创建、同 job 重试、新旧提交归属、取消后再生成 |
-| [ikjjr0-canvas-recovery](../../backend/libs/shared/persistence/ikjjr0-canvas-recovery.integration.test.ts) | `IKJJR0_DATABASE_URL` | `3311 / bw_gate_ikjjr0` | 成片及重生样片受理、并发幂等、冲突拒绝与预扣失败补偿 |
+| [ikjjr0-generation-create-recovery](../../backend/libs/shared/persistence/ikjjr0-generation-create-recovery.integration.test.ts) | `IKJJR0_DATABASE_URL` | `3311 / bw_gate_ikjjr0` | 视频样片成片受理、并发幂等、冲突拒绝与预扣失败补偿（分镜预览部分随 IKRDNK 退役） |
 | [ikjku2-canvas-recovery](../../backend/libs/shared/persistence/ikjku2-canvas-recovery.integration.test.ts) | `IKJKU2_DATABASE_URL` | `3312 / bw_gate_ikjku2` | 新协议保存不得省略受保护卡；旧协议及方案应用绕过同样拒绝 |
 | [ikjku8-canvas-recovery](../../backend/libs/shared/persistence/ikjku8-canvas-recovery.integration.test.ts) | `IKJKU8_DATABASE_URL` | `3313 / bw_gate_ikjku8` | 保存回执丢失后的同身份、同摘要重放先于版本检查，不重复推进 |
 | [ikjlts-canvas-recovery](../../backend/libs/shared/persistence/ikjlts-canvas-recovery.integration.test.ts) | `IKJLTS_DATABASE_URL` | `3314 / bw_gate_ikjlts` | apply 与 restore 的资产必须属于任务可信产物；拒绝时整笔回滚 |

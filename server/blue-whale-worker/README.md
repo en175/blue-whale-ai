@@ -192,12 +192,7 @@ worker/
   - [x] service `JobStateMachineService` 扩展：
     - `claimImageJobById` → Optional<ClaimedJobDto>（**套 source 白名单**：bottom_dock/plan_apply/storyboard_preview）
     - `requeueImageJobForRetry` → boolean（WHERE status='processing'，无 fence；.catch→false）
-    - `syncRecordSummary`：completeJob/failJob 事务内回写 scene_card_generation_records.summary_status
-      （internals.ts:21-62 逐字移植；resolveLogicalSlots + aggregateSlotStatus 纯函数）
-    - `syncStoryboardPreviewSummary`：completeJob/failJob 事务内回写 storyboard_previews.summary_status
-      （internals.ts:67-113 逐字移植；按 first_generation_job_id 反查）
-  - [x] entity `SceneCardGenerationRecordEntity` + mapper（syncRecordSummary 用）
-  - [x] entity `StoryboardPreviewEntity` + mapper（syncStoryboardPreviewSummary 用）
+    - 场景卡与分镜预览的摘要回写已随 IKRDNK 退役删除
   - [x] consumer `ImageConsumer`：tag=image, digitGuard=true, group=generation-image-worker+suffix
   - [x] config `ImageEnabledCondition`：@Conditional 按 tag 启停
   - [x] config `RocketMqConfig` 扩展：image consumer bean（Semaphore IMAGE_CONCURRENCY default 20，1-64）

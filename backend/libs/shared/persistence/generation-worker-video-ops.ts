@@ -1,6 +1,5 @@
 import type {PrismaClient} from "@prisma/client";
 
-import {syncRecordSummary} from "./generation-worker-internals.js";
 import type {WorkerRepo} from "./generation-worker-types.js";
 
 const VIDEO_POLL_INTERVAL_MS = 5_000;
@@ -122,12 +121,6 @@ export function createWorkerVideoOps(prisma: PrismaClient): Pick<WorkerRepo, "ma
             where: { id: videoSlot.id },
             data: { status: "succeeded", asset_id: asset.id },
           });
-          if (videoSlot.scene_card_generation_record_id) {
-            await syncRecordSummary(
-              tx,
-              videoSlot.scene_card_generation_record_id,
-            );
-          }
         }
         return true;
       });
@@ -164,9 +157,6 @@ export function createWorkerVideoOps(prisma: PrismaClient): Pick<WorkerRepo, "ma
             where: { id: slot.id },
             data: { status: "failed" },
           });
-          if (slot.scene_card_generation_record_id) {
-            await syncRecordSummary(tx, slot.scene_card_generation_record_id);
-          }
         }
         await tx.generation_job_logs.create({
           data: {

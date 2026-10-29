@@ -85,11 +85,6 @@ export interface SaveSharedAssetGoodsRequest {
   snapshot: SharedAssetGoodsSnapshot;
 }
 
-export interface SaveSharedAssetSceneRequest {
-  assetType: 'scene';
-  sourceSceneCardId: string;
-}
-
 export interface SaveSharedAssetTextRequest {
   assetType: 'text';
   snapshot: SharedAssetTextSnapshot;
@@ -99,7 +94,6 @@ export type SaveSharedAssetRequest =
   | SaveSharedAssetCardRequest
   | SaveSharedAssetMediaRequest
   | SaveSharedAssetGoodsRequest
-  | SaveSharedAssetSceneRequest
   | SaveSharedAssetTextRequest;
 
 export interface SaveSharedAssetResult {
@@ -119,14 +113,6 @@ export interface SharedAssetPageData {
   total: number;
   size: number;
   current: number;
-}
-
-export interface AddSceneToProjectRequest {
-  projectId: string;
-}
-
-export interface AddSceneToProjectResult {
-  sceneCardId: string;
 }
 
 function buildQuery(params: SharedAssetListQuery): string {
@@ -153,16 +139,6 @@ export function fetchSharedAssetList(params: SharedAssetListQuery = {}): Promise
 
 export function fetchSharedAssetDetail(id: string): Promise<SharedAssetView> {
   return apiRequest<SharedAssetView>(`/api/shared-assets/${encodeURIComponent(id)}`);
-}
-
-export function addSceneToProject(
-  id: string,
-  projectId: string,
-): Promise<AddSceneToProjectResult> {
-  return apiRequest<AddSceneToProjectResult>(`/api/shared-assets/${encodeURIComponent(id)}/add-to-project`, {
-    method: 'POST',
-    body: JSON.stringify({ projectId }),
-  });
 }
 
 export function removeSharedAsset(id: string): Promise<null> {

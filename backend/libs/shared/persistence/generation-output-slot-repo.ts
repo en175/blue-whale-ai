@@ -1,19 +1,6 @@
 
 export type OutputSlotStatus = "pending" | "succeeded" | "failed" | "missing";
 
-export type SlotSummaryStatus = "generating" | "partial" | "success" | "failed";
-
-export function aggregateSlotStatus(
-  statuses: OutputSlotStatus[],
-): SlotSummaryStatus {
-  if (statuses.length === 0) return "failed";
-  if (statuses.some((s) => s === "pending")) return "generating";
-  const succeeded = statuses.filter((s) => s === "succeeded").length;
-  if (succeeded === statuses.length) return "success";
-  if (succeeded === 0) return "failed";
-  return "partial";
-}
-
 export function resolveLogicalSlots<
   T extends { slot_index: number; status: OutputSlotStatus },
 >(slots: T[]): T[] {

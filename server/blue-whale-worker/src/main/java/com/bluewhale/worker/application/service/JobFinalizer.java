@@ -42,8 +42,6 @@ public class JobFinalizer {
     private final GenerationOutputSlotMapper slotMapper;
 
     private final GenerationJobExtraMapper extraMapper;
-    private final SceneCardGenerationRecordSync recordSync;
-    private final StoryboardPreviewSync previewSync;
     private final TerminalEventOutbox outbox;
 
     public JobFinalizer(
@@ -52,8 +50,6 @@ public class JobFinalizer {
             GenerationJobLogMapper jobLogMapper,
             GenerationOutputSlotMapper slotMapper,
             GenerationJobExtraMapper extraMapper,
-            SceneCardGenerationRecordSync recordSync,
-            StoryboardPreviewSync previewSync,
             TerminalEventOutbox outbox
     ) {
         this.jobMapper = jobMapper;
@@ -61,8 +57,6 @@ public class JobFinalizer {
         this.jobLogMapper = jobLogMapper;
         this.slotMapper = slotMapper;
         this.extraMapper = extraMapper;
-        this.recordSync = recordSync;
-        this.previewSync = previewSync;
         this.outbox = outbox;
     }
 
@@ -293,12 +287,6 @@ public class JobFinalizer {
             return true;
         }
 
-        GenerationOutputSlotEntity firstSlot = slots.isEmpty() ? null : slots.get(0);
-        if (firstSlot != null && firstSlot.getSceneCardGenerationRecordId() != null) {
-            recordSync.sync(firstSlot.getSceneCardGenerationRecordId());
-        }
-        previewSync.sync(jobIdLong);
-
         return true;
     }
 
@@ -356,12 +344,6 @@ public class JobFinalizer {
             throw new IllegalStateException(
                     "failJob 守卫通过后任务 " + jobId + " 不存在，数据损坏");
         }
-
-        GenerationOutputSlotEntity firstFailSlot = slots.isEmpty() ? null : slots.get(0);
-        if (firstFailSlot != null && firstFailSlot.getSceneCardGenerationRecordId() != null) {
-            recordSync.sync(firstFailSlot.getSceneCardGenerationRecordId());
-        }
-        previewSync.sync(jobIdLong);
 
         insertLog(jobIdLong, JobStatusEnum.FAILED, errorCode + ": " + errorMessage,
                 Map.of("code", errorCode, "message", errorMessage,
@@ -464,9 +446,6 @@ public class JobFinalizer {
                 .findFirst().orElse(null);
         if (videoSlot != null) {
             slotMapper.updateSlot(videoSlot.getId(), JobStatusEnum.SUCCEEDED.value(), asset.getId());
-            if (videoSlot.getSceneCardGenerationRecordId() != null) {
-                recordSync.sync(videoSlot.getSceneCardGenerationRecordId());
-            }
         }
 
         return true;
@@ -496,9 +475,6 @@ public class JobFinalizer {
         List<GenerationOutputSlotEntity> pendingSlots = slotMapper.findPendingByJobId(jobIdLong);
         for (GenerationOutputSlotEntity slot : pendingSlots) {
             slotMapper.updateSlotStatus(slot.getId(), JobStatusEnum.FAILED.value());
-            if (slot.getSceneCardGenerationRecordId() != null) {
-                recordSync.sync(slot.getSceneCardGenerationRecordId());
-            }
         }
         insertLog(jobIdLong, JobStatusEnum.FAILED, errorCode + ": " + errorMessage,
                 Map.of("code", errorCode, "message", errorMessage,
@@ -856,12 +832,6 @@ public class JobFinalizer {
             log.warn("[cancel] 取不到 job，无法发布终态事件：jobId={}", jobId);
             return;
         }
-
-        GenerationOutputSlotEntity firstFailSlot = slots.isEmpty() ? null : slots.get(0);
-        if (firstFailSlot != null && firstFailSlot.getSceneCardGenerationRecordId() != null) {
-            recordSync.sync(firstFailSlot.getSceneCardGenerationRecordId());
-        }
-        previewSync.sync(jobIdLong);
 
         insertLog(jobIdLong, JobStatusEnum.CANCELLED, "用户取消", Map.of());
 

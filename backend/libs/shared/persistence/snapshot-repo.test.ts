@@ -264,18 +264,6 @@ describe("SnapshotRepo.loadConversationState", () => {
           },
         ]),
       },
-      scene_cards: {
-        findMany: vi.fn().mockResolvedValue([]),
-      },
-      scene_card_generation_records: {
-        findMany: vi.fn().mockResolvedValue([]),
-      },
-      storyboard_previews: {
-        findMany: vi.fn().mockResolvedValue([]),
-      },
-      generation_output_slots: {
-        findMany: vi.fn().mockResolvedValue([]),
-      },
       user_assets: { findMany: vi.fn().mockResolvedValue([]) },
     } as unknown as PrismaClient;
 
@@ -285,9 +273,6 @@ describe("SnapshotRepo.loadConversationState", () => {
       conversation_messages: [
         expect.objectContaining({ message_id: "8", sequence_no: 1 }),
       ],
-      scene_cards: [],
-      scene_card_generation_records: [],
-      storyboard_previews: [],
     });
   });
 
@@ -308,10 +293,6 @@ describe("SnapshotRepo.loadConversationState", () => {
         ]),
       },
       user_assets: { findMany: assetsFindMany },
-      scene_cards: { findMany: vi.fn().mockResolvedValue([]) },
-      scene_card_generation_records: { findMany: vi.fn().mockResolvedValue([]) },
-      storyboard_previews: { findMany: vi.fn().mockResolvedValue([]) },
-      generation_output_slots: { findMany: vi.fn().mockResolvedValue([]) },
     } as unknown as PrismaClient;
 
     const state = await createSnapshotRepo(prisma).loadConversationState(
@@ -321,83 +302,5 @@ describe("SnapshotRepo.loadConversationState", () => {
 
     expect(state.conversation_messages[0]?.mentions).toEqual([]);
     expect(assetsFindMany).not.toHaveBeenCalled();
-  });
-});
-
-describe("SnapshotRepo.loadConversationState output slots", () => {
-  it("collapses retry attempts into stable logical slots", async () => {
-    const empty = () => ({ findMany: vi.fn().mockResolvedValue([]) });
-    const prisma = {
-      conversation_messages: empty(),
-      scene_cards: empty(),
-      scene_card_generation_records: {
-        findMany: vi.fn().mockResolvedValue([
-          {
-            id: 88n,
-            scene_card_id: 66n,
-            summary_status: "partial",
-            first_generation_job_id: 300n,
-          },
-        ]),
-      },
-      storyboard_previews: empty(),
-      generation_output_slots: {
-        findMany: vi.fn().mockResolvedValue([
-          {
-            id: 401n,
-            scene_card_generation_record_id: 88n,
-            slot_index: 0,
-            status: "failed",
-            asset_id: null,
-            retry_of_slot_id: null,
-            initial_placement_status: "pending",
-          },
-          {
-            id: 501n,
-            scene_card_generation_record_id: 88n,
-            slot_index: 0,
-            status: "succeeded",
-            asset_id: 901n,
-            retry_of_slot_id: 401n,
-            initial_placement_status: "pending",
-          },
-          {
-            id: 402n,
-            scene_card_generation_record_id: 88n,
-            slot_index: 1,
-            status: "failed",
-            asset_id: null,
-            retry_of_slot_id: null,
-            initial_placement_status: "pending",
-          },
-        ]),
-      },
-    } as unknown as PrismaClient;
-
-    const snapshot = await createSnapshotRepo(prisma).loadConversationState(
-      "55",
-      "9",
-    );
-
-    expect(
-      snapshot.scene_card_generation_records[0]?.output_slots,
-    ).toEqual([
-      {
-        slot_id: "501",
-        slot_index: 0,
-        status: "succeeded",
-        asset_id: "901",
-        retry_of_slot_id: "401",
-        initial_placement_status: "pending",
-      },
-      {
-        slot_id: "402",
-        slot_index: 1,
-        status: "failed",
-        asset_id: null,
-        retry_of_slot_id: null,
-        initial_placement_status: "pending",
-      },
-    ]);
   });
 });

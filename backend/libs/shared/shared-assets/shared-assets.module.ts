@@ -13,7 +13,6 @@ import {
   StyleCardStrategy,
 } from "./type/card-strategies.js";
 import { MediaStrategy } from "./type/media-strategies.js";
-import { SceneStrategy } from "./type/scene-strategy.js";
 import { GoodsStrategy } from "./type/goods-strategy.js";
 import { TextStrategy } from "./type/text-strategy.js";
 import { SharedAssetSourceAdapter } from "./shared-asset-source.adapter.js";
@@ -36,7 +35,6 @@ import { SharedAssetSourceAdapter } from "./shared-asset-source.adapter.js";
         new MediaStrategy(source, "video"),
         new MediaStrategy(source, "audio"),
         new GoodsStrategy(),
-        new SceneStrategy(source),
         new TextStrategy(),
       ],
       inject: [SHARED_ASSET_SOURCE_PORT],
