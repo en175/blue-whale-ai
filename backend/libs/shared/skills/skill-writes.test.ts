@@ -1,7 +1,6 @@
 import { DomainError, SKILL_ERROR_SPECS } from "@lib/contracts";
 import {
   SkillAddConflictError,
-  SkillInUseError,
   SkillNameConflictError,
   SkillNameReservedError,
 } from "@lib/shared/persistence/index.js";
@@ -128,18 +127,6 @@ describe("冲突类 → 409，不是 400", () => {
     expect(error.message).toContain("我的拆解");
   });
 
-  it("技能正在使用中不能删", async () => {
-    const error = await rejection(() =>
-      handleDeletePersonalSkill("7", "valid_skill_id", svc({
-        deletePersonal: vi.fn().mockRejectedValue(new SkillInUseError("拆解短视频")),
-      })),
-    );
-    expect({ code: error.code, status: error.status }).toEqual({
-      code: SKILL_ERROR_SPECS.SKILL_IN_USE.code,
-      status: 409,
-    });
-    expect(error.message).toContain("拆解短视频");
-  });
 });
 
 describe("不是 DomainError 的异常照旧往上抛", () => {

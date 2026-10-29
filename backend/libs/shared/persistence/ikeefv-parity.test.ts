@@ -72,11 +72,11 @@ describe("IKEEFV 双轨迁移（删 3 悬空表 + agent_runs 瘦身 3 死列）"
     }
   });
 
-  it("schema.prisma 同步：3 个 model 下线、agent_runs model 保留且无死列", () => {
+  it("schema.prisma 同步：3 个 model 下线、agent_runs 已由后续工单退役且无死列", () => {
     for (const table of DROPPED_TABLES) {
       expect(schemaPrisma).not.toContain(`model ${table} `);
     }
-    expect(schemaPrisma).toContain("model agent_runs ");
+    expect(schemaPrisma).not.toContain("model agent_runs ");
     for (const column of DROPPED_COLUMNS) {
       expect(schemaPrisma).not.toContain(column);
     }

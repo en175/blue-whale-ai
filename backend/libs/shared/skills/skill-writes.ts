@@ -2,7 +2,6 @@ import { ok, skillError } from "@lib/contracts";
 import { parseSkillMd, serializeSkillMd } from "@lib/core";
 import {
   SkillAddConflictError,
-  SkillInUseError,
   SkillNameConflictError,
   SkillNameReservedError,
 } from "@lib/shared/persistence/index.js";
@@ -121,12 +120,6 @@ export async function handleDeletePersonalSkill(
     }
     return ok();
   } catch (e) {
-    if (e instanceof SkillInUseError) {
-      throw skillError(
-        "SKILL_IN_USE",
-        `技能「${e.skillName}」正在使用中，无法删除`,
-      );
-    }
     throw e;
   }
 }
