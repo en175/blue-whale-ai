@@ -191,6 +191,3 @@ export async function resolveOfficialSourceSkillId(
   });
   return c > 0 ? sourceSkillId.toString() : null;
 }
-
-
-
