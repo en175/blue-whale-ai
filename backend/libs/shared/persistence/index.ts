@@ -96,14 +96,6 @@ export {
   type PendingUploadAsset,
 } from "./asset-repo.js";
 export {
-  createSharedAssetRepo,
-  type SharedAssetRepo,
-  type SharedAssetRow,
-  type SharedAssetCreateInput,
-  type SharedAssetListFilter,
-  type SharedAssetPage,
-} from "./shared-asset-repo.js";
-export {
   createMaterialGroupRepo,
   type MaterialGroupRepo,
   type MaterialGroupView,

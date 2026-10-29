@@ -35,7 +35,7 @@ CREATE TABLE `user_assets` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
-CREATE TABLE `catalog_material_groups` (
+CREATE TABLE `user_material_info` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `user_id` BIGINT NOT NULL,
     `material_group_id` VARCHAR(128) NOT NULL,
@@ -53,27 +53,6 @@ CREATE TABLE `catalog_material_groups` (
     INDEX `idx_material_group_user_kind`(`user_id`, `kind`),
     INDEX `idx_material_group_user_alive`(`user_id`, `is_delete`),
     UNIQUE INDEX `uk_material_group_user_upstream`(`user_id`, `material_group_id`),
-    PRIMARY KEY (`id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-
-CREATE TABLE `user_shared_asset_snapshots` (
-    `id` BIGINT NOT NULL AUTO_INCREMENT,
-    `user_id` BIGINT NOT NULL,
-    `asset_type` VARCHAR(16) NOT NULL,
-    `kind` VARCHAR(16) NULL,
-    `name` VARCHAR(255) NOT NULL,
-    `thumbnail_url` VARCHAR(512) NULL,
-    `snapshot` JSON NOT NULL,
-    `dedup_key` VARCHAR(128) NULL,
-    `status` VARCHAR(16) NOT NULL DEFAULT 'normal',
-    `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
-    `gmt_modified` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
-    `version` INTEGER NOT NULL DEFAULT 0,
-    `is_delete` TINYINT NOT NULL DEFAULT 0,
-
-    INDEX `idx_shared_user_type`(`user_id`, `asset_type`, `kind`, `is_delete`),
-    INDEX `idx_shared_user_created`(`user_id`, `gmt_create`),
-    UNIQUE INDEX `uk_shared_user_dedup`(`user_id`, `dedup_key`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 

@@ -38,7 +38,6 @@ function setup() {
     toolMode: 'select',
     spawnPosition: () => ({ x: 0, y: 0 }),
     handleMediaDims: vi.fn(),
-    handleSaveMediaToAssets: vi.fn(),
     dockToolCallbacks: {},
     actionsRef: { current: {} },
     setMediaNodes,

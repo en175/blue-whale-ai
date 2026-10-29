@@ -86,6 +86,8 @@ const RENAMED = new Map([
   ["homepage_hero", "content_homepage_heroes"],
 ]);
 
+const SUPERSEDED_BY_IKRGTJ = new Set(["shared_assets", "material_groups"]);
+
 const INDEX_RENAMES = new Map([
   ["uk_media_tool_pricing__tool_type", "uk_catalog_media_tools__tool_type"],
   ["uk_user_skill", "uk_user_skills__user_skill"],
@@ -122,8 +124,9 @@ describe("IKQY3N 三轨迁移（目录/素材/技能与模板表改名）", () =
     );
   });
 
-  it("Prisma 模型只剩新表名", () => {
+  it("Prisma 模型只剩新表名（IKRGTJ 后续改名/退役的两张表除外）", () => {
     for (const [from, to] of RENAMED) {
+      if (SUPERSEDED_BY_IKRGTJ.has(from)) continue;
       expect(schemaPrisma).toContain("model " + to + " {");
       expect(schemaPrisma).not.toContain("model " + from + " {");
     }
@@ -133,8 +136,9 @@ describe("IKQY3N 三轨迁移（目录/素材/技能与模板表改名）", () =
     }
   });
 
-  it("Java 测试 schema 同步新表名", () => {
+  it("Java 测试 schema 同步新表名（IKRGTJ 后续改名/退役的两张表除外）", () => {
     for (const [from, to] of RENAMED) {
+      if (SUPERSEDED_BY_IKRGTJ.has(from)) continue;
       expect(javaSchemaSql).not.toContain("CREATE TABLE `" + from + "`");
       if (to !== "catalog_media_tools") {
         expect(javaSchemaSql).toContain("CREATE TABLE `" + to + "`");

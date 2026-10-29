@@ -145,7 +145,6 @@ vi.mock('@/custom/api/jobs', () => ({
   readJobFailText: apiMocks.readJobFailText,
 }));
 
-vi.mock('@/custom/api/sharedAssets', () => ({ saveSharedAsset: vi.fn() }));
 
 const canvasDocMock = vi.hoisted(() => ({
   current: {

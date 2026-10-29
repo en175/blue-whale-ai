@@ -71,7 +71,7 @@
 ```
 > `Result` 为分页素材组列表（`TotalCount` / `Items: [Id, Name, GroupType, CoverUrl, CreateTime, UpdateTime]` / `PageNumber` / `PageSize`）。
 >
-> **产品侧行为（IKEXX8 → 2026-10-09 ADR-0126）**：`Filter.GroupType` 为 `AIGC` / `LivenessFace` 时本 Action **不打上游**，改读产品本地 `catalog_material_groups`（`AIGC`→`kind="virtual"`，`LivenessFace`→`kind="real"`），返回同款信封，**只含当前用户自己的组**（`RequestId` 为后端合成 `req_<uuid>`）。**缺失或认不出的 `GroupType` 仍透传上游**，所以前端必须继续传 `GroupType`。列表项的 `GroupType` 现在会如实回 `LivenessFace`；`CoverUrl` **恒为 `null`**（上游组信息里没有封面字段，实测过），前端不要依赖。
+> **产品侧行为（IKEXX8 → 2026-10-09 ADR-0126）**：`Filter.GroupType` 为 `AIGC` / `LivenessFace` 时本 Action **不打上游**，改读产品本地 `user_material_info`（`AIGC`→`kind="virtual"`，`LivenessFace`→`kind="real"`），返回同款信封，**只含当前用户自己的组**（`RequestId` 为后端合成 `req_<uuid>`）。**缺失或认不出的 `GroupType` 仍透传上游**，所以前端必须继续传 `GroupType`。列表项的 `GroupType` 现在会如实回 `LivenessFace`；`CoverUrl` **恒为 `null`**（上游组信息里没有封面字段，实测过），前端不要依赖。
 >
 > 存量真人组**不补偿**（本地无行 → 列表看不到），用户需重走 H5 认证；详见 [`2026-10-09-material-binding-and-delete-cascade-api.md`](./2026-10-09-material-binding-and-delete-cascade-api.md) §3。前端请求形状不变，见 [素材关联对接文档 §6.2](./2026-09-07-material-association-api.md)。
 

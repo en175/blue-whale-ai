@@ -40,7 +40,6 @@ export interface GenerationRuntimeBindingInput {
   setEdges: Dispatch<SetStateAction<Edge[]>>;
   patchMediaNode: (nodeId: string, patch: Record<string, unknown>) => void;
   attachCallbacks: (node: Node) => Node;
-  handleSaveMediaToAssets: (id: string) => void;
   handleMediaDims: (id: string, dims: MediaDims) => void;
   addCanvasEdge: (source: string, target: string, refRole?: VideoRefRole, marker?: Record<string, unknown>) => void;
   applyJobTerminal: GenerationRuntimeHost['applyTerminal'];
@@ -65,7 +64,7 @@ export function useGenerationRuntimeBinding(input: GenerationRuntimeBindingInput
     },
     patchNode: (nodeId, patch) => inputRef.current.patchMediaNode(nodeId, patch),
     insertMediaNode: (node) => {
-      const { attachCallbacks, actionsRef, handleSaveMediaToAssets, handleMediaDims, mediaNodesRef, setMediaNodes } = inputRef.current;
+      const { attachCallbacks, actionsRef, handleMediaDims, mediaNodesRef, setMediaNodes } = inputRef.current;
       const built = attachCallbacks({
         id: node.id,
         type: 'mediaNode',
@@ -81,7 +80,6 @@ export function useGenerationRuntimeBinding(input: GenerationRuntimeBindingInput
           onAddToChat: (id: string) => actionsRef.current.addToChat(id),
           onDownload: (id: string) => actionsRef.current.download(id),
           onShowDetails: (id: string) => actionsRef.current.showDetails(id),
-          onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
           onMediaDims: handleMediaDims,
         },
       } as Node);

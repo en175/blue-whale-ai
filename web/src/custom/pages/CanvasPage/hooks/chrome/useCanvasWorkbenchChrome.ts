@@ -1,7 +1,7 @@
 import { useCallback, useRef, useState } from 'react';
 import { persistSnapAlignmentEnabled, readSnapAlignmentEnabled } from '../../graph/snapPreference';
 
-import { type ToolMode, type CardFilter } from '@/custom/enums';
+import { type ToolMode } from '@/custom/enums';
 
 export function useCanvasWorkbenchChrome() {
   const [showMiniMap, setShowMiniMap] = useState(false);
@@ -18,9 +18,6 @@ export function useCanvasWorkbenchChrome() {
   const [soloSelectedNodeId, setSoloSelectedNodeId] = useState<string | null>(null);
   const [showCharacterLibrary, setShowCharacterLibrary] = useState(false);
   const [characterLibraryTarget, setCharacterLibraryTarget] = useState<'image' | 'asset' | null>(null);
-  const [showAssetsModal, setShowAssetsModal] = useState(false);
-  const [assetsModalDefaultTab, setAssetsModalDefaultTab] = useState<string | undefined>(undefined);
-  const [assetsModalDefaultFilter, setAssetsModalDefaultFilter] = useState<CardFilter | undefined>(undefined);
   const [showEdges, setShowEdges] = useState(true);
   const [snapAlignmentOn, setSnapAlignmentOn] = useState(readSnapAlignmentEnabled);
   const [pendingDeleteGroup, setPendingDeleteGroup] = useState<{ id: string; count: number } | null>(null);
@@ -38,8 +35,6 @@ export function useCanvasWorkbenchChrome() {
     anchoredOverlayHiddenIds, setAnchoredOverlayHiddenIds, isAnchoredOverlayDragHidden,
     soloSelectedNodeId, setSoloSelectedNodeId,
     showCharacterLibrary, setShowCharacterLibrary, characterLibraryTarget, setCharacterLibraryTarget,
-    showAssetsModal, setShowAssetsModal, assetsModalDefaultTab, setAssetsModalDefaultTab,
-    assetsModalDefaultFilter, setAssetsModalDefaultFilter,
     showEdges, setShowEdges, snapAlignmentOn, setSnapAlignmentOn, persistSnap,
     pendingDeleteGroup, setPendingDeleteGroup,
     submittingNodeId, setSubmittingNodeId,

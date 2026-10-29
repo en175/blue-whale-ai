@@ -30,3 +30,4 @@
 - `generation_output_slots` 写入方（backend）与读取方（worker-java）不再引用被删列，Java 测试 schema 同步删除对应建表语句。
 - 分镜预览专用的恢复集成测试用例（IKJJR0 的 S1–S5）随被测接口删除；同一文件里的 R1–R5 验证的是仍然存活的 `generation.create` 视频样片受理与预扣补偿，已迁到 `ikjjr0-generation-create-recovery.integration.test.ts` 保留。
 - 共享资产列表接口仍接受 `assetType=scene` 过滤，历史条目在面板里显示为只读；新增保存请求返回 400。
+- IKRGTJ 已删除 `user_shared_asset_snapshots` 表与共享资产入口，上文「历史条目仍可列出」「列表接口仍接受 `assetType=scene`」不再适用；场景卡的只读兼容只剩画布节点与契约变体两处。

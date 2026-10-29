@@ -22,7 +22,6 @@ export interface CanvasUploadDropHost {
   toolMode: string;
   spawnPosition: () => { x: number; y: number };
   handleMediaDims: (id: string, dims: MediaDims) => void;
-  handleSaveMediaToAssets: (id: string) => void;
   dockToolCallbacks: Record<string, unknown>;
   actionsRef: RefObject<UploadDropActions>;
   setMediaNodes: Dispatch<SetStateAction<Node[]>>;
@@ -51,7 +50,6 @@ export function useCanvasUploadDrop(host: CanvasUploadDropHost): CanvasUploadDro
     toolMode,
     spawnPosition,
     handleMediaDims,
-    handleSaveMediaToAssets,
     dockToolCallbacks,
     actionsRef,
     setMediaNodes,
@@ -105,7 +103,6 @@ export function useCanvasUploadDrop(host: CanvasUploadDropHost): CanvasUploadDro
       onDownload: (id: string) => actionsRef.current.download(id),
       ...dockToolCallbacks,
       onShowDetails: (id: string) => actionsRef.current.showDetails(id),
-      onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
       onMediaDims: handleMediaDims,
     };
     if (opts?.replaceNodeId) {

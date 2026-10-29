@@ -81,7 +81,7 @@
 ## 6. API 与数据边界
 
 - 信封 `{ code, data, msg }`。`code === 200` 才用 `data`；否则抛错并展示 `msg`。默认 toast 和 `silent` 走 `web/src/shared/api/http.ts`。不需打断用户的请求用 `silent`，由页面自己处理。
-- 一领域一模块；函数名「动词 + 资源」（`listSharedAssets`）。API 文件不渲染 UI、不 toast。
+- 一领域一模块；函数名「动词 + 资源」（`fetchProjects`）。API 文件不渲染 UI、不 toast。
 - 页面不直接 `fetch`。新读写走对应端的 `api/` + Query。修存量缺陷时，不顺手把旧的 `useEffect` 拉数改成 Query。
 - 预签名上传、SSE / 流式、媒体二进制等非信封传输，可在对应 `api/` 或专用工具里用 `fetch`，页面仍不直接 `fetch`。
 - 401 / 登录失效走统一鉴权提示，不在各页复制跳转。

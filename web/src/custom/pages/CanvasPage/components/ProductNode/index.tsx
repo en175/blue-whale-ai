@@ -47,7 +47,6 @@ interface ProductNodeData {
   projectId?: string;
   onDelete?: (id: string) => void;
   onAddToChat?: (id: string) => void;
-  onSaveToAssets?: (id: string) => void;
   onProductChange?: (id: string, patch: { images?: ProductImage[]; detail?: string }) => void;
   onPickFromCanvas?: (id: string) => void;
   onToast?: (type: 'success' | 'error' | 'warn', msg: string) => void;

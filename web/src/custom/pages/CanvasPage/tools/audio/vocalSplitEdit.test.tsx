@@ -130,7 +130,6 @@ vi.mock('@/custom/api/canvasRecovery', () => ({
     queryFn: async () => ({ protocol_version: 1, canvas_version: null, records: [], next_cursor: null }),
   })),
 }));
-vi.mock('@/custom/api/sharedAssets', () => ({ saveSharedAsset: vi.fn() }));
 vi.mock('@/custom/api/generation', () => ({ fetchGenerationModels: apiMocks.fetchGenerationModels }));
 vi.mock('@/custom/utils/upload', () => ({ uploadAssetFile: apiMocks.uploadAssetFile }));
 

@@ -139,7 +139,6 @@ interface TextNodeData {
   onDelete?: (id: string) => void;
   onDuplicate?: (id: string) => void;
   onAddToChat?: (id: string) => void;
-  onSaveToAssets?: (id: string) => void;
   onPaste?: (id: string) => void;
   onToast?: (type: 'success' | 'error' | 'warn', msg: string) => void;
   textGen?: boolean;

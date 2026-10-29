@@ -32,7 +32,6 @@ export interface CanvasAssetsPlacementHost {
   spawnPosition: () => { x: number; y: number };
   dockToolCallbacks: Record<string, unknown>;
   handleMediaDims: (id: string, dims: MediaDims) => void;
-  handleSaveMediaToAssets: (id: string) => void;
   addCanvasEdge: (source: string, target: string, refRole?: VideoRefRole) => void;
   validateVideoRefConnect: (source: string, target: string, role?: VideoRefRole) => boolean;
   videoCapsOfDraft: (id: string | null) => { imageMax?: number; videoReferenceMax?: number; audioReferenceMax?: number } | null;
@@ -75,7 +74,6 @@ export function useCanvasAssetsPlacement(host: CanvasAssetsPlacementHost): Canva
     spawnPosition,
     dockToolCallbacks,
     handleMediaDims,
-    handleSaveMediaToAssets,
     addCanvasEdge,
     validateVideoRefConnect,
     videoCapsOfDraft,
@@ -183,7 +181,6 @@ export function useCanvasAssetsPlacement(host: CanvasAssetsPlacementHost): Canva
           onDownload: (id: string) => actionsRef.current.download(id),
           ...dockToolCallbacks,
           onShowDetails: (id: string) => actionsRef.current.showDetails(id),
-          onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
           onMediaDims: handleMediaDims,
         },
       });

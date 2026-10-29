@@ -173,7 +173,6 @@ vi.mock('@/custom/api/generation', () => ({
   fetchGenerationModels: apiMocks.fetchGenerationModels,
 }));
 
-vi.mock('@/custom/api/sharedAssets', () => ({ saveSharedAsset: vi.fn() }));
 
 const canvasDocMock = vi.hoisted(() => ({
   current: {

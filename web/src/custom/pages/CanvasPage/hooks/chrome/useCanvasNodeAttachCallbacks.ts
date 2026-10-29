@@ -28,10 +28,6 @@ export interface CanvasNodeAttachCallbacksHost {
   ) => void;
   handleMediaDims: (id: string, dims: MediaDims) => void;
   handleAssetHoverChange: (id: string, hovered: boolean) => void;
-  handleSaveMediaToAssets: (id: string) => void;
-  handleSaveTextToAssets: (id: string) => void;
-  handleSaveCardToAssets: (id: string) => void;
-  handleSaveGoodsToAssets: (id: string) => void;
   handleProductChange: (id: string, patch: ProductChangePatch) => void;
   handleCardChange: (id: string, patch: CardChangePatch) => void;
   generationDock: { writeSelf: (kind: 'text') => void };
@@ -63,10 +59,6 @@ export function useCanvasNodeAttachCallbacks(host: CanvasNodeAttachCallbacksHost
     handleMediaIndexChange,
     handleMediaDims,
     handleAssetHoverChange,
-    handleSaveMediaToAssets,
-    handleSaveTextToAssets,
-    handleSaveCardToAssets,
-    handleSaveGoodsToAssets,
     handleProductChange,
     handleCardChange,
     generationDock,
@@ -102,7 +94,6 @@ export function useCanvasNodeAttachCallbacks(host: CanvasNodeAttachCallbacksHost
           onCopyImage: (id: string) => actionsRef.current.copyImage(id),
           onComplianceCheck: (id: string) => actionsRef.current.complianceCheck(id),
           onFillEmptyShell: (id: string, file: File) => actionsRef.current.fillEmptyShell(id, file),
-          onSaveToAssets: (id: string) => handleSaveTextToAssets(id),
           onWriteSelf: () => {
             generationDock.writeSelf('text');
           },
@@ -126,7 +117,6 @@ export function useCanvasNodeAttachCallbacks(host: CanvasNodeAttachCallbacksHost
           onDownload: (id: string) => actionsRef.current.download(id),
           ...dockToolCallbacks,
           onShowDetails: (id: string) => actionsRef.current.showDetails(id),
-          onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
           onMediaDims: handleMediaDims,
           onLocateInputSource: (sourceNodeId: string) => locateTextSource(sourceNodeId),
         };
@@ -143,7 +133,6 @@ export function useCanvasNodeAttachCallbacks(host: CanvasNodeAttachCallbacksHost
           onCopyImage: (id: string) => actionsRef.current.copyImage(id),
           onComplianceCheck: (id: string) => actionsRef.current.complianceCheck(id),
           onFillEmptyShell: (id: string, file: File) => actionsRef.current.fillEmptyShell(id, file),
-          onSaveToAssets: (id: string) => handleSaveGoodsToAssets(id),
           onProductChange: (id: string, patch: ProductChangePatch) => handleProductChange(id, patch),
           onPickFromCanvas: (id: string) => {
             pickers.setPickMode('product');
@@ -166,7 +155,6 @@ export function useCanvasNodeAttachCallbacks(host: CanvasNodeAttachCallbacksHost
           onComplianceCheck: (id: string) => actionsRef.current.complianceCheck(id),
           onFillEmptyShell: (id: string, file: File) => actionsRef.current.fillEmptyShell(id, file),
           onGenerateImage: () => actionsRef.current.openImageDialog(),
-          onSaveToAssets: (id: string) => handleSaveCardToAssets(id),
           onCardChange: (id: string, patch: CardChangePatch) => handleCardChange(id, patch),
           onPickFromCanvas: (id: string) => {
             pickers.setPickMode('asset');

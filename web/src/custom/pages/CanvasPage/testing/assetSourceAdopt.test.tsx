@@ -156,7 +156,6 @@ vi.mock('@/custom/api/jobs', () => ({
   readJobFailText: apiMocks.readJobFailText,
 }));
 
-vi.mock('@/custom/api/sharedAssets', () => ({ saveSharedAsset: vi.fn() }));
 
 const apiGenerationMocks = vi.hoisted(() => ({
   fetchGenerationModels: vi.fn(async (): Promise<GenerationModel[]> => []),

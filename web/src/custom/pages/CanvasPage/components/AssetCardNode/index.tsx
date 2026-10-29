@@ -59,8 +59,6 @@ export interface AssetCardNodeData {
   onDelete?: (id: string) => void;
   onAddToChat?: (id: string) => void;
 
-  onSaveToAssets?: (id: string) => void;
-
   onCardChange?: (id: string, patch: { refs?: CanvasGalleryRef[]; desc?: string; voice?: { name: string; src: string } | null }) => void;
 
   onGenerateImage?: () => void;

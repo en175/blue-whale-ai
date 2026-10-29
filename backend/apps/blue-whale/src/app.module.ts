@@ -23,7 +23,6 @@ import { PhoneVerificationModule } from "@lib/shared/auth/phone-verification.mod
 import { PhoneActionModule } from "@lib/shared/identity/phone-action.module.js";
 import { RateLimitModule } from "@lib/shared/rate-limit/rate-limit.module.js";
 import { RateLimitGuard } from "@lib/shared/rate-limit/rate-limit.guard.js";
-import { SharedAssetsModule } from "@lib/shared/shared-assets/shared-assets.module.js";
 import { SkillModule } from "@lib/shared/skills/skills.module.js";
 import { SnapshotModule } from "@lib/shared/snapshot/snapshot.module.js";
 import { TemplateModule } from "@lib/shared/template/template.module.js";
@@ -53,7 +52,6 @@ import { AudioVideoMuxesApiModule } from "./api/audio-video-muxes/audio-video-mu
 import { ProjectAssetsModule } from "./api/project-assets/project-assets.module.js";
 import { ProjectsApiModule } from "./api/projects/projects.module.js";
 import { RechargeModule } from "./api/recharge/recharge.module.js";
-import { SharedAssetsApiModule } from "./api/shared-assets/shared-assets.module.js";
 import { SiteHomepageHeroesModule } from "./api/site/homepage-heroes.module.js";
 import { SkillsApiModule } from "./api/skills/skills.module.js";
 import { AgentTemplatesModule } from "./api/templates/templates.module.js";
@@ -84,7 +82,6 @@ import { IdentityModule } from "@lib/shared/identity/index.js";
     DashboardModule,
     GenerationModule,
     SkillModule,
-    SharedAssetsModule,
     SnapshotModule,
     SessionModule,
     CaptchaModule,
@@ -126,7 +123,6 @@ import { IdentityModule } from "@lib/shared/identity/index.js";
     ProjectsApiModule,
     ProjectAssetsModule,
     SkillsApiModule,
-    SharedAssetsApiModule,
     SiteHomepageHeroesModule,
     AgentTemplatesModule,
     AgentV1Module,
