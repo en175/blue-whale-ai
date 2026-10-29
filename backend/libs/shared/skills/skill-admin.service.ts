@@ -21,6 +21,22 @@ export class SkillAdminService {
     return this.repo.listOfficialSkills();
   }
 
+  getOfficialSkill(id: bigint) {
+    return this.repo.getOfficialSkill(id);
+  }
+
+  updateOfficialSkill(
+    id: bigint,
+    input: {
+      name?: string;
+      description?: string | null;
+      body?: string | null;
+      category?: string;
+    },
+  ) {
+    return this.repo.updateOfficialSkill(id, input);
+  }
+
   listCategories() {
     return this.repo.listCategories();
   }

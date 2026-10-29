@@ -125,4 +125,71 @@ export class AdminSkillsController {
       throw toAdminError(error);
     }
   }
+
+  @Get(":id")
+  async detail(@Param("id") idRaw: string) {
+    const id = parseBigId(idRaw);
+    if (!id) throw new AdminException(400, "id 无效");
+    try {
+      const data = await this.skillAdmin.getOfficialSkill(id);
+      if (!data) throw new AdminException(404, "技能不存在");
+      return { success: true, data };
+    } catch (error) {
+      if (error instanceof AdminException) throw error;
+      throw toAdminError(error);
+    }
+  }
+
+  @Put(":id")
+  async update(
+    @Param("id") idRaw: string,
+    @Body() body: Record<string, unknown>,
+  ) {
+    const id = parseBigId(idRaw);
+    if (!id) throw new AdminException(400, "id 无效");
+    const input: {
+      name?: string;
+      description?: string | null;
+      body?: string | null;
+      category?: string;
+    } = {};
+    if (body.name !== undefined) {
+      const name = typeof body.name === "string" ? body.name.trim() : "";
+      if (!name || name.length > 255) {
+        throw new AdminException(400, "名称须为 1–255 字符");
+      }
+      input.name = name;
+    }
+    if (body.category !== undefined) {
+      const category =
+        typeof body.category === "string" ? body.category.trim() : "";
+      if (!category || category.length > CATEGORY_MAX) {
+        throw new AdminException(400, `分类名须为 1–${CATEGORY_MAX} 字符`);
+      }
+      input.category = category;
+    }
+    if (body.description !== undefined) {
+      if (body.description !== null && typeof body.description !== "string") {
+        throw new AdminException(400, "简介须为字符串或 null");
+      }
+      input.description = body.description as string | null;
+    }
+    if (body.body !== undefined) {
+      if (body.body !== null && typeof body.body !== "string") {
+        throw new AdminException(400, "正文须为字符串或 null");
+      }
+      input.body = body.body as string | null;
+    }
+    if (Object.keys(input).length === 0) {
+      throw new AdminException(400, "没有可更新的字段");
+    }
+    try {
+      const ok = await this.skillAdmin.updateOfficialSkill(id, input);
+      if (!ok) throw new AdminException(404, "技能不存在");
+      return { success: true, data: { id: idRaw } };
+    } catch (error) {
+      if (error instanceof AdminException) throw error;
+      throw toAdminError(error);
+    }
+  }
 }

@@ -19,7 +19,7 @@ describe("SkillAdminRepo — 官方技能分类管理", () => {
     const ok = await createSkillAdminRepo(prisma).setCategory(3n, "short_video");
     expect(ok).toBe(true);
     expect(prisma.catalog_skills.updateMany).toHaveBeenCalledWith({
-      where: { id: 3n, source: "official", is_delete: 0 },
+      where: { id: 3n, owner_user_id: 0n, is_delete: 0 },
       data: { category: "short_video" },
     });
   });
@@ -34,7 +34,7 @@ describe("SkillAdminRepo — 官方技能分类管理", () => {
     const n = await createSkillAdminRepo(prisma).assignCategory([1n, 2n], "short_video");
     expect(n).toBe(2);
     expect(prisma.catalog_skills.updateMany).toHaveBeenCalledWith({
-      where: { id: { in: [1n, 2n] }, source: "official", is_delete: 0 },
+      where: { id: { in: [1n, 2n] }, owner_user_id: 0n, is_delete: 0 },
       data: { category: "short_video" },
     });
   });
@@ -44,7 +44,7 @@ describe("SkillAdminRepo — 官方技能分类管理", () => {
     const n = await createSkillAdminRepo(prisma).renameCategory("film", "film_tv");
     expect(n).toBe(2);
     expect(prisma.catalog_skills.updateMany).toHaveBeenCalledWith({
-      where: { source: "official", is_delete: 0, category: "film" },
+      where: { owner_user_id: 0n, is_delete: 0, category: "film" },
       data: { category: "film_tv" },
     });
   });
@@ -53,7 +53,7 @@ describe("SkillAdminRepo — 官方技能分类管理", () => {
     const prisma = mockPrisma({ updateMany: vi.fn().mockResolvedValue({ count: 1 }) });
     await createSkillAdminRepo(prisma).clearCategory("marketing");
     expect(prisma.catalog_skills.updateMany).toHaveBeenCalledWith({
-      where: { source: "official", is_delete: 0, category: "marketing" },
+      where: { owner_user_id: 0n, is_delete: 0, category: "marketing" },
       data: { category: "" },
     });
   });
@@ -72,7 +72,7 @@ describe("SkillAdminRepo — 官方技能分类管理", () => {
     ]);
     expect(prisma.catalog_skills.groupBy).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { source: "official", is_delete: 0, category: { not: "" } },
+        where: { owner_user_id: 0n, is_delete: 0, category: { not: "" } },
       }),
     );
   });
@@ -88,7 +88,7 @@ describe("SkillAdminRepo — 官方技能分类管理", () => {
       { id: "3", name: "深度写作", cover_url: null, category: "other", sort_order: 1 },
     ]);
     expect(prisma.catalog_skills.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { source: "official", is_delete: 0 } }),
+      expect.objectContaining({ where: { owner_user_id: 0n, is_delete: 0 } }),
     );
   });
 });

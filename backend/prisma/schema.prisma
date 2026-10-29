@@ -440,10 +440,15 @@ model generation_canvas_outputs {
 /// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
 model catalog_skills {
   id              BigInt   @id @default(autoincrement())
-  name            String   @unique(map: "uk_name") @db.VarChar(255)
+  creative_skill_id String?  @unique(map: "uk_catalog_skills__creative_skill_id") @db.VarChar(80)
+  owner_user_id   BigInt   @default(0)
+  asset_domain    String   @default("official") @db.VarChar(16)
+  name            String   @db.VarChar(255)
   skill_code      String?  @unique(map: "uk_skill_code") @db.VarChar(32)
   description     String?  @db.Text
-  content         String?  @db.LongText
+  body            String?  @db.LongText
+  content_digest  String?  @db.VarChar(71)
+  auto_match      Int      @default(0) @db.TinyInt
   source          String   @default("official") @db.VarChar(32)
   sort_order      Int      @default(0)
   cover_url       String?  @db.VarChar(512)
@@ -453,12 +458,15 @@ model catalog_skills {
   name_zh         String?  @db.VarChar(255)
   description_en  String?  @db.Text
   description_zh  String?  @db.Text
+  name_key        String?  @db.VarChar(255)
   gmt_create      DateTime @default(now()) @db.DateTime(0)
   gmt_modified    DateTime @default(now()) @db.DateTime(0)
   version         Int      @default(0)
   is_delete       Int      @default(0) @db.TinyInt
 
   @@index([sort_order], map: "idx_sort")
+  @@index([owner_user_id, name_key], map: "idx_catalog_skills__owner_name_key")
+  @@index([owner_user_id, asset_domain], map: "idx_catalog_skills__owner_domain")
 }
 
 /// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
@@ -543,43 +551,6 @@ model content_homepage_heroes {
   @@index([enabled, is_delete, sort_order], map: "idx_hero_enabled_sort")
   @@index([sort_order, is_delete], map: "idx_hero_sort")
   @@index([scene, enabled, is_delete, sort_order], map: "idx_hero_scene_enabled_sort")
-}
-
-/// Creative Skill 稳定身份（IK60WS，资产契约 §1）：官方与个人共用一表；
-/// owner_user_id=0 表示平台官方资产，asset_domain 区分 official/personal。
-model catalog_creative_skills {
-  id                BigInt   @id @default(autoincrement())
-  creative_skill_id String   @unique(map: "uk_catalog_creative_skills__creative_skill_id") @db.VarChar(80)
-  name              String   @db.VarChar(255)
-  description       String?  @db.VarChar(1000)
-  source_skill_id   BigInt?
-  active_version_id String?  @db.VarChar(80)
-  owner_user_id     BigInt   @default(0)
-  asset_domain      String   @default("official") @db.VarChar(16)
-  name_key          String?  @db.VarChar(255)
-  auto_match        Int      @default(0)
-  gmt_create        DateTime @default(now()) @db.DateTime(0)
-  gmt_modified      DateTime @default(now()) @db.DateTime(0)
-
-  @@index([owner_user_id, asset_domain], map: "idx_owner_domain")
-  @@index([owner_user_id, name_key], map: "idx_owner_name_key")
-}
-
-/// Creative Skill 不可变版本快照（IK60WS，资产契约 §1）：
-/// body 为剥掉 frontmatter 的纯正文，digest=sha256(body)，仅受信任运行时按 pin 读取。
-model catalog_creative_skill_versions {
-  id                        BigInt   @id @default(autoincrement())
-  creative_skill_version_id String   @unique(map: "uk_catalog_creative_skill_versions__creative_skill_version_id") @db.VarChar(80)
-  creative_skill_id         String   @db.VarChar(80)
-  display_version           String   @db.VarChar(64)
-  body                      String   @db.LongText
-  content_digest            String   @db.VarChar(71)
-  resource_digest           String   @db.VarChar(71)
-  media_type                String   @default("text/markdown") @db.VarChar(128)
-  gmt_create                DateTime @default(now()) @db.DateTime(0)
-  gmt_modified              DateTime @default(now()) @db.DateTime(0)
-
-  @@unique([creative_skill_id, display_version], map: "uk_catalog_creative_skill_versions__semver")
 }
 
 /// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
