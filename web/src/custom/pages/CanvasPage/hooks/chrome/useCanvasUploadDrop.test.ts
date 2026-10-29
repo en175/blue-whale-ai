@@ -37,7 +37,6 @@ function host(over: Partial<CanvasUploadDropHost> = {}): CanvasUploadDropHost {
     toolMode: 'select',
     spawnPosition: () => ({ x: 0, y: 0 }),
     handleMediaDims: () => {},
-    handleSaveMediaToAssets: () => {},
     dockToolCallbacks: {},
     actionsRef: ref({}) as unknown as CanvasUploadDropHost['actionsRef'],
     setMediaNodes: () => {},

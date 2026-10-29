@@ -106,7 +106,6 @@ vi.mock('@/custom/api/canvas', () => ({
     JSON.stringify(edges.map((e) => JSON.parse(JSON.stringify(e)))),
   ),
 }));
-vi.mock('@/custom/api/sharedAssets', () => ({ saveSharedAsset: vi.fn() }));
 vi.mock('@/custom/api/generation', () => ({
   fetchGenerationModels: vi.fn(async (): Promise<GenerationModel[]> => []),
 }));

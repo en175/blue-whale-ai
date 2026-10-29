@@ -1,4 +1,4 @@
-import { type AssetCardKind, type CardFilter } from '@/custom/enums';
+import { type AssetCardKind } from '@/custom/enums';
 import type { Dispatch, SetStateAction } from 'react';
 import type { MaterialAsset } from '@/custom/api/material';
 
@@ -6,9 +6,6 @@ import type { UploadedFile } from '../../components/ImageDialog';
 import type { CanvasGalleryRef } from '../../media/collectMediaBlocks';
 
 export function useCanvasChromeActions(input: {
-  setAssetsModalDefaultTab: Dispatch<SetStateAction<string | undefined>>;
-  setAssetsModalDefaultFilter: Dispatch<SetStateAction<CardFilter | undefined>>;
-  setShowAssetsModal: Dispatch<SetStateAction<boolean>>;
   handleCreateAssetCard: (kind: AssetCardKind) => void;
   handleCreateProduct: () => void;
   characterLibraryTarget: 'image' | 'asset' | null;
@@ -17,24 +14,12 @@ export function useCanvasChromeActions(input: {
   setAssetPickResult: Dispatch<SetStateAction<{ ts: number; assetId: string; ref: CanvasGalleryRef } | null>>;
 }) {
   const handleToolMenuSelect = (menu: string, item: string) => {
-    if (menu === 'assets' && item === 'shared') {
-      input.setAssetsModalDefaultTab(undefined);
-      input.setAssetsModalDefaultFilter('all-assets');
-      input.setShowAssetsModal(true);
-      return;
-    }
     if (menu === 'assets') {
       input.handleCreateAssetCard(item as AssetCardKind);
       return;
     }
     if (menu === 'goods' && item === 'create') {
       input.handleCreateProduct();
-      return;
-    }
-    if (menu === 'goods' && item === 'import') {
-      input.setAssetsModalDefaultTab('goods');
-      input.setAssetsModalDefaultFilter(undefined);
-      input.setShowAssetsModal(true);
     }
   };
   const handleCharacterLibrarySelect = (assets: MaterialAsset[]) => {

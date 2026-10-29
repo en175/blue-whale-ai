@@ -193,7 +193,6 @@ export interface MediaNodeData {
   onDelete?: (id: string) => void;
   onDuplicate?: (id: string) => void;
   onAddToChat?: (id: string) => void;
-  onSaveToAssets?: (id: string) => void;
   onCancelJob?: (id: string) => void;
   onRetryJob?: (id: string) => void;
   onFixFollowVideo?: (id: string) => void;

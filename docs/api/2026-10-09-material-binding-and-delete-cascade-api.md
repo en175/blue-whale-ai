@@ -147,7 +147,7 @@ DELETE /api/assets/:assetId
 
 ### 3.1 行为变化
 
-`POST /api/material/ListAssetGroups` 的虚拟组与真人组**都改读本地表**（`catalog_material_groups`），不再吐上游的全租户列表。
+`POST /api/material/ListAssetGroups` 的虚拟组与真人组**都改读本地表**（`user_material_info`），不再吐上游的全租户列表。
 
 | `Filter.GroupType` | 行为 |
 |---|---|

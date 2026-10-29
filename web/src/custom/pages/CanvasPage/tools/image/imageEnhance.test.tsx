@@ -129,7 +129,6 @@ vi.mock('@/custom/api/jobs', () => ({
   createAudioTrim: apiMocks.createAudioTrim,
   readJobFailText: apiMocks.readJobFailText,
 }));
-vi.mock('@/custom/api/sharedAssets', () => ({ saveSharedAsset: vi.fn() }));
 vi.mock('@/custom/api/generation', () => ({ fetchGenerationModels: apiMocks.fetchGenerationModels }));
 
 const canvasDocMock = vi.hoisted(() => ({

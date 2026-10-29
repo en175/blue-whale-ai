@@ -146,7 +146,6 @@ vi.mock('@/custom/api/canvasRecovery', () => ({
   })),
 }));
 
-vi.mock('@/custom/api/sharedAssets', () => ({ saveSharedAsset: vi.fn() }));
 
 vi.mock('@/custom/api/generation', () => ({
   fetchGenerationModels: apiMocks.fetchGenerationModels,

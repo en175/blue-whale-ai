@@ -112,7 +112,6 @@ vi.mock('@/custom/api/jobs', () => ({
   createVocalSplit: apiMocks.createVocalSplit,
   readJobFailText: apiMocks.readJobFailText,
 }));
-vi.mock('@/custom/api/sharedAssets', () => ({ saveSharedAsset: vi.fn() }));
 vi.mock('@/custom/api/generation', () => ({ fetchGenerationModels: apiMocks.fetchGenerationModels }));
 
 const recoveryMocks = vi.hoisted(() => ({

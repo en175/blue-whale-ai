@@ -1,10 +1,6 @@
-import { type AssetCardKind } from '@/custom/enums';
 import { type RefObject, useRef, useState } from 'react';
 import type { Node } from '@xyflow/react';
-import { unifiedTextNodeText } from '@lib/contracts/text-node-markdown';
-import { fetchAllAssets, fetchAssetDetail, type AssetRecord } from '@/custom/api/assets';
-import { isApiError } from '@/shared/api/http';
-import { saveSharedAsset, type SaveSharedAssetRequest } from '@/custom/api/sharedAssets';
+import { fetchAssetDetail, type AssetRecord } from '@/custom/api/assets';
 
 import { fetchRemoteMedia } from '../../media/fetchRemoteMedia';
 import { downloadFileNameOf, resolveDownloadMime } from '../../components/cardName';
@@ -42,7 +38,7 @@ const fetchAssetBlob = async (src: string): Promise<Blob | null> => {
 type GroupDownloadItem = { filename: string; blob: Blob };
 
 export function useCanvasAssetActions(host: CanvasAssetActionsHost) {
-  const { mediaNodesRef, textNodesRef, productNodesRef, assetNodesRef, showToast } = host;
+  const { mediaNodesRef, textNodesRef, showToast } = host;
 
   const downloadMediaById = async (id: string, notifyMissing: boolean): Promise<boolean> => {
     const node = mediaNodesRef.current?.find((n) => n.id === id);
@@ -193,134 +189,6 @@ export function useCanvasAssetActions(host: CanvasAssetActionsHost) {
     setAssetDetailLoading(false);
   };
 
-  const doSaveSharedAsset = async (req: SaveSharedAssetRequest, successMsg: string) => {
-    console.log('[SaveAssets] doSaveSharedAsset 请求', req);
-    try {
-      const result = await saveSharedAsset(req);
-      console.log('[SaveAssets] 保存结果', result);
-      if (result.created) {
-        showToast('success', successMsg);
-      } else {
-        showToast('warn', '该内容已在共享资产中，未重复创建；如需更新请先删除旧条目');
-      }
-      return result;
-    } catch (e) {
-      console.warn('[SaveAssets] 保存失败', e);
-      if (!isApiError(e)) showToast('error', '保存失败，请重试');
-      return null;
-    }
-  };
-
-  const handleSaveMediaToAssets = async (nodeId: string) => {
-    const node = mediaNodesRef.current?.find((n) => n.id === nodeId);
-    if (!node) {
-      console.warn('[SaveAssets] 未找到媒体节点', nodeId);
-      showToast('error', '节点不存在');
-      return;
-    }
-    const nd = node.data as Record<string, unknown>;
-    const mediaType = (nd.mediaType || nd.type) as 'image' | 'video' | 'audio' | undefined;
-    const assetId = nd.assetId ?? nd.asset_id ?? nd.assetID;
-    const fileName = (nd.fileName || nd.name) as string | undefined;
-    const src = nd.src as string | undefined;
-    console.log('[SaveAssets] handleSaveMediaToAssets', { nodeId, assetId, mediaType, src });
-    if (!mediaType) {
-      console.warn('[SaveAssets] 无 mediaType，无法保存', { nodeId, data: nd });
-      showToast('error', '节点类型异常，无法保存');
-      return;
-    }
-    let sourceAssetId = assetId ? String(assetId) : '';
-    if (!sourceAssetId && src) {
-      try {
-        const records = await fetchAllAssets(mediaType);
-        const hit = records.find((r) => r.url === src);
-        if (hit) sourceAssetId = String(hit.id);
-      } catch (err) {
-        console.warn('[SaveAssets] 按 URL 反查资产失败', err);
-      }
-    }
-    if (!sourceAssetId) {
-      console.warn('[SaveAssets] 无 assetId，无法保存', { nodeId, data: nd });
-      showToast('error', '请先上传素材后再保存');
-      return;
-    }
-    const name = fileName || `媒体-${mediaType}`;
-    await doSaveSharedAsset(
-      {
-        assetType: 'media',
-        kind: mediaType,
-        sourceAssetId,
-        name,
-      },
-      `已保存「${name}」到共享资产`,
-    );
-  };
-
-  const handleSaveTextToAssets = async (nodeId: string) => {
-    const node = textNodesRef.current?.find((n) => n.id === nodeId);
-    if (!node) return;
-    const text = unifiedTextNodeText(node.data ?? {});
-    if (!text) {
-      showToast('error', '文本内容为空，无法保存');
-      return;
-    }
-    await doSaveSharedAsset(
-      { assetType: 'text', snapshot: { text } },
-      '已保存文本到共享资产',
-    );
-  };
-
-  const handleSaveCardToAssets = async (nodeId: string) => {
-    const node = assetNodesRef.current?.find((n) => n.id === nodeId);
-    if (!node) return;
-    const data = node.data as {
-      kind: AssetCardKind;
-      initialRefs?: Array<{ id: string; src: string }>;
-      initialDesc?: string;
-      voice?: { name: string; src: string };
-    };
-    if (data.kind === 'generation' || !data.kind) {
-      showToast('error', '生成卡暂不支持保存到共享资产');
-      return;
-    }
-    const refs = data.initialRefs ?? [];
-    const desc = data.initialDesc ?? '';
-    if (refs.length === 0 && !desc) {
-      showToast('error', '请先为卡片补充参考图或描述');
-      return;
-    }
-    await doSaveSharedAsset(
-      {
-        assetType: 'card',
-        kind: data.kind as 'style' | 'character' | 'object' | 'environment' | 'custom',
-        snapshot: {
-          referenceImages: refs,
-          description: desc,
-          ...(data.kind === 'character' && data.voice ? { voice: data.voice } : {}),
-        },
-      },
-      `已保存「${({ style: '风格卡', character: '角色卡', object: '物体卡', environment: '环境卡', custom: '自定义卡' } as const)[data.kind]}」到共享资产`,
-    );
-  };
-
-  const handleSaveGoodsToAssets = async (nodeId: string) => {
-    const node = productNodesRef.current?.find((n) => n.id === nodeId);
-    if (!node) return;
-    const data = node.data as { name?: string; detail?: string; images?: Array<{ id: string; src: string; enabled: boolean }> };
-    const name = data.name || '商品';
-    await doSaveSharedAsset(
-      {
-        assetType: 'goods',
-        snapshot: {
-          name,
-          detail: data.detail || '',
-          images: (data.images || []).map((img) => ({ id: img.id, src: img.src, enabled: img.enabled })),
-        },
-      },
-      `已保存「${name}」到共享资产`,
-    );
-  };
-
   return {
     assetDetailTarget,
     assetDetailLoading,
@@ -328,9 +196,5 @@ export function useCanvasAssetActions(host: CanvasAssetActionsHost) {
     handleNodeShowDetails,
     handleNodeDownload,
     handleDownloadGroupNodes,
-    handleSaveMediaToAssets,
-    handleSaveTextToAssets,
-    handleSaveCardToAssets,
-    handleSaveGoodsToAssets,
   };
 }

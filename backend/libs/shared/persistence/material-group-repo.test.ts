@@ -17,7 +17,7 @@ describe("MaterialGroupRepo", () => {
 
   it("upsert 创建虚拟默认组：按 (user_id, material_group_id) 复合唯一落表", async () => {
     const upsert = vi.fn().mockResolvedValue(row);
-    const repo = createMaterialGroupRepo({ catalog_material_groups: { upsert } } as never);
+    const repo = createMaterialGroupRepo({ user_material_info: { upsert } } as never);
 
     const view = await repo.upsert({
       userId: "9",
@@ -56,7 +56,7 @@ describe("MaterialGroupRepo", () => {
 
   it("findVirtualDefault：按 user_id + kind=virtual + is_default=true + 未删查", async () => {
     const findFirst = vi.fn().mockResolvedValue(row);
-    const repo = createMaterialGroupRepo({ catalog_material_groups: { findFirst } } as never);
+    const repo = createMaterialGroupRepo({ user_material_info: { findFirst } } as never);
 
     const view = await repo.findVirtualDefault("9");
 
@@ -75,7 +75,7 @@ describe("MaterialGroupRepo", () => {
 
   it("findVirtualDefault 无组：返回 null", async () => {
     const repo = createMaterialGroupRepo({
-      catalog_material_groups: { findFirst: vi.fn().mockResolvedValue(null) },
+      user_material_info: { findFirst: vi.fn().mockResolvedValue(null) },
     } as never);
 
     expect(await repo.findVirtualDefault("9")).toBeNull();
@@ -83,7 +83,7 @@ describe("MaterialGroupRepo", () => {
 
   it("listByUser：按 user_id + 未删 + 可选 kind 过滤", async () => {
     const findMany = vi.fn().mockResolvedValue([row]);
-    const repo = createMaterialGroupRepo({ catalog_material_groups: { findMany } } as never);
+    const repo = createMaterialGroupRepo({ user_material_info: { findMany } } as never);
 
     const views = await repo.listByUser("9", "virtual");
 
@@ -100,7 +100,7 @@ describe("MaterialGroupRepo", () => {
     const count = vi.fn().mockResolvedValue(3);
     const findMany = vi.fn().mockResolvedValue([row]);
     const repo = createMaterialGroupRepo({
-      catalog_material_groups: { count, findMany },
+      user_material_info: { count, findMany },
     } as never);
 
     const { total, rows } = await repo.pageByUser("9", "virtual", 2, 10);
@@ -121,7 +121,7 @@ describe("MaterialGroupRepo", () => {
 
   it("softDelete：按 (user_id, material_group_id) 软删，置 is_delete + deleted_at", async () => {
     const updateMany = vi.fn().mockResolvedValue({ count: 1 });
-    const repo = createMaterialGroupRepo({ catalog_material_groups: { updateMany } } as never);
+    const repo = createMaterialGroupRepo({ user_material_info: { updateMany } } as never);
 
     await repo.softDelete("9", "group-virt-1");
 

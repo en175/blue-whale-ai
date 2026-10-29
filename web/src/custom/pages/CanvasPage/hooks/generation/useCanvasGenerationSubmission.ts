@@ -59,7 +59,6 @@ export interface CanvasGenerationSubmissionHost extends CanvasGenerationTerminal
   spawnPosition: () => { x: number; y: number };
   textAttachmentsForSend: (targetNodeId: string) => ImageTextAttachment[];
   handleMediaDims: (nodeId: string, dims: MediaDims) => void;
-  handleSaveMediaToAssets: (nodeId: string) => void;
   dockCallbacks: ReturnType<typeof createCanvasToolSessions>['callbacks'] & {
     onEnhanceImage: (id: string) => void;
     onVideoEnhance: (id: string) => void;
@@ -576,7 +575,7 @@ export function useCanvasGenerationSubmission(host: CanvasGenerationSubmissionHo
     const {
       currentId, mediaNodesRef, edgesRef, generationRuntimeRef, setMediaNodes, setEdges,
       actionsRef, toolMode, attachCallbacks, patchMediaNode, dockCallbacks,
-      textAttachmentsForSend, handleMediaDims, handleSaveMediaToAssets, blockInvalidDraft, spawnPosition,
+      textAttachmentsForSend, handleMediaDims, blockInvalidDraft, spawnPosition,
       addCanvasEdge,
     } = hostRef.current;
     const draftModeOfNode = (nodeId: string, data?: Record<string, unknown>) =>
@@ -680,7 +679,6 @@ export function useCanvasGenerationSubmission(host: CanvasGenerationSubmissionHo
         onDownload: (id: string) => actionsRef.current.download(id),
         ...dockCallbacks,
         onShowDetails: (id: string) => actionsRef.current.showDetails(id),
-        onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
         onMediaDims: handleMediaDims,
       },
     };

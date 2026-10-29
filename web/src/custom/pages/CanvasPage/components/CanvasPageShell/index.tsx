@@ -16,7 +16,6 @@ import CanvasPaneContextMenu from '../CanvasPaneContextMenu';
 import ConnectTypeMenu from '../ConnectTypeMenu';
 import AgentPanel from '../AgentPanel';
 import AssetsPickerModal from '../AssetsPickerModal';
-import SharedAssetsModal from '../SharedAssetsModal';
 import CharacterLibraryModal from '../CharacterLibraryModal';
 import AssetDetailModal from '@/custom/pages/Assets/components/AssetDetailModal';
 import ConfirmModal from '@/custom/components/ConfirmModal';
@@ -39,7 +38,6 @@ type PickHintProps = ComponentProps<typeof CanvasPickHint>;
 type PaneMenuProps = ComponentProps<typeof CanvasPaneContextMenu>;
 type HeaderProps = ComponentProps<typeof CanvasHeader>;
 type AgentProps = ComponentProps<typeof AgentPanel>;
-type SharedProps = ComponentProps<typeof SharedAssetsModal>;
 type CharProps = ComponentProps<typeof CharacterLibraryModal>;
 type AssetDetailProps = ComponentProps<typeof AssetDetailModal>;
 type ConfirmProps = ComponentProps<typeof ConfirmModal>;
@@ -245,11 +243,6 @@ interface CanvasPageShellProps {
     pendingDeleteGroup: { id: string; count: number } | null;
     setPendingDeleteGroup: Dispatch<SetStateAction<{ id: string; count: number } | null>>;
     confirmDeleteGroup: ConfirmProps['onConfirm'];
-    showAssetsModal: boolean;
-    setShowAssetsModal: Dispatch<SetStateAction<boolean>>;
-    handleAddSharedAsset: NonNullable<SharedProps['onAddItem']>;
-    assetsModalDefaultTab: SharedProps['defaultTab'];
-    assetsModalDefaultFilter: SharedProps['defaultCardFilter'];
     showCharacterLibrary: boolean;
     setShowCharacterLibrary: Dispatch<SetStateAction<boolean>>;
     setCharacterLibraryTarget: Dispatch<SetStateAction<'image' | 'asset' | null>>;
@@ -578,18 +571,6 @@ export default function CanvasPageShell(props: CanvasPageShellProps) {
           showLivenessTab={pick.assetsPickerTarget === 'toolbar' || pick.assetsPickerTarget === 'videoDraft'}
           showCharacterTab={pick.assetsPickerTarget === 'videoDraft'}
           rejectUnapprovedForVideo={pick.assetsPickerTarget === 'videoDraft'}
-        />
-      )}
-      {overlays.showAssetsModal && (
-        <SharedAssetsModal
-          onClose={() => overlays.setShowAssetsModal(false)}
-          onAddItem={(item) => overlays.handleAddSharedAsset(item).then((ok) => {
-            if (ok) overlays.setShowAssetsModal(false);
-            return ok;
-          })}
-          onToast={menus.showToast}
-          defaultTab={overlays.assetsModalDefaultTab}
-          defaultCardFilter={overlays.assetsModalDefaultFilter}
         />
       )}
       {overlays.showCharacterLibrary && (

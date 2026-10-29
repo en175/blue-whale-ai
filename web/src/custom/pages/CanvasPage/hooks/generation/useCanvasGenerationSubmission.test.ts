@@ -119,7 +119,6 @@ function createBag(nodes: Node[]): Bag {
     spawnPosition: () => ({ x: 10, y: 20 }),
     textAttachmentsForSend: () => [],
     handleMediaDims: () => {},
-    handleSaveMediaToAssets: () => {},
     dockCallbacks: {} as CanvasGenerationSubmissionHost['dockCallbacks'],
   };
   return next;

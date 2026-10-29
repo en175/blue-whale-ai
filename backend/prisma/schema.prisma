@@ -47,7 +47,7 @@ model user_assets {
 /// kind：virtual=虚拟人像库组（每用户至多 1 个默认组），real=真人像库组（每用户可多个）。
 /// cover_url：封面图（真人组用，虚拟组可空）。material_group_id：上游组 id（group-...）。
 /// is_default 每用户 virtual 至多 1 个用应用层保证（MySQL 唯一索引无法表达条件唯一，不设 DB 约束）。
-model catalog_material_groups {
+model user_material_info {
   id                BigInt    @id @default(autoincrement())
   user_id           BigInt
   material_group_id String    @db.VarChar(128)
@@ -86,31 +86,6 @@ model catalog_material_states {
 
   @@index([status, gmt_create], map: "idx_catalog_material_states__poll")
   @@index([material_group_id], map: "idx_catalog_material_states__group")
-}
-
-/// 画布共享资产（IK9QKP）：用户主动保存、跨项目可复用的自包含快照库。
-/// 两层类型对齐画布节点结构：asset_type = 节点大类（card/media/goods/scene/text），
-/// kind = 节点判别字段（card 的 data.kind / media 的 data.mediaType；goods/scene/text 为 NULL）。
-/// snapshot 统一存各类型全部数据（自包含，不依赖来源表）；name/thumbnail_url 为列表查询冗余列。
-/// dedup_key 幂等去重：媒体 url sha256、卡片 类型+描述 sha256、商品 名称 sha256、场景 内容 sha256、文本 NULL。
-model user_shared_asset_snapshots {
-  id            BigInt   @id @default(autoincrement())
-  user_id       BigInt
-  asset_type    String   @db.VarChar(16)
-  kind          String?  @db.VarChar(16)
-  name          String   @db.VarChar(255)
-  thumbnail_url String?  @db.VarChar(512)
-  snapshot      Json
-  dedup_key     String?  @db.VarChar(128)
-  status        String   @default("normal") @db.VarChar(16)
-  gmt_create    DateTime @default(now()) @db.DateTime(0)
-  gmt_modified  DateTime @default(now()) @db.DateTime(0)
-  version       Int      @default(0)
-  is_delete     Int      @default(0) @db.TinyInt
-
-  @@unique([user_id, dedup_key], map: "uk_shared_user_dedup")
-  @@index([user_id, asset_type, kind, is_delete], map: "idx_shared_user_type")
-  @@index([user_id, gmt_create], map: "idx_shared_user_created")
 }
 
 /// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments

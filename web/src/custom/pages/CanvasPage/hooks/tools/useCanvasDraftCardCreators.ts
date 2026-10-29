@@ -29,8 +29,6 @@ export interface CanvasDraftCardCreatorsHost {
   ) => void;
   handleDraftError: (id: string, error: string) => void;
   removeCanvasNodes: (ids: string[]) => void;
-  handleSaveMediaToAssets: (id: string) => void;
-  handleSaveTextToAssets: (id: string) => void;
   generationDock: { writeSelf: (kind: 'text') => void };
   showToast: (type: 'success' | 'error' | 'warn', msg: string) => void;
   setTextNodes: Dispatch<SetStateAction<Node[]>>;
@@ -70,8 +68,6 @@ export function useCanvasDraftCardCreators(host: CanvasDraftCardCreatorsHost): C
     handleMediaIndexChange,
     handleDraftError,
     removeCanvasNodes,
-    handleSaveMediaToAssets,
-    handleSaveTextToAssets,
     generationDock,
     showToast,
     setTextNodes,
@@ -124,7 +120,6 @@ export function useCanvasDraftCardCreators(host: CanvasDraftCardCreatorsHost): C
         onDownload: (id: string) => actionsRef.current.download(id),
         ...dockToolCallbacks,
         onShowDetails: (id: string) => actionsRef.current.showDetails(id),
-        onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
         onMediaDims: handleMediaDims,
       },
     };
@@ -167,7 +162,6 @@ export function useCanvasDraftCardCreators(host: CanvasDraftCardCreatorsHost): C
         onDownload: (id: string) => actionsRef.current.download(id),
         ...dockToolCallbacks,
         onShowDetails: (id: string) => actionsRef.current.showDetails(id),
-        onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
         onMediaDims: handleMediaDims,
       },
     };
@@ -212,7 +206,6 @@ export function useCanvasDraftCardCreators(host: CanvasDraftCardCreatorsHost): C
         onDownload: (id: string) => actionsRef.current.download(id),
         ...dockToolCallbacks,
         onShowDetails: (id: string) => actionsRef.current.showDetails(id),
-        onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
         onMediaDims: handleMediaDims,
       },
     };
@@ -257,7 +250,6 @@ export function useCanvasDraftCardCreators(host: CanvasDraftCardCreatorsHost): C
         onDuplicate: (id: string) => actionsRef.current.duplicate(id),
         onAddToChat: (id: string) => actionsRef.current.addToChat(id),
         onPaste: (id: string) => actionsRef.current.pasteAtNode(id),
-        onSaveToAssets: (id: string) => handleSaveTextToAssets(id),
         onToast: (type: 'success' | 'error' | 'warn', msg: string) => showToast(type, msg),
         onWriteSelf: () => {
           generationDock.writeSelf('text');

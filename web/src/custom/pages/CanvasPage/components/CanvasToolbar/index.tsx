@@ -16,7 +16,6 @@ import {
   Box,
   Mountain,
   SquarePlus,
-  Download,
   type LucideIcon,
 } from 'lucide-react';
 import styles from './index.module.css';
@@ -48,7 +47,6 @@ const TOOL_MENUS: Record<ToolMenuKey, { title: string; icon: LucideIcon; items: 
     icon: ShoppingBag,
     items: [
       { key: 'create', label: '新建商品', icon: SquarePlus },
-      { key: 'import', label: '导入商品', icon: Download },
     ],
   },
 };

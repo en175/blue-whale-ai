@@ -15,7 +15,6 @@ export interface CanvasTextNodeFactoriesHost {
   findCanvasNode: (id: string) => Node | undefined;
   removeCanvasNodes: (ids: string[]) => void;
   handleDraftError: (id: string, error: string) => void;
-  handleSaveTextToAssets: (id: string) => void;
   handleMediaIndexChange: (id: string, mediaMentions: MediaMention[], mediaRefs: import('@lib/contracts/text-node-media').MediaRef[], delta: { added: string[]; removed: string[] }) => void;
   syncTextIndexEdges: (textId: string, delta: { added: string[]; removed: string[] }) => void;
   showToast: (type: 'success' | 'error' | 'warn', msg: string) => void;
@@ -41,7 +40,6 @@ export function useCanvasTextNodeFactories(host: CanvasTextNodeFactoriesHost): C
     findCanvasNode,
     removeCanvasNodes,
     handleDraftError,
-    handleSaveTextToAssets,
     handleMediaIndexChange,
     syncTextIndexEdges,
     showToast,
@@ -69,7 +67,6 @@ export function useCanvasTextNodeFactories(host: CanvasTextNodeFactoriesHost): C
         onTitleChange: (id: string, name: string) => getActions().renameCard(id, name),
         onAddToChat: (id: string) => getActions().addToChat(id),
         onPaste: (id: string) => getActions().pasteAtNode(id),
-        onSaveToAssets: (id: string) => handleSaveTextToAssets(id),
         onToast: (type: 'success' | 'error' | 'warn', msg: string) => showToast(type, msg),
       },
     };
