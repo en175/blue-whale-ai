@@ -2,7 +2,6 @@ import {
   RESOURCE_NOT_FOUND_CODE,
   fail,
   ok,
-  type LegacyMigrationReport,
   type PublicGenerationError,
   type ResultEnvelope,
 } from "@lib/contracts";
@@ -57,7 +56,6 @@ export interface SnapshotData {
   storyboard_previews: readonly unknown[];
   generation_jobs: SnapshotGenerationJob[];
   assets: Record<string, SnapshotAssetSummary>;
-  legacy_migration?: LegacyMigrationReport;
 }
 
 function toWireJob(job: {
@@ -101,7 +99,7 @@ export async function handleGetSnapshot(
   const project = await deps.projects.findOwnedById(projectId, userId);
   if (!project) return fail(RESOURCE_NOT_FOUND_CODE, "资源不存在");
 
-  const { canvas, report } = await deps.canvas.migrateLegacyCards(projectId);
+  const canvas = await deps.canvas.getByProject(projectId);
   const [{ generation_jobs, assets }, conversation] = await Promise.all([
     deps.snapshot.loadJobsAndAssets(projectId, userId),
     deps.snapshot.loadConversationState(projectId, userId),
@@ -127,9 +125,6 @@ export async function handleGetSnapshot(
       id: canvas.id === null ? null : wireInteger(canvas.id),
       project_id: wireInteger(canvas.project_id),
     },
-    ...(report.migrated.length > 0 || report.failed.length > 0
-      ? { legacy_migration: report }
-      : {}),
     conversation_messages: conversation.conversation_messages.map(
       (message) => ({
         ...message,

@@ -1012,21 +1012,6 @@ model conversation_quote_snapshots {
   @@unique([project_id, quote_key], map: "uk_conversation_quote")
 }
 
-/// Immutable legacy generation-card migration history (IKDLQK): card content captured before conversion to an ordinary text node; read-only, never rewritten by later edits.
-model project_card_migration_history {
-  id          BigInt   @id @default(autoincrement())
-  project_id  BigInt
-  node_id     String   @db.VarChar(128)
-  title       String   @db.VarChar(200)
-  prompt_text String   @db.MediumText
-  visual_text String?  @db.MediumText
-  source_json Json?
-  card_json   Json
-  gmt_create  DateTime @default(now()) @db.DateTime(0)
-
-  @@unique([project_id, node_id], map: "uk_project_card_migration_history__node")
-}
-
 /// 会员周期（bw_memberships）。自建用户体系第一刀，建表理由见 migration 20260924120000。
 /// 一行 = 一个会员周期，**不是**「用户当前等级」——当前等级是这些周期的一个推导。
 /// tier 是 billing 侧会员折扣的输入，也是这张表存在的理由。

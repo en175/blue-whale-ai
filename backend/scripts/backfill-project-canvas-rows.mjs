@@ -137,7 +137,6 @@ while (processed < MAX_PROJECTS) {
           outcome.legacy.edges,
           outcome.view.nodes,
           outcome.view.edges,
-          new Set(outcome.report.migrated_cards),
         );
         if (!entry.comparison.consistent) {
           console.warn(`- project=${projectId} 比对不一致：${entry.comparison.differences.join(", ")}`);

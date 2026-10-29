@@ -675,21 +675,6 @@ CREATE TABLE `conversation_quote_snapshots` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
-CREATE TABLE `project_card_migration_history` (
-    `id` BIGINT NOT NULL AUTO_INCREMENT,
-    `project_id` BIGINT NOT NULL,
-    `node_id` VARCHAR(128) NOT NULL,
-    `title` VARCHAR(200) NOT NULL,
-    `prompt_text` MEDIUMTEXT NOT NULL,
-    `visual_text` MEDIUMTEXT NULL,
-    `source_json` JSON NULL,
-    `card_json` JSON NOT NULL,
-    `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
-
-    UNIQUE INDEX `uk_project_card_migration_history__node`(`project_id`, `node_id`),
-    PRIMARY KEY (`id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-
 CREATE TABLE `catalog_material_states` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `material_id` VARCHAR(128) NOT NULL,

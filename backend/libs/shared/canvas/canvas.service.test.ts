@@ -576,3 +576,28 @@ describe("CanvasService.save 旧协议受保护标记严格比较", () => {
     });
   });
 });
+
+describe("CanvasService.get 不再做旧卡迁移", () => {
+  it("直接返回画布内容，不再携带 legacy_migration", async () => {
+    const legacyCard = {
+      id: "c1",
+      type: "assetNode",
+      position: { x: 1, y: 2 },
+      data: { kind: "generation", generationCard: { shotTitle: "旧镜头", prompt: "旧提示词" } },
+    };
+    const { service } = buildService({
+      id: 1n,
+      project_id: 1n,
+      version: 3,
+      viewport_json: null,
+      nodes_json: [legacyCard],
+      edges_json: [],
+    });
+
+    const result = await service.get("u1", "1");
+
+    expect(result.code).toBe(200);
+    expect(result.data).not.toHaveProperty("legacy_migration");
+    expect(JSON.parse(result.data.nodes ?? "[]")).toEqual([legacyCard]);
+  });
+});

@@ -32,10 +32,6 @@ const javaSchemaSql = readFileSync(
   ),
   "utf8",
 );
-const cleanupScript = readFileSync(
-  new URL("../../../scripts/cleanup-project-card-migration-history.mjs", import.meta.url),
-  "utf8",
-);
 
 const RENAMED = new Map([
   ["topup_tiers", "billing_products"],
@@ -65,7 +61,7 @@ const JAVA_SCHEMA_RENAMED = [...RENAMED].filter(
   ([from]) => from !== "recharge_orders" && from !== "system_settings",
 );
 
-const SUPERSEDED_TABLES = new Set(["admin_operation_logs"]);
+const SUPERSEDED_TABLES = new Set(["admin_operation_logs", "legacy_card_history"]);
 
 const BACKEND_ROOT = new URL("../../..", import.meta.url).pathname;
 const REPO_ROOT = new URL("../../../..", import.meta.url).pathname;
@@ -129,14 +125,6 @@ describe("IKQY3O 三轨迁移（计费 / 身份 / 运维 / 命令回执表改名
     expect(migrationSql).toContain("180 天");
   });
 
-  it("清理脚本按保留期删除超期行", () => {
-    expect(cleanupScript).toContain("project_card_migration_history");
-    expect(cleanupScript).toContain("RETENTION_DAYS");
-    expect(cleanupScript).toContain("DELETE FROM project_card_migration_history");
-    expect(cleanupScript).toContain("SET time_zone");
-    expect(cleanupScript).toContain('process.argv.includes("--apply")');
-  });
-
   it("Prisma 模型只剩新表名", () => {
     for (const [from, to] of RENAMED) {
       if (SUPERSEDED_TABLES.has(from)) continue;
@@ -145,6 +133,7 @@ describe("IKQY3O 三轨迁移（计费 / 身份 / 运维 / 命令回执表改名
     }
     for (const [from, to] of INDEX_RENAMES) {
       expect(schemaPrisma).not.toContain('"' + from + '"');
+      if (to.includes("project_card_migration_history")) continue;
       expect(schemaPrisma).toContain('"' + to + '"');
     }
   });
@@ -164,7 +153,7 @@ describe("IKQY3O 三轨迁移（计费 / 身份 / 运维 / 命令回执表改名
 
   it("生产代码与运维脚本不再访问旧表名", () => {
     const names =
-      "topup_tiers|recharge_orders|cost_reservations|cost_adjustments|admin_operation_logs|system_settings|command_idempotency|legacy_card_history";
+      "topup_tiers|recharge_orders|cost_reservations|cost_adjustments|admin_operation_logs|system_settings|command_idempotency|legacy_card_history|project_card_migration_history";
     const accessor = new RegExp("\\b(prisma|tx|client)\\.(" + names + ")\\b");
     const rawSql = new RegExp("\\b(FROM|INTO|JOIN|UPDATE)\\s+`?(" + names + ")`?\\b", "i");
     const bareReference = new RegExp("\\b(" + names + ")\\s*\\.", "i");
@@ -187,7 +176,7 @@ describe("IKQY3O 三轨迁移（计费 / 身份 / 运维 / 命令回执表改名
 
   it("Java 生产代码不再引用旧表名", () => {
     const names =
-      "topup_tiers|recharge_orders|cost_reservations|cost_adjustments|admin_operation_logs|system_settings|command_idempotency|legacy_card_history";
+      "topup_tiers|recharge_orders|cost_reservations|cost_adjustments|admin_operation_logs|system_settings|command_idempotency|legacy_card_history|project_card_migration_history";
     const reference = new RegExp("\\b(" + names + ")\\b");
     const files = javaSources(join(REPO_ROOT, "server/blue-whale-worker/src/main"));
     expect(files.length).toBeGreaterThan(0);

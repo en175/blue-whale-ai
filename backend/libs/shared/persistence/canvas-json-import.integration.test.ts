@@ -28,7 +28,6 @@ describe.skipIf(!process.env.IKQY3D_DATABASE_URL)("存量画布懒迁移（真�
     await prisma.client.project_node_revisions.deleteMany({ where: { project_id: projectId } });
     await prisma.client.project_edges.deleteMany({ where: { project_id: projectId } });
     await prisma.client.project_nodes.deleteMany({ where: { project_id: projectId } });
-    await prisma.client.project_card_migration_history.deleteMany({ where: { project_id: projectId } });
     await prisma.client.project_canvas.deleteMany({ where: { project_id: projectId } });
   });
 
@@ -37,7 +36,6 @@ describe.skipIf(!process.env.IKQY3D_DATABASE_URL)("存量画布懒迁移（真�
       await prisma.client.project_node_revisions.deleteMany({ where: { project_id: projectId } });
       await prisma.client.project_edges.deleteMany({ where: { project_id: projectId } });
       await prisma.client.project_nodes.deleteMany({ where: { project_id: projectId } });
-      await prisma.client.project_card_migration_history.deleteMany({ where: { project_id: projectId } });
       await prisma.client.project_canvas.deleteMany({ where: { project_id: projectId } });
       await prisma.client.project.delete({ where: { id: projectId } });
       await prisma.client.$disconnect();

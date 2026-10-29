@@ -1,6 +1,5 @@
 import { infiniteQueryOptions } from '@tanstack/react-query';
 import { apiRequest, type ApiRequestInit } from '@/shared/api/http';
-import type { LegacyMigrationReport } from '@lib/contracts/legacy-card-migration';
 
 export interface ProjectRecord {
   id: number | string;
@@ -137,7 +136,6 @@ export interface ProjectSnapshot {
   canvas: SnapshotCanvas | null;
   assets: Record<string, SnapshotAsset>;
   jobs: unknown[];
-  legacy_migration?: LegacyMigrationReport;
 }
 
 const snapshotPending = new Map<string, Promise<ProjectSnapshot>>();

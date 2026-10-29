@@ -98,12 +98,10 @@ vi.mock('@/custom/api/assets', () => ({
 
 vi.mock('@/custom/api/canvas', () => ({
   createConversationQuote: vi.fn(),
-  legacyCardHistoryOptions: (projectId: string) => ({ queryKey: ['canvas', projectId, 'legacy-history'], queryFn: () => Promise.resolve({ items: [] }), retry: false }),
   applyPromptPreview: vi.fn(),
   saveCanvasDoc: vi.fn(),
   serializeNodes: vi.fn(() => '[]'),
   serializeEdges: vi.fn(() => '[]'),
-  listLegacyCardHistory: vi.fn(async () => ({ items: [] })),
 }));
 
 vi.mock('@/custom/api/generation', () => ({ fetchGenerationModels: vi.fn(async () => []) }));

@@ -28,7 +28,6 @@ export function useCanvasWorkbenchChrome() {
   const editingTargetRef = useRef<string | null>(null);
   const [selectRequest, setSelectRequest] = useState<{ id: string; ts: number } | null>(null);
   const [selectManyRequest, setSelectManyRequest] = useState<{ ids: string[]; ts: number } | null>(null);
-  const [showLegacyHistory, setShowLegacyHistory] = useState(false);
   const persistSnap = (enabled: boolean) => persistSnapAlignmentEnabled(enabled);
   return {
     showMiniMap, setShowMiniMap,
@@ -45,6 +44,5 @@ export function useCanvasWorkbenchChrome() {
     pendingDeleteGroup, setPendingDeleteGroup,
     submittingNodeId, setSubmittingNodeId,
     editingTargetRef, selectRequest, setSelectRequest, selectManyRequest, setSelectManyRequest,
-    showLegacyHistory, setShowLegacyHistory,
   };
 }

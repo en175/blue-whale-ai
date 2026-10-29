@@ -18,7 +18,6 @@ import AgentPanel from '../AgentPanel';
 import AssetsPickerModal from '../AssetsPickerModal';
 import SharedAssetsModal from '../SharedAssetsModal';
 import CharacterLibraryModal from '../CharacterLibraryModal';
-import LegacyHistoryModal from '../LegacyHistoryModal';
 import AssetDetailModal from '@/custom/pages/Assets/components/AssetDetailModal';
 import ConfirmModal from '@/custom/components/ConfirmModal';
 import FlowCanvas from '../Canvas';
@@ -42,7 +41,6 @@ type HeaderProps = ComponentProps<typeof CanvasHeader>;
 type AgentProps = ComponentProps<typeof AgentPanel>;
 type SharedProps = ComponentProps<typeof SharedAssetsModal>;
 type CharProps = ComponentProps<typeof CharacterLibraryModal>;
-type LegacyProps = ComponentProps<typeof LegacyHistoryModal>;
 type AssetDetailProps = ComponentProps<typeof AssetDetailModal>;
 type ConfirmProps = ComponentProps<typeof ConfirmModal>;
 type FlowProps = ComponentProps<typeof FlowCanvas>;
@@ -238,9 +236,6 @@ interface CanvasPageShellProps {
     handleDelete: HeaderProps['onDeleteProject'];
     handleToggleProjectPin: NonNullable<HeaderProps['onTogglePinProject']>;
     handleNewProject: HeaderProps['onNewProject'];
-    legacyHistory: LegacyProps['items'] | null | undefined;
-    showLegacyHistory: LegacyProps['open'];
-    setShowLegacyHistory: Dispatch<SetStateAction<boolean>>;
   };
 
   overlays: {
@@ -290,7 +285,6 @@ export default function CanvasPageShell(props: CanvasPageShellProps) {
         onTogglePinProject={projectHandlers.handleToggleProjectPin}
         onNewProject={projectHandlers.handleNewProject}
         onToggleAgent={() => agent.setShowAgent(!agent.showAgent)}
-        onShowLegacyHistory={projectHandlers.legacyHistory && projectHandlers.legacyHistory.length > 0 ? () => projectHandlers.setShowLegacyHistory(true) : undefined}
         hideAgentEntry={agent.showAgent}
       />
       <AssetDetailModal
@@ -608,11 +602,6 @@ export default function CanvasPageShell(props: CanvasPageShellProps) {
           onSelectAssets={overlays.handleCharacterLibrarySelect}
         />
       )}
-      <LegacyHistoryModal
-        open={projectHandlers.showLegacyHistory}
-        items={projectHandlers.legacyHistory ?? []}
-        onClose={() => projectHandlers.setShowLegacyHistory(false)}
-      />
     </div>
   );
 }
