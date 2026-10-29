@@ -1,10 +1,8 @@
 import { type AssetCardKind } from '@/custom/enums';
 import { type Dispatch, type RefObject, type SetStateAction } from 'react';
 import type { Node } from '@xyflow/react';
-import { type MediaMention, type MediaRef } from '@lib/contracts/text-node-media';
 
 import type { CanvasGalleryRef } from '../../media/collectMediaBlocks';
-import type { MediaDims } from '../../components/MediaNode/mediaContentSize';
 
 type PickChannel = 'image' | 'video' | 'audio' | 'product' | 'asset';
 
@@ -33,15 +31,9 @@ export interface CanvasNodeFactoriesHost {
   productSeq: RefObject<number>;
   pendingNodeIdsRef: RefObject<Set<string>>;
   actionsRef: RefObject<CanvasNodeActions>;
-  setTextNodes: Dispatch<SetStateAction<Node[]>>;
-  setMediaNodes: Dispatch<SetStateAction<Node[]>>;
   setProductNodes: Dispatch<SetStateAction<Node[]>>;
   setAssetNodes: Dispatch<SetStateAction<Node[]>>;
-  removeCanvasNodes: (ids: string[]) => void;
-  handleMediaIndexChange: (id: string, mediaMentions: MediaMention[], mediaRefs: MediaRef[], delta: { added: string[]; removed: string[] }) => void;
-  handleMediaDims: (id: string, dims: MediaDims) => void;
   handleAssetHoverChange: (id: string, hovered: boolean) => void;
-  dockToolCallbacks: Record<string, unknown>;
   showToast: (type: 'success' | 'error' | 'warn', msg: string) => void;
   pickers: {
     setPickMode: (mode: PickChannel | null) => void;

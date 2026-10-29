@@ -10,8 +10,6 @@ import { extractTextNodeText } from '../../agent/quoteConversation';
 export interface CanvasAssetActionsHost {
   mediaNodesRef: RefObject<Node[]>;
   textNodesRef: RefObject<Node[]>;
-  productNodesRef: RefObject<Node[]>;
-  assetNodesRef: RefObject<Node[]>;
   showToast: (type: 'success' | 'error' | 'warn', msg: string) => void;
 }
 

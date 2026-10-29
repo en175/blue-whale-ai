@@ -26,6 +26,13 @@ const schemaPrisma = readFileSync(
   new URL("../../../prisma/schema.prisma", import.meta.url),
   "utf8",
 );
+const javaSchemaSql = readFileSync(
+  new URL(
+    "../../../../server/blue-whale-worker/src/test/resources/db/bluewhale-schema.sql",
+    import.meta.url,
+  ),
+  "utf8",
+);
 
 const TRACKS = [migrationSql, standaloneSql, snapshotSql];
 
@@ -68,5 +75,11 @@ describe("素材组表归位与共享资产快照退役（IKRGTJ）", () => {
     expect(schemaPrisma).toContain("model user_material_info {");
     expect(schemaPrisma).not.toContain("model catalog_material_groups {");
     expect(schemaPrisma).not.toContain("model user_shared_asset_snapshots {");
+  });
+
+  it("Java 测试 schema 同步改名与删表", () => {
+    expect(javaSchemaSql).toContain("CREATE TABLE `user_material_info`");
+    expect(javaSchemaSql).not.toContain("CREATE TABLE `catalog_material_groups`");
+    expect(javaSchemaSql).not.toContain("user_shared_asset_snapshots");
   });
 });

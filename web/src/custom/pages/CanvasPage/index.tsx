@@ -646,8 +646,6 @@ export default function CanvasPage() {
   } = useCanvasAssetActions({
     mediaNodesRef,
     textNodesRef,
-    productNodesRef,
-    assetNodesRef,
     showToast,
   });
   const canvasHistory = useCanvasHistory({
@@ -999,15 +997,9 @@ export default function CanvasPage() {
     productSeq,
     pendingNodeIdsRef,
     actionsRef,
-    setTextNodes,
-    setMediaNodes,
     setProductNodes,
     setAssetNodes,
-    removeCanvasNodes,
-    handleMediaIndexChange,
-    handleMediaDims,
     handleAssetHoverChange,
-    dockToolCallbacks,
     showToast,
     pickers: { setPickMode, setPickTarget, setPickProductId, setPickAssetId },
   });

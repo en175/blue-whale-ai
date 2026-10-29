@@ -44,4 +44,5 @@ ADR-0117 §2 把前缀空间收敛为 `identity_ / billing_ / generation_`，§6
 
 - `catalog_material_groups` → `user_material_info`：该表按 `user_id` 存用户人像库分组，归属是用户而非只读目录，`catalog_` 前缀不成立。三条索引名不含旧表名，按决策 3 不改。
 - `user_shared_asset_snapshots` 整表退役：`086` 直接 `DROP TABLE`，后端 `shared-assets` 模块、路由与契约，前端共享资产弹窗与保存入口一并删除。ADR-0117 §6 与 ADR-0139 中依赖「共享资产历史条目仍可读」的兼容描述不再成立。
-- `086` 是破坏性变更：表改名与删表后旧镜像立即失效，必须先上新 backend 与 worker 镜像，再执行迁移；回滚镜像需按 `008` + `078` 重建共享快照表结构，迁移前备份。
+- `086` 是破坏性变更，两个方向都有窗口期：新镜像先上线、`086` 尚未执行时，它会按 `user_material_info` 访问仍是旧表名的库，素材组相关接口（`ListAssetGroups` 的 `AIGC` / `LivenessFace`、虚拟默认组补建）会直接 500；`086` 执行后旧镜像立即读不到表。镜像发布与 `086` 必须在同一维护窗口内完成，先镜像后 DDL，且新镜像不得长时间空跑。worker-java 不读这两张表，无额外顺序要求。
+- 回滚：执行 `RENAME TABLE user_material_info TO catalog_material_groups` 恢复改名，并按 `008` + `078` 重建 `user_shared_asset_snapshots`；同时回退 backend 与 worker 镜像。删表不可恢复，迁移前先备份。
