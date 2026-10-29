@@ -96,7 +96,7 @@ function toAdminView(row: {
 export function createHomepageHeroRepo(prisma: PrismaClient): HomepageHeroRepo {
   return {
     async listAll(scene) {
-      const rows = await prisma.content_homepage_heroes.findMany({
+      const rows = await prisma.bw_homepage_heroes.findMany({
         where: { is_delete: 0, scene },
         orderBy: [{ sort_order: "asc" }, { id: "asc" }],
       });
@@ -104,7 +104,7 @@ export function createHomepageHeroRepo(prisma: PrismaClient): HomepageHeroRepo {
     },
 
     async listEnabled(scene) {
-      const rows = await prisma.content_homepage_heroes.findMany({
+      const rows = await prisma.bw_homepage_heroes.findMany({
         where: { is_delete: 0, enabled: 1, scene },
         orderBy: [{ sort_order: "asc" }, { id: "asc" }],
         select: {
@@ -125,7 +125,7 @@ export function createHomepageHeroRepo(prisma: PrismaClient): HomepageHeroRepo {
     },
 
     async getById(id) {
-      const row = await prisma.content_homepage_heroes.findFirst({
+      const row = await prisma.bw_homepage_heroes.findFirst({
         where: { id, is_delete: 0 },
       });
       return row ? toAdminView(row) : null;
@@ -135,7 +135,7 @@ export function createHomepageHeroRepo(prisma: PrismaClient): HomepageHeroRepo {
       return prisma.$transaction(async (tx) => {
         const enabling = input.enabled ?? 1;
         if (enabling === 1) {
-          const enabledCount = await tx.content_homepage_heroes.count({
+          const enabledCount = await tx.bw_homepage_heroes.count({
             where: { is_delete: 0, enabled: 1, scene: input.scene },
           });
           if (enabledCount + 1 > HOMEPAGE_HERO_MAX_ENABLED) {
@@ -146,14 +146,14 @@ export function createHomepageHeroRepo(prisma: PrismaClient): HomepageHeroRepo {
         }
         let sortOrder = input.sort_order;
         if (sortOrder === undefined) {
-          const agg = await tx.content_homepage_heroes.aggregate({
+          const agg = await tx.bw_homepage_heroes.aggregate({
             where: { is_delete: 0, scene: input.scene },
             _max: { sort_order: true },
           });
           sortOrder = (agg._max.sort_order ?? -1) + 1;
         }
         const now = new Date();
-        const row = await tx.content_homepage_heroes.create({
+        const row = await tx.bw_homepage_heroes.create({
           data: {
             scene: input.scene,
             media_type: input.media_type,
@@ -170,14 +170,14 @@ export function createHomepageHeroRepo(prisma: PrismaClient): HomepageHeroRepo {
 
     async update(id, input) {
       return prisma.$transaction(async (tx) => {
-        const existing = await tx.content_homepage_heroes.findFirst({
+        const existing = await tx.bw_homepage_heroes.findFirst({
           where: { id, is_delete: 0 },
         });
         if (!existing) return false;
 
         const targetEnabled = input.enabled ?? existing.enabled;
         if (existing.enabled === 0 && targetEnabled === 1) {
-          const enabledCount = await tx.content_homepage_heroes.count({
+          const enabledCount = await tx.bw_homepage_heroes.count({
             where: { is_delete: 0, enabled: 1, scene: existing.scene },
           });
           if (enabledCount + 1 > HOMEPAGE_HERO_MAX_ENABLED) {
@@ -187,7 +187,7 @@ export function createHomepageHeroRepo(prisma: PrismaClient): HomepageHeroRepo {
           }
         }
 
-        await tx.content_homepage_heroes.update({
+        await tx.bw_homepage_heroes.update({
           where: { id },
           data: {
             media_type: input.media_type ?? existing.media_type,
@@ -204,7 +204,7 @@ export function createHomepageHeroRepo(prisma: PrismaClient): HomepageHeroRepo {
     },
 
     async softDelete(id) {
-      const result = await prisma.content_homepage_heroes.updateMany({
+      const result = await prisma.bw_homepage_heroes.updateMany({
         where: { id, is_delete: 0 },
         data: { is_delete: 1, gmt_modified: new Date() },
       });
@@ -213,12 +213,12 @@ export function createHomepageHeroRepo(prisma: PrismaClient): HomepageHeroRepo {
 
     async move(id, direction) {
       return prisma.$transaction(async (tx) => {
-        const target = await tx.content_homepage_heroes.findFirst({
+        const target = await tx.bw_homepage_heroes.findFirst({
           where: { id, is_delete: 0 },
         });
         if (!target) return { ok: false, reason: "not_found" as const };
 
-        const siblings = await tx.content_homepage_heroes.findMany({
+        const siblings = await tx.bw_homepage_heroes.findMany({
           where: { is_delete: 0, scene: target.scene },
           orderBy: [{ sort_order: "asc" }, { id: "asc" }],
         });
@@ -229,7 +229,7 @@ export function createHomepageHeroRepo(prisma: PrismaClient): HomepageHeroRepo {
           swapped.map((row, i) =>
             row.sort_order === i
               ? Promise.resolve()
-              : tx.content_homepage_heroes.update({
+              : tx.bw_homepage_heroes.update({
                   where: { id: row.id },
                   data: { sort_order: i, gmt_modified: new Date() },
                 }),
@@ -240,7 +240,7 @@ export function createHomepageHeroRepo(prisma: PrismaClient): HomepageHeroRepo {
     },
 
     async countEnabled(scene) {
-      return prisma.content_homepage_heroes.count({
+      return prisma.bw_homepage_heroes.count({
         where: { is_delete: 0, enabled: 1, scene },
       });
     },
