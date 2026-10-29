@@ -21,6 +21,7 @@ import { SnapshotService } from "@lib/shared/snapshot/snapshot.service.js";
 import { handleGetSnapshot } from "@lib/shared/snapshot/handle-snapshot.js";
 import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js";
 import { resolveProjectListQuery } from "./project-list-query.js";
+import { parseProjectSource } from "./project-source.js";
 
 @Controller("projects")
 export class ProjectsController {
@@ -70,11 +71,9 @@ export class ProjectsController {
     @Body() body: { name?: unknown; source?: unknown },
   ) {
     const name = typeof body.name === "string" ? body.name.trim() : "";
-    const rawSource = body.source;
-    if (rawSource !== undefined && rawSource !== "dialog" && rawSource !== "canvas") {
-      return fail(FAILURE_CODE, "source 仅支持 dialog/canvas");
-    }
-    return ok(await this.project.create(user.userId, name, rawSource));
+    const parsedSource = parseProjectSource(body.source);
+    if (!parsedSource.ok) return fail(FAILURE_CODE, parsedSource.reason);
+    return ok(await this.project.create(user.userId, name, parsedSource.source));
   }
 
   @Post("batch-delete")

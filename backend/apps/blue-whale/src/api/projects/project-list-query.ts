@@ -1,7 +1,9 @@
+import { parseProjectSource, type ProjectSource } from "./project-source.js";
+
+export type { ProjectSource };
+
 export const PROJECT_LIST_LIMIT_MAX = 20;
 export const PROJECT_LIST_KEYWORD_MAX = 64;
-
-export type ProjectSource = "dialog" | "canvas";
 
 export type ProjectListQuery =
   | { kind: "all"; keyword?: string; source?: ProjectSource }
@@ -23,13 +25,16 @@ export function resolveProjectListQuery(
     return { kind: "invalid", reason: `keyword 长度不得超过 ${PROJECT_LIST_KEYWORD_MAX}` };
   }
   const keywordOption = keyword ? { keyword } : {};
-  const rawSource = (query.source ?? "").trim();
-  if (rawSource && rawSource !== "dialog" && rawSource !== "canvas") {
-    return { kind: "invalid", reason: "source 仅支持 dialog/canvas" };
+  if (Object.hasOwn(query, "kind")) {
+    return { kind: "invalid", reason: "参数 kind 已更名为 source" };
   }
-  const sourceOption = rawSource
-    ? { source: rawSource as ProjectSource }
-    : {};
+  const rawSource = query.source;
+  if (rawSource !== undefined && typeof rawSource !== "string") {
+    return { kind: "invalid", reason: "source 参数格式非法" };
+  }
+  const parsedSource = parseProjectSource(rawSource?.trim());
+  if (!parsedSource.ok) return { kind: "invalid", reason: parsedSource.reason };
+  const sourceOption = parsedSource.source ? { source: parsedSource.source } : {};
   const hasPage = Object.hasOwn(query, "page");
   const hasSize = Object.hasOwn(query, "size");
   const hasLimit = Object.hasOwn(query, "limit");

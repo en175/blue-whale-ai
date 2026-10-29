@@ -97,3 +97,19 @@ describe("resolveProjectListQuery source (IKRGON)", () => {
     expect(resolveProjectListQuery({ source: "other" })).toMatchObject({ kind: "invalid" });
   });
 });
+
+describe("resolveProjectListQuery source 组合与旧参数（IKRGON）", () => {
+  it("source 与 keyword 组合", () => {
+    expect(resolveProjectListQuery({ source: "dialog", keyword: " 设计 " })).toEqual({
+      kind: "all",
+      source: "dialog",
+      keyword: "设计",
+    });
+  });
+
+  it("旧的 kind 参数显式拒绝，避免静默返回全量", () => {
+    expect(resolveProjectListQuery({ kind: "dialog" })).toMatchObject({
+      kind: "invalid",
+    });
+  });
+});
