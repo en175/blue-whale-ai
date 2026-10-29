@@ -7,15 +7,10 @@ import {
   nodeRowFromInput,
   stableJson,
   type CanvasEdgeRow,
+  type CanvasNodeInput,
   type CanvasNodeRow,
 } from "../canvas/apply-diff.js";
-import {
-  isLegacyGenerationCard,
-  planLegacyCardMigration,
-  type CanvasNodeLike,
-} from "../canvas/legacy-card-migration.js";
 import { createCanvasRepo, edgeFromRow, nodeFromRow } from "./canvas-repo.js";
-import type { LegacyCardHistoryDraft } from "./legacy-card-history-repo.js";
 
 type Tx = Prisma.TransactionClient;
 
@@ -37,8 +32,6 @@ export interface CanvasRowsImportReport {
   duplicate_node_ids: string[];
   duplicate_edge_ids: string[];
   duplicate_edge_pairs: string[];
-  migrated_cards: string[];
-  failed_cards: Array<{ nodeId: string; title: string; reason: string }>;
 }
 
 export interface CanvasComparison {
@@ -63,7 +56,6 @@ interface CanvasRowsPlan {
   report: CanvasRowsImportReport;
   nodeRows: CanvasNodeRow[];
   edgeRows: CanvasEdgeRow[];
-  historyDrafts: LegacyCardHistoryDraft[];
 }
 
 function emptyReport(): CanvasRowsImportReport {
@@ -74,8 +66,6 @@ function emptyReport(): CanvasRowsImportReport {
     duplicate_node_ids: [],
     duplicate_edge_ids: [],
     duplicate_edge_pairs: [],
-    migrated_cards: [],
-    failed_cards: [],
   };
 }
 
@@ -86,13 +76,13 @@ function asObject(value: unknown): Record<string, unknown> | null {
 }
 
 function parseLegacyNodes(raw: Prisma.JsonValue | null): {
-  nodes: CanvasNodeLike[];
+  nodes: CanvasNodeInput[];
   duplicateIds: string[];
 } {
   if (raw === null) return { nodes: [], duplicateIds: [] };
   if (!Array.isArray(raw)) throw new CanvasRowsImportError("parse_failure", "nodes_json 不是数组");
   const seen = new Set<string>();
-  const nodes: CanvasNodeLike[] = [];
+  const nodes: CanvasNodeInput[] = [];
   const duplicateIds: string[] = [];
   for (const [index, item] of raw.entries()) {
     const node = asObject(item);
@@ -175,7 +165,7 @@ async function buildCanvasRowsPlan(
   const report = emptyReport();
   if (canvas.rows_authoritative === 1) {
     report.already_authoritative = true;
-    return { report, nodeRows: [], edgeRows: [], historyDrafts: [] };
+    return { report, nodeRows: [], edgeRows: [] };
   }
   const [nodeCount, edgeCount] = await Promise.all([
     tx.project_nodes.count({ where: { project_id: projectId } }),
@@ -194,21 +184,7 @@ async function buildCanvasRowsPlan(
   report.duplicate_edge_ids = parsedEdges.duplicateIds;
   report.duplicate_edge_pairs = parsedEdges.duplicatePairs;
 
-  let nodes = parsedNodes.nodes;
-  let historyDrafts: LegacyCardHistoryDraft[] = [];
-  if (nodes.some(isLegacyGenerationCard)) {
-    const history = await tx.project_card_migration_history.findMany({
-      where: { project_id: projectId },
-      orderBy: { id: "asc" },
-    });
-    const plan = planLegacyCardMigration(nodes, history);
-    if (plan) {
-      nodes = plan.nodes;
-      historyDrafts = plan.historyDrafts;
-      report.migrated_cards = plan.migrated;
-      report.failed_cards = plan.failed;
-    }
-  }
+  const nodes = parsedNodes.nodes;
 
   const nodeRows = nodes.map((node) =>
     nodeRowFromInput({
@@ -221,7 +197,7 @@ async function buildCanvasRowsPlan(
   const edgeRows = parsedEdges.edges.map((edge) => edgeRowFromInput(edge));
   report.imported_nodes = nodeRows.length;
   report.imported_edges = edgeRows.length;
-  return { report, nodeRows, edgeRows, historyDrafts };
+  return { report, nodeRows, edgeRows };
 }
 
 export async function importCanvasJsonToRows(
@@ -232,20 +208,6 @@ export async function importCanvasJsonToRows(
   const plan = await buildCanvasRowsPlan(tx, projectId, canvas);
   if (plan.report.already_authoritative) return plan.report;
 
-  if (plan.historyDrafts.length > 0) {
-    await tx.project_card_migration_history.createMany({
-      data: plan.historyDrafts.map((row) => ({
-        project_id: projectId,
-        node_id: row.nodeId,
-        title: row.title,
-        prompt_text: row.promptText,
-        visual_text: row.visualText,
-        ...(row.source != null ? { source_json: row.source as Prisma.InputJsonValue } : {}),
-        card_json: (row.cardJson ?? {}) as Prisma.InputJsonValue,
-      })),
-      skipDuplicates: true,
-    });
-  }
   if (plan.nodeRows.length > 0) {
     await tx.project_nodes.createMany({
       data: plan.nodeRows.map((row) => ({
@@ -343,11 +305,11 @@ function normalizePosition(position: unknown): { x: number; y: number } {
   return { x: coordinate(record?.x) ?? 0, y: coordinate(record?.y) ?? 0 };
 }
 
-function normalizeNode(node: Record<string, unknown>, skipMigrationFields: boolean): Record<string, unknown> {
+function normalizeNode(node: Record<string, unknown>): Record<string, unknown> {
   return {
-    ...(skipMigrationFields ? {} : { type: node.type }),
+    type: node.type,
     position: normalizePosition(node.position),
-    ...(skipMigrationFields ? {} : { data: stableJson(asObject(node.data) ?? {}) }),
+    data: stableJson(asObject(node.data) ?? {}),
   };
 }
 
@@ -375,7 +337,6 @@ export function compareCanvasJson(
   legacyEdgesJson: unknown,
   viewNodes: Array<Record<string, unknown>>,
   viewEdges: Array<Record<string, unknown>>,
-  skipDataNodeIds: ReadonlySet<string> = new Set(),
 ): CanvasComparison {
   const differences: string[] = [];
   const legacyNodes = firstById(legacyNodesJson, "id");
@@ -386,9 +347,8 @@ export function compareCanvasJson(
       differences.push(`node:${id}:missing`);
       continue;
     }
-    const skipData = skipDataNodeIds.has(id);
-    const expected = normalizeNode(node, skipData);
-    const actual = normalizeNode(view, skipData);
+    const expected = normalizeNode(node);
+    const actual = normalizeNode(view);
     for (const key of Object.keys(expected)) {
       if (stableJson(expected[key]) !== stableJson(actual[key])) differences.push(`node:${id}:${key}`);
     }

@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom';
-import { Bot, History } from 'lucide-react';
+import { Bot } from 'lucide-react';
 import RechargeModal from '@/custom/components/UserDropdown/RechargeModal';
 import { useRechargeUiStore } from '@/custom/stores/recharge';
 import ProjectSelector, { type CanvasProject } from '../ProjectSelector';
@@ -14,7 +14,6 @@ interface CanvasHeaderProps {
   onTogglePinProject?: (id: string, pinned: boolean) => void;
   onNewProject: () => void;
   onToggleAgent: () => void;
-  onShowLegacyHistory?: () => void;
   hideAgentEntry?: boolean;
 }
 
@@ -27,7 +26,6 @@ export default function CanvasHeader({
   onTogglePinProject,
   onNewProject,
   onToggleAgent,
-  onShowLegacyHistory,
   hideAgentEntry = false,
 }: CanvasHeaderProps) {
   const navigate = useNavigate();
@@ -58,15 +56,6 @@ export default function CanvasHeader({
 
       {}
       <div className={styles.right}>
-        {onShowLegacyHistory && (
-          <button
-            className={styles.agentBtn}
-            onClick={onShowLegacyHistory}
-          >
-            <History size={16} strokeWidth={2} />
-            <span>迁移历史</span>
-          </button>
-        )}
         <button
           className={`${styles.agentBtn} ${hideAgentEntry ? styles.agentBtnHidden : ''}`}
           onClick={onToggleAgent}

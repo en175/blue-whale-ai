@@ -4,12 +4,10 @@ import { nodeAssetId, planError } from "./prompt-target.js";
 import { BadRequestException, ConflictException, Injectable } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import { readPromptPreview, sourceKey } from "./prompt-preview.js";
-import { planLegacyCardMigration, type CanvasNodeLike } from "./legacy-card-migration.js";
-import { CANVAS_EDGE_LIMITS, CANVAS_RECOVERY_PROTOCOL_VERSION, CONVERSATION_QUOTE_LIST_LIMIT, DATA_NOT_EXIST_CODE, DomainError, canvasEdgeSchema, fail, ok, applyPreviewSchema, conversationQuoteCreateSchema, previewSourceSchema, PROMPT_TEXT_LIMITS as limits, RECOVERY_PAGE_LIMIT_DEFAULT, RECOVERY_PAGE_LIMIT_MAX, RECOVERY_PAGE_LIMIT_MIN, RECOVERY_REASONS, RECOVERY_RESOLVE_IDS_MAX, recoverySaveFieldsSchema, type LegacyCardHistoryItem, type LegacyMigrationReport } from "@lib/contracts";
+import { CANVAS_EDGE_LIMITS, CANVAS_RECOVERY_PROTOCOL_VERSION, CONVERSATION_QUOTE_LIST_LIMIT, DATA_NOT_EXIST_CODE, DomainError, canvasEdgeSchema, fail, ok, applyPreviewSchema, conversationQuoteCreateSchema, previewSourceSchema, PROMPT_TEXT_LIMITS as limits, RECOVERY_PAGE_LIMIT_DEFAULT, RECOVERY_PAGE_LIMIT_MAX, RECOVERY_PAGE_LIMIT_MIN, RECOVERY_REASONS, RECOVERY_RESOLVE_IDS_MAX, recoverySaveFieldsSchema } from "@lib/contracts";
 import {
   createCanvasRepo,
   createConversationQuoteRepo,
-  createLegacyCardHistoryRepo,
   RecoveryContractError,
   decodeRecoveryCursor,
   guardLegacyCanvasWrite,
@@ -19,9 +17,7 @@ import {
   recoveryMarkerOfNode,
   resolveCanvasRecoveryItems,
   saveCanvasWithRecovery,
-  type CanvasView,
   type ConversationQuoteRow,
-  type LegacyCardHistoryRow,
   type RecoveryRecordView,
 } from "@lib/shared/persistence/index.js";
 
@@ -111,7 +107,6 @@ function parseApplyViewport(raw: unknown): { x: number; y: number; zoom: number 
   return { x, y, zoom };
 }
 
-
 function isReusableApplyMediaNode(item: { type?: string; data?: Record<string, unknown> }): boolean {
   if (item.type !== "mediaNode") return false;
   if (item.data?.assetMissing === true) return false;
@@ -131,20 +126,6 @@ function toQuoteView(row: ConversationQuoteRow) {
   };
 }
 
-function toHistoryItem(row: LegacyCardHistoryRow): LegacyCardHistoryItem {
-  const source = previewSourceSchema.nullable().safeParse(row.source_json ?? null);
-  return {
-    historyId: row.id.toString(),
-    nodeId: row.node_id,
-    title: row.title,
-    promptText: row.prompt_text,
-    visualText: row.visual_text ?? null,
-    source: source.success ? source.data : null,
-    cardJson: row.card_json ?? null,
-    migratedAt: wallClockRfc3339(row.gmt_create),
-  };
-}
-
 function canvasVersionConflict(version: number | null) {
   return { code: 412, msg: "Canvas 版本冲突", data: { version } } as const;
 }
@@ -155,7 +136,6 @@ export const CANVAS_SAVE_CONFLICT_CODES: ReadonlySet<number> = new Set([400, 404
 export class CanvasService {
   private repoInstance?: ReturnType<typeof createCanvasRepo>;
   private quoteRepoInstance?: ReturnType<typeof createConversationQuoteRepo>;
-  private historyRepoInstance?: ReturnType<typeof createLegacyCardHistoryRepo>;
 
   private get repo(): ReturnType<typeof createCanvasRepo> {
     if (!this.repoInstance) {
@@ -171,13 +151,6 @@ export class CanvasService {
     return this.quoteRepoInstance;
   }
 
-  private get historyRepo(): ReturnType<typeof createLegacyCardHistoryRepo> {
-    if (!this.historyRepoInstance) {
-      this.historyRepoInstance = createLegacyCardHistoryRepo(this.prisma.client);
-    }
-    return this.historyRepoInstance;
-  }
-
   constructor(
     private readonly prisma: PrismaService,
     private readonly project: ProjectService,
@@ -186,64 +159,11 @@ export class CanvasService {
   async get(ownerId: string, projectId: string) {
     const owned = await this.project.findOwnedById(projectId, ownerId);
     if (!owned) return fail(DATA_NOT_EXIST_CODE, "项目不存在");
-    const { canvas, report } = await this.migrateLegacyCards(projectId);
-    if (report.migrated.length > 0 || report.failed.length > 0) {
-      return ok({ ...canvas, legacy_migration: report });
-    }
-    return ok(canvas);
+    return ok(await this.repo.getByProject(projectId));
   }
 
   getByProject(projectId: string) {
     return this.repo.getByProject(projectId);
-  }
-
-  async migrateLegacyCards(projectId: string): Promise<{ canvas: CanvasView; report: LegacyMigrationReport }> {
-    if (await this.repo.isRowsAuthoritative(projectId)) {
-      return {
-        canvas: await this.repo.getByProject(projectId),
-        report: { migrated: [], failed: [] },
-      };
-    }
-    for (let attempt = 0; attempt < 5; attempt += 1) {
-      const canvas = await this.repo.getByProject(projectId);
-      let nodes: CanvasNodeLike[];
-      try {
-        const parsed = JSON.parse(canvas.nodes ?? "[]") as unknown;
-        if (!Array.isArray(parsed)) throw new Error();
-        nodes = parsed as CanvasNodeLike[];
-      } catch {
-        return { canvas, report: { migrated: [], failed: [] } };
-      }
-      const history = await this.historyRepo.listByProject(projectId);
-      const plan = planLegacyCardMigration(nodes, history);
-      if (!plan) return { canvas, report: { migrated: [], failed: [] } };
-      if (plan.migrated.length === 0) {
-        return { canvas, report: { migrated: [], failed: plan.failed } };
-      }
-      try {
-        const saved = await this.historyRepo.migrate(projectId, canvas.version!, JSON.stringify(plan.nodes), plan.historyDrafts);
-        if (saved) return { canvas: await this.repo.getByProject(projectId), report: { migrated: plan.migrated, failed: plan.failed } };
-      } catch (error) {
-        const code = (error as { code?: unknown })?.code;
-        if (code !== "P2034") throw error;
-      }
-    }
-    const canvas = await this.repo.getByProject(projectId);
-    try {
-      const parsed = JSON.parse(canvas.nodes ?? "[]") as unknown;
-      const nodes = (Array.isArray(parsed) ? parsed : []) as CanvasNodeLike[];
-      const history = await this.historyRepo.listByProject(projectId);
-      const plan = planLegacyCardMigration(nodes, history);
-      return { canvas, report: { migrated: [], failed: plan?.failed ?? [] } };
-    } catch {
-      return { canvas, report: { migrated: [], failed: [] } };
-    }
-  }
-
-  async listLegacyCardHistory(ownerId: string, projectId: string) {
-    if (!await this.project.findOwnedById(projectId, ownerId)) return fail(DATA_NOT_EXIST_CODE, "项目不存在");
-    const rows = await this.historyRepo.listByProject(projectId);
-    return ok({ items: rows.map(toHistoryItem) });
   }
 
   async createConversationQuote(ownerId: string, projectId: string, body: unknown) {

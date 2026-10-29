@@ -13,14 +13,12 @@ interface Seed {
   rows_authoritative?: number;
   existingNodes?: number;
   existingEdges?: number;
-  history?: Array<Record<string, unknown>>;
 }
 
 function fakeTx(seed: Seed) {
   const created = {
     nodes: [] as Array<Record<string, unknown>>,
     edges: [] as Array<Record<string, unknown>>,
-    history: [] as Array<Record<string, unknown>>,
     canvas: null as null | Record<string, unknown>,
   };
   const tx = {
@@ -34,12 +32,6 @@ function fakeTx(seed: Seed) {
       count: async () => seed.existingEdges ?? 0,
       createMany: async ({ data }: { data: Array<Record<string, unknown>> }) => {
         created.edges.push(...data);
-      },
-    },
-    project_card_migration_history: {
-      findMany: async () => seed.history ?? [],
-      createMany: async ({ data }: { data: Array<Record<string, unknown>> }) => {
-        created.history.push(...data);
       },
     },
     project_canvas: {
@@ -89,6 +81,21 @@ describe("存量画布 JSON 导入行表", () => {
     expect(created.canvas).toEqual({ rows_authoritative: 1 });
   });
 
+  it("旧生成卡原样导入：不再转换类型或 data", async () => {
+    const card = {
+      id: "c1",
+      type: "assetNode",
+      position: { x: 1, y: 2 },
+      data: { kind: "generation", generationCard: { shotTitle: "旧镜头", prompt: "旧提示词" } },
+    };
+    const seed: Seed = { nodes_json: [card], edges_json: [] };
+    const { tx, created } = fakeTx(seed);
+    const report = await importCanvasJsonToRows(tx, 9n, canvasOf(seed));
+    expect(report.imported_nodes).toBe(1);
+    expect(created.nodes[0]).toMatchObject({ node_id: "c1", type: "assetNode" });
+    expect(created.nodes[0]!.data_json).toEqual(card.data);
+  });
+
   it("重复节点 id 保留第一条；重复连线 id 与端点对分别只留第一条", async () => {
     const seed: Seed = {
       nodes_json: [
@@ -112,25 +119,6 @@ describe("存量画布 JSON 导入行表", () => {
     expect(created.nodes.find((row) => row.node_id === "n1")!.data_json).toEqual({ text: "第一" });
     expect(created.edges).toHaveLength(1);
     expect(created.edges[0]).toMatchObject({ edge_id: "e1", source_node_id: "n1", target_node_id: "n2" });
-  });
-
-  it("旧卡按迁移历史转换并落历史行", async () => {
-    const card = {
-      id: "c1",
-      type: "assetNode",
-      data: {
-        kind: "generation",
-        generationCard: { shotTitle: "镜头 A", prompt: "一只蓝鲸", source: { sessionId: "s1", revisionId: "r1", shotNo: 1 } },
-      },
-    };
-    const seed: Seed = { nodes_json: [card], edges_json: [], history: [] };
-    const { tx, created } = fakeTx(seed);
-    const report = await importCanvasJsonToRows(tx, 9n, canvasOf(seed));
-
-    expect(report.migrated_cards).toEqual(["c1"]);
-    expect(created.nodes[0]!.data_json).toMatchObject({ title: "镜头 A" });
-    expect(created.history).toHaveLength(1);
-    expect(created.history[0]).toMatchObject({ node_id: "c1", title: "镜头 A", prompt_text: "一只蓝鲸" });
   });
 
   it("结构化解析失败时不写入、不开启标记", async () => {
@@ -223,23 +211,13 @@ describe("行表与旧 JSON 比对", () => {
     );
   });
 
-  it("迁移过的卡片跳过类型与 data 比对，仍比对位置", () => {
+  it("位置不同计入差异", () => {
     const comparison = compareCanvasJson(
-      [{ id: "n1", type: "assetNode", position: { x: 0, y: 0 }, data: { legacy: true } }],
+      [{ id: "n1", type: "textNode", position: { x: 5, y: 0 }, data: { text: "甲" } }],
       [],
       [viewNodes[0]],
       [],
-      new Set(["n1"]),
     );
-    expect(comparison.consistent).toBe(true);
-
-    const positionDiff = compareCanvasJson(
-      [{ id: "n1", type: "assetNode", position: { x: 5, y: 0 }, data: { legacy: true } }],
-      [],
-      [viewNodes[0]],
-      [],
-      new Set(["n1"]),
-    );
-    expect(positionDiff.differences).toEqual(["node:n1:position"]);
+    expect(comparison.differences).toEqual(["node:n1:position"]);
   });
 });

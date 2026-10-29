@@ -45,14 +45,6 @@ export class CanvasesController {
     return this.canvas.listConversationQuotes(user.userId, projectId, ids ?? "");
   }
 
-  @Get(":projectId/legacy-card-history")
-  listLegacyCardHistory(
-    @CurrentUser() user: AuthenticatedUser,
-    @Param("projectId") projectId: string,
-  ) {
-    return this.canvas.listLegacyCardHistory(user.userId, projectId);
-  }
-
   @Get()
   async get(
     @CurrentUser() user: AuthenticatedUser,
