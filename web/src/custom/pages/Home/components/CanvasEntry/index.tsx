@@ -66,7 +66,7 @@ export default function CanvasEntry() {
         <span className={styles.newCanvasLabel}>新建画布</span>
       </button>
       {recent.map((project) => {
-        const cover = project.previews?.[0];
+        const cover = project.previews?.find((preview) => preview.type === 'image');
         return (
           <button
             key={project.id}
@@ -76,20 +76,12 @@ export default function CanvasEntry() {
             onClick={() => navigate(`/canvas?project=${project.id}`)}
           >
             {cover ? (
-              cover.type === 'video' ? (
-                <video
-                  className={styles.recentCover}
-                  src={resolveMediaSrc(cover.url)}
-                  muted
-                  playsInline
-                  preload="metadata"
-                  aria-hidden="true"
-                />
-              ) : (
-                <img className={styles.recentCover} src={resolveMediaSrc(cover.url)} alt="" loading="lazy" />
-              )
+              <img className={styles.recentCover} src={resolveMediaSrc(cover.url)} alt="" loading="lazy" />
             ) : (
-              <LayoutGrid className={styles.recentEmptyIcon} size={26} strokeWidth={1.6} aria-hidden="true" />
+              <span className={styles.recentEmpty} data-testid="canvas-recent-empty">
+                <LayoutGrid size={26} strokeWidth={1.4} aria-hidden="true" />
+                <span>暂无内容预览</span>
+              </span>
             )}
             <strong className={styles.recentName}>{project.name}</strong>
           </button>

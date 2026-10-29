@@ -28,11 +28,11 @@ vi.mock('@/custom/components/LoginModal', () => ({ default: () => null }));
 let root: Root;
 let mountNode: HTMLDivElement;
 
-function record(id: string, name: string): ProjectRecord {
+function record(id: string, name: string, previews: ProjectRecord['previews'] = []): ProjectRecord {
   return {
     id,
     name,
-    previews: [],
+    previews,
     created_at: '2026-10-28T14:30:00+08:00',
     last_opened_at: null,
     last_edited_at: '2026-10-28T16:00:00+08:00',
@@ -57,7 +57,12 @@ beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   api.createProject.mockResolvedValue(record('42', 'new'));
   api.fetchRecentProjects.mockResolvedValue({
-    records: [record('1', '最近一'), record('2', '最近二'), record('3', '最近三'), record('4', '第四个')],
+    records: [
+      record('1', '有图项目', [{ url: 'https://cdn.example.test/a.png', type: 'image' }]),
+      record('2', '只有视频', [{ url: 'https://cdn.example.test/b.mp4', type: 'video' }]),
+      record('3', '空项目'),
+      record('4', '第四个'),
+    ],
     total: 4,
     size: 3,
     current: 1,
@@ -77,8 +82,27 @@ describe('CanvasEntry', () => {
     expect(api.fetchRecentProjects).toHaveBeenCalledWith(3);
     expect(mountNode.textContent).not.toContain('最近项目');
     expect(mountNode.querySelectorAll('[data-testid="canvas-recent-card"]')).toHaveLength(3);
-    expect(mountNode.textContent).toContain('最近三');
+    expect(mountNode.textContent).toContain('空项目');
     expect(mountNode.textContent).not.toContain('第四个');
+  });
+
+  it('取列表里第一张图片作为封面，视频项不当封面', async () => {
+    await renderEntry();
+
+    const cards = [...mountNode.querySelectorAll<HTMLElement>('[data-testid="canvas-recent-card"]')];
+    const cover = cards[0].querySelector('img');
+    expect(cover?.getAttribute('src')).toBe('https://cdn.example.test/a.png');
+    expect(cards[0].querySelector('video')).toBeNull();
+    expect(cards[1].querySelector('img')).toBeNull();
+    expect(cards[1].querySelector('[data-testid="canvas-recent-empty"]')).not.toBeNull();
+  });
+
+  it('没有可用图片时显示占位与「暂无内容预览」', async () => {
+    await renderEntry();
+
+    const empty = mountNode.querySelectorAll('[data-testid="canvas-recent-empty"]');
+    expect(empty).toHaveLength(2);
+    expect(empty[0].textContent).toContain('暂无内容预览');
   });
 
   it('点最近项目进入该项目画布', async () => {
