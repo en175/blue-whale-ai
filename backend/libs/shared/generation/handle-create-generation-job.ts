@@ -33,6 +33,7 @@ import {
   PARAM_MISSING_CODE,
   RESOURCE_NOT_FOUND_CODE,
   errorCodeToNumeric,
+  messageOf,
   checkGenerationParamLimit,
   toGenerationParamCheckInput,
   resolveVideoMode,
@@ -2133,7 +2134,7 @@ export async function handleCreateGenerationJob(
     }
     const quoteDep = deps.quote;
     if (quoteDep === undefined) {
-      return fail(errorCodeToNumeric(ERROR_QUOTE_STALE), "价格已更新，请刷新后重新确认提交", {
+      return fail(errorCodeToNumeric(ERROR_QUOTE_STALE), messageOf(errorCodeToNumeric(ERROR_QUOTE_STALE)), {
         code: ERROR_QUOTE_STALE,
       });
     }
@@ -2172,7 +2173,7 @@ export async function handleCreateGenerationJob(
       Number(quote.credits) !== credits ||
       currentRevision !== revision
     ) {
-      return fail(errorCodeToNumeric(ERROR_QUOTE_STALE), "价格已更新，请刷新后重新确认提交", {
+      return fail(errorCodeToNumeric(ERROR_QUOTE_STALE), messageOf(errorCodeToNumeric(ERROR_QUOTE_STALE)), {
         code: ERROR_QUOTE_STALE,
       });
     }

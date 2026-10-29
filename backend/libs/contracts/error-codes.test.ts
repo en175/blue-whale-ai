@@ -38,8 +38,8 @@ describe("单一码表（IKDZGM / ADR-0083）", () => {
   });
 
   it("一码一文案：同一数字码不重复 key", () => {
-    expect(ERROR_CODES[1001]).toBe("账户余额不足，请充值后重试");
-    expect(ERROR_CODES[1002]).toBe("输入参数无效");
+    expect(ERROR_CODES[1001]).toBe("积分余额不足，本次尚未提交。");
+    expect(ERROR_CODES[1002]).toBe("当前参数不受支持，请调整后再发送。");
   });
 
   it("生成域关键码与 generation 表数值码一致（唯一 Source of Truth）", () => {
@@ -50,35 +50,35 @@ describe("单一码表（IKDZGM / ADR-0083）", () => {
 
   it("IKE7JP：capability_unsupported_param 登记数值码 1030 且一码一文案", () => {
     expect(GENERATION_ERROR_NUMERIC_CODES[ERROR_CAPABILITY_UNSUPPORTED_PARAM]).toBe(1030);
-    expect(ERROR_CODES[1030]).toBe("当前模型不支持所选参数，请按提示调整");
+    expect(ERROR_CODES[1030]).toBe("当前参数不受支持，请调整后再发送。");
     expect(1030).toBeGreaterThanOrEqual(1000);
     expect(1030).toBeLessThanOrEqual(1099);
   });
 
   it("IKE7JP：能力细分码 1031-1033 各配固定文案（一码一文案）", () => {
     expect(GENERATION_ERROR_NUMERIC_CODES[ERROR_CAPABILITY_UNSUPPORTED_RESOLUTION]).toBe(1031);
-    expect(ERROR_CODES[1031]).toBe("当前模型不支持所选分辨率");
+    expect(ERROR_CODES[1031]).toBe("当前参数不受支持，请调整后再发送。");
     expect(GENERATION_ERROR_NUMERIC_CODES[ERROR_CAPABILITY_UNSUPPORTED_RATIO]).toBe(1032);
-    expect(ERROR_CODES[1032]).toBe("当前模型不支持所选比例");
+    expect(ERROR_CODES[1032]).toBe("当前参数不受支持，请调整后再发送。");
     expect(GENERATION_ERROR_NUMERIC_CODES[ERROR_CAPABILITY_UNSUPPORTED_DURATION]).toBe(1033);
-    expect(ERROR_CODES[1033]).toBe("当前模型不支持所选时长");
+    expect(ERROR_CODES[1033]).toBe("当前参数不受支持，请调整后再发送。");
   });
 
   it("IKE7JP：invalid_reference 登记数值码 1034 且一码一文案", () => {
     expect(GENERATION_ERROR_NUMERIC_CODES[ERROR_INVALID_REFERENCE]).toBe(1034);
-    expect(ERROR_CODES[1034]).toBe("参考素材无效，请重新选择");
+    expect(ERROR_CODES[1034]).toBe("参考素材无法用于本次生成，请更换后再发送。");
   });
 
   it("IKFL53/IKJ8J8：content_rejected_reference 登记数值码 1038，文案为中性兜底", () => {
     expect(GENERATION_ERROR_NUMERIC_CODES[ERROR_CONTENT_REJECTED_REFERENCE]).toBe(1038);
-    expect(ERROR_CODES[1038]).toBe("生成内容可能涉及版权限制，请调整提示词或素材后重试");
+    expect(ERROR_CODES[1038]).toBe("内容未通过审核，请调整描述或参考素材后再发送。");
     expect(1038).toBeGreaterThanOrEqual(1000);
     expect(1038).toBeLessThanOrEqual(1099);
   });
 
   it("IKJ8J8：content_rejected_audio 登记数值码 1059 且一码一文案", () => {
     expect(GENERATION_ERROR_NUMERIC_CODES[ERROR_CONTENT_REJECTED_AUDIO]).toBe(1059);
-    expect(ERROR_CODES[1059]).toBe("生成的音频可能涉及版权限制，请调整提示词后重试");
+    expect(ERROR_CODES[1059]).toBe("内容未通过审核，请调整描述或参考素材后再发送。");
     expect(1059).toBeGreaterThanOrEqual(1000);
     expect(1059).toBeLessThanOrEqual(1099);
   });

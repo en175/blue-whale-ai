@@ -3633,7 +3633,7 @@ describe("handleCreateGenerationJob 样片提交确认与阶段落库（IKIZQ8�
     const result = await handleCreateGenerationJob("u1", "p1", { ...body, ...staleConfirmation }, null, deps);
 
     expect(result.code).toBe(1056);
-    expect(result.msg).toBe("价格已更新，请刷新后重新确认提交");
+    expect(result.msg).toBe("预计消耗已更新，请确认后再发送。");
     expect(createJob).not.toHaveBeenCalled();
   });
 
