@@ -5,6 +5,16 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 import { extraString, loadJobExtras, setJobExtras } from "./generation-jobs-extra-repo.js";
 
 
+export function touchProjectEdited(
+  tx: Prisma.TransactionClient,
+  projectId: bigint,
+): Promise<unknown> {
+  return tx.project.updateMany({
+    where: { id: projectId },
+    data: { last_edited_at: new Date() },
+  });
+}
+
 export interface CanvasView {
   id: string | null;
   project_id: string;
@@ -199,6 +209,7 @@ export function createCanvasRepo(prisma: PrismaClient): CanvasRepo {
           update: { ...data, version: { increment: 1 } },
         });
         await markOutputSlotsPlaced(tx, pid, data.nodes_json);
+        await touchProjectEdited(tx, pid);
         return toView(row);
       });
     },
@@ -218,6 +229,7 @@ export function createCanvasRepo(prisma: PrismaClient): CanvasRepo {
             await linkPromptMaterials(tx, pid, materials);
             await markOutputSlotsPlaced(tx, pid, data.nodes_json);
             await markAudioMixCards(tx, pid, data.nodes_json, materials?.ownerId);
+            await touchProjectEdited(tx, pid);
             return toView(row);
           });
         } catch (error) {
@@ -241,6 +253,7 @@ export function createCanvasRepo(prisma: PrismaClient): CanvasRepo {
         await linkPromptMaterials(tx, pid, materials);
         await markOutputSlotsPlaced(tx, pid, data.nodes_json);
         await markAudioMixCards(tx, pid, data.nodes_json, materials?.ownerId);
+        await touchProjectEdited(tx, pid);
         const row = await tx.canvas.findFirst({ where: { project_id: pid } });
         return row ? toView(row) : null;
       });

@@ -17,7 +17,7 @@ import {
 import { Prisma } from "@prisma/client";
 import type { PrismaClient } from "@prisma/client";
 
-import { linkPromptMaterials, markAudioMixCards, markOutputSlotsPlaced } from "./canvas-repo.js";
+import { linkPromptMaterials, markAudioMixCards, markOutputSlotsPlaced, touchProjectEdited } from "./canvas-repo.js";
 import { RecoveryContractError } from "./generation-canvas-recovery-repo.js";
 import {
   isMultiResultOutputKey,
@@ -860,6 +860,7 @@ export async function saveCanvasWithRecovery(
       if (input.materials) await linkPromptMaterials(tx, pid, input.materials as never);
       await markOutputSlotsPlaced(tx, pid, data.nodes_json);
       await markAudioMixCards(tx, pid, data.nodes_json, input.ownerId);
+      await touchProjectEdited(tx, pid);
     }
 
     for (const write of [...planned, ...aligned]) {

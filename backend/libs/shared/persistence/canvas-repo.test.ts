@@ -16,6 +16,7 @@ describe("canvas optimistic save", () => {
       return {};
     });
     const tx = {
+    project: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
       canvas: {
         updateMany: vi.fn(async ({ where }: { where: { version: number } }) => {
           if (where.version !== version) return { count: 0 };
@@ -59,6 +60,7 @@ describe("canvas optimistic save", () => {
   it("IKJCOE：卡号不在本人本项目作用域内 → 一个扩展位都不写（跨用户写防护）", async () => {
     const upsertExtra = vi.fn().mockResolvedValue({});
     const tx = {
+    project: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
       canvas: {
         updateMany: vi.fn(async () => ({ count: 1 })),
         findFirst: vi.fn(async () => ({
@@ -104,6 +106,7 @@ describe("canvas optimistic save", () => {
     const jobScan = vi.fn().mockResolvedValue([]);
     const jobUpsert = vi.fn();
     const tx = {
+    project: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
       canvas: {
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
         findFirst: vi.fn().mockResolvedValue({ id: 1n, project_id: 55n, version: 4, viewport_json: null, nodes_json: [], edges_json: null }),
@@ -126,6 +129,7 @@ describe("canvas optimistic save", () => {
     const updateMany = vi.fn().mockResolvedValue({ count: 0 });
     const jobUpsert = vi.fn();
     const tx = {
+    project: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
       canvas: { updateMany },
       generation_jobs: { findMany: vi.fn().mockResolvedValue([]) },
       generation_job_extras: {
@@ -145,6 +149,7 @@ describe("canvas optimistic save", () => {
     const jobUpsert = vi.fn().mockResolvedValue({});
     const assetsWrite = vi.fn();
     const tx = {
+    project: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
       canvas: {
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
         findFirst: vi.fn().mockResolvedValue({ id: 1n, project_id: 55n, version: 4, viewport_json: null, nodes_json: [], edges_json: null }),
@@ -181,6 +186,7 @@ describe("canvas optimistic save", () => {
     const updateMany = vi.fn().mockResolvedValue({ count: 0 });
     const upsert = vi.fn();
     const tx = {
+    project: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
       canvas: { updateMany, upsert, findFirst: vi.fn() },
       generation_output_slots: { updateMany: vi.fn() },
     };
@@ -220,6 +226,7 @@ describe("canvas optimistic save", () => {
   it("marks deterministic output slots placed in the same Canvas transaction", async () => {
     const markPlaced = vi.fn().mockResolvedValue({ count: 1 });
     const tx = {
+    project: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
       canvas: {
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
         findFirst: vi.fn().mockResolvedValue({
@@ -266,6 +273,7 @@ describe("canvas edges persistence (IKDLQF)", () => {
     const edges = [{ id: "e1", source: "text-1", target: "media-1" }];
     const updateMany = vi.fn().mockResolvedValue({ count: 1 });
     const tx = {
+    project: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
       canvas: {
         updateMany,
         findFirst: vi.fn().mockResolvedValue({

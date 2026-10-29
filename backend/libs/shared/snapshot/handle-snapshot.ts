@@ -43,7 +43,7 @@ export interface SnapshotAssetSummary {
 }
 
 export interface SnapshotData {
-  project: { id: WireInteger; name: string; thumb: string | null; created_at: string };
+  project: { id: WireInteger; name: string; created_at: string };
   canvas: {
     id: WireInteger | null;
     project_id: WireInteger;
@@ -122,7 +122,11 @@ export async function handleGetSnapshot(
   }
 
   return ok({
-    project: { ...project, id: wireInteger(project.id) },
+    project: {
+      id: wireInteger(project.id),
+      name: project.name,
+      created_at: project.created_at,
+    },
     canvas: {
       ...canvas,
       id: canvas.id === null ? null : wireInteger(canvas.id),
