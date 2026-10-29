@@ -44,3 +44,4 @@ ADR-0117 §2 把前缀空间收敛为 `identity_ / billing_ / generation_`，§6
 
 - `catalog_material_groups` → `user_material_info`：该表按 `user_id` 存用户人像库分组，归属是用户而非只读目录，`catalog_` 前缀不成立。三条索引名不含旧表名，按决策 3 不改。
 - `user_shared_asset_snapshots` 整表退役：`086` 直接 `DROP TABLE`，后端 `shared-assets` 模块、路由与契约，前端共享资产弹窗与保存入口一并删除。ADR-0117 §6 与 ADR-0139 中依赖「共享资产历史条目仍可读」的兼容描述不再成立。
+- `086` 是破坏性变更：表改名与删表后旧镜像立即失效，必须先上新 backend 与 worker 镜像，再执行迁移；回滚镜像需按 `008` + `078` 重建共享快照表结构，迁移前备份。
