@@ -23,7 +23,7 @@ export class TemplateService {
     return this.repo.listAllTags();
   }
 
-  pageByTagCode(tagCode: string, current: number, size: number) {
-    return this.repo.pageByTagCode(tagCode, current, size);
+  pageCards(query: Parameters<ReturnType<typeof createTemplateRepo>["pageCards"]>[0]) {
+    return this.repo.pageCards(query);
   }
 }

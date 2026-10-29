@@ -29,6 +29,7 @@ export interface AdminTemplateCardView {
   video_url: string | null;
   layout: string;
   sort_order: number;
+  is_featured: number;
   images: AdminTemplateImageView[];
 }
 
@@ -39,12 +40,14 @@ export interface TemplateCardInput {
   video_url: string | null;
   layout: string;
   sort_order: number;
+  is_featured: number;
   images: Array<{ id?: string; image_url: string }>;
 }
 
 export interface TemplateAdminRepo {
   renameTag(tagCode: string, label: string): Promise<boolean>;
   setTagVisibility(tagCode: string, visible: number): Promise<boolean>;
+  createTag(tagCode: string, label: string, sortOrder: number): Promise<boolean>;
   listCards(tagCode?: string): Promise<AdminTemplateCardView[]>;
   getCard(id: bigint): Promise<AdminTemplateCardView | null>;
   createCard(input: TemplateCardInput): Promise<string>;
@@ -78,6 +81,7 @@ async function assembleCards(
     video_url: string | null;
     layout: string;
     sort_order: number;
+    is_featured: number;
   }>,
 ): Promise<AdminTemplateCardView[]> {
   if (cards.length === 0) return [];
@@ -105,6 +109,7 @@ async function assembleCards(
     video_url: c.video_url,
     layout: c.layout,
     sort_order: c.sort_order,
+    is_featured: c.is_featured,
     images: byCard.get(c.id.toString()) ?? [],
   }));
 }
@@ -125,6 +130,25 @@ export function createTemplateAdminRepo(prisma: PrismaClient): TemplateAdminRepo
         data: { visible, gmt_modified: new Date() },
       });
       return result.count > 0;
+    },
+
+    async createTag(tagCode, label, sortOrder) {
+      try {
+        await prisma.template_tag.create({
+          data: { tag_code: tagCode, label, sort_order: sortOrder },
+        });
+        return true;
+      } catch (error) {
+        if (
+          typeof error === "object" &&
+          error !== null &&
+          "code" in error &&
+          error.code === "P2002"
+        ) {
+          return false;
+        }
+        throw error;
+      }
     },
 
     async listCards(tagCode?) {
@@ -155,6 +179,7 @@ export function createTemplateAdminRepo(prisma: PrismaClient): TemplateAdminRepo
             video_url: input.video_url,
             layout: input.layout,
             sort_order: input.sort_order,
+            is_featured: input.is_featured,
             gmt_modified: now,
           },
         });
@@ -189,6 +214,7 @@ export function createTemplateAdminRepo(prisma: PrismaClient): TemplateAdminRepo
             video_url: input.video_url,
             layout: input.layout,
             sort_order: input.sort_order,
+            is_featured: input.is_featured,
             gmt_modified: now,
           },
         });

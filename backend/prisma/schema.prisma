@@ -542,6 +542,7 @@ model template_card {
   content      String?  @db.LongText
   layout       String   @db.VarChar(32)
   sort_order   Int      @default(0)
+  is_featured  Int      @default(0) @db.TinyInt
   is_delete    Int      @default(0) @db.TinyInt
   gmt_create   DateTime @default(now()) @db.DateTime(0)
   gmt_modified DateTime @default(now()) @db.DateTime(0)

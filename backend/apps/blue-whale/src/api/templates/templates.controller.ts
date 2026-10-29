@@ -15,15 +15,23 @@ export class AgentTemplatesController {
   @Public()
   @Get("page")
   async page(@Query() query: Record<string, string> = {}) {
-    const tagCode = query.tagCode ?? "";
-    if (!isValidTagCode(tagCode)) {
-      throw new DomainError(FAILURE_CODE, `非法标签: ${tagCode}`);
+    const tagCode = (query.tagCode ?? "").trim();
+    if (tagCode) {
+      const tags = await this.template.listAllTags();
+      const valid =
+        tags.length > 0
+          ? tags.some((tag) => tag.tag_code === tagCode)
+          : isValidTagCode(tagCode);
+      if (!valid) {
+        throw new DomainError(FAILURE_CODE, `非法标签: ${tagCode}`);
+      }
     }
-    const result = await this.template.pageByTagCode(
-      tagCode,
-      Math.max(1, Number(query.page ?? "1") || 1),
-      Math.max(1, Number(query.size ?? "10") || 10),
-    );
+    const result = await this.template.pageCards({
+      ...(tagCode ? { tagCode } : {}),
+      ...(query.isFeatured === "1" ? { isFeatured: true } : {}),
+      current: Math.max(1, Number(query.page ?? "1") || 1),
+      size: Math.max(1, Number(query.size ?? "10") || 10),
+    });
     return ok(result);
   }
 

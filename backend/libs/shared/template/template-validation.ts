@@ -23,6 +23,7 @@ export interface TemplateCardForm {
   video_url?: unknown;
   content?: unknown;
   images?: unknown;
+  is_featured?: unknown;
 }
 
 export type TemplateParseResult =
@@ -143,6 +144,18 @@ export function parseTemplateCardForm(
     }
   }
 
+  const featuredRaw = form.is_featured;
+  let isFeatured = 0;
+  if (featuredRaw !== undefined && featuredRaw !== null) {
+    if (featuredRaw === true || featuredRaw === 1 || featuredRaw === "1") {
+      isFeatured = 1;
+    } else if (featuredRaw === false || featuredRaw === 0 || featuredRaw === "0") {
+      isFeatured = 0;
+    } else {
+      return { ok: false, error: "is_featured 仅支持 true/false 或 0/1" };
+    }
+  }
+
   return {
     ok: true,
     input: {
@@ -152,6 +165,7 @@ export function parseTemplateCardForm(
       video_url: video.value,
       layout,
       sort_order: sortOrderNum,
+      is_featured: isFeatured,
       images,
     },
   };
