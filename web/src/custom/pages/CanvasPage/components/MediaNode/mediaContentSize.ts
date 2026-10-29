@@ -18,7 +18,7 @@ export interface MediaDims {
 }
 
 export const MEDIA_CONTENT_SHORT_SIDE = 280;
-const MEDIA_CONTENT_LONG_SIDE_MAX = 840;
+export const MEDIA_CONTENT_LONG_SIDE_MAX = 840;
 
 const MEDIA_AUDIO_CONTENT_WIDTH = 480;
 const MEDIA_AUDIO_CONTENT_HEIGHT = 240;

@@ -12,6 +12,8 @@ import type { UploadedFile } from '../../components/ImageDialog';
 import type { AudioRefItem } from '../../components/AudioDialog';
 import type { MediaDims } from '../../components/MediaNode/mediaContentSize';
 import { assetDisplayName } from '../../graph/canvasPureNodeHelpers';
+import type { BatchItemLayout } from '../../graph/batchLayout';
+import type { SpawnBatchOptions } from '../chrome/useCanvasSpawn';
 import { newNodeId } from '../../graph/nodeId';
 import { baseSourceError, imageMediaRefsOf, isMaterialLibraryId, readAssetId } from '../../media/mediaRefs';
 import { asVideoRefMediaType, mergedVideoMediaRefsOf, occupiedVideoRefIds, type VideoMediaRef, type VideoMediaRefs } from '../../tools/video/videoMediaRefs';
@@ -30,6 +32,7 @@ export interface CanvasAssetsPlacementHost {
   actionsRef: RefObject<CanvasNodeActions>;
   setMediaNodes: Dispatch<SetStateAction<Node[]>>;
   spawnPosition: () => { x: number; y: number };
+  spawnBatch: (items: BatchItemLayout[], options?: SpawnBatchOptions) => Array<{ x: number; y: number }>;
   dockToolCallbacks: Record<string, unknown>;
   handleMediaDims: (id: string, dims: MediaDims) => void;
   addCanvasEdge: (source: string, target: string, refRole?: VideoRefRole) => void;
@@ -72,6 +75,7 @@ export function useCanvasAssetsPlacement(host: CanvasAssetsPlacementHost): Canva
     actionsRef,
     setMediaNodes,
     spawnPosition,
+    spawnBatch,
     dockToolCallbacks,
     handleMediaDims,
     addCanvasEdge,
@@ -103,6 +107,7 @@ export function useCanvasAssetsPlacement(host: CanvasAssetsPlacementHost): Canva
     if (!currentId) return null;
     const adoptedIds: string[] = [];
     const nodes: Node[] = [];
+    const batchItems: BatchItemLayout[] = [];
     const reusedCompliance: Array<{ id: string; patch: Record<string, unknown> }> = [];
     const complianceFromAsset = (asset: AssetRecord): Record<string, unknown> => {
       if (asset.type === 'audio') return {};
@@ -153,10 +158,15 @@ export function useCanvasAssetsPlacement(host: CanvasAssetsPlacementHost): Canva
       }
       const fileNameFromUrl = assetDisplayName(asset);
       const nodeId = newNodeId('media');
+      batchItems.push({
+        mediaType,
+        width: asset.width ?? undefined,
+        height: asset.height ?? undefined,
+      });
       nodes.push({
         id: nodeId,
         type: 'mediaNode' as const,
-        position: spawnPosition(),
+        position: { x: 0, y: 0 },
         data: {
           src: asset.url,
           fileName: fileNameFromUrl,
@@ -185,6 +195,10 @@ export function useCanvasAssetsPlacement(host: CanvasAssetsPlacementHost): Canva
         },
       });
     }
+    const positions = batchItems.length > 1 ? spawnBatch(batchItems) : [];
+    nodes.forEach((node, index) => {
+      node.position = positions[index] ?? spawnPosition();
+    });
     nodes.forEach((node) => pendingNodeIdsRef.current.add(node.id));
     setMediaNodes((prev) => {
       const patched = reusedCompliance.length === 0

@@ -1,6 +1,15 @@
 import { useCallback, useRef, type RefObject } from 'react';
+import type { Viewport } from '@xyflow/react';
 import { nextDraftPosition } from '../../graph/draftSpawn';
 import { nodeBoxOf } from '../../graph/canvasPureNodeHelpers';
+import {
+  BATCH_DOCK_RESERVE,
+  batchNodeBoxOf,
+  batchViewportOf,
+  layoutBatch,
+  type BatchAnchor,
+  type BatchItemLayout,
+} from '../../graph/batchLayout';
 import type { CanvasGraph } from '../document/useCanvasGraph';
 
 const DOCK_RESERVE_PX = 300;
@@ -9,12 +18,18 @@ export interface CanvasSpawnHost {
   graph: CanvasGraph;
 }
 
+export type SpawnBatchOptions = Partial<Omit<BatchAnchor, 'screen'>> & {
+  screen?: { x: number; y: number };
+  focus?: (viewport: Viewport) => void;
+};
+
 export interface CanvasSpawnHandles {
   spawnPosRef: RefObject<(screenPt?: { x: number; y: number }) => { x: number; y: number }>;
   registerSpawnPosition: (fn: (screenPt?: { x: number; y: number }) => { x: number; y: number }) => void;
   spawnPosition: () => { x: number; y: number };
   spawnNearScreen: (screenPt: { x: number; y: number }) => { x: number; y: number };
   spawnDraftPosition: () => { x: number; y: number };
+  spawnBatch: (items: BatchItemLayout[], options?: SpawnBatchOptions) => Array<{ x: number; y: number }>;
 }
 
 export function useCanvasSpawn(host: CanvasSpawnHost): CanvasSpawnHandles {
@@ -46,6 +61,24 @@ export function useCanvasSpawn(host: CanvasSpawnHost): CanvasSpawnHandles {
     const nodes = graph.allNodes();
     return nextDraftPosition({ center, dockTop, nodes: nodes.map(nodeBoxOf) });
   };
+  const spawnBatch = (items: BatchItemLayout[], options?: SpawnBatchOptions) => {
+    const screen = options?.screen ?? spawnPosRef.current();
+    const dockTop = spawnPosRef.current({ x: window.innerWidth / 2, y: window.innerHeight - DOCK_RESERVE_PX }).y;
+    const positions = layoutBatch({
+      anchor: {
+        screen,
+        dockTop,
+        anchor: options?.anchor,
+        placement: options?.placement ?? 'stack',
+      },
+      items,
+      nodes: graph.allNodes().map(batchNodeBoxOf),
+    });
+    if (options?.focus && positions.length > 0) {
+      options.focus(batchViewportOf(positions, items, { width: window.innerWidth, height: window.innerHeight }, BATCH_DOCK_RESERVE));
+    }
+    return positions;
+  };
 
-  return { spawnPosRef, registerSpawnPosition, spawnPosition, spawnNearScreen, spawnDraftPosition };
+  return { spawnPosRef, registerSpawnPosition, spawnPosition, spawnNearScreen, spawnDraftPosition, spawnBatch };
 }

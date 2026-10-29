@@ -279,7 +279,7 @@ export default function CanvasPage() {
     toolDepsRef,
     mediaNodesRef,
   });
-  const { spawnPosRef, registerSpawnPosition, spawnPosition, spawnNearScreen, spawnDraftPosition } = useCanvasSpawn({
+  const { spawnPosRef, registerSpawnPosition, spawnPosition, spawnNearScreen, spawnDraftPosition, spawnBatch } = useCanvasSpawn({
     graph,
   });
   const {
@@ -783,6 +783,7 @@ export default function CanvasPage() {
     actionsRef,
     setMediaNodes,
     spawnPosition,
+    spawnBatch,
     dockToolCallbacks,
     handleMediaDims,
     addCanvasEdge,
@@ -808,7 +809,7 @@ export default function CanvasPage() {
   });
   const {
     placeFileOnCanvas,
-    handleUploadFile,
+    handleUploadFiles,
     handleCopyImage,
     handleFillEmptyShell,
     applyClipboardAtFlow,
@@ -816,6 +817,7 @@ export default function CanvasPage() {
     currentId,
     toolMode,
     spawnPosition,
+    spawnBatch,
     handleMediaDims,
     dockToolCallbacks,
     actionsRef,
@@ -1447,7 +1449,7 @@ export default function CanvasPage() {
         textNodes, mediaNodes, productNodes, assetNodes,
         showEdges, setShowEdges, snapAlignmentOn, setSnapAlignmentOn, edges,
         guardEdgesChange, onConnect: handleConnect, connectingSourceRef, handleConnectEnd,
-        isValidCanvasConnection, focusViewport, docViewport: doc?.viewport,
+        isValidCanvasConnection, focusViewport, setFocusViewport, docViewport: doc?.viewport,
         setViewport, setLiveViewport, registerSpawnPosition, handleNodeDragStop,
         handleCanvasNodeClick, handleCanvasPaneClick, handleSelectionChangeStable,
         refPickActive: imagePickSessionActive || videoPickSessionActive || audioPickSessionActive || toolSessions.blocksCanvasDrag(),
@@ -1461,7 +1463,7 @@ export default function CanvasPage() {
         connectMenu, closeConnectMenu, applyConnectType, paneMenu, setPaneMenu, canvasHistory,
         findCanvasNode, showToast,
         spawnNearScreen, paneUploadRef, paneUploadPosRef, placeFileOnCanvas,
-        handleToolMenuSelect, handleUploadFile, placeNodeFile: (file) => placeFileOnCanvas(file),
+        handleToolMenuSelect, handleUploadFiles, placeNodeFile: (file) => placeFileOnCanvas(file),
       }}
       nodeActions={{
         handleAddTextNode, canOpenEditor, openImageDraftDialog, createImageDraftCard,
