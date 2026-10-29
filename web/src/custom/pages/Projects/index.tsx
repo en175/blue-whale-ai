@@ -74,9 +74,9 @@ function PreviewGallery({ project }: { project: ProjectRecord }) {
     return (
       <Empty
         className={styles.previewEmpty}
-        aria-label="暂无图片预览"
+        aria-label="暂无内容预览"
         icon={<ImageOff size={28} strokeWidth={1.5} aria-hidden="true" />}
-        title="暂无图片预览"
+        title="暂无内容预览"
       />
     );
   }
@@ -85,18 +85,30 @@ function PreviewGallery({ project }: { project: ProjectRecord }) {
     <div
       className={styles.previewGallery}
       data-preview-count={previews.length}
-      aria-label={`${project.name} 的图片预览`}
+      aria-label={`${project.name} 的内容预览`}
     >
-      {previews.map((url, index) => (
-        <img
-          key={`${url}-${index}`}
-          className={styles.previewImage}
-          src={resolveMediaSrc(url)}
-          crossOrigin={remoteImageCrossOrigin(url)}
-          alt={`${project.name} 图片预览 ${index + 1}`}
-          loading="lazy"
-        />
-      ))}
+      {previews.map((preview, index) =>
+        preview.type === 'video' ? (
+          <video
+            key={`${preview.url}-${index}`}
+            className={styles.previewImage}
+            src={resolveMediaSrc(preview.url)}
+            muted
+            playsInline
+            preload="metadata"
+            aria-label={`${project.name} 视频预览 ${index + 1}`}
+          />
+        ) : (
+          <img
+            key={`${preview.url}-${index}`}
+            className={styles.previewImage}
+            src={resolveMediaSrc(preview.url)}
+            crossOrigin={remoteImageCrossOrigin(preview.url)}
+            alt={`${project.name} 图片预览 ${index + 1}`}
+            loading="lazy"
+          />
+        ),
+      )}
     </div>
   );
 }

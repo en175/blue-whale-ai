@@ -1,13 +1,18 @@
 import { infiniteQueryOptions } from '@tanstack/react-query';
 import { apiRequest, type ApiRequestInit } from '@/shared/api/http';
 
+export interface ProjectPreview {
+  url: string;
+  type: 'image' | 'video';
+}
+
 export interface ProjectRecord {
   id: number | string;
   name: string;
-  thumb: string | null;
-  previews: string[];
+  previews: ProjectPreview[];
   created_at: string;
   last_opened_at: string | null;
+  last_edited_at: string;
   pinned_at: string | null;
 }
 

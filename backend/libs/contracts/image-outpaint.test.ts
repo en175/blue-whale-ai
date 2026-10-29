@@ -107,7 +107,7 @@ describe("image_outpaint 契约不变量（TS 侧）", () => {
   it("兜底错误码 image_outpaint_failed → 1041，文案表同步", () => {
     expect(ERROR_IMAGE_OUTPAINT_FAILED).toBe("image_outpaint_failed");
     expect(GENERATION_ERROR_NUMERIC_CODES[ERROR_IMAGE_OUTPAINT_FAILED]).toBe(1041);
-    expect(ERROR_CODES[1041]).toContain("扩图");
+    expect(ERROR_CODES[1041]).toBe("操作未完成，请稍后查看。");
   });
 });
 

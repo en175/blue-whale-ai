@@ -7,7 +7,7 @@ import { sessionJwtSecret } from "./jwt-secret.js";
 
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const ROLE_STATUS_RECHECK_MS = 5 * 60 * 1000;
-export const MAX_SESSIONS_PER_USER = 3;
+export const MAX_SESSIONS_PER_USER = 4;
 
 export function normalizeClientId(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;

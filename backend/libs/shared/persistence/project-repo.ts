@@ -4,13 +4,18 @@ import type { PrismaClient } from "@prisma/client";
 import { nodeFromRow } from "./canvas-repo.js";
 
 
+export interface ProjectPreview {
+  url: string;
+  type: "image" | "video";
+}
+
 export interface ProjectView {
   id: string;
   name: string;
-  thumb: string | null;
-  previews: string[];
+  previews: ProjectPreview[];
   created_at: string;
   last_opened_at: string | null;
+  last_edited_at: string;
   pinned_at: string | null;
 }
 
@@ -21,13 +26,23 @@ export interface ProjectPage {
   current: number;
 }
 
+export interface ProjectListOptions {
+  keyword?: string;
+}
+
 export interface ProjectRepo {
-  listByOwner(ownerId: string): Promise<ProjectView[]>;
+  listByOwner(ownerId: string, options?: ProjectListOptions): Promise<ProjectView[]>;
   listByOwnerPaged(
     ownerId: string,
     page: number,
     size: number,
+    options?: ProjectListOptions,
   ): Promise<ProjectPage>;
+  listByOwnerRecent(
+    ownerId: string,
+    limit: number,
+    options?: ProjectListOptions,
+  ): Promise<ProjectView[]>;
   create(ownerId: string, name: string): Promise<ProjectView>;
   findOwnedById(id: string, ownerId: string): Promise<ProjectView | null>;
   findOwnerId(id: string): Promise<string | null>;
@@ -52,18 +67,18 @@ export interface ProjectRepo {
 function toView(row: {
   id: bigint;
   name: string;
-  thumb: string | null;
   gmt_create: Date;
   last_opened_at: Date | null;
+  last_edited_at: Date;
   pinned_at: Date | null;
 }): ProjectView {
   return {
     id: row.id.toString(),
     name: row.name,
-    thumb: row.thumb,
     previews: [],
     created_at: wallClockRfc3339(row.gmt_create),
     last_opened_at: wallClockRfc3339OrNull(row.last_opened_at) ?? null,
+    last_edited_at: wallClockRfc3339(row.last_edited_at),
     pinned_at: wallClockRfc3339OrNull(row.pinned_at) ?? null,
   };
 }
@@ -73,7 +88,7 @@ function defaultProjectName(now: Date = new Date()): string {
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
 }
 
-const NON_IMAGE_MEDIA = new Set(["video", "audio"]);
+const NON_MEDIA_PREVIEW_TYPES = new Set(["audio"]);
 
 function readId(value: unknown): string | null {
   if (typeof value === "string" && value.length > 0) return value;
@@ -87,7 +102,7 @@ function readUrl(value: unknown): string | null {
   return value;
 }
 
-function collectCanvasImageRefs(nodes: unknown): { ids: Set<string>; urls: Set<string> } {
+function collectCanvasMediaRefs(nodes: unknown): { ids: Set<string>; urls: Set<string> } {
   const ids = new Set<string>();
   const urls = new Set<string>();
   const visit = (value: unknown): void => {
@@ -99,7 +114,7 @@ function collectCanvasImageRefs(nodes: unknown): { ids: Set<string>; urls: Set<s
     const rec = value as Record<string, unknown>;
     if (rec.enabled === false) return;
     const mediaType = rec.mediaType ?? rec.media_type ?? rec.type;
-    if (typeof mediaType === "string" && NON_IMAGE_MEDIA.has(mediaType)) return;
+    if (typeof mediaType === "string" && NON_MEDIA_PREVIEW_TYPES.has(mediaType)) return;
     for (const key of ["assetId", "asset_id", "assetID"] as const) {
       const id = readId(rec[key]);
       if (id) ids.add(id);
@@ -161,10 +176,10 @@ export function createProjectRepo(prisma: PrismaClient): ProjectRepo {
       select: { project_id: true, asset_id: true },
     });
     const linkedAssetIds = [...new Set(links.map((link) => link.asset_id))];
-    const imageAssets = await prisma.user_assets.findMany({
+    const mediaAssets = await prisma.user_assets.findMany({
       where: {
         user_id: uid,
-        type: "image",
+        type: { in: ["image", "video"] },
         status: "normal",
         is_delete: false,
         OR: [
@@ -173,7 +188,7 @@ export function createProjectRepo(prisma: PrismaClient): ProjectRepo {
         ],
       },
       orderBy: { gmt_create: "desc" },
-      select: { id: true, project_id: true, url: true },
+      select: { id: true, project_id: true, url: true, type: true },
     });
     const membership = new Map<string, Set<bigint>>();
     const addMember = (assetId: bigint, projectId: bigint) => {
@@ -183,7 +198,7 @@ export function createProjectRepo(prisma: PrismaClient): ProjectRepo {
       if (projects) projects.add(projectId);
       else membership.set(key, new Set([projectId]));
     };
-    for (const asset of imageAssets) addMember(asset.id, asset.project_id);
+    for (const asset of mediaAssets) addMember(asset.id, asset.project_id);
     for (const link of links) addMember(link.asset_id, link.project_id);
     const canvases = await prisma.project_canvas.findMany({
       where: { project_id: { in: projectIds }, is_delete: 0 },
@@ -208,24 +223,28 @@ export function createProjectRepo(prisma: PrismaClient): ProjectRepo {
     for (const row of canvases) {
       onCanvas.set(
         row.project_id,
-        collectCanvasImageRefs(
+        collectCanvasMediaRefs(
           row.rows_authoritative === 1
             ? rowNodesByProject.get(row.project_id) ?? []
             : row.nodes_json,
         ),
       );
     }
-    const byProject = new Map<bigint, string[]>();
-    for (const asset of imageAssets) {
+    const byProject = new Map<bigint, ProjectPreview[]>();
+    for (const asset of mediaAssets) {
       const projects = membership.get(asset.id.toString());
       if (!projects) continue;
       const assetId = asset.id.toString();
       for (const projectId of projects) {
         const refs = onCanvas.get(projectId);
         if (!refs || (!refs.ids.has(assetId) && !refs.urls.has(asset.url))) continue;
+        const preview: ProjectPreview = {
+          url: asset.url,
+          type: asset.type === "video" ? "video" : "image",
+        };
         const list = byProject.get(projectId);
-        if (!list) byProject.set(projectId, [asset.url]);
-        else if (list.length < 3) list.push(asset.url);
+        if (!list) byProject.set(projectId, [preview]);
+        else if (list.length < 3) list.push(preview);
       }
     }
     for (const view of views) {
@@ -233,31 +252,39 @@ export function createProjectRepo(prisma: PrismaClient): ProjectRepo {
     }
   }
 
+  function listWhere(ownerId: string, options: ProjectListOptions | undefined) {
+    const keyword = options?.keyword?.trim();
+    return {
+      owner_id: BigInt(ownerId),
+      purpose: "canvas",
+      is_delete: 0,
+      ...(keyword ? { name: { contains: keyword } } : {}),
+    };
+  }
+
+  const LIST_ORDER = [
+    { pinned_at: "desc" as const },
+    { last_edited_at: "desc" as const },
+    { id: "desc" as const },
+  ];
+
   return {
-    async listByOwner(ownerId) {
+    async listByOwner(ownerId, options) {
       const rows = await prisma.project.findMany({
-        where: {
-          owner_id: BigInt(ownerId),
-          purpose: "canvas",
-          is_delete: 0,
-        },
-        orderBy: [{ pinned_at: "desc" }, { gmt_create: "desc" }],
+        where: listWhere(ownerId, options),
+        orderBy: LIST_ORDER,
       });
       const views = rows.map(toView);
       await attachPreviews(ownerId, rows, views);
       return views;
     },
-    async listByOwnerPaged(ownerId, page, size) {
-      const where = {
-        owner_id: BigInt(ownerId),
-        purpose: "canvas",
-        is_delete: 0,
-      };
+    async listByOwnerPaged(ownerId, page, size, options) {
+      const where = listWhere(ownerId, options);
       const [total, rows] = await Promise.all([
         prisma.project.count({ where }),
         prisma.project.findMany({
           where,
-          orderBy: [{ pinned_at: "desc" }, { gmt_create: "desc" }, { id: "desc" }],
+          orderBy: LIST_ORDER,
           skip: (page - 1) * size,
           take: size,
         }),
@@ -265,6 +292,16 @@ export function createProjectRepo(prisma: PrismaClient): ProjectRepo {
       const views = rows.map(toView);
       await attachPreviews(ownerId, rows, views);
       return { records: views, total, size, current: page };
+    },
+    async listByOwnerRecent(ownerId, limit, options) {
+      const rows = await prisma.project.findMany({
+        where: listWhere(ownerId, options),
+        orderBy: LIST_ORDER,
+        take: limit,
+      });
+      const views = rows.map(toView);
+      await attachPreviews(ownerId, rows, views);
+      return views;
     },
     async create(ownerId, name) {
       const trimmed = name.trim();

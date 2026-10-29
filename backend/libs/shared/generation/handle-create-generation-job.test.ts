@@ -3636,7 +3636,7 @@ describe("handleCreateGenerationJob 样片提交确认与阶段落库（IKIZQ8�
     const result = await handleCreateGenerationJob("u1", "p1", { ...body, ...staleConfirmation }, null, deps);
 
     expect(result.code).toBe(1056);
-    expect(result.msg).toBe("价格已更新，请刷新后重新确认提交");
+    expect(result.msg).toBe("预计消耗已更新，请确认后再发送。");
     expect(createJob).not.toHaveBeenCalled();
   });
 
@@ -3654,7 +3654,7 @@ describe("handleCreateGenerationJob 样片提交确认与阶段落库（IKIZQ8�
     expect(createJob).not.toHaveBeenCalled();
   });
 
-  it("★ G04：算不出价格（quote=null）→ 1056，零创建（无报价不给出可提交金额）", async () => {
+  it("★ G04：算不出价格（quote=null）→ 1063 报价不可用，零创建（无报价不给出可提交金额）", async () => {
     const quote = vi.fn().mockResolvedValue(null);
     const { deps, createJob } = buildVideoDeps(SAMPLE_CAPABILITY, quote);
 
@@ -3665,11 +3665,11 @@ describe("handleCreateGenerationJob 样片提交确认与阶段落库（IKIZQ8�
       null, deps,
     );
 
-    expect(result.code).toBe(1056);
+    expect(result.code).toBe(1063);
     expect(createJob).not.toHaveBeenCalled();
   });
 
-  it("★ 未接报价依赖（服务端无 quote 装配）→ 1056 fail closed，普通视频不受影响", async () => {
+  it("★ 未接报价依赖（服务端无 quote 装配）→ 1063 fail closed，普通视频不受影响", async () => {
     const { deps, createJob } = buildVideoDeps(SAMPLE_CAPABILITY);
 
     const body = SAMPLE_BODY();
@@ -3677,7 +3677,7 @@ describe("handleCreateGenerationJob 样片提交确认与阶段落库（IKIZQ8�
       "u1", "p1", { ...body, expected_credits: 19, quote_revision: "r1" }, null, deps,
     );
 
-    expect(result.code).toBe(1056);
+    expect(result.code).toBe(1063);
     expect(createJob).not.toHaveBeenCalled();
   });
 

@@ -167,8 +167,9 @@ describe("projectPublicError", () => {
     );
     expect(out).not.toBeNull();
     expect(out!.code).toBe(1011);
-    expect(out!.message).toBe("生成服务响应异常");
-    expect("retryable" in out!).toBe(false);
+    expect(out!.message).toBe("服务暂时异常，本次生成失败。");
+    expect(out!.category).toBe("transient");
+    expect(out!.retryable).toBe(true);
     expect("params" in out!).toBe(false);
     expect("details" in out!).toBe(false);
   });
@@ -182,7 +183,7 @@ describe("projectPublicError", () => {
       "image",
     );
     expect(out!.code).toBe(1061);
-    expect(out!.message).toBe("生成服务额度不足，请联系平台管理员");
+    expect(out!.message).toBe("当前模型服务暂不可用，请稍后再试或选择其他可用模型。");
   });
 
   it("旧码归一：历史 invalid_video_inputs → invalid_reference 数值码 1034 + 码表文案", () => {
@@ -191,7 +192,7 @@ describe("projectPublicError", () => {
       "video",
     );
     expect(out!.code).toBe(1034);
-    expect(out!.message).toBe("参考素材无效，请重新选择");
+    expect(out!.message).toBe("参考素材无法用于本次生成，请更换后再发送。");
   });
 
   it("IKFL53/IKJ8J8: content_rejected_reference → 1038 + 中性兜底文案", () => {
@@ -204,7 +205,7 @@ describe("projectPublicError", () => {
       "video",
     );
     expect(out!.code).toBe(1038);
-    expect(out!.message).toBe("生成内容可能涉及版权限制，请调整提示词或素材后重试");
+    expect(out!.message).toBe("内容未通过审核，请调整描述或参考素材后再发送。");
   });
 
   it("IKJ8J8: content_rejected_audio → 1059 + 音频版权精确文案", () => {
@@ -217,19 +218,19 @@ describe("projectPublicError", () => {
       "video",
     );
     expect(out!.code).toBe(1059);
-    expect(out!.message).toBe("生成的音频可能涉及版权限制，请调整提示词后重试");
+    expect(out!.message).toBe("内容未通过审核，请调整描述或参考素材后再发送。");
   });
 
-  it("白名单外码 fallback 到类型兜底：码表文案（视频生成失败）", () => {
+  it("白名单外码 fallback 到类型兜底：码表文案（操作未完成，请稍后查看。）", () => {
     const out = projectPublicError({ code: "some_new_code" }, "video");
     expect(out!.code).toBe(1021);
-    expect(out!.message).toBe("视频生成失败");
+    expect(out!.message).toBe("操作未完成，请稍后查看。");
   });
 
   it("IKHLK3: 插帧白名单外码 → 1049 + 插帧文案", () => {
     const out = projectPublicError({ code: "some_new_code" }, "video_frame_interpolation");
     expect(out!.code).toBe(1049);
-    expect(out!.message).toBe("视频插帧失败，请重试");
+    expect(out!.message).toBe("操作未完成，请稍后查看。");
   });
 
   it("IKJFGQ：reason 随投影外发 canonical 字符串码——数值码撞号重排时前端识别的稳定锚点", () => {
@@ -251,33 +252,33 @@ describe("projectPublicError", () => {
 describe("messageFor", () => {
   it("每种错误码都有中文文案（前端只展示 msg）", () => {
     const cases: Array<[string, string]> = [
-      [ERROR_QUOTA_EXHAUSTED, "账户余额不足，请充值后重试"],
-      [ERROR_INVALID_INPUT, "输入参数无效"],
-      [ERROR_UNSUPPORTED_TYPE, "不支持的生成类型"],
-      [ERROR_UNSUPPORTED_INPUT, "输入内容不支持"],
-      [ERROR_MODEL_UNAVAILABLE, "模型未开通或不可用"],
-      [ERROR_REFERENCE_ASSET_UNAVAILABLE, "参考素材不可用"],
-      [ERROR_REFERENCE_LIMIT_EXCEEDED, "参考素材数量超过限制"],
-      [ERROR_SOURCE_ASSET_UNAVAILABLE, "源视频资产不可用"],
-      [ERROR_PROVIDER_CREDENTIAL_MISSING, "生成服务凭证未配置"],
-      [ERROR_PROVIDER_CONFIG, "生成服务配置不完整"],
-      [ERROR_PROVIDER_TIMEOUT, "生成服务响应超时"],
-      [ERROR_NO_RESULT, "生成服务未返回结果"],
-      [ERROR_SUBMISSION_UNKNOWN, "无法确认视频任务是否已提交"],
-      [ERROR_TIMED_OUT, "视频生成超时"],
-      [ERROR_STORAGE_FAILED, "生成结果存储失败"],
-      [ERROR_ALL_OUTPUTS_FAILED, "所有输出均生成失败"],
-      [ERROR_CONTENT_REJECTED, "生成内容未通过安全审核"],
-      [ERROR_CONTENT_REVIEW_UNAVAILABLE, "内容审核不可用"],
-      [ERROR_MEDIA_EXTRACT_FAILED, "音频提取失败"],
-      [ERROR_VIDEO_GENERATION_FAILED, "视频生成失败"],
-      [ERROR_IMAGE_GENERATION_FAILED, "图像生成失败"],
-      [ERROR_VIDEO_HAS_NO_AUDIO_TRACK, "视频没有音轨"],
-      [ERROR_VIDEO_DOWNLOAD_FAILED, "视频下载失败"],
-      [ERROR_VIDEO_TOO_LARGE, "视频超过大小上限"],
-      [ERROR_EXTRACT_FAILED, "音频提取失败"],
-      [ERROR_UPLOAD_FAILED, "音频上传失败"],
-      [ERROR_ENQUEUE_FAILED, "任务入队失败"],
+      [ERROR_QUOTA_EXHAUSTED, "积分余额不足，本次尚未提交。"],
+      [ERROR_INVALID_INPUT, "当前参数不受支持，请调整后再发送。"],
+      [ERROR_UNSUPPORTED_TYPE, "当前参数不受支持，请调整后再发送。"],
+      [ERROR_UNSUPPORTED_INPUT, "当前参数不受支持，请调整后再发送。"],
+      [ERROR_MODEL_UNAVAILABLE, "当前模型服务暂不可用，请稍后再试或选择其他可用模型。"],
+      [ERROR_REFERENCE_ASSET_UNAVAILABLE, "参考素材无法用于本次生成，请更换后再发送。"],
+      [ERROR_REFERENCE_LIMIT_EXCEEDED, "当前参考不符合所选模型要求，请调整后再发送。"],
+      [ERROR_SOURCE_ASSET_UNAVAILABLE, "参考素材无法用于本次生成，请更换后再发送。"],
+      [ERROR_PROVIDER_CREDENTIAL_MISSING, "当前模型服务暂不可用，请稍后再试或选择其他可用模型。"],
+      [ERROR_PROVIDER_CONFIG, "当前模型服务暂不可用，请稍后再试或选择其他可用模型。"],
+      [ERROR_PROVIDER_TIMEOUT, "服务暂时异常，本次生成失败。"],
+      [ERROR_NO_RESULT, "操作未完成，请稍后查看。"],
+      [ERROR_SUBMISSION_UNKNOWN, "提交结果核对中，请勿重复提交。"],
+      [ERROR_TIMED_OUT, "服务暂时异常，本次生成失败。"],
+      [ERROR_STORAGE_FAILED, "结果保存失败，结果暂未恢复。"],
+      [ERROR_ALL_OUTPUTS_FAILED, "操作未完成，请稍后查看。"],
+      [ERROR_CONTENT_REJECTED, "内容未通过审核，请调整描述或参考素材后再发送。"],
+      [ERROR_CONTENT_REVIEW_UNAVAILABLE, "服务暂时异常，本次生成失败。"],
+      [ERROR_MEDIA_EXTRACT_FAILED, "操作未完成，请稍后查看。"],
+      [ERROR_VIDEO_GENERATION_FAILED, "操作未完成，请稍后查看。"],
+      [ERROR_IMAGE_GENERATION_FAILED, "操作未完成，请稍后查看。"],
+      [ERROR_VIDEO_HAS_NO_AUDIO_TRACK, "参考素材无法用于本次生成，请更换后再发送。"],
+      [ERROR_VIDEO_DOWNLOAD_FAILED, "服务暂时异常，本次生成失败。"],
+      [ERROR_VIDEO_TOO_LARGE, "参考文件超过大小限制，请更换或压缩后上传。"],
+      [ERROR_EXTRACT_FAILED, "操作未完成，请稍后查看。"],
+      [ERROR_UPLOAD_FAILED, "参考素材上传失败，请检查网络后重新上传。"],
+      [ERROR_ENQUEUE_FAILED, "服务暂时异常，本次生成失败。"],
     ];
     for (const [code, expected] of cases) {
       expect(messageFor(code, "image"), `messageFor(${code})`).toBe(expected);
@@ -285,22 +286,22 @@ describe("messageFor", () => {
   });
 
   it("I一码一文案：provider_failed 统一文案，media_extract 码表文案（ADR-0083）", () => {
-    expect(messageFor(ERROR_PROVIDER_FAILED, "video")).toBe("生成服务响应异常");
-    expect(messageFor(ERROR_PROVIDER_FAILED, "audio")).toBe("生成服务响应异常");
-    expect(messageFor(ERROR_PROVIDER_FAILED, "image")).toBe("生成服务响应异常");
+    expect(messageFor(ERROR_PROVIDER_FAILED, "video")).toBe("服务暂时异常，本次生成失败。");
+    expect(messageFor(ERROR_PROVIDER_FAILED, "audio")).toBe("服务暂时异常，本次生成失败。");
+    expect(messageFor(ERROR_PROVIDER_FAILED, "image")).toBe("服务暂时异常，本次生成失败。");
     expect(messageFor(ERROR_MEDIA_EXTRACT_FAILED, "media_extract")).toBe(
-      "音频提取失败",
+      "操作未完成，请稍后查看。",
     );
     expect(messageFor(ERROR_EXTRACT_FAILED, "media_extract")).toBe(
-      "音频提取失败",
+      "操作未完成，请稍后查看。",
     );
   });
 
   it("未知码按类型兜底到对应中文", () => {
-    expect(messageFor("some_new_code", "video")).toBe("视频生成失败");
-    expect(messageFor("some_new_code", "audio")).toBe("音频生成失败");
-    expect(messageFor("some_new_code", "image")).toBe("图像生成失败");
-    expect(messageFor("some_new_code", "media_extract")).toBe("音频提取失败");
+    expect(messageFor("some_new_code", "video")).toBe("操作未完成，请稍后查看。");
+    expect(messageFor("some_new_code", "audio")).toBe("操作未完成，请稍后查看。");
+    expect(messageFor("some_new_code", "image")).toBe("操作未完成，请稍后查看。");
+    expect(messageFor("some_new_code", "media_extract")).toBe("操作未完成，请稍后查看。");
   });
 
   it("projectPublicError 对 null stored_error 不抛错", () => {
@@ -319,7 +320,7 @@ describe("platform_quota_exhausted（ADR-0128：平台额度不足与个人积�
     );
     expect(out!.code).toBe(1061);
     expect(out!.reason).toBe("platform_quota_exhausted");
-    expect(out!.message).toBe("生成服务额度不足，请联系平台管理员");
+    expect(out!.message).toBe("当前模型服务暂不可用，请稍后再试或选择其他可用模型。");
   });
 
   it("旧记录 quota_exhausted + 上游欠费原文 → 按证据翻成 1061", () => {
@@ -331,7 +332,7 @@ describe("platform_quota_exhausted（ADR-0128：平台额度不足与个人积�
       "video",
     );
     expect(out!.code).toBe(1061);
-    expect(out!.message).toBe("生成服务额度不足，请联系平台管理员");
+    expect(out!.message).toBe("当前模型服务暂不可用，请稍后再试或选择其他可用模型。");
   });
 
   it("旧记录 quota_exhausted 但无额度证据 → 保持 1001（证据不足不推断）", () => {
@@ -340,7 +341,7 @@ describe("platform_quota_exhausted（ADR-0128：平台额度不足与个人积�
       "video",
     );
     expect(out!.code).toBe(1001);
-    expect(out!.message).toBe("账户余额不足，请充值后重试");
+    expect(out!.message).toBe("积分余额不足，本次尚未提交。");
   });
 
   it("普通上游异常不误报余额不足", () => {
@@ -349,6 +350,6 @@ describe("platform_quota_exhausted（ADR-0128：平台额度不足与个人积�
       "video",
     );
     expect(out!.code).toBe(1011);
-    expect(out!.message).toBe("生成服务响应异常");
+    expect(out!.message).toBe("服务暂时异常，本次生成失败。");
   });
 });

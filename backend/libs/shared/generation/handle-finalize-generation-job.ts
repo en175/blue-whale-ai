@@ -7,6 +7,7 @@ import {
   ERROR_INVALID_INPUT,
   ERROR_MODEL_UNAVAILABLE,
   ERROR_QUOTE_STALE,
+  ERROR_QUOTE_UNAVAILABLE,
   ERROR_SUBMISSION_UNKNOWN,
   IDEMPOTENCY_CONFLICT_CODE,
   JOB_STATUS_CHECKING,
@@ -262,8 +263,8 @@ export async function handleFinalizeGenerationJobCreate(
   }
   const quoteDep = deps.quote;
   if (quoteDep === undefined) {
-    return fail(errorCodeToNumeric(ERROR_QUOTE_STALE), "价格已更新，请刷新后重新确认提交", {
-      code: ERROR_QUOTE_STALE,
+    return fail(errorCodeToNumeric(ERROR_QUOTE_UNAVAILABLE), messageOf(errorCodeToNumeric(ERROR_QUOTE_UNAVAILABLE)), {
+      code: ERROR_QUOTE_UNAVAILABLE,
     });
   }
   const derived = deriveFinalizeInput(sample.input, capability.row);
@@ -289,12 +290,16 @@ export async function handleFinalizeGenerationJobCreate(
           quoteInput: derived,
         })
       : null;
+  if (quote === null) {
+    return fail(errorCodeToNumeric(ERROR_QUOTE_UNAVAILABLE), messageOf(errorCodeToNumeric(ERROR_QUOTE_UNAVAILABLE)), {
+      code: ERROR_QUOTE_UNAVAILABLE,
+    });
+  }
   if (
-    quote === null ||
     Number(quote.credits) !== parsed.data.expected_credits ||
     currentRevision !== parsed.data.quote_revision
   ) {
-    return fail(errorCodeToNumeric(ERROR_QUOTE_STALE), "价格已更新，请刷新后重新确认提交", {
+    return fail(errorCodeToNumeric(ERROR_QUOTE_STALE), messageOf(errorCodeToNumeric(ERROR_QUOTE_STALE)), {
       code: ERROR_QUOTE_STALE,
     });
   }

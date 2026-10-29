@@ -34,10 +34,12 @@ import {
   ERROR_UNSUPPORTED_TYPE,
   ERROR_CAPABILITY_UNSUPPORTED_PARAM,
   ERROR_QUOTE_STALE,
+  ERROR_QUOTE_UNAVAILABLE,
   VIDEO_SAMPLE_RESOLUTION,
   PARAM_MISSING_CODE,
   RESOURCE_NOT_FOUND_CODE,
   errorCodeToNumeric,
+  messageOf,
   checkGenerationParamLimit,
   toGenerationParamCheckInput,
   canonicalSizeValue,
@@ -2224,8 +2226,8 @@ export async function handleCreateGenerationJob(
     }
     const quoteDep = deps.quote;
     if (quoteDep === undefined) {
-      return fail(errorCodeToNumeric(ERROR_QUOTE_STALE), "价格已更新，请刷新后重新确认提交", {
-        code: ERROR_QUOTE_STALE,
+      return fail(errorCodeToNumeric(ERROR_QUOTE_UNAVAILABLE), messageOf(errorCodeToNumeric(ERROR_QUOTE_UNAVAILABLE)), {
+        code: ERROR_QUOTE_UNAVAILABLE,
       });
     }
 
@@ -2258,12 +2260,13 @@ export async function handleCreateGenerationJob(
             quoteInput,
           })
         : null;
-    if (
-      quote === null ||
-      Number(quote.credits) !== credits ||
-      currentRevision !== revision
-    ) {
-      return fail(errorCodeToNumeric(ERROR_QUOTE_STALE), "价格已更新，请刷新后重新确认提交", {
+    if (quote === null) {
+      return fail(errorCodeToNumeric(ERROR_QUOTE_UNAVAILABLE), messageOf(errorCodeToNumeric(ERROR_QUOTE_UNAVAILABLE)), {
+        code: ERROR_QUOTE_UNAVAILABLE,
+      });
+    }
+    if (Number(quote.credits) !== credits || currentRevision !== revision) {
+      return fail(errorCodeToNumeric(ERROR_QUOTE_STALE), messageOf(errorCodeToNumeric(ERROR_QUOTE_STALE)), {
         code: ERROR_QUOTE_STALE,
       });
     }

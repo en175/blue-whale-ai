@@ -113,7 +113,7 @@ describe('toBillingChargeError（Charge 的三条失败语义）', () => {
 
     expect(mapped).toBeInstanceOf(DomainError);
     expect(mapped).toMatchObject({ code: 1005, status: 400 });
-    expect(mapped?.message).toBe('模型未开通或不可用');
+    expect(mapped?.message).toBe('当前模型服务暂不可用，请稍后再试或选择其他可用模型。');
   });
 
   it('★ 原因词与内部细节不外泄 —— 用户看不懂 UNPRICEABLE，也不必知道是哪个模型漏配', () => {
@@ -127,13 +127,13 @@ describe('toBillingChargeError（Charge 的三条失败语义）', () => {
     expect(mapped?.message).not.toMatch(/UNPRICEABLE|未配置计价规则|doubao-seedream/);
   });
 
-  it('余额不足（INSUFFICIENT_CREDITS）→ 402 + 码表里那句「账户余额不足，请充值后重试」', () => {
+  it('余额不足（INSUFFICIENT_CREDITS）→ 402 + 码表里那句「积分余额不足，本次尚未提交。」', () => {
     const mapped = toBillingChargeError(
       rpc('INSUFFICIENT_CREDITS: 可用余额 0，本次需 100', Code.FailedPrecondition),
     );
 
     expect(mapped).toMatchObject({ code: 1001, status: 402 });
-    expect(mapped?.message).toBe('账户余额不足，请充值后重试');
+    expect(mapped?.message).toBe('积分余额不足，本次尚未提交。');
   });
 
   it('billing 不可用（UNAVAILABLE / DeadlineExceeded）→ 503：运维问题，重试有意义', () => {

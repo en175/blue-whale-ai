@@ -16,7 +16,7 @@ import {
 import { Prisma } from "@prisma/client";
 import type { PrismaClient } from "@prisma/client";
 
-import { edgeFromRow, linkPromptMaterials, markAudioMixCards, markOutputSlotsPlaced, nodeFromRow } from "./canvas-repo.js";
+import { edgeFromRow, linkPromptMaterials, markAudioMixCards, markOutputSlotsPlaced, nodeFromRow, touchProjectEdited } from "./canvas-repo.js";
 import { RecoveryContractError, canvasNodesOf, loadRecoveryOwners, type RecoveryNodeOwner } from "./generation-canvas-recovery-repo.js";
 import { stableJson } from "../canvas/apply-diff.js";
 import { CanvasRowsWriteError, replaceCanvasRows } from "./canvas-rows-replace.js";
@@ -882,6 +882,7 @@ export async function saveCanvasWithRecovery(
       if (input.materials) await linkPromptMaterials(tx, pid, input.materials as never);
       await markOutputSlotsPlaced(tx, pid, incomingNodes);
       await markAudioMixCards(tx, pid, incomingNodes, input.ownerId);
+      await touchProjectEdited(tx, pid);
     }
 
     for (const write of [...planned, ...aligned]) {

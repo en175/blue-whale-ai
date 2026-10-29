@@ -174,14 +174,14 @@ const audioModel = {
 };
 
 const apiMocks = vi.hoisted(() => ({
-  fetchProjects: vi.fn(async () => [{ id: 'p1', name: '项目一', thumb: null, previews: [], created_at: '2026-01-01T00:00:00Z', last_opened_at: null, pinned_at: null }]),
+  fetchProjects: vi.fn(async () => [{ id: 'p1', name: '项目一', previews: [], created_at: '2026-01-01T00:00:00Z', last_opened_at: null, last_edited_at: '2026-01-01T00:00:00Z', pinned_at: null }]),
   createProject: vi.fn(async () => ({
     id: 'p2',
     name: '未命名项目',
-    thumb: null,
     previews: [],
     created_at: '2026-01-01T00:00:00Z',
     last_opened_at: null,
+    last_edited_at: '2026-01-01T00:00:00Z',
     pinned_at: null,
   }) satisfies ProjectRecord),
   renameProject: vi.fn(),

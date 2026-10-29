@@ -25,6 +25,10 @@ export class TemplateAdminService {
     return this.repo.setTagVisibility(tagCode, visible);
   }
 
+  createTag(tagCode: string, label: string, sortOrder: number) {
+    return this.repo.createTag(tagCode, label, sortOrder);
+  }
+
   listCards(tagCode?: string) {
     return this.repo.listCards(tagCode);
   }

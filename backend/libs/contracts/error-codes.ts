@@ -66,6 +66,7 @@ export const ERROR_JOB_ALREADY_RETRIED = "job_already_retried";
 export const ERROR_JOB_NOT_CANCELABLE = "job_not_cancelable";
 
 export const ERROR_QUOTE_STALE = "quote_stale";
+export const ERROR_QUOTE_UNAVAILABLE = "quote_unavailable";
 export const ERROR_FINALIZE_ALREADY_ATTEMPTED = "finalize_already_attempted";
 export const ERROR_FINALIZE_DEADLINE_EXCEEDED = "finalize_deadline_exceeded";
 
@@ -170,10 +171,48 @@ export const GENERATION_ERROR_NUMERIC_CODES: Record<string, number> = {
   [ERROR_TASK_TYPE_PARAM_CONSTRAINT]: 1060,
   [ERROR_PLATFORM_QUOTA_EXHAUSTED]: 1061,
   [ERROR_JOB_NOT_CANCELABLE]: 1062,
+  [ERROR_QUOTE_UNAVAILABLE]: 1063,
 };
 
 export function errorCodeToNumeric(code: string): number {
   return GENERATION_ERROR_NUMERIC_CODES[code] ?? GENERATION_ERROR_UNKNOWN_NUMERIC_CODE;
+}
+
+export type ErrorCategory =
+  | "transient"
+  | "content_rejected"
+  | "capability"
+  | "reference"
+  | "model_unavailable"
+  | "quota"
+  | "storage"
+  | "quote_changed"
+  | "unknown";
+
+export const ERROR_CATEGORY_CODES: Record<ErrorCategory, readonly number[]> = {
+  transient: [1011, 1012, 1015, 1019, 1024, 1028],
+  content_rejected: [1018, 1038, 1059],
+  capability: [1002, 1003, 1004, 1007, 1025, 1030, 1031, 1032, 1033, 1054, 1055, 1057, 1058, 1060, 1062],
+  reference: [1006, 1008, 1023, 1027, 1034, 1035, 1036],
+  model_unavailable: [1005, 1009, 1010, 1061],
+  quota: [1001],
+  storage: [1016],
+  quote_changed: [1056, 1063],
+  unknown: [
+    1013, 1014, 1017, 1020, 1021, 1022, 1026, 1029, 1037,
+    1039, 1040, 1041, 1042, 1043, 1044, 1045, 1046, 1047, 1048, 1049,
+    1050, 1051, 1052, 1053,
+  ],
+};
+
+const CATEGORY_BY_CODE: ReadonlyMap<number, ErrorCategory> = new Map(
+  (Object.entries(ERROR_CATEGORY_CODES) as [ErrorCategory, readonly number[]][])
+    .flatMap(([category, codes]) => codes.map((code) => [code, category] as const)),
+);
+
+export function errorRecoveryOf(code: number): { category: ErrorCategory; retryable: boolean } {
+  const category = CATEGORY_BY_CODE.get(code) ?? "unknown";
+  return { category, retryable: category === "transient" };
 }
 
 export const ACCOUNT_ERROR_NUMERIC_CODES: Record<string, number> = {
@@ -345,68 +384,6 @@ export const SKILL_ERROR_SPECS = {
 export type SkillErrorName = keyof typeof SKILL_ERROR_SPECS;
 
 export const ERROR_CODES: Record<number, string> = {
-  1001: "账户余额不足，请充值后重试",
-  1002: "输入参数无效",
-  1003: "不支持的生成类型",
-  1004: "输入内容不支持",
-  1005: "模型未开通或不可用",
-  1006: "参考素材不可用",
-  1007: "参考素材数量超过限制",
-  1008: "源视频资产不可用",
-  1009: "生成服务凭证未配置",
-  1010: "生成服务配置不完整",
-  1011: "生成服务响应异常",
-  1012: "生成服务响应超时",
-  1013: "生成服务未返回结果",
-  1014: "无法确认视频任务是否已提交",
-  1015: "视频生成超时",
-  1016: "生成结果存储失败",
-  1017: "所有输出均生成失败",
-  1018: "生成内容未通过安全审核",
-  1038: "生成内容可能涉及版权限制，请调整提示词或素材后重试",
-  1019: "内容审核不可用",
-  1020: "音频提取失败",
-  1021: "视频生成失败",
-  1022: "图像生成失败",
-  1023: "视频没有音轨",
-  1024: "视频下载失败",
-  1025: "视频超过大小上限",
-  1026: "音频提取失败",
-  1027: "音频上传失败",
-  1028: "任务入队失败",
-  1029: "音频生成失败",
-  1030: "当前模型不支持所选参数，请按提示调整",
-  1031: "当前模型不支持所选分辨率",
-  1032: "当前模型不支持所选比例",
-  1033: "当前模型不支持所选时长",
-  1034: "参考素材无效，请重新选择",
-  1035: "参考素材类型不符合要求，请更换后重试",
-  1036: "参考视频不符合要求（格式/大小/时长/像素），请更换后重试",
-  1037: "生成数量与预期不符，请重新生成",
-  1039: "高清放大失败，请重试",
-  1040: "图片擦除失败，请重试",
-  1041: "扩图失败，请重试",
-  1042: "抠图失败，请重试",
-  1043: "去字幕失败，请重试",
-  1044: "音频提取失败，请重试",
-  1045: "视频画质增强失败，请重试",
-  1046: "场景切分失败，请重试",
-  1047: "人声背景分离失败，请重试",
-  1048: "音频截取失败，请重试",
-  1049: "视频插帧失败，请重试",
-  1050: "智能抠像失败，请重试",
-  1051: "音频混合失败，请重试",
-  1052: "音频调速失败，请重试",
-  1053: "音视频合成失败，请重试",
-  1054: "当前状态不允许重试，仅失败或部分成功的任务可重试",
-  1055: "该任务的失败项已全部重试，无需再次重试",
-  1056: "价格已更新，请刷新后重新确认提交",
-  1057: "该样片已有成片任务，请查看其成片结果",
-  1058: "已超过样片转成片的截止时间，可重新生成样片后再试",
-  1059: "生成的音频可能涉及版权限制，请调整提示词后重试",
-  1060: "视频模式、比例或时长不符合要求，请重新编辑并确认视频模式、比例和时长后再提交",
-  1061: "生成服务额度不足，请联系平台管理员",
-  1062: "仅排队中的任务可取消",
   1101: "原密码错误，请重试",
   1102: "新密码需为 8-20 位",
   1103: "当前账号未设置密码",
@@ -455,6 +432,37 @@ export const ERROR_CODES: Record<number, string> = {
   100410: "共享资产类型不支持",
 };
 
+const CATEGORY_MESSAGES: Record<ErrorCategory, string> = {
+  transient: "服务暂时异常，本次生成失败。",
+  content_rejected: "内容未通过审核，请调整描述或参考素材后再发送。",
+  capability: "当前参数不受支持，请调整后再发送。",
+  reference: "参考素材无法用于本次生成，请更换后再发送。",
+  model_unavailable: "当前模型服务暂不可用，请稍后再试或选择其他可用模型。",
+  quota: "积分余额不足，本次尚未提交。",
+  storage: "结果保存失败，结果暂未恢复。",
+  quote_changed: "预计消耗已更新，请确认后再发送。",
+  unknown: "操作未完成，请稍后查看。",
+};
+
+const GENERATION_MESSAGE_OVERRIDES: Record<number, string> = {
+  1007: "当前参考不符合所选模型要求，请调整后再发送。",
+  1014: "提交结果核对中，请勿重复提交。",
+  1025: "参考文件超过大小限制，请更换或压缩后上传。",
+  1027: "参考素材上传失败，请检查网络后重新上传。",
+  1054: "当前状态不允许重试，仅失败或部分成功的任务可重试",
+  1055: "该任务的失败项已全部重试，无需再次重试",
+  1057: "该样片已有成片任务，请查看其成片结果",
+  1058: "已超过样片转成片的截止时间，可重新生成样片后再试",
+  1062: "仅排队中的任务可取消",
+  1063: "暂时无法发送，请稍后再试。",
+};
+
+for (const [category, codes] of Object.entries(ERROR_CATEGORY_CODES) as [ErrorCategory, readonly number[]][]) {
+  for (const code of codes) {
+    ERROR_CODES[code] = GENERATION_MESSAGE_OVERRIDES[code] ?? CATEGORY_MESSAGES[category];
+  }
+}
+
 for (const spec of Object.values(ASSET_ERROR_SPECS)) {
   ERROR_CODES[spec.code] = spec.message;
 }
@@ -488,6 +496,8 @@ export interface PublicGenerationError {
   code: number;
   reason?: string;
   message: string;
+  category: ErrorCategory;
+  retryable: boolean;
 }
 
 export interface PublicAccountError {

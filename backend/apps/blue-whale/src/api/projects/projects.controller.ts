@@ -37,16 +37,23 @@ export class ProjectsController {
   ) {
     const resolved = resolveProjectListQuery(query);
     if (resolved.kind === "invalid") {
-      return fail(FAILURE_CODE, "page 与 size 必须成对出现");
+      return fail(FAILURE_CODE, resolved.reason);
     }
+    const options = resolved.keyword ? { keyword: resolved.keyword } : undefined;
     if (resolved.kind === "all") {
-      return ok(await this.project.listByOwner(user.userId));
+      return ok(await this.project.listByOwner(user.userId, options));
+    }
+    if (resolved.kind === "limit") {
+      return ok(
+        await this.project.listByOwnerRecent(user.userId, resolved.limit, options),
+      );
     }
     return ok(
       await this.project.listByOwnerPaged(
         user.userId,
         resolved.page,
         resolved.size,
+        options,
       ),
     );
   }

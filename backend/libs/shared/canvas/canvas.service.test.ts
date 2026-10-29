@@ -29,6 +29,7 @@ function buildService(current: CanvasRow | null = null) {
     }
   };
   const tx = {
+    project: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
     project_canvas: {
       create: vi.fn().mockImplementation(async ({ data }: { data: Record<string, unknown> }) => ({
         id: 1n,
