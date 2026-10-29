@@ -4,11 +4,18 @@ import { createRoot, type Root } from 'react-dom/client';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import CanvasEntry from './index';
-import { MOCK_RECENT_CANVASES } from './mockRecentCanvases';
+import type { ProjectRecord } from '@/custom/api/projects';
 
-const api = vi.hoisted(() => ({ createProject: vi.fn(), navigate: vi.fn() }));
+const api = vi.hoisted(() => ({
+  createProject: vi.fn(),
+  fetchRecentProjects: vi.fn(),
+  navigate: vi.fn(),
+}));
 
-vi.mock('@/custom/api/projects', () => ({ createProject: api.createProject }));
+vi.mock('@/custom/api/projects', async () => {
+  const actual = await vi.importActual<typeof import('@/custom/api/projects')>('@/custom/api/projects');
+  return { ...actual, createProject: api.createProject, fetchRecentProjects: api.fetchRecentProjects };
+});
 vi.mock('react-router-dom', async () => {
   const actual = await vi.importActual<typeof import('react-router-dom')>('react-router-dom');
   return { ...actual, useNavigate: () => api.navigate };
@@ -21,6 +28,18 @@ vi.mock('@/custom/components/LoginModal', () => ({ default: () => null }));
 let root: Root;
 let mountNode: HTMLDivElement;
 
+function record(id: string, name: string): ProjectRecord {
+  return {
+    id,
+    name,
+    previews: [],
+    created_at: '2026-10-28T14:30:00+08:00',
+    last_opened_at: null,
+    last_edited_at: '2026-10-28T16:00:00+08:00',
+    pinned_at: null,
+  };
+}
+
 async function renderEntry() {
   mountNode = document.createElement('div');
   document.body.appendChild(mountNode);
@@ -28,11 +47,21 @@ async function renderEntry() {
   await act(async () => {
     root.render(createElement(MemoryRouter, null, createElement(CanvasEntry)));
   });
+  await act(async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+  });
 }
 
 beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-  api.createProject.mockResolvedValue({ id: 42, name: 'x' });
+  api.createProject.mockResolvedValue(record('42', 'new'));
+  api.fetchRecentProjects.mockResolvedValue({
+    records: [record('1', '最近一'), record('2', '最近二'), record('3', '最近三'), record('4', '第四个')],
+    total: 4,
+    size: 3,
+    current: 1,
+  });
 });
 
 afterEach(async () => {
@@ -42,28 +71,27 @@ afterEach(async () => {
 });
 
 describe('CanvasEntry', () => {
-  it('展示「新建画布」+ 3 个最近项目位，且没有「最近项目」标题', async () => {
+  it('用 limit=3 拉最近项目，最多展示 3 个', async () => {
     await renderEntry();
 
-    expect(mountNode.textContent).toContain('新建画布');
+    expect(api.fetchRecentProjects).toHaveBeenCalledWith(3);
     expect(mountNode.textContent).not.toContain('最近项目');
-    expect(mountNode.querySelectorAll('[data-testid="canvas-recent-placeholder"]')).toHaveLength(3);
-    MOCK_RECENT_CANVASES.slice(0, 3).forEach((item) => {
-      expect(mountNode.textContent).toContain(item.name);
-    });
+    expect(mountNode.querySelectorAll('[data-testid="canvas-recent-card"]')).toHaveLength(3);
+    expect(mountNode.textContent).toContain('最近三');
+    expect(mountNode.textContent).not.toContain('第四个');
   });
 
-  it('点最近项目位不创建项目、不跳转', async () => {
+  it('点最近项目进入该项目画布', async () => {
     await renderEntry();
 
     await act(async () => {
-      mountNode.querySelector<HTMLElement>('[data-testid="canvas-recent-placeholder"]')!.click();
+      mountNode.querySelector<HTMLButtonElement>('[data-testid="canvas-recent-card"]')!.click();
     });
+    expect(api.navigate).toHaveBeenCalledWith('/canvas?project=1');
     expect(api.createProject).not.toHaveBeenCalled();
-    expect(api.navigate).not.toHaveBeenCalled();
   });
 
-  it('新建画布在当前页进入空画布', async () => {
+  it('新建画布以 source=canvas 创建并在当前页进入', async () => {
     await renderEntry();
 
     const button = [...mountNode.querySelectorAll('button')].find((b) => b.textContent?.includes('新建画布'))!;
@@ -71,7 +99,7 @@ describe('CanvasEntry', () => {
       button.click();
       await Promise.resolve();
     });
-    expect(api.createProject).toHaveBeenCalledTimes(1);
+    expect(api.createProject).toHaveBeenCalledWith(expect.any(String), undefined, 'canvas');
     expect(api.navigate).toHaveBeenCalledWith('/canvas?project=42');
   });
 });

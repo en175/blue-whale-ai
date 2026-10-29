@@ -24,18 +24,8 @@ vi.mock('./components/CanvasEntry', () => ({
 }));
 
 vi.mock('./components/ChatBox', () => ({
-  default: function MockChatBox({
-    workspace,
-    onWorkspaceChange,
-  }: {
-    workspace: string;
-    onWorkspaceChange: (next: 'create' | 'canvas') => void;
-  }) {
-    return createElement(
-      'div',
-      { 'data-testid': 'chat-box', 'data-workspace': workspace },
-      createElement('button', { onClick: () => onWorkspaceChange(workspace === 'create' ? 'canvas' : 'create') }, '切换'),
-    );
+  default: function MockChatBox({ workspace }: { workspace: string }) {
+    return createElement('div', { 'data-testid': 'chat-box', 'data-workspace': workspace });
   },
 }));
 
@@ -95,13 +85,19 @@ describe('Home 顶栏', () => {
 });
 
 describe('Home 主语与切换', () => {
-  it('标语为两行「让想象有画面」「让表达有回响」，无句号', async () => {
+  it('标语为单行「让想象有画面，让表达有回响」，无句号', async () => {
     await renderHome();
 
     const title = mountNode.querySelector('h1');
-    expect(title?.textContent).toBe('让想象有画面让表达有回响');
-    expect(title?.querySelectorAll('br')).toHaveLength(1);
+    expect(title?.textContent).toBe('让想象有画面，让表达有回响');
     expect(title?.textContent).not.toMatch(/[。.]$/);
+  });
+
+  it('主切换只有「生成」「画布」两项', async () => {
+    await renderHome();
+
+    const items = [...mountNode.querySelectorAll('[aria-label="工作方式"] button')].map((b) => b.textContent);
+    expect(items).toEqual(['生成', '画布']);
   });
 
   it('只在「生成」下展示案例，「画布」下换成新建与最近项目位', async () => {
@@ -111,9 +107,11 @@ describe('Home 主语与切换', () => {
     expect(mountNode.querySelector('[data-testid="card-gallery"]')).not.toBeNull();
     expect(mountNode.querySelector('[data-testid="canvas-entry"]')).toBeNull();
 
-    const toggle = [...mountNode.querySelectorAll('button')].find((b) => b.textContent === '切换');
+    const canvasButton = [...mountNode.querySelectorAll<HTMLButtonElement>('[aria-label="工作方式"] button')].find(
+      (b) => b.textContent === '画布',
+    );
     await act(async () => {
-      toggle?.click();
+      canvasButton?.click();
     });
 
     expect(mountNode.querySelector('[data-testid="chat-box"]')?.getAttribute('data-workspace')).toBe('canvas');

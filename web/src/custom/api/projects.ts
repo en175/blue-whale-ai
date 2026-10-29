@@ -6,6 +6,13 @@ export interface ProjectPreview {
   type: 'image' | 'video';
 }
 
+export interface ProjectPreview {
+  url: string;
+  type: 'image' | 'video';
+}
+
+export type ProjectSource = 'dialog' | 'canvas';
+
 export interface ProjectRecord {
   id: number | string;
   name: string;
@@ -23,11 +30,20 @@ export interface ProjectPageData {
   current: number;
 }
 
+export interface ProjectListQuery {
+  page?: number;
+  size?: number;
+  limit?: number;
+  keyword?: string;
+  source?: ProjectSource;
+}
+
 export const PROJECT_PAGE_SIZE = 30;
 
 export const projectKeys = {
   all: ['projects'] as const,
   pages: (size: number) => [...projectKeys.all, 'pages', size] as const,
+  list: (query: ProjectListQuery) => [...projectKeys.all, 'list', query] as const,
 };
 
 let pending: Promise<ProjectRecord[]> | null = null;
@@ -41,9 +57,27 @@ export function fetchProjects() {
   return pending;
 }
 
+function projectQuery(params: ProjectListQuery) {
+  const search = new URLSearchParams();
+  if (params.page != null) search.set('page', String(params.page));
+  if (params.size != null) search.set('size', String(params.size));
+  if (params.limit != null) search.set('limit', String(params.limit));
+  if (params.keyword) search.set('keyword', params.keyword);
+  if (params.source) search.set('source', params.source);
+  return search;
+}
+
 export function fetchProjectPage(page: number, size = PROJECT_PAGE_SIZE) {
-  const params = new URLSearchParams({ page: String(page), size: String(size) });
+  const params = projectQuery({ page, size });
   return apiRequest<ProjectPageData>(`/api/projects?${params.toString()}`, { silent: true });
+}
+
+export function fetchProjectListQuery(params: ProjectListQuery) {
+  return apiRequest<ProjectPageData>(`/api/projects?${projectQuery(params).toString()}`, { silent: true });
+}
+
+export function fetchRecentProjects(limit = 3) {
+  return apiRequest<ProjectPageData>(`/api/projects?${projectQuery({ limit }).toString()}`, { silent: true });
 }
 
 export function touchProjectLastOpened(id: ProjectRecord['id']): Promise<void> {
@@ -70,11 +104,11 @@ export function projectPageQueryOptions(size = PROJECT_PAGE_SIZE) {
   });
 }
 
-export function createProject(name: string, init?: ApiRequestInit) {
+export function createProject(name: string, init?: ApiRequestInit, source?: ProjectSource) {
   return apiRequest<ProjectRecord>('/api/projects', {
     ...init,
     method: 'POST',
-    body: JSON.stringify({ name }),
+    body: JSON.stringify(source ? { name, source } : { name }),
   });
 }
 

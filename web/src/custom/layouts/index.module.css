@@ -3,10 +3,16 @@
   height: 100%;
   display: flex;
   overflow: hidden;
+  background: #000;
+}
+
+.homeLayout {
+  --home-sidebar-width: 72px;
 }
 
 .layoutWideSidebar {
-  --sidebar-width: 240px;
+  --sidebar-width: 250px;
+  --home-sidebar-width: 250px;
 }
 
 .main {

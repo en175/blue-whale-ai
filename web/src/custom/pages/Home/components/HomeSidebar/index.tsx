@@ -1,11 +1,18 @@
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Home, FolderOpen, Image, PanelLeft, Search } from 'lucide-react';
+import { Home, FolderOpen, Image, LayoutGrid, PanelLeft, Search } from 'lucide-react';
 import { useAppStore } from '@/custom/stores';
 import { getCurrentUser, subscribe } from '@/shared/utils/auth';
 import LoginModal from '@/custom/components/LoginModal';
 import { showToast } from '@/custom/components/Toast';
-import { MOCK_CANVAS_PROJECTS, MOCK_GENERATE_PROJECTS, type MockHistoryProject } from './mockHistoryProjects';
+import {
+  deleteProject,
+  fetchProjectListQuery,
+  renameProject,
+  type ProjectRecord,
+  type ProjectSource,
+} from '@/custom/api/projects';
+import { resolveMediaSrc } from '@/shared/utils/remoteImageCors';
 import styles from './index.module.css';
 
 const menuItems = [
@@ -16,17 +23,20 @@ const menuItems = [
 
 const PAGE_SIZE = 6;
 
-type HistoryKind = 'generate' | 'canvas';
-
-const GROUPS: { key: HistoryKind; label: string }[] = [
-  { key: 'generate', label: '生成' },
+const GROUPS: { key: ProjectSource; label: string }[] = [
+  { key: 'dialog', label: '生成' },
   { key: 'canvas', label: '画布' },
 ];
 
-const MOCK_SOURCE: Record<HistoryKind, MockHistoryProject[]> = {
-  generate: MOCK_GENERATE_PROJECTS,
-  canvas: MOCK_CANVAS_PROJECTS,
-};
+interface GroupState {
+  records: ProjectRecord[];
+  page: number;
+  total: number;
+  loading: boolean;
+}
+
+const EMPTY_GROUP: GroupState = { records: [], page: 0, total: 0, loading: false };
+const EMPTY: Record<ProjectSource, GroupState> = { dialog: EMPTY_GROUP, canvas: EMPTY_GROUP };
 
 export default function HomeSidebar({
   expanded,
@@ -41,16 +51,53 @@ export default function HomeSidebar({
   const user = useSyncExternalStore(subscribe, getCurrentUser);
   const [showLogin, setShowLogin] = useState(false);
   const [keyword, setKeyword] = useState('');
-  const [pages, setPages] = useState<Record<HistoryKind, number>>({ generate: 1, canvas: 1 });
-  const [deleted, setDeleted] = useState<Set<string>>(new Set());
-  const [renamed, setRenamed] = useState<Record<string, string>>({});
+  const [groups, setGroups] = useState<Record<ProjectSource, GroupState>>(EMPTY);
   const [menuOpen, setMenuOpen] = useState<string | null>(null);
   const pendingItem = useRef<(typeof menuItems)[0] | null>(null);
+  const requestRef = useRef(0);
 
   useEffect(() => {
     const matched = menuItems.find((item) => item.path === location.pathname);
     if (matched) setActiveMenu(matched.key);
   }, [location.pathname, setActiveMenu]);
+
+  const load = (source: ProjectSource, page: number, search: string) =>
+    fetchProjectListQuery({ source, page, size: PAGE_SIZE, keyword: search || undefined });
+
+  useEffect(() => {
+    if (!user || !expanded) return;
+    const ticket = ++requestRef.current;
+    const search = keyword.trim();
+    setGroups({ dialog: { ...EMPTY_GROUP, loading: true }, canvas: { ...EMPTY_GROUP, loading: true } });
+    Promise.all(GROUPS.map((group) => load(group.key, 1, search).catch(() => null))).then((pages) => {
+      if (ticket !== requestRef.current) return;
+      setGroups({
+        dialog: pages[0] ? { records: pages[0].records, page: 1, total: pages[0].total, loading: false } : EMPTY_GROUP,
+        canvas: pages[1] ? { records: pages[1].records, page: 1, total: pages[1].total, loading: false } : EMPTY_GROUP,
+      });
+    });
+  }, [keyword, user, expanded]);
+
+  const loadMore = async (source: ProjectSource) => {
+    const group = groups[source];
+    if (group.loading) return;
+    setGroups((prev) => ({ ...prev, [source]: { ...prev[source], loading: true } }));
+    const nextPage = group.page + 1;
+    const data = await load(source, nextPage, keyword.trim()).catch(() => null);
+    setGroups((prev) =>
+      data
+        ? {
+            ...prev,
+            [source]: {
+              records: [...prev[source].records, ...data.records],
+              page: nextPage,
+              total: data.total,
+              loading: false,
+            },
+          }
+        : { ...prev, [source]: { ...prev[source], loading: false } },
+    );
+  };
 
   const handleClick = (item: (typeof menuItems)[0]) => {
     if (item.key !== 'home' && !user) {
@@ -74,43 +121,57 @@ export default function HomeSidebar({
 
   const handleKeyword = (value: string) => {
     setKeyword(value);
-    setPages({ generate: 1, canvas: 1 });
     setMenuOpen(null);
   };
 
-  const query = keyword.trim().toLowerCase();
-  const groups = useMemo(() => {
-    const build = (kind: HistoryKind) =>
-      MOCK_SOURCE[kind]
-        .filter((item) => !deleted.has(item.id))
-        .map((item) => ({ id: item.id, name: renamed[item.id] ?? item.name }))
-        .filter((item) => !query || item.name.toLowerCase().includes(query));
-    return { generate: build('generate'), canvas: build('canvas') };
-  }, [deleted, renamed, query]);
+  const replaceRecord = (record: ProjectRecord, next: Partial<ProjectRecord>) => {
+    setGroups((prev) => {
+      const patch = (source: ProjectSource) => ({
+        ...prev[source],
+        records: prev[source].records.map((item) =>
+          String(item.id) === String(record.id) ? { ...item, ...next } : item,
+        ),
+      });
+      return { dialog: patch('dialog'), canvas: patch('canvas') };
+    });
+  };
 
-  const handleRename = (record: { id: string; name: string }) => {
+  const removeRecord = (record: ProjectRecord) => {
+    setGroups((prev) => {
+      const patch = (source: ProjectSource) => ({
+        ...prev[source],
+        records: prev[source].records.filter((item) => String(item.id) !== String(record.id)),
+        total: Math.max(0, prev[source].total - 1),
+      });
+      return { dialog: patch('dialog'), canvas: patch('canvas') };
+    });
+  };
+
+  const handleRename = async (record: ProjectRecord) => {
     const next = window.prompt('重命名项目', record.name)?.trim();
     setMenuOpen(null);
     if (!next || next === record.name) return;
-    setRenamed((prev) => ({ ...prev, [record.id]: next }));
+    try {
+      await renameProject(record.id, next);
+      replaceRecord(record, { name: next });
+    } catch {
+      showToast('warn', '重命名失败，请稍后再试');
+    }
   };
 
-  const handleDelete = (record: { id: string; name: string }) => {
+  const handleDelete = async (record: ProjectRecord) => {
     setMenuOpen(null);
     if (!window.confirm(`确认删除「${record.name}」？删除后无法找回。`)) return;
-    setDeleted((prev) => new Set(prev).add(record.id));
-  };
-
-  const handleOpen = (record: { id: string }) => {
-    if (record.id.startsWith('mock-')) {
-      showToast('warn', '示例数据，联调后可打开项目');
-      return;
+    try {
+      await deleteProject(record.id);
+      removeRecord(record);
+    } catch {
+      showToast('warn', '删除失败，请稍后再试');
     }
-    navigate(`/canvas?project=${record.id}`);
   };
 
-  const searching = query.length > 0;
-  const hasHistory = GROUPS.some((group) => groups[group.key].length > 0);
+  const searching = keyword.trim().length > 0;
+  const hasHistory = GROUPS.some((group) => groups[group.key].records.length > 0);
 
   return (
     <aside className={`${styles.sidebar} ${styles.onGlass} ${expanded ? styles.expanded : ''}`}>
@@ -163,52 +224,64 @@ export default function HomeSidebar({
               <p className={styles.historyEmpty}>没有匹配的项目</p>
             ) : (
               GROUPS.map((group) => {
-                const items = groups[group.key];
-                const visible = items.slice(0, pages[group.key] * PAGE_SIZE);
+                const items = groups[group.key].records;
                 return (
                   <section key={group.key} className={styles.historyGroup} aria-label={group.label}>
                     <h3 className={styles.historyHeading}>{group.label}</h3>
-                    {visible.length === 0 ? (
-                      <p className={styles.historyEmpty}>暂无{group.label}</p>
+                    {items.length === 0 ? (
+                      <p className={styles.historyEmpty}>
+                        {groups[group.key].loading ? '加载中…' : `暂无${group.label}`}
+                      </p>
                     ) : (
                       <ul className={styles.historyItems}>
-                        {visible.map((record) => (
-                          <li key={record.id} className={styles.historyItem}>
-                            <button
-                              className={styles.historyRow}
-                              title={record.name}
-                              onClick={() => handleOpen(record)}
-                            >
-                              <span className={styles.historyName}>{record.name}</span>
-                            </button>
-                            <button
-                              className={styles.itemMore}
-                              onClick={() => setMenuOpen(menuOpen === record.id ? null : record.id)}
-                              aria-label={`${record.name} 的更多操作`}
-                              aria-haspopup="menu"
-                              aria-expanded={menuOpen === record.id}
-                            >
-                              ···
-                            </button>
-                            {menuOpen === record.id && (
-                              <div className={styles.itemMenu} role="menu">
-                                <button role="menuitem" onClick={() => handleRename(record)}>
-                                  重命名
-                                </button>
-                                <button role="menuitem" onClick={() => handleDelete(record)}>
-                                  删除
-                                </button>
-                              </div>
-                            )}
-                          </li>
-                        ))}
+                        {items.map((record) => {
+                          const cover = record.previews?.[0];
+                          return (
+                            <li key={record.id} className={styles.historyItem}>
+                              <button
+                                className={styles.historyRow}
+                                title={record.name}
+                                onClick={() => navigate(`/canvas?project=${record.id}`)}
+                              >
+                                <span className={styles.historyThumb}>
+                                  {cover ? (
+                                    cover.type === 'video' ? (
+                                      <video src={resolveMediaSrc(cover.url)} muted playsInline preload="metadata" />
+                                    ) : (
+                                      <img src={resolveMediaSrc(cover.url)} alt="" loading="lazy" />
+                                    )
+                                  ) : (
+                                    <LayoutGrid size={16} strokeWidth={1.8} aria-hidden="true" />
+                                  )}
+                                </span>
+                                <span className={styles.historyName}>{record.name}</span>
+                              </button>
+                              <button
+                                className={styles.itemMore}
+                                onClick={() => setMenuOpen(menuOpen === String(record.id) ? null : String(record.id))}
+                                aria-label={`${record.name} 的更多操作`}
+                                aria-haspopup="menu"
+                                aria-expanded={menuOpen === String(record.id)}
+                              >
+                                ···
+                              </button>
+                              {menuOpen === String(record.id) && (
+                                <div className={styles.itemMenu} role="menu">
+                                  <button role="menuitem" onClick={() => handleRename(record)}>
+                                    重命名
+                                  </button>
+                                  <button role="menuitem" onClick={() => handleDelete(record)}>
+                                    删除
+                                  </button>
+                                </div>
+                              )}
+                            </li>
+                          );
+                        })}
                       </ul>
                     )}
-                    {items.length > visible.length && (
-                      <button
-                        className={styles.historyMore}
-                        onClick={() => setPages((prev) => ({ ...prev, [group.key]: prev[group.key] + 1 }))}
-                      >
+                    {groups[group.key].records.length < groups[group.key].total && (
+                      <button className={styles.historyMore} onClick={() => loadMore(group.key)}>
                         更多
                       </button>
                     )}

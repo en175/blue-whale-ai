@@ -68,29 +68,46 @@ afterEach(async () => {
   vi.clearAllMocks();
 });
 
+function filterButton(label: string): HTMLButtonElement | undefined {
+  return [...mountNode.querySelectorAll<HTMLButtonElement>('[aria-label="案例分类"] button')].find(
+    (b) => b.textContent === label,
+  );
+}
+
 describe('CardGallery', () => {
-  it('图片与视频按场景混排在同一条网格，不再分层', async () => {
+  it('按场景筛选，默认选第一个场景', async () => {
     await mountGallery();
 
-    const kinds = cards().map((card) => card.getAttribute('data-media-kind'));
-    expect(kinds).toEqual(['image', 'video']);
-    expect(mountNode.querySelectorAll('[data-testid="gallery-card-grid"]')).toHaveLength(1);
-    expect([...mountNode.querySelectorAll('button')].some((b) => b.textContent?.includes('图片'))).toBe(false);
+    const filters = [...mountNode.querySelectorAll('[aria-label="案例分类"] button')];
+    expect(filters.map((b) => b.textContent)).toEqual(['商品展示', '人物种草']);
+    expect(filters[0].getAttribute('aria-pressed')).toBe('true');
+    expect(cards().map((card) => card.getAttribute('data-media-kind'))).toEqual(['image']);
   });
 
-  it('两类卡都显示用途标签', async () => {
+  it('切换场景后只展示该场景案例', async () => {
     await mountGallery();
 
-    const labels = cards().map((card) => card.textContent);
-    expect(labels[0]).toContain('商品展示');
-    expect(labels[1]).toContain('人物种草');
+    await act(async () => {
+      filterButton('人物种草')?.click();
+    });
+    expect(cards().map((card) => card.getAttribute('data-media-kind'))).toEqual(['video']);
+  });
+
+  it('两类卡都带用途标签', async () => {
+    await mountGallery();
+    expect(cards()[0].textContent).toContain('商品展示');
+
+    await act(async () => {
+      filterButton('人物种草')?.click();
+    });
+    expect(cards()[0].textContent).toContain('人物种草');
   });
 
   it('过滤「测试20260828144946」', async () => {
     await mountGallery();
 
     expect(mountNode.textContent).not.toContain('测试20260828144946');
-    expect(cards()).toHaveLength(2);
+    expect(cards()).toHaveLength(1);
   });
 
   it('点击只把正文与模式回填，不提交', async () => {
@@ -102,19 +119,15 @@ describe('CardGallery', () => {
     });
     expect(onCardClick).toHaveBeenCalledTimes(1);
     expect(onCardClick).toHaveBeenCalledWith('填写商品正文', 'image');
-
-    await act(async () => {
-      cards()[1].click();
-    });
-    expect(onCardClick).toHaveBeenCalledWith('种草短片', 'video');
-    expect(api.fetchTemplatePage).toHaveBeenCalledTimes(2);
   });
 
-  it('只有视频卡展示播放 UI', async () => {
+  it('视频场景卡片带类型角标', async () => {
     await mountGallery();
 
-    const [image, video] = cards();
-    expect(image.querySelector('[data-testid="gallery-play-overlay"]')).toBeNull();
-    expect(video.querySelector('[data-testid="gallery-play-overlay"]')).toBeTruthy();
+    await act(async () => {
+      filterButton('人物种草')?.click();
+    });
+    expect(cards()[0].querySelector('svg')).not.toBeNull();
+    expect(cards()[0].getAttribute('data-media-kind')).toBe('video');
   });
 });
