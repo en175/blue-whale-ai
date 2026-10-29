@@ -3,17 +3,17 @@ import { describe, expect, it } from "vitest";
 
 const migrationSql = readFileSync(
   new URL(
-    "../../../prisma/migrations/20261029150000_ikrgon_project_entry_kind/migration.sql",
+    "../../../prisma/migrations/20261029150000_ikrgon_project_source/migration.sql",
     import.meta.url,
   ),
   "utf8",
 );
 const standaloneSql = readFileSync(
-  new URL("../../../prisma/schema/086_ikrgon_project_entry_kind.sql", import.meta.url),
+  new URL("../../../prisma/schema/086_ikrgon_project_source.sql", import.meta.url),
   "utf8",
 );
 const snapshotSql = readFileSync(
-  new URL("../../../../docs/sql/20261029_ikrgon_project_entry_kind.sql", import.meta.url),
+  new URL("../../../../docs/sql/20261029_ikrgon_project_source.sql", import.meta.url),
   "utf8",
 );
 const schemaPrisma = readFileSync(
@@ -21,16 +21,16 @@ const schemaPrisma = readFileSync(
   "utf8",
 );
 
-describe("IKRGON 三轨迁移（project entry_kind）", () => {
+describe("IKRGON 三轨迁移（project source）", () => {
   it("三处 SQL 逐字一致", () => {
     expect(migrationSql).toBe(standaloneSql);
     expect(migrationSql).toBe(snapshotSql);
   });
 
-  it("新增 entry_kind 列，默认 canvas", () => {
+  it("新增 source 列，默认 canvas", () => {
     for (const sql of [migrationSql, standaloneSql, snapshotSql]) {
       expect(sql).toContain(
-        "ADD COLUMN `entry_kind` VARCHAR(16) NOT NULL DEFAULT 'canvas'",
+        "ADD COLUMN `source` VARCHAR(16) NOT NULL DEFAULT 'canvas'",
       );
     }
   });
@@ -41,7 +41,7 @@ describe("IKRGON 三轨迁移（project entry_kind）", () => {
 
   it("schema.prisma project model 同步该列", () => {
     expect(schemaPrisma).toMatch(
-      /^\s*entry_kind\s+String\s+@default\("canvas"\) @db\.VarChar\(16\)$/m,
+      /^\s*source\s+String\s+@default\("canvas"\) @db\.VarChar\(16\)$/m,
     );
   });
 });

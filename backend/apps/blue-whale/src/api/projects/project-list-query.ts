@@ -1,18 +1,18 @@
 export const PROJECT_LIST_LIMIT_MAX = 20;
 export const PROJECT_LIST_KEYWORD_MAX = 64;
 
-export type ProjectEntryKind = "dialog" | "canvas";
+export type ProjectSource = "dialog" | "canvas";
 
 export type ProjectListQuery =
-  | { kind: "all"; keyword?: string; entryKind?: ProjectEntryKind }
+  | { kind: "all"; keyword?: string; source?: ProjectSource }
   | {
       kind: "page";
       page: number;
       size: number;
       keyword?: string;
-      entryKind?: ProjectEntryKind;
+      source?: ProjectSource;
     }
-  | { kind: "limit"; limit: number; keyword?: string; entryKind?: ProjectEntryKind }
+  | { kind: "limit"; limit: number; keyword?: string; source?: ProjectSource }
   | { kind: "invalid"; reason: string };
 
 export function resolveProjectListQuery(
@@ -23,12 +23,12 @@ export function resolveProjectListQuery(
     return { kind: "invalid", reason: `keyword 长度不得超过 ${PROJECT_LIST_KEYWORD_MAX}` };
   }
   const keywordOption = keyword ? { keyword } : {};
-  const rawEntryKind = (query.kind ?? "").trim();
-  if (rawEntryKind && rawEntryKind !== "dialog" && rawEntryKind !== "canvas") {
-    return { kind: "invalid", reason: "kind 仅支持 dialog/canvas" };
+  const rawSource = (query.source ?? "").trim();
+  if (rawSource && rawSource !== "dialog" && rawSource !== "canvas") {
+    return { kind: "invalid", reason: "source 仅支持 dialog/canvas" };
   }
-  const entryKindOption = rawEntryKind
-    ? { entryKind: rawEntryKind as ProjectEntryKind }
+  const sourceOption = rawSource
+    ? { source: rawSource as ProjectSource }
     : {};
   const hasPage = Object.hasOwn(query, "page");
   const hasSize = Object.hasOwn(query, "size");
@@ -44,14 +44,14 @@ export function resolveProjectListQuery(
     if (!Number.isInteger(limit) || limit < 1 || limit > PROJECT_LIST_LIMIT_MAX) {
       return { kind: "invalid", reason: `limit 必须在 1-${PROJECT_LIST_LIMIT_MAX} 之间` };
     }
-    return { kind: "limit", limit, ...keywordOption, ...entryKindOption };
+    return { kind: "limit", limit, ...keywordOption, ...sourceOption };
   }
-  if (!hasPage) return { kind: "all", ...keywordOption, ...entryKindOption };
+  if (!hasPage) return { kind: "all", ...keywordOption, ...sourceOption };
   return {
     kind: "page",
     page: Math.max(1, Number(query.page) || 1),
     size: Math.max(1, Number(query.size) || 1),
     ...keywordOption,
-    ...entryKindOption,
+    ...sourceOption,
   };
 }

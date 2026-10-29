@@ -82,18 +82,18 @@ describe("resolveProjectListQuery limit / keyword (IKRE7U)", () => {
   });
 });
 
-describe("resolveProjectListQuery kind (IKRGON)", () => {
+describe("resolveProjectListQuery source (IKRGON)", () => {
   it("carries dialog/canvas and rejects unknown values", () => {
-    expect(resolveProjectListQuery({ kind: "dialog" })).toEqual({
+    expect(resolveProjectListQuery({ source: "dialog" })).toEqual({
       kind: "all",
-      entryKind: "dialog",
+      source: "dialog",
     });
-    expect(resolveProjectListQuery({ kind: "canvas", page: "2", size: "6" })).toEqual({
+    expect(resolveProjectListQuery({ source: "canvas", page: "2", size: "6" })).toEqual({
       kind: "page",
       page: 2,
       size: 6,
-      entryKind: "canvas",
+      source: "canvas",
     });
-    expect(resolveProjectListQuery({ kind: "other" })).toMatchObject({ kind: "invalid" });
+    expect(resolveProjectListQuery({ source: "other" })).toMatchObject({ kind: "invalid" });
   });
 });

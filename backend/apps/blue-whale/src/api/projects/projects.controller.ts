@@ -40,10 +40,10 @@ export class ProjectsController {
       return fail(FAILURE_CODE, resolved.reason);
     }
     const options =
-      resolved.keyword || resolved.entryKind
+      resolved.keyword || resolved.source
         ? {
             ...(resolved.keyword ? { keyword: resolved.keyword } : {}),
-            ...(resolved.entryKind ? { kind: resolved.entryKind } : {}),
+            ...(resolved.source ? { source: resolved.source } : {}),
           }
         : undefined;
     if (resolved.kind === "all") {
@@ -67,14 +67,14 @@ export class ProjectsController {
   @Post()
   async create(
     @CurrentUser() user: AuthenticatedUser,
-    @Body() body: { name?: unknown; entry_kind?: unknown },
+    @Body() body: { name?: unknown; source?: unknown },
   ) {
     const name = typeof body.name === "string" ? body.name.trim() : "";
-    const rawKind = body.entry_kind;
-    if (rawKind !== undefined && rawKind !== "dialog" && rawKind !== "canvas") {
-      return fail(FAILURE_CODE, "entry_kind 仅支持 dialog/canvas");
+    const rawSource = body.source;
+    if (rawSource !== undefined && rawSource !== "dialog" && rawSource !== "canvas") {
+      return fail(FAILURE_CODE, "source 仅支持 dialog/canvas");
     }
-    return ok(await this.project.create(user.userId, name, rawKind));
+    return ok(await this.project.create(user.userId, name, rawSource));
   }
 
   @Post("batch-delete")

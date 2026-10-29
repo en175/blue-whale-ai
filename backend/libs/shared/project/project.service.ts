@@ -50,9 +50,9 @@ export class ProjectService {
   create(
     ownerId: string,
     name: string,
-    entryKind?: Parameters<ReturnType<typeof createProjectRepo>["create"]>[2],
+    source?: Parameters<ReturnType<typeof createProjectRepo>["create"]>[2],
   ) {
-    return this.repo.create(ownerId, name, entryKind);
+    return this.repo.create(ownerId, name, source);
   }
 
   rename(id: string, ownerId: string, name: string) {
