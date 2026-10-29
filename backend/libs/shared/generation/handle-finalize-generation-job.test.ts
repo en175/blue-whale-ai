@@ -5,7 +5,7 @@ import {
   handleFinalizeGenerationJobCreate,
   handleFinalizeGenerationJobQuote,
 } from "./handle-finalize-generation-job.js";
-import { quoteRevisionOf } from "./handle-quote-generation-job.js";
+import { quoteRevisionOf, videoQuoteRevisionInput } from "./handle-quote-generation-job.js";
 import type { FinalizeSourceJob } from "@lib/shared/persistence/index.js";
 
 
@@ -110,7 +110,7 @@ function confirmationOf(
       catalogVersion: quoteResult.catalogVersion,
       capabilityVersion: capability.version as number | undefined,
       tier: quoteResult.tier,
-      quoteInput: derived,
+      quoteInput: videoQuoteRevisionInput(derived),
     }),
   };
 }

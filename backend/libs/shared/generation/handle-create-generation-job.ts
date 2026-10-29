@@ -104,7 +104,7 @@ import {
   DURATION_BASIS_KEY,
   OMNI_TASK_TYPE_ALLOWED_KEY,
 } from "@lib/shared/billing/billing-specs.js";
-import { quoteRevisionOf } from "./handle-quote-generation-job.js";
+import { quoteRevisionOf, videoQuoteRevisionInput } from "./handle-quote-generation-job.js";
 
 import {
   channelOf,
@@ -2164,7 +2164,7 @@ export async function handleCreateGenerationJob(
             catalogVersion: quote.catalogVersion,
             capabilityVersion: capability?.version,
             tier: quote.tier,
-            quoteInput,
+            quoteInput: type === "video" ? videoQuoteRevisionInput(quoteInput) : quoteInput,
           })
         : null;
     if (
