@@ -356,15 +356,17 @@ describe("SessionService 会话数量与同浏览器替换（PRD 7.5）", () => 
     return token;
   }
 
-  it("最多 3 个会话：第 4 个登录淘汰最早登录的", async () => {
+  it("最多 4 个会话：第 5 个登录淘汰最早登录的", async () => {
     const first = await make("t1");
     await make("t2");
     await make("t3");
     await make("t4");
+    await make("t5");
 
     expect(await service.resolveSession(first)).toBeNull();
     expect(await service.resolveSession("t2")).not.toBeNull();
     expect(await service.resolveSession("t4")).not.toBeNull();
+    expect(await service.resolveSession("t5")).not.toBeNull();
     expect(redis.store.has(`user_session:8:${hash(first)}`)).toBe(false);
   });
 
@@ -373,6 +375,7 @@ describe("SessionService 会话数量与同浏览器替换（PRD 7.5）", () => 
     await make("t2");
     await make("t3");
     await make("t4");
+    await make("t5");
 
     expect(await service.wasEvicted(first)).toBe(true);
     expect(await service.wasEvicted("t2")).toBe(false);
@@ -394,6 +397,7 @@ describe("SessionService 会话数量与同浏览器替换（PRD 7.5）", () => 
     const b = await make("b", "browser-b");
     await make("c", "browser-c");
     await make("d", "browser-d");
+    await make("e", "browser-e");
 
     expect(await service.resolveSession(a)).toBeNull();
     expect(await service.resolveSession(b)).not.toBeNull();
@@ -406,6 +410,7 @@ describe("SessionService 会话数量与同浏览器替换（PRD 7.5）", () => 
     const keep = await make("n1");
     await make("n2");
     await make("n3");
+    await make("n4");
 
     expect(await service.resolveSession(legacy)).toBeNull();
     expect(await service.wasEvicted(legacy)).toBe(true);
