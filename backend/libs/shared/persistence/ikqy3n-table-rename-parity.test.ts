@@ -90,6 +90,10 @@ const SUPERSEDED_BY_IKRGTJ = new Set(["shared_assets", "material_groups", "mater
 
 const SUPERSEDED_INDEX_RENAMES = new Set(["uk_material_assets_material", "idx_material_assets_poll", "idx_material_assets_group", "uk_media_tool_pricing__tool_type"]);
 
+const SUPERSEDED_BY_SKILL_DOMAIN = new Set(["catalog_creative_skills", "catalog_creative_skill_versions"]);
+
+const SUPERSEDED_INDEX_RENAMES_BY_SKILL_DOMAIN = new Set(["uk_catalog_creative_skills__creative_skill_id", "uk_catalog_creative_skill_versions__creative_skill_version_id", "uk_catalog_creative_skill_versions__semver"]);
+
 const INDEX_RENAMES = new Map([
   ["uk_media_tool_pricing__tool_type", "uk_catalog_media_tools__tool_type"],
   ["uk_user_skill", "uk_user_skills__user_skill"],
@@ -129,11 +133,13 @@ describe("IKQY3N 三轨迁移（目录/素材/技能与模板表改名）", () =
   it("Prisma 模型只剩新表名（被后续工单改名/退役的表除外）", () => {
     for (const [from, to] of RENAMED) {
       if (SUPERSEDED_BY_IKRGTJ.has(from)) continue;
+      if (SUPERSEDED_BY_SKILL_DOMAIN.has(to)) continue;
       expect(schemaPrisma).toContain("model " + to + " {");
       expect(schemaPrisma).not.toContain("model " + from + " {");
     }
     for (const [from, to] of INDEX_RENAMES) {
       if (SUPERSEDED_INDEX_RENAMES.has(from)) continue;
+      if (SUPERSEDED_INDEX_RENAMES_BY_SKILL_DOMAIN.has(to)) continue;
       expect(schemaPrisma).not.toContain('"' + from + '"');
       expect(schemaPrisma).toContain('"' + to + '"');
     }
@@ -142,11 +148,13 @@ describe("IKQY3N 三轨迁移（目录/素材/技能与模板表改名）", () =
   it("Java 测试 schema 同步新表名（被后续工单改名/退役的表除外）", () => {
     for (const [from, to] of RENAMED) {
       if (SUPERSEDED_BY_IKRGTJ.has(from)) continue;
+      if (SUPERSEDED_BY_SKILL_DOMAIN.has(to)) continue;
       expect(javaSchemaSql).not.toContain("CREATE TABLE `" + from + "`");
       expect(javaSchemaSql).toContain("CREATE TABLE `" + to + "`");
     }
     for (const [from, to] of INDEX_RENAMES) {
       if (SUPERSEDED_INDEX_RENAMES.has(from)) continue;
+      if (SUPERSEDED_INDEX_RENAMES_BY_SKILL_DOMAIN.has(to)) continue;
       expect(javaSchemaSql).not.toContain("`" + from + "`");
       expect(javaSchemaSql).toContain("`" + to + "`");
     }

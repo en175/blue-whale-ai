@@ -3,11 +3,15 @@ import { useQuery } from '@tanstack/react-query';
 import { Pencil, Trash2 } from 'lucide-react';
 import {
   adminSkillCategoriesOptions,
+  adminSkillDetailOptions,
   adminSkillsOptions,
   assignAdminSkillsCategory,
   renameAdminSkillCategory,
   deleteAdminSkillCategory,
+  setAdminSkillActive,
+  updateAdminSkill,
   type AdminSkill,
+  type AdminSkillDetail,
 } from '@/admin/api/adminSkills';
 import { remoteImageCrossOrigin, resolveMediaSrc } from '@/shared/utils/remoteImageCors';
 import { isApiError } from '@/shared/api/http';
@@ -42,6 +46,8 @@ export default function SkillManage() {
   const [bulkNew, setBulkNew] = useState('');
   const [renameTarget, setRenameTarget] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+  const [editTarget, setEditTarget] = useState<AdminSkill | null>(null);
+  const [onlyMissingContent, setOnlyMissingContent] = useState(false);
 
   const skillsQuery = useQuery(adminSkillsOptions());
   const catsQuery = useQuery(adminSkillCategoriesOptions());
@@ -79,10 +85,19 @@ export default function SkillManage() {
   );
 
   const filtered = useMemo(() => {
-    if (filter === 'all') return skills;
-    if (filter === FILTER_NONE) return skills.filter((s) => s.category === '');
-    return skills.filter((s) => s.category === filter);
-  }, [skills, filter]);
+    const base =
+      filter === 'all'
+        ? skills
+        : filter === FILTER_NONE
+          ? skills.filter((s) => s.category === '')
+          : skills.filter((s) => s.category === filter);
+    return onlyMissingContent ? base.filter((s) => !s.has_content) : base;
+  }, [onlyMissingContent, skills, filter]);
+
+  const missingContentCount = useMemo(
+    () => skills.filter((s) => !s.has_content).length,
+    [skills],
+  );
 
   const hasUncat = skills.some((s) => s.category === '');
   const allFilteredSelected = filtered.length > 0 && filtered.every((s) => selected.has(s.id));
@@ -204,6 +219,15 @@ export default function SkillManage() {
                 未分类
               </Chip>
             )}
+            {missingContentCount > 0 && (
+              <Chip
+                active={onlyMissingContent}
+                onClick={() => setOnlyMissingContent((v) => !v)}
+              >
+                缺正文
+                <Badge tone="warning">{missingContentCount}</Badge>
+              </Chip>
+            )}
             {cats.map((c) => (
               <span key={c.name} style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
                 <Chip active={filter === c.name} onClick={() => setFilter(c.name)}>
@@ -266,19 +290,21 @@ export default function SkillManage() {
               <th>封面</th>
               <th>名称</th>
               <th>分类</th>
+              <th>状态</th>
+              <th>操作</th>
             </tr>
           </thead>
           <tbody>
             {loading && (
               <tr>
-                <td colSpan={4}>
+                <td colSpan={6}>
                   <Empty message="加载中…" />
                 </td>
               </tr>
             )}
             {!loading && loadError && (
               <tr>
-                <td colSpan={4}>
+                <td colSpan={6}>
                   <Empty
                     message={loadError}
                     extra={<Button onClick={load}>重试</Button>}
@@ -288,7 +314,7 @@ export default function SkillManage() {
             )}
             {!loading && !loadError && filtered.length === 0 && (
               <tr>
-                <td colSpan={4}>
+                <td colSpan={6}>
                   <Empty message="暂无技能" />
                 </td>
               </tr>
@@ -348,12 +374,53 @@ export default function SkillManage() {
                       )}
                     </div>
                   </td>
+                  <td>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <Badge tone={s.is_delete === 0 ? 'neutral' : 'warning'}>
+                        {s.is_delete === 0 ? '在架' : '下架'}
+                      </Badge>
+                      {!s.has_content && <Badge tone="warning" dot>缺正文</Badge>}
+                    </div>
+                  </td>
+                  <td>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        icon={<Pencil size={12} strokeWidth={2} />}
+                        onClick={() => setEditTarget(s)}
+                      >
+                        编辑
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={busy}
+                        onClick={() =>
+                          run(() => setAdminSkillActive(s.id, s.is_delete === 0 ? 1 : 0))
+                        }
+                      >
+                        {s.is_delete === 0 ? '下架' : '上架'}
+                      </Button>
+                    </div>
+                  </td>
                 </tr>
               );
             })}
           </tbody>
         </Table>
       </Card>
+
+      {editTarget && (
+        <EditSkillModal
+          skill={editTarget}
+          onClose={() => setEditTarget(null)}
+          onSaved={() => {
+            setEditTarget(null);
+            load();
+          }}
+        />
+      )}
 
       <RenameModal
         from={renameTarget}
@@ -377,6 +444,155 @@ export default function SkillManage() {
         />
       )}
     </Page>
+  );
+}
+
+function EditSkillModal({
+  skill,
+  onClose,
+  onSaved,
+}: {
+  skill: AdminSkill;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const detailQuery = useQuery(adminSkillDetailOptions(skill.id));
+  const [form, setForm] = useState({
+    name: '',
+    description: '',
+    content: '',
+    category: '',
+    sort_order: '0',
+    cover_url: '',
+  });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    const detail: AdminSkillDetail | undefined = detailQuery.data;
+    if (!detail) return;
+    setForm({
+      name: detail.name,
+      description: detail.description ?? '',
+      content: detail.content ?? '',
+      category: detail.category,
+      sort_order: String(detail.sort_order),
+      cover_url: detail.cover_url ?? '',
+    });
+    setError('');
+  }, [detailQuery.data]);
+
+  const save = async () => {
+    if (saving) return;
+    const name = form.name.trim();
+    if (!name || name.length > 255) {
+      setError('名称须为 1–255 字符');
+      return;
+    }
+    const sortOrder = Number(form.sort_order);
+    if (!Number.isInteger(sortOrder)) {
+      setError('排序须为整数');
+      return;
+    }
+    setSaving(true);
+    setError('');
+    try {
+      await updateAdminSkill(skill.id, {
+        name,
+        description: form.description.trim() || null,
+        content: form.content || null,
+        category: form.category.trim(),
+        sort_order: sortOrder,
+        cover_url: form.cover_url.trim() || null,
+      });
+      onSaved();
+    } catch (e) {
+      setError(isApiError(e) ? e.message : '保存失败，请稍后重试');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal
+      open
+      title={`编辑技能（${skill.name}）`}
+      onClose={onClose}
+      footer={
+        <>
+          <Button onClick={onClose}>取消</Button>
+          <Button variant="primary" disabled={saving || detailQuery.isPending} onClick={save}>
+            {saving ? '保存中…' : '保存'}
+          </Button>
+        </>
+      }
+    >
+      {detailQuery.isError && (
+        <Alert tone="danger">
+          {isApiError(detailQuery.error) ? detailQuery.error.message : '加载技能失败'}
+        </Alert>
+      )}
+      {detailQuery.isPending && <Empty message="加载中…" />}
+      {!detailQuery.isPending && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--admin-space-3)' }}>
+          <label>
+            <div>名称</div>
+            <Input
+              maxLength={255}
+              value={form.name}
+              onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
+              style={{ width: '100%' }}
+            />
+          </label>
+          <label>
+            <div>简介</div>
+            <textarea
+              value={form.description}
+              onChange={(e) => setForm((p) => ({ ...p, description: e.target.value }))}
+              rows={3}
+              style={{ width: '100%', fontFamily: 'inherit', padding: '8px 10px', borderRadius: 'var(--admin-radius-control)', border: '1px solid var(--admin-border)' }}
+            />
+          </label>
+          <label>
+            <div>正文（Markdown）</div>
+            <textarea
+              value={form.content}
+              onChange={(e) => setForm((p) => ({ ...p, content: e.target.value }))}
+              rows={14}
+              style={{ width: '100%', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 12.5, lineHeight: 1.6, padding: '8px 10px', borderRadius: 'var(--admin-radius-control)', border: '1px solid var(--admin-border)' }}
+            />
+          </label>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 120px', gap: 'var(--admin-space-3)' }}>
+            <label>
+              <div>分类</div>
+              <Input
+                maxLength={32}
+                value={form.category}
+                onChange={(e) => setForm((p) => ({ ...p, category: e.target.value }))}
+                style={{ width: '100%' }}
+              />
+            </label>
+            <label>
+              <div>排序</div>
+              <Input
+                value={form.sort_order}
+                onChange={(e) => setForm((p) => ({ ...p, sort_order: e.target.value }))}
+                style={{ width: '100%' }}
+              />
+            </label>
+          </div>
+          <label>
+            <div>封面地址</div>
+            <Input
+              value={form.cover_url}
+              onChange={(e) => setForm((p) => ({ ...p, cover_url: e.target.value }))}
+              style={{ width: '100%' }}
+            />
+          </label>
+          {error && <Alert tone="danger">{error}</Alert>}
+        </div>
+      )}
+    </Modal>
   );
 }
 

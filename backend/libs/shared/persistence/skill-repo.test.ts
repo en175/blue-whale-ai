@@ -12,6 +12,7 @@ describe("SkillRepo — 技能库读路径与激活埋点", () => {
         findMany: vi.fn().mockResolvedValue([
           {
             id: 3n,
+            creative_skill_id: "deep_writing",
             name: "深度写作",
             description: "写作助手",
             cover_url: "https://x/cover.png",
@@ -34,7 +35,7 @@ describe("SkillRepo — 技能库读路径与激活埋点", () => {
         Promise.resolve(
           sql.includes("creative_skill_activation")
             ? [{ creative_skill_id: "deep_writing", usage_count: 5n }]
-            : [{ source_skill_id: 3n, creative_skill_id: "deep_writing" }],
+            : [],
         ),
       ),
     } as unknown as PrismaClient;
@@ -68,6 +69,7 @@ describe("SkillRepo — 技能库读路径与激活埋点", () => {
   function libraryRow(overrides: LibraryRow): LibraryRow {
     return {
       id: 3n,
+      creative_skill_id: "deep_writing",
       name: "深度写作",
       description: "写作助手",
       cover_url: null,
@@ -86,16 +88,13 @@ describe("SkillRepo — 技能库读路径与激活埋点", () => {
 
   function createLibraryPrisma(opts: {
     rows: LibraryRow[];
-    creativeMap?: { source_skill_id: bigint; creative_skill_id: string }[];
     usage?: { creative_skill_id: string; usage_count: bigint }[];
     mine?: { skill_id: bigint }[];
   }) {
     const skillFindMany = vi.fn().mockResolvedValue(opts.rows);
     const queryRawUnsafe = vi.fn().mockImplementation((sql: string) =>
       Promise.resolve(
-        sql.includes("creative_skill_activation")
-          ? (opts.usage ?? [])
-          : (opts.creativeMap ?? []),
+        sql.includes("creative_skill_activation") ? (opts.usage ?? []) : [],
       ),
     );
     const prisma = {
@@ -115,7 +114,7 @@ describe("SkillRepo — 技能库读路径与激活埋点", () => {
     await repo.listLibrary("9", { category: "film", pageNum: 1, pageSize: 10 });
     expect(skillFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { source: "official", is_delete: 0, category: "film" },
+        where: { owner_user_id: 0n, is_delete: 0, category: "film" },
       }),
     );
 
@@ -123,7 +122,7 @@ describe("SkillRepo — 技能库读路径与激活埋点", () => {
     await repo.listLibrary("9", { category: "all", pageNum: 1, pageSize: 10 });
     await repo.listLibrary("9", { pageNum: 1, pageSize: 10 });
     for (const call of skillFindMany.mock.calls) {
-      expect(call[0].where).toEqual({ source: "official", is_delete: 0 });
+      expect(call[0].where).toEqual({ owner_user_id: 0n, is_delete: 0 });
     }
   });
 
@@ -328,18 +327,13 @@ describe("SkillRepo — 技能库读路径与激活埋点", () => {
 
   it("sort=most_used 按去重使用人数降序，人数相同按 sort_order 升序兜底；无埋点记 0", async () => {
     const rows = [
-      libraryRow({ id: 1n, name_zh: "甲", sort_order: 1 }),
-      libraryRow({ id: 2n, name_zh: "乙", sort_order: 2 }),
-      libraryRow({ id: 3n, name_zh: "丙", sort_order: 3 }),
-      libraryRow({ id: 4n, name_zh: "丁", sort_order: 4 }),
+      libraryRow({ id: 1n, creative_skill_id: "skill_a", name_zh: "甲", sort_order: 1 }),
+      libraryRow({ id: 2n, creative_skill_id: "skill_b", name_zh: "乙", sort_order: 2 }),
+      libraryRow({ id: 3n, creative_skill_id: "skill_c", name_zh: "丙", sort_order: 3 }),
+      libraryRow({ id: 4n, creative_skill_id: null, name_zh: "丁", sort_order: 4 }),
     ];
     const { prisma, queryRawUnsafe } = createLibraryPrisma({
       rows,
-      creativeMap: [
-        { source_skill_id: 1n, creative_skill_id: "skill_a" },
-        { source_skill_id: 2n, creative_skill_id: "skill_b" },
-        { source_skill_id: 3n, creative_skill_id: "skill_c" },
-      ],
       usage: [
         { creative_skill_id: "skill_b", usage_count: 5n },
         { creative_skill_id: "skill_c", usage_count: 5n },
@@ -388,12 +382,9 @@ describe("SkillRepo — 技能库读路径与激活埋点", () => {
   });
 
 
-  it("resolveOfficialSkillId 命中官方映射时返回 skill.id 字符串", async () => {
-    const queryRawUnsafe = vi
-      .fn()
-      .mockResolvedValue([{ source_skill_id: 3n }]);
+  it("resolveOfficialSkillId 命中官方技能时返回内部 id 字符串", async () => {
+    const queryRawUnsafe = vi.fn().mockResolvedValue([{ id: 3n }]);
     const prisma = {
-      catalog_skills: { count: vi.fn().mockResolvedValue(1) },
       $queryRawUnsafe: queryRawUnsafe,
     } as unknown as PrismaClient;
 
@@ -401,28 +392,24 @@ describe("SkillRepo — 技能库读路径与激活埋点", () => {
       createSkillRepo(prisma).resolveOfficialSkillId("deep_writing"),
     ).resolves.toBe("3");
     expect(queryRawUnsafe).toHaveBeenCalledWith(
-      expect.stringContaining("asset_domain = 'official'"),
+      expect.stringContaining("owner_user_id = 0"),
       "deep_writing",
     );
   });
 
   it("个人技能 ID 与未知 ID 解析失败（resolve 返回 null，按不存在处理）", async () => {
-    const count = vi.fn();
     const prisma = {
-      catalog_skills: { count },
       $queryRawUnsafe: vi.fn().mockResolvedValue([]),
     } as unknown as PrismaClient;
     const repo = createSkillRepo(prisma);
 
     await expect(repo.resolveOfficialSkillId("my_personal")).resolves.toBeNull();
     await expect(repo.resolveOfficialSkillId("no_such_skill")).resolves.toBeNull();
-    expect(count).not.toHaveBeenCalled();
   });
 
-  it("官方映射指向的 skill 行已逻辑删时 resolve 返回 null", async () => {
+  it("官方技能已下架时 resolve 返回 null", async () => {
     const prisma = {
-      catalog_skills: { count: vi.fn().mockResolvedValue(0) },
-      $queryRawUnsafe: vi.fn().mockResolvedValue([{ source_skill_id: 3n }]),
+      $queryRawUnsafe: vi.fn().mockResolvedValue([]),
     } as unknown as PrismaClient;
 
     await expect(
@@ -431,10 +418,9 @@ describe("SkillRepo — 技能库读路径与激活埋点", () => {
   });
 
   it("findAssetDomainInfo 返回任意域的域与 owner（forced 守卫用）", async () => {
+    const findFirst = vi.fn().mockResolvedValue({ owner_user_id: 42n });
     const prisma = {
-      $queryRawUnsafe: vi
-        .fn()
-        .mockResolvedValue([{ asset_domain: "personal", owner_user_id: 42n }]),
+      catalog_skills: { findFirst },
     } as unknown as PrismaClient;
 
     await expect(
@@ -442,19 +428,12 @@ describe("SkillRepo — 技能库读路径与激活埋点", () => {
     ).resolves.toEqual({ asset_domain: "personal", owner_user_id: "42" });
   });
 
-  it("findAssetDomainInfo 未知 ID / 表缺失 → null（按不可用处理，不泄露存在性）", async () => {
-    const missing = {
-      $queryRawUnsafe: vi.fn().mockResolvedValue([]),
+  it("findAssetDomainInfo 未知 ID → null（按不可用处理，不泄露存在性）", async () => {
+    const prisma = {
+      catalog_skills: { findFirst: vi.fn().mockResolvedValue(null) },
     } as unknown as PrismaClient;
     await expect(
-      createSkillRepo(missing).findAssetDomainInfo("no_such_skill"),
-    ).resolves.toBeNull();
-
-    const broken = {
-      $queryRawUnsafe: vi.fn().mockRejectedValue(new Error("no such table")),
-    } as unknown as PrismaClient;
-    await expect(
-      createSkillRepo(broken).findAssetDomainInfo("deep_writing"),
+      createSkillRepo(prisma).findAssetDomainInfo("no_such_skill"),
     ).resolves.toBeNull();
   });
 
@@ -556,18 +535,22 @@ describe("SkillRepo.checkPersonalNameAvailable / createPersonalSkill 名称校�
     expect(page.records[0]).toMatchObject({ skill_code: "cn01" });
   });
 
-  it("listMine records 含 skill_code（skill 快照存在时）", async () => {
+  it("listMine records 含 skill_code（官方引用存在时）", async () => {
     const prisma = {
       catalog_skills: {
-        findMany: vi.fn().mockResolvedValue([
-          { id: 1n, name: "技能A", description: null, cover_url: null, source: "official", skill_code: "cn01" },
-        ]),
+        findMany: vi.fn().mockImplementation((args: { where?: Record<string, unknown> }) =>
+          Promise.resolve(
+            args?.where?.owner_user_id !== undefined
+              ? []
+              : [
+                  { id: 1n, creative_skill_id: "skill_a", name: "技能A", description: null, cover_url: null, source: "official", skill_code: "cn01" },
+                ],
+          ),
+        ),
       },
       user_skills: {
-        count: vi.fn().mockResolvedValue(1),
         findMany: vi.fn().mockResolvedValue([{ skill_id: 1n }]),
       },
-      $queryRawUnsafe: vi.fn().mockResolvedValue([]),
     } as unknown as PrismaClient;
 
     const page = await createSkillRepo(prisma).listMine("100", { pageNum: 1, pageSize: 50 });
@@ -576,21 +559,18 @@ describe("SkillRepo.checkPersonalNameAvailable / createPersonalSkill 名称校�
 });
 
 describe("SkillRepo — getOfficialContent（IKA64P 直接使用填全文）", () => {
-  it("解析 active version body", async () => {
+  it("解析官方技能正文", async () => {
     const prisma = {
-      catalog_creative_skills: {
-        findFirst: vi.fn().mockResolvedValue({ active_version_id: "v1" }),
-      },
-      catalog_creative_skill_versions: {
-        findFirst: vi.fn().mockResolvedValue({ body: "技能正文" }),
+      catalog_skills: {
+        findFirst: vi.fn().mockResolvedValue({ content: "技能正文" }),
       },
     } as unknown as PrismaClient;
     expect(await createSkillRepo(prisma).getOfficialContent("cs1")).toBe("技能正文");
   });
 
-  it("无 active version 返回 null", async () => {
+  it("无正文返回 null", async () => {
     const prisma = {
-      catalog_creative_skills: { findFirst: vi.fn().mockResolvedValue(null) },
+      catalog_skills: { findFirst: vi.fn().mockResolvedValue(null) },
     } as unknown as PrismaClient;
     expect(await createSkillRepo(prisma).getOfficialContent("cs1")).toBeNull();
   });

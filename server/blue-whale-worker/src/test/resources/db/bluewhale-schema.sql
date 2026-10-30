@@ -229,6 +229,8 @@ CREATE TABLE `project_command_receipts` (
 
 CREATE TABLE `catalog_skills` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
+    `creative_skill_id` VARCHAR(80) NULL,
+    `owner_user_id` BIGINT NOT NULL DEFAULT 0,
     `name` VARCHAR(255) NOT NULL,
     `skill_code` VARCHAR(32) NULL,
     `description` TEXT NULL,
@@ -242,13 +244,16 @@ CREATE TABLE `catalog_skills` (
     `name_zh` VARCHAR(255) NULL,
     `description_en` TEXT NULL,
     `description_zh` TEXT NULL,
+    `name_key` VARCHAR(255) NULL,
     `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
     `gmt_modified` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
     `version` INTEGER NOT NULL DEFAULT 0,
     `is_delete` TINYINT NOT NULL DEFAULT 0,
 
-    UNIQUE INDEX `uk_name`(`name`),
+    UNIQUE INDEX `uk_catalog_skills__creative_skill_id`(`creative_skill_id`),
+    UNIQUE INDEX `uk_catalog_skills__owner_name`(`owner_user_id`, `name_key`),
     UNIQUE INDEX `uk_skill_code`(`skill_code`),
+    INDEX `idx_catalog_skills__owner_active_sort`(`owner_user_id`, `is_delete`, `sort_order`),
     INDEX `idx_sort`(`sort_order`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
@@ -330,43 +335,6 @@ CREATE TABLE `content_homepage_heroes` (
 
     INDEX `idx_hero_enabled_sort`(`enabled`, `is_delete`, `sort_order`),
     INDEX `idx_hero_sort`(`sort_order`, `is_delete`),
-    PRIMARY KEY (`id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-
-CREATE TABLE `catalog_creative_skills` (
-    `id` BIGINT NOT NULL AUTO_INCREMENT,
-    `creative_skill_id` VARCHAR(80) NOT NULL,
-    `name` VARCHAR(255) NOT NULL,
-    `description` VARCHAR(1000) NULL,
-    `source_skill_id` BIGINT NULL,
-    `active_version_id` VARCHAR(80) NULL,
-    `owner_user_id` BIGINT NOT NULL DEFAULT 0,
-    `asset_domain` VARCHAR(16) NOT NULL DEFAULT 'official',
-    `name_key` VARCHAR(255) NULL,
-    `auto_match` INTEGER NOT NULL DEFAULT 0,
-    `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
-    `gmt_modified` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
-
-    UNIQUE INDEX `uk_catalog_creative_skills__creative_skill_id`(`creative_skill_id`),
-    INDEX `idx_owner_domain`(`owner_user_id`, `asset_domain`),
-    INDEX `idx_owner_name_key`(`owner_user_id`, `name_key`),
-    PRIMARY KEY (`id`)
-) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-
-CREATE TABLE `catalog_creative_skill_versions` (
-    `id` BIGINT NOT NULL AUTO_INCREMENT,
-    `creative_skill_version_id` VARCHAR(80) NOT NULL,
-    `creative_skill_id` VARCHAR(80) NOT NULL,
-    `display_version` VARCHAR(64) NOT NULL,
-    `body` LONGTEXT NOT NULL,
-    `content_digest` VARCHAR(71) NOT NULL,
-    `resource_digest` VARCHAR(71) NOT NULL,
-    `media_type` VARCHAR(128) NOT NULL DEFAULT 'text/markdown',
-    `gmt_create` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
-    `gmt_modified` DATETIME(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
-
-    UNIQUE INDEX `uk_catalog_creative_skill_versions__creative_skill_version_id`(`creative_skill_version_id`),
-    UNIQUE INDEX `uk_catalog_creative_skill_versions__semver`(`creative_skill_id`, `display_version`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 

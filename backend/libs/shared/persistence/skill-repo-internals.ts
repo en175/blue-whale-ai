@@ -35,7 +35,7 @@ export async function generateCreativeSkillId(
     const candidate = suffix === 0 ? base : `${base}_${suffix + 1}`;
     try {
       const rows = await prisma.$queryRawUnsafe<{ c: bigint }[]>(
-        `SELECT COUNT(*) AS c FROM catalog_creative_skills WHERE creative_skill_id = ?`,
+        `SELECT COUNT(*) AS c FROM catalog_skills WHERE creative_skill_id = ?`,
         candidate,
       );
       if (Number(rows[0]?.c ?? 0) === 0) return candidate;
@@ -52,7 +52,7 @@ export async function checkPersonalNameKeyAvailable(
   nameKey: string,
 ): Promise<"ok" | "conflict" | "reserved"> {
   const officialNames = await prisma.catalog_skills.findMany({
-    where: { is_delete: 0 },
+    where: { owner_user_id: BigInt(0), is_delete: 0 },
     select: { name: true },
   });
   const officialNameKeys = new Set(
@@ -62,7 +62,7 @@ export async function checkPersonalNameKeyAvailable(
 
   try {
     const conflicts = await prisma.$queryRawUnsafe<{ c: bigint }[]>(
-      `SELECT COUNT(*) AS c FROM catalog_creative_skills WHERE owner_user_id = ? AND asset_domain = 'personal' AND name_key = ?`,
+      `SELECT COUNT(*) AS c FROM catalog_skills WHERE owner_user_id = ? AND source = 'personal' AND name_key = ?`,
       BigInt(userId),
       nameKey,
     );
@@ -89,27 +89,6 @@ export type SkillRow = {
   search_keywords: string | null;
 };
 
-export async function mapCreativeSkillIds(
-  prisma: PrismaClient,
-  skillIds: bigint[],
-): Promise<Map<string, string>> {
-  if (skillIds.length === 0) return new Map();
-  try {
-    const placeholders = skillIds.map(() => "?").join(",");
-    const rows = await prisma.$queryRawUnsafe<
-      { source_skill_id: bigint; creative_skill_id: string }[]
-    >(
-      `SELECT source_skill_id, creative_skill_id FROM catalog_creative_skills WHERE source_skill_id IN (${placeholders})`,
-      ...skillIds,
-    );
-    return new Map(
-      rows.map((r) => [r.source_skill_id.toString(), r.creative_skill_id]),
-    );
-  } catch {
-    return new Map();
-  }
-}
-
 export async function mapUsageCounts(
   prisma: PrismaClient,
   creativeSkillIds: string[],
@@ -135,7 +114,10 @@ export function nonEmpty(value: string | null): string | null {
   return value !== null && value !== "" ? value : null;
 }
 
-export function resolveName(lang: SkillLibraryLang, row: SkillRow): string {
+export function resolveName(
+  lang: SkillLibraryLang,
+  row: Pick<SkillRow, "name" | "name_en" | "name_zh">,
+): string {
   return lang === "zh"
     ? (nonEmpty(row.name_zh) ?? nonEmpty(row.name_en) ?? row.name)
     : (nonEmpty(row.name_en) ?? row.name);
@@ -143,7 +125,7 @@ export function resolveName(lang: SkillLibraryLang, row: SkillRow): string {
 
 export function resolveDescription(
   lang: SkillLibraryLang,
-  row: SkillRow,
+  row: Pick<SkillRow, "description" | "description_en" | "description_zh">,
 ): string | null {
   return lang === "zh"
     ? (nonEmpty(row.description_zh) ??
@@ -175,19 +157,15 @@ export async function resolveOfficialSourceSkillId(
   prisma: PrismaClient,
   creativeSkillId: string,
 ): Promise<string | null> {
-  let rows: { source_skill_id: bigint }[];
+  let rows: { id: bigint }[];
   try {
-    rows = await prisma.$queryRawUnsafe<{ source_skill_id: bigint }[]>(
-      `SELECT source_skill_id FROM catalog_creative_skills WHERE creative_skill_id = ? AND asset_domain = 'official'`,
+    rows = await prisma.$queryRawUnsafe<{ id: bigint }[]>(
+      `SELECT id FROM catalog_skills WHERE creative_skill_id = ? AND owner_user_id = 0 AND is_delete = 0`,
       creativeSkillId,
     );
   } catch {
     return null;
   }
-  const sourceSkillId = rows[0]?.source_skill_id;
-  if (sourceSkillId == null) return null;
-  const c = await prisma.catalog_skills.count({
-    where: { id: sourceSkillId, is_delete: 0 },
-  });
-  return c > 0 ? sourceSkillId.toString() : null;
+  const skillId = rows[0]?.id;
+  return skillId == null ? null : skillId.toString();
 }
