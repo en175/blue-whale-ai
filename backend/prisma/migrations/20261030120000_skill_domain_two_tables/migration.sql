@@ -1,4 +1,4 @@
-SET NAMES utf8mb4;
+SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci;
 ALTER TABLE `catalog_skills`
     ADD COLUMN `creative_skill_id` VARCHAR(80) NULL AFTER `id`,
     ADD COLUMN `owner_user_id` BIGINT NOT NULL DEFAULT 0 AFTER `creative_skill_id`,
@@ -17,8 +17,8 @@ INSERT INTO `catalog_skills` (`creative_skill_id`, `owner_user_id`, `name`, `nam
            CASE WHEN cs.asset_domain = 'personal' THEN 'personal' ELSE 'official' END,
            'other', 0, 0, cs.gmt_create, cs.gmt_modified
       FROM `catalog_creative_skills` cs
-     WHERE cs.creative_skill_id NOT IN (
-           SELECT creative_skill_id FROM (SELECT `creative_skill_id` FROM `catalog_skills` WHERE `creative_skill_id` IS NOT NULL) t);
+     WHERE cs.creative_skill_id COLLATE utf8mb4_unicode_ci NOT IN (
+           SELECT creative_skill_id COLLATE utf8mb4_unicode_ci FROM (SELECT `creative_skill_id` FROM `catalog_skills` WHERE `creative_skill_id` IS NOT NULL) t);
 UPDATE `catalog_skills`
    SET `name_key` = LOWER(TRIM(REGEXP_REPLACE(`name`, '[[:space:]]+', ' ')))
  WHERE `name_key` IS NULL;
