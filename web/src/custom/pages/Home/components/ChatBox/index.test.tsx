@@ -8,24 +8,22 @@ import styles from './index.module.css';
 import { OMNI_REFERENCE_FOLLOW_HINT } from '@/custom/utils/video-reference-hints';
 
 
-const { fetchGenerationModels, navigate, pickerOnSelect, createProject } = vi.hoisted(() => ({
+const { fetchGenerationModels, navigate, pickerOnSelect, createProject, authUser } = vi.hoisted(() => ({
   fetchGenerationModels: vi.fn(),
   navigate: vi.fn(),
   pickerOnSelect: { current: null as null | ((assets: unknown[]) => void) },
   createProject: vi.fn(),
+  authUser: { current: { id: 'u1', name: 'tester' } as { id: string; name: string } | null },
 }));
 
 vi.mock('@/custom/api/generation', () => ({ fetchGenerationModels }));
 
 vi.mock('react-router-dom', () => ({ useNavigate: () => navigate, useLocation: () => ({ pathname: '/', search: '', state: null }) }));
 
-vi.mock('@/shared/utils/auth', () => {
-  const user = { id: 'u1', name: 'tester' };
-  return {
-    getCurrentUser: () => user,
-    subscribe: () => () => {},
-  };
-});
+vi.mock('@/shared/utils/auth', () => ({
+  getCurrentUser: () => authUser.current,
+  subscribe: () => () => {},
+}));
 
 vi.mock('@/custom/api/projects', () => ({ createProject }));
 
@@ -164,6 +162,7 @@ async function switchToVideoTabAndInject(assets: unknown[]) {
 
 beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  authUser.current = { id: 'u1', name: 'tester' };
   fetchGenerationModels.mockResolvedValue([seedance25, seedance20]);
   createProject.mockReset();
   navigate.mockReset();
@@ -463,5 +462,108 @@ describe('IKR63U 首页发送只提交一次', () => {
       state: expect.objectContaining({ agentText: '画一只猫', agentAutoSend: true }),
     });
     expect((mountNode.querySelector('textarea') as HTMLTextAreaElement).value).toBe('');
+  });
+});
+
+function quoteBadge() {
+  return mountNode.querySelector<HTMLElement>('[data-testid="home-quote"]')!;
+}
+
+function requestsToQuoteApi(fetchMock: ReturnType<typeof vi.fn>): string[] {
+  return fetchMock.mock.calls
+    .map(([url]) => String(url))
+    .filter((url) => url.includes('/api/generation-quotes'));
+}
+
+async function settleQuote() {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 700));
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+}
+
+describe('IKR63N 首页积分预估接线', () => {
+  let quoteFetch: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    quoteFetch = vi.fn().mockImplementation(() =>
+      Promise.resolve(new Response(JSON.stringify({ code: 200, msg: null, data: { credits: 128 } }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })),
+    );
+    vi.stubGlobal('fetch', quoteFetch);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('视频页签带完整参数请求预估并显示数字', async () => {
+    await renderChatBox();
+    await switchMode('视频');
+    await settleQuote();
+
+    expect(quoteBadge().textContent).toBe('128');
+
+    const [url, init] = quoteFetch.mock.calls.find(([u]) => String(u).includes('/api/generation-quotes'))! as [string, RequestInit];
+    expect(url).toBe('/api/generation-quotes');
+    const body = JSON.parse(init.body as string);
+    expect(body).toMatchObject({
+      type: 'video',
+      parameters: { model_id: 'seedance-2.5', mode: 'text2video', resolution: '720p', duration: 10 },
+      references: [],
+    });
+  });
+
+  it('视频智能体页不请求，徽标只有图标', async () => {
+    await renderChatBox();
+    await act(async () => { typePrompt('画一只猫'); });
+    await settleQuote();
+
+    expect(requestsToQuoteApi(quoteFetch)).toHaveLength(0);
+    expect(quoteBadge().textContent).toBe('');
+  });
+
+  it('未登录不请求', async () => {
+    authUser.current = null;
+    await renderChatBox();
+    await switchMode('视频');
+    await settleQuote();
+
+    expect(requestsToQuoteApi(quoteFetch)).toHaveLength(0);
+    expect(quoteBadge().textContent).toBe('');
+  });
+
+  it('计费服务失败时只显示图标，不弹提示', async () => {
+    fetchGenerationModels.mockResolvedValue([{ ...seedance25, model_id: 'seedance-quote-error' }]);
+    quoteFetch.mockImplementation(() => Promise.resolve(new Response(JSON.stringify({ code: 500100, msg: '计费异常', data: null }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })));
+    await renderChatBox();
+    await switchMode('视频');
+    await settleQuote();
+
+    expect(quoteBadge().textContent).toBe('');
+    expect(document.body.textContent).not.toContain('计费异常');
+    expect((mountNode.querySelector('textarea') as HTMLTextAreaElement).disabled).toBe(false);
+  });
+
+  it('提示词变化防抖：停手后才按新提示词请求一次', async () => {
+    await renderChatBox();
+    await switchMode('视频');
+    await settleQuote();
+    const before = requestsToQuoteApi(quoteFetch).length;
+
+    await act(async () => { typePrompt('海边日落'); });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 150)); });
+    expect(requestsToQuoteApi(quoteFetch)).toHaveLength(before);
+
+    await settleQuote();
+    expect(requestsToQuoteApi(quoteFetch)).toHaveLength(before + 1);
+    const lastBody = JSON.parse((quoteFetch.mock.calls.at(-1)![1] as RequestInit).body as string);
+    expect(lastBody.parameters.prompt).toBe('海边日落');
   });
 });
