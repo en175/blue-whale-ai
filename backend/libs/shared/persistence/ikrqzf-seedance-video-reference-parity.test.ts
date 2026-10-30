@@ -10,7 +10,7 @@ const migrationSql = readFileSync(
 );
 const standaloneSql = readFileSync(
   new URL(
-    "../../../prisma/schema/076_ikrqzf_seedance_2_0_fast_mini_video_reference.sql",
+    "../../../prisma/schema/091_ikrqzf_seedance_2_0_fast_mini_video_reference.sql",
     import.meta.url,
   ),
   "utf8",
@@ -47,7 +47,16 @@ describe("IKRQZF Seedance 2.0 Fast/Mini 参考视频能力迁移：三轨", () =
     expect(standaloneSql).toContain("`version` = `version` + 1");
   });
 
-  it("种子同步标准 2.0 行，不再出现参考视频关闭", () => {
+  it("只命中启用的视频能力行", () => {
+    expect(standaloneSql).toContain("AND `capability_type` = 'video'");
+    expect(standaloneSql).toContain("AND `is_delete` = 0");
+    expect(standaloneSql).toContain("`gmt_modified` = NOW()");
+  });
+
+  it("种子同步标准 2.0 行，且参考音频开关保持关闭", () => {
+    expect(seedSql).toContain(
+      "'video_reference', TRUE,\n      'video_reference_max', 3,\n      'audio_reference', FALSE,",
+    );
     expect(seedSql).not.toContain("'video_reference', FALSE");
   });
 });
