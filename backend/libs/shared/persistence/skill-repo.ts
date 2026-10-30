@@ -1,4 +1,3 @@
-import {createHash} from "node:crypto";
 import type {PrismaClient} from "@prisma/client";
 import {checkPersonalNameKeyAvailable, generateCreativeSkillId, mapUsageCounts, matchLibraryKeyword, normalizeNameKey, resolveDescription, resolveName, resolveOfficialSourceSkillId, type SkillRow} from "./skill-repo-internals.js";
 import {SkillAddConflictError, SkillNameConflictError, SkillNameReservedError} from "./skill-repo-types.js";

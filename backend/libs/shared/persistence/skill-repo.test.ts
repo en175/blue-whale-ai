@@ -575,3 +575,58 @@ describe("SkillRepo — getOfficialContent（IKA64P 直接使用填全文）", (
     expect(await createSkillRepo(prisma).getOfficialContent("cs1")).toBeNull();
   });
 });
+
+describe("SkillRepo — findAgentSkill 上下架与归属守卫", () => {
+  function createResolvePrisma(rows: unknown[]) {
+    const queryRawUnsafe = vi.fn().mockResolvedValue(rows);
+    return {
+      prisma: { $queryRawUnsafe: queryRawUnsafe } as unknown as PrismaClient,
+      queryRawUnsafe,
+    };
+  }
+
+  it("查询按 owner 判断：官方要求在架，个人要求本人", async () => {
+    const { prisma, queryRawUnsafe } = createResolvePrisma([]);
+
+    await createSkillRepo(prisma).findAgentSkill("deep_writing", "9");
+
+    const [sql, ...params] = queryRawUnsafe.mock.calls[0];
+    expect(sql).toContain("content AS body");
+    expect(sql).toContain("(owner_user_id = 0 AND is_delete = 0)");
+    expect(sql).toContain("(owner_user_id = ? AND owner_user_id <> 0)");
+    expect(sql).toContain("content IS NOT NULL");
+    expect(params).toEqual(["deep_writing", 9n]);
+  });
+
+  it("官方技能下架后查无结果 → null（按不存在处理）", async () => {
+    const { prisma } = createResolvePrisma([]);
+
+    expect(
+      await createSkillRepo(prisma).findAgentSkill("deep_writing", "9"),
+    ).toBeNull();
+  });
+
+  it("他人个人技能查无结果 → null（不泄露存在性）", async () => {
+    const { prisma } = createResolvePrisma([]);
+
+    expect(
+      await createSkillRepo(prisma).findAgentSkill("my_personal", "9"),
+    ).toBeNull();
+  });
+
+  it("在架官方技能返回正文与稳定身份", async () => {
+    const { prisma } = createResolvePrisma([
+      {
+        creative_skill_id: "deep_writing",
+        name: "深度写作",
+        description: null,
+        asset_domain: "official",
+        body: "技能正文",
+      },
+    ]);
+
+    await expect(
+      createSkillRepo(prisma).findAgentSkill("deep_writing", "9"),
+    ).resolves.toMatchObject({ creative_skill_id: "deep_writing", body: "技能正文" });
+  });
+});

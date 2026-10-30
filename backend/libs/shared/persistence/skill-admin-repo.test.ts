@@ -167,7 +167,7 @@ describe("SkillAdminRepo — 官方技能维护", () => {
     });
     expect(prisma.catalog_skills.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: 3n, owner_user_id: 0n, is_delete: 0 },
+        where: { id: 3n, owner_user_id: 0n },
       }),
     );
   });
@@ -187,7 +187,7 @@ describe("SkillAdminRepo — 官方技能维护", () => {
     });
     expect(result).toBe("ok");
     expect(prisma.catalog_skills.updateMany).toHaveBeenCalledWith({
-      where: { id: 3n, owner_user_id: 0n, is_delete: 0 },
+      where: { id: 3n, owner_user_id: 0n },
       data: expect.objectContaining({
         name: "深度写作二",
         name_key: "深度写作二",
@@ -227,14 +227,20 @@ describe("SkillAdminRepo — 官方技能维护", () => {
     ).toBe("not_found");
   });
 
-  it("setActive 写 is_delete，限定官方行", async () => {
+  it("setActive 可下架也可恢复（不按当前 is_delete 过滤）", async () => {
+    const updateMany = vi.fn().mockResolvedValue({ count: 1 });
     const prisma = mockPrisma({
-      catalog_skills: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
+      catalog_skills: { updateMany },
     });
     expect(await createSkillAdminRepo(prisma).setActive(3n, 1)).toBe(true);
-    expect(prisma.catalog_skills.updateMany).toHaveBeenCalledWith({
-      where: { id: 3n, owner_user_id: 0n, is_delete: 0 },
+    expect(await createSkillAdminRepo(prisma).setActive(3n, 0)).toBe(true);
+    expect(updateMany).toHaveBeenNthCalledWith(1, {
+      where: { id: 3n, owner_user_id: 0n },
       data: expect.objectContaining({ is_delete: 1 }),
+    });
+    expect(updateMany).toHaveBeenNthCalledWith(2, {
+      where: { id: 3n, owner_user_id: 0n },
+      data: expect.objectContaining({ is_delete: 0 }),
     });
   });
 
@@ -252,7 +258,7 @@ describe("SkillAdminRepo — 官方技能维护", () => {
     });
     expect(await createSkillAdminRepo(prisma).backfillOfficialAssets()).toBe(1);
     expect(updateMany).toHaveBeenCalledWith({
-      where: { id: 3n, owner_user_id: 0n, is_delete: 0, creative_skill_id: null },
+      where: { id: 3n, owner_user_id: 0n, creative_skill_id: null },
       data: expect.objectContaining({
         creative_skill_id: expect.stringMatching(/^[a-z0-9_]+$/),
         name_key: "深度写作",
