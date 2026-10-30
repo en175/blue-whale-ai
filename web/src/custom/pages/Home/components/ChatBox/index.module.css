@@ -543,6 +543,40 @@
   }
 }
 
+.previewOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.82);
+}
+
+.previewImage {
+  max-width: min(92vw, 1280px);
+  max-height: 88vh;
+  object-fit: contain;
+  border-radius: var(--radius-md);
+  cursor: default;
+}
+
+.previewClose {
+  position: absolute;
+  top: 28px;
+  right: 32px;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-full);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(20, 20, 22, 0.8);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
 
 .videoContent {
   flex: 1;
@@ -611,6 +645,10 @@
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+.refThumb img.refThumbMedia {
+  cursor: zoom-in;
 }
 
 .refThumbAudio {

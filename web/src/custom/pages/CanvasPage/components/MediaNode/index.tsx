@@ -37,7 +37,7 @@ import styles from './index.module.css';
 
 const HANDLE_STYLE = { background: 'transparent', border: 'none', width: 24, height: 24 } as const;
 
-function HandlePlus() {
+function HandlePlus({ onAdd }: { onAdd?: (client: { x: number; y: number }) => void }) {
   return (
     <span className="nodrag nopan" style={{
       display: 'flex',
@@ -50,7 +50,14 @@ function HandlePlus() {
       border: '1px solid #555',
       color: '#ccc',
       boxShadow: '0 2px 6px rgba(0,0,0,0.4)',
-    }}>
+      cursor: onAdd ? 'pointer' : undefined,
+    }}
+      onClick={(e) => {
+        if (!onAdd) return;
+        e.stopPropagation();
+        onAdd({ x: e.clientX, y: e.clientY });
+      }}
+    >
       <Plus size={14} strokeWidth={2.5} />
     </span>
   );
@@ -195,6 +202,8 @@ export interface MediaNodeData {
   onAddToChat?: (id: string) => void;
   onCancelJob?: (id: string) => void;
   onRetryJob?: (id: string) => void;
+  onAddLeft?: (client: { x: number; y: number }) => void;
+  onAddRight?: (client: { x: number; y: number }) => void;
   onFixFollowVideo?: (id: string) => void;
   onTitleChange?: (id: string, name: string) => void;
   onEnhanceImage?: (id: string) => void;
@@ -1027,7 +1036,7 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
       >
         {showTargetHandle && (
           <Handle type="target" position={Position.Left} className={styles.handle} style={{ ...HANDLE_STYLE, left: '-16px' }}>
-          <HandlePlus />
+          <HandlePlus onAdd={data.onAddLeft} />
         </Handle>
         )}
         {isEmptyShell ? (
@@ -1271,7 +1280,7 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
         )}
         {showSourceHandle && (
         <Handle type="source" position={Position.Right} className={styles.handle} style={{ ...HANDLE_STYLE, right: '-16px' }}>
-        <HandlePlus />
+        <HandlePlus onAdd={data.onAddRight} />
       </Handle>
         )}
       </div>

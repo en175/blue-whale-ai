@@ -55,6 +55,7 @@ function createFixture() {
     });
     handlers = useCanvasConnectHandlers({
       connectMenu: null, connectingSourceRef, edgesRef, findCanvasNode,
+      allNodes: () => [], addTextNodeAt: () => '',
       isConnectableSource, availableGenKinds, setConnectMenu,
       addCanvasEdge: connect.addCanvasEdge, connectPlanToDraft: connect.connectPlanToDraft,
       connectPair: connect.connectPair, videoRefSourceError, imageRefSourceError, audioRefSourceError,

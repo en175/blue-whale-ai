@@ -19,13 +19,31 @@
 .edgeGroup:hover .basePath,
 .edgeGroup.selectedConnected .basePath {
   stroke: rgba(220, 220, 230, 0.7);
-  stroke-dasharray: 10 10;
-  animation: dashFlow 1.8s linear infinite;
 }
 
-@keyframes dashFlow {
-  from { stroke-dashoffset: 0; }
-  to   { stroke-dashoffset: -40; }
+.glowPath {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+}
+
+.edgeGroup:hover .glowPath,
+.edgeGroup.selectedConnected .glowPath {
+  opacity: 1;
+  animation: glowFlow 2s linear infinite;
+}
+
+@keyframes glowFlow {
+  from { stroke-dashoffset: var(--edge-length, 0); }
+  to   { stroke-dashoffset: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .edgeGroup:hover .glowPath,
+  .edgeGroup.selectedConnected .glowPath {
+    animation: none;
+    opacity: 0.6;
+  }
 }
 
 .deleteBtn {
