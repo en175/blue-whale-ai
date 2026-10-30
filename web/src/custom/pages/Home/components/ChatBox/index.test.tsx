@@ -8,10 +8,11 @@ import styles from './index.module.css';
 import { OMNI_REFERENCE_FOLLOW_HINT } from '@/custom/utils/video-reference-hints';
 
 
-const { fetchGenerationModels, navigate, pickerOnSelect } = vi.hoisted(() => ({
+const { fetchGenerationModels, navigate, pickerOnSelect, createProject } = vi.hoisted(() => ({
   fetchGenerationModels: vi.fn(),
   navigate: vi.fn(),
   pickerOnSelect: { current: null as null | ((assets: unknown[]) => void) },
+  createProject: vi.fn(),
 }));
 
 vi.mock('@/custom/api/generation', () => ({ fetchGenerationModels }));
@@ -26,7 +27,7 @@ vi.mock('@/shared/utils/auth', () => {
   };
 });
 
-vi.mock('@/custom/api/projects', () => ({ createProject: vi.fn() }));
+vi.mock('@/custom/api/projects', () => ({ createProject }));
 
 vi.mock('../SkillModal', () => ({ default: () => null }));
 vi.mock('@/custom/components/LoginModal', () => ({ default: () => null }));
@@ -161,6 +162,8 @@ async function switchToVideoTabAndInject(assets: unknown[]) {
 beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   fetchGenerationModels.mockResolvedValue([seedance25, seedance20]);
+  createProject.mockReset();
+  navigate.mockReset();
 });
 
 afterEach(async () => {
@@ -341,5 +344,60 @@ describe('V1.3.0 首页输入区模式', () => {
     expect(quote).not.toBeNull();
     expect(quote.querySelector('svg')).not.toBeNull();
     expect(quote.textContent ?? '').toBe('');
+  });
+});
+
+function typePrompt(value: string) {
+  const textarea = mountNode.querySelector('textarea')!;
+  const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;
+  setter.call(textarea, value);
+  textarea.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+function sendButton(): HTMLButtonElement {
+  return mountNode.querySelector<HTMLButtonElement>(`button[class*="sendBtn"]`)!;
+}
+
+describe('IKR63U 首页发送只提交一次', () => {
+  it('创建中连点发送只创建一个项目，按钮锁定', async () => {
+    createProject.mockImplementation(() => new Promise(() => {}));
+    await renderChatBox();
+    await act(async () => { typePrompt('画一只猫'); });
+    expect(sendButton().disabled).toBe(false);
+
+    await act(async () => { sendButton().click(); });
+    expect(sendButton().disabled).toBe(true);
+    await act(async () => { sendButton().click(); });
+    await act(async () => { await Promise.resolve(); });
+
+    expect(createProject).toHaveBeenCalledTimes(1);
+  });
+
+  it('创建项目失败时保留正文，不跳转画布', async () => {
+    createProject.mockRejectedValue({ status: 500 });
+    await renderChatBox();
+    await act(async () => { typePrompt('画一只猫'); });
+
+    await act(async () => { sendButton().click(); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    expect(createProject).toHaveBeenCalledTimes(1);
+    expect(navigate).not.toHaveBeenCalled();
+    expect((mountNode.querySelector('textarea') as HTMLTextAreaElement).value).toBe('画一只猫');
+    expect(sendButton().disabled).toBe(false);
+  });
+
+  it('创建项目成功后跳到新画布，首页正文清空', async () => {
+    createProject.mockResolvedValue({ id: 'p9', name: 'x' });
+    await renderChatBox();
+    await act(async () => { typePrompt('画一只猫'); });
+
+    await act(async () => { sendButton().click(); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    expect(navigate).toHaveBeenCalledWith('/canvas?project=p9', {
+      state: expect.objectContaining({ agentText: '画一只猫', agentAutoSend: true }),
+    });
+    expect((mountNode.querySelector('textarea') as HTMLTextAreaElement).value).toBe('');
   });
 });

@@ -94,6 +94,56 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
+async function renderAutoSendPanel(props: { inputVersion: number; autoSendReady: boolean }) {
+  container = document.createElement('div');
+  document.body.appendChild(container);
+  root = createRoot(container);
+  await act(async () => {
+    root.render(
+      createElement(AgentPanel, {
+        onClose: vi.fn(),
+        projectId: 'p1',
+        onPlaceFileOnCanvas: vi.fn(async () => ({ asset_id: 'a1', url: 'blob:x' })),
+        initialInput: '帮我做一条宣传片',
+        autoSend: true,
+        autoSendPayload: {
+          content: [{ type: 'text', text: '帮我做一条宣传片' }],
+          userText: '帮我做一条宣传片',
+        },
+        ...props,
+      }),
+    );
+  });
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+}
+
+describe('IKR63U 首页 Agent 自动首发', () => {
+  it('交接就绪后只自动发送一次首条消息', async () => {
+    sessionMock.sendMessage.mockClear();
+
+    await renderAutoSendPanel({ inputVersion: 100, autoSendReady: true });
+
+    expect(sessionMock.sendMessage.mock.calls).toHaveLength(1);
+    expect(sessionMock.sendMessage.mock.calls[0]).toEqual([
+      [{ type: 'text', text: '帮我做一条宣传片' }],
+      undefined,
+      undefined,
+      undefined,
+      '帮我做一条宣传片',
+      undefined,
+    ]);
+  });
+
+  it('交接未就绪时不发送', async () => {
+    sessionMock.sendMessage.mockClear();
+
+    await renderAutoSendPanel({ inputVersion: 101, autoSendReady: false });
+
+    expect(sessionMock.sendMessage).not.toHaveBeenCalled();
+  });
+});
+
 describe('AgentPanel 停靠抽屉（IKDLD4）', () => {
   it('默认宽度 468px，左缘渲染隐形拖拽热区', async () => {
     await renderPanel();

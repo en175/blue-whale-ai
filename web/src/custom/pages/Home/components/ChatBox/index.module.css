@@ -533,6 +533,16 @@
   background: rgba(255, 255, 255, 0.3);
 }
 
+.sendSpin {
+  animation: sendSpin 0.9s linear infinite;
+}
+
+@keyframes sendSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 
 .videoContent {
   flex: 1;

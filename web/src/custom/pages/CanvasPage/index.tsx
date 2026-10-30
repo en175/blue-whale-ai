@@ -829,7 +829,7 @@ export default function CanvasPage() {
     handleAddTextNode,
     showToast,
   });
-  useCanvasHomeAgentInject({
+  const { agentHandoffSettled } = useCanvasHomeAgentInject({
     doc,
     placeFileOnCanvas,
     setAgentAssetPicks,
@@ -1491,6 +1491,7 @@ export default function CanvasPage() {
       agent={{
         showAgent, setShowAgent, agentOpened, agentContext, agentCandidate,
         confirmAgentCandidate, cancelAgentCandidate, appliedCardIds, handleAgentCardApply, agentAssetPicks,
+        agentHandoffSettled,
       }}
       mediaUpdates={{
         submittingNodeId, audioVideoMuxInFlightSourceIds, finalizeCtaByNodeId,

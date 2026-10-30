@@ -108,6 +108,15 @@ interface AgentPanelProps {
   initialSkillId?: string;
   initialSkillName?: string;
   mediaBlocks?: import('@/custom/api/agentSessions').SessionContentBlock[];
+  autoSend?: boolean;
+  autoSendReady?: boolean;
+  autoSendPayload?: {
+    content: SessionContentBlock[];
+    skillId?: string;
+    skillName?: string;
+    userText?: string;
+    chips?: { id: string; label: string }[];
+  };
   onPlaceFileOnCanvas: (file: File) => Promise<SidebarCanvasUpload>;
   onPickFromAssets?: () => void;
   externalAssetPicks?: { ts: number; blocks: import('@/custom/api/agentSessions').SessionContentBlock[] } | null;
@@ -130,7 +139,7 @@ function quoteTooltipOfChip(blocks: SessionContentBlock[] | undefined, chipId: s
   return text.length > 500 ? `${text.slice(0, 500)}…` : text;
 }
 
-export default function AgentPanel({ open = true, onClose, initialInput, initialCardLabel, inputVersion, projectId, onApplyToDock, appliedCardIds, initialSkillId, initialSkillName, mediaBlocks: initialMediaBlocks, onPlaceFileOnCanvas, onPickFromAssets, externalAssetPicks, candidateBlocks, onPrepareCandidate, onCancelCandidate }: AgentPanelProps) {
+export default function AgentPanel({ open = true, onClose, initialInput, initialCardLabel, inputVersion, autoSend, autoSendReady, autoSendPayload, projectId, onApplyToDock, appliedCardIds, initialSkillId, initialSkillName, mediaBlocks: initialMediaBlocks, onPlaceFileOnCanvas, onPickFromAssets, externalAssetPicks, candidateBlocks, onPrepareCandidate, onCancelCandidate }: AgentPanelProps) {
   useAssetUrlCache();
   const chipEditorRef = useRef<ChipTextEditorHandle>(null);
 
@@ -643,6 +652,31 @@ export default function AgentPanel({ open = true, onClose, initialInput, initial
       }
     }
   };
+
+  const autoSendRef = useRef({ version: 0, triggered: false });
+  useEffect(() => {
+    if (inputVersion !== autoSendRef.current.version) {
+      autoSendRef.current = { version: inputVersion ?? 0, triggered: false };
+    }
+  }, [inputVersion]);
+  useEffect(() => {
+    const state = autoSendRef.current;
+    if (!autoSend || !autoSendReady || state.triggered) return;
+    if (!state.version) return;
+    const messageText = autoSendPayload?.userText?.trim() || initialInput?.trim() || '';
+    if (!messageText && pendingMediaBlocksState.length === 0) return;
+    state.triggered = true;
+    const timer = window.setTimeout(() => {
+      if (autoSendPayload) {
+        void sendMessage(autoSendPayload.content, autoSendPayload.skillId, undefined, autoSendPayload.skillName, autoSendPayload.userText, autoSendPayload.chips)
+          .then((accepted) => { if (accepted) clearDraft(); });
+      } else {
+        void handleSend();
+      }
+    }, 0);
+    return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoSend, autoSendReady, initialInput, pendingMediaBlocksState, autoSendPayload]);
 
   const handleCardApply = (
     card: NonNullable<SessionContentBlock['card']>,
