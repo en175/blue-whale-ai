@@ -6,9 +6,7 @@ UPDATE `generation_model_capability`
 SET `features` = JSON_SET(
       `features`,
       '$.video_reference', CAST('true' AS JSON),
-      '$.video_reference_max', 3,
-      '$.audio_reference', CAST('true' AS JSON),
-      '$.audio_reference_max', 3
+      '$.video_reference_max', 3
     ),
     `version` = `version` + 1,
     `gmt_modified` = NOW()

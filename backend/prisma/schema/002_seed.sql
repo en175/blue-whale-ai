@@ -78,7 +78,7 @@ INSERT INTO generation_model_capability (
       'audio', TRUE,
       'video_reference', TRUE,
       'video_reference_max', 3,
-      'audio_reference', TRUE,
+      'audio_reference', FALSE,
       'audio_reference_max', 3,
       'image_reference_max', 1,
       'max_reference_duration_sec', 15,

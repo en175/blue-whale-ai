@@ -43,13 +43,11 @@ describe("IKRQZF Seedance 2.0 Fast/Mini 参考视频能力迁移：三轨", () =
     expect(standaloneSql).toContain("'doubao-seedance-2-0-mini-260615'");
     expect(standaloneSql).toContain("CAST('true' AS JSON)");
     expect(standaloneSql).toContain("'$.video_reference_max', 3");
-    expect(standaloneSql).toContain("'$.audio_reference', CAST('true' AS JSON)");
-    expect(standaloneSql).toContain("'$.audio_reference_max', 3");
+    expect(standaloneSql).not.toContain("audio_reference");
     expect(standaloneSql).toContain("`version` = `version` + 1");
   });
 
-  it("种子同步标准 2.0 行，不再出现参考视频与参考音频关闭", () => {
+  it("种子同步标准 2.0 行，不再出现参考视频关闭", () => {
     expect(seedSql).not.toContain("'video_reference', FALSE");
-    expect(seedSql).not.toContain("'audio_reference', FALSE");
   });
 });
