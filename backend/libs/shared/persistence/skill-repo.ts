@@ -1,6 +1,5 @@
-import {createHash, randomUUID} from "node:crypto";
 import type {PrismaClient} from "@prisma/client";
-import {checkPersonalNameKeyAvailable, generateCreativeSkillId, mapCreativeSkillIds, mapUsageCounts, matchLibraryKeyword, normalizeNameKey, resolveDescription, resolveName, resolveOfficialSourceSkillId, type SkillRow} from "./skill-repo-internals.js";
+import {checkPersonalNameKeyAvailable, generateCreativeSkillId, mapUsageCounts, matchLibraryKeyword, normalizeNameKey, resolveDescription, resolveName, resolveOfficialSourceSkillId, type SkillRow} from "./skill-repo-internals.js";
 import {SkillAddConflictError, SkillNameConflictError, SkillNameReservedError} from "./skill-repo-types.js";
 import type {SkillMineView, SkillRepo} from "./skill-repo-types.js";
 
@@ -14,32 +13,34 @@ export function createSkillRepo(prisma: PrismaClient): SkillRepo {
       const lang = q.lang ?? "zh";
       const sort = q.sort ?? "featured";
       const where = {
-        source: "official",
+        owner_user_id: BigInt(0),
         is_delete: 0,
         ...(q.category && q.category !== "all"
           ? { category: q.category }
           : {}),
       };
-      const rows: SkillRow[] = await prisma.catalog_skills.findMany({
-        where,
-        select: {
-          id: true,
-          name: true,
-          description: true,
-          cover_url: true,
-          source: true,
-          skill_code: true,
-          category: true,
-          sort_order: true,
-          gmt_create: true,
-          name_en: true,
-          name_zh: true,
-          description_en: true,
-          description_zh: true,
-          search_keywords: true,
-        },
-        orderBy: { sort_order: "asc" },
-      });
+      const rows: (SkillRow & { creative_skill_id: string | null })[] =
+        await prisma.catalog_skills.findMany({
+          where,
+          select: {
+            id: true,
+            creative_skill_id: true,
+            name: true,
+            description: true,
+            cover_url: true,
+            source: true,
+            skill_code: true,
+            category: true,
+            sort_order: true,
+            gmt_create: true,
+            name_en: true,
+            name_zh: true,
+            description_en: true,
+            description_zh: true,
+            search_keywords: true,
+          },
+          orderBy: { sort_order: "asc" },
+        });
 
       const resolved = rows.map((row) => ({
         row,
@@ -60,15 +61,14 @@ export function createSkillRepo(prisma: PrismaClient): SkillRepo {
         select: { skill_id: true },
       });
       const mineIds = new Set(mine.map((m) => m.skill_id.toString()));
-      const creativeIds = await mapCreativeSkillIds(
+      const usageCounts = await mapUsageCounts(
         prisma,
-        matched.map((r) => r.row.id),
+        matched
+          .map((r) => r.row.creative_skill_id)
+          .filter((id): id is string => id !== null),
       );
-      const usageCounts = await mapUsageCounts(prisma, [...creativeIds.values()]);
-      const usageOf = (skillId: bigint): number => {
-        const cid = creativeIds.get(skillId.toString());
-        return cid !== undefined ? (usageCounts.get(cid) ?? 0) : 0;
-      };
+      const usageOf = (creativeSkillId: string | null): number =>
+        creativeSkillId !== null ? (usageCounts.get(creativeSkillId) ?? 0) : 0;
 
       if (sort === "newest") {
         matched.sort(
@@ -77,7 +77,7 @@ export function createSkillRepo(prisma: PrismaClient): SkillRepo {
       } else if (sort === "most_used") {
         matched.sort(
           (a, b) =>
-            usageOf(b.row.id) - usageOf(a.row.id) ||
+            usageOf(b.row.creative_skill_id) - usageOf(a.row.creative_skill_id) ||
             a.row.sort_order - b.row.sort_order,
         );
       }
@@ -87,7 +87,7 @@ export function createSkillRepo(prisma: PrismaClient): SkillRepo {
         records: matched
           .slice(start, start + q.pageSize)
           .map(({ row, name, description }) => ({
-            creative_skill_id: creativeIds.get(row.id.toString()) ?? null,
+            creative_skill_id: row.creative_skill_id,
             name,
             description,
             cover_url: row.cover_url,
@@ -96,7 +96,7 @@ export function createSkillRepo(prisma: PrismaClient): SkillRepo {
             asset_domain: "official" as const,
             added: mineIds.has(row.id.toString()),
             category: row.category,
-            usage_count: usageOf(row.id),
+            usage_count: usageOf(row.creative_skill_id),
           })),
         total: matched.length,
         size: q.pageSize,
@@ -106,16 +106,15 @@ export function createSkillRepo(prisma: PrismaClient): SkillRepo {
     },
 
     async getOfficialContent(creativeId) {
-      const row = await prisma.catalog_creative_skills.findFirst({
-        where: { creative_skill_id: creativeId, asset_domain: "official" },
-        select: { active_version_id: true },
+      const row = await prisma.catalog_skills.findFirst({
+        where: {
+          creative_skill_id: creativeId,
+          owner_user_id: BigInt(0),
+          is_delete: 0,
+        },
+        select: { content: true },
       });
-      if (!row?.active_version_id) return null;
-      const ver = await prisma.catalog_creative_skill_versions.findFirst({
-        where: { creative_skill_version_id: row.active_version_id },
-        select: { body: true },
-      });
-      return ver?.body ?? null;
+      return row?.content ?? null;
     },
 
     async findAgentSkill(creativeSkillId, requestingUserId) {
@@ -129,18 +128,16 @@ export function createSkillRepo(prisma: PrismaClient): SkillRepo {
             body: string;
           }[]
         >(
-          `SELECT cs.creative_skill_id,
-                  COALESCE(NULLIF(s.name_zh, ''), cs.name) AS name,
-                  cs.description,
-                  cs.asset_domain,
-                  v.body
-             FROM catalog_creative_skills cs
-             JOIN catalog_creative_skill_versions v ON v.creative_skill_id = cs.creative_skill_id
-             LEFT JOIN catalog_skills s ON s.id = cs.source_skill_id AND s.is_delete = 0
-            WHERE cs.creative_skill_id = ?
-              AND (cs.asset_domain = 'official'
-                   OR (cs.asset_domain = 'personal' AND cs.owner_user_id = ?))
-            ORDER BY (v.creative_skill_version_id = cs.active_version_id) DESC, v.id DESC
+          `SELECT creative_skill_id,
+                  COALESCE(NULLIF(name_zh, ''), name) AS name,
+                  description,
+                  CASE WHEN owner_user_id = 0 THEN 'official' ELSE 'personal' END AS asset_domain,
+                  content AS body
+             FROM catalog_skills
+            WHERE creative_skill_id = ?
+              AND content IS NOT NULL
+              AND ((owner_user_id = 0 AND is_delete = 0)
+                   OR (owner_user_id = ? AND owner_user_id <> 0))
             LIMIT 1`,
           creativeSkillId,
           BigInt(requestingUserId),
@@ -163,6 +160,7 @@ export function createSkillRepo(prisma: PrismaClient): SkillRepo {
         where: { id: { in: skillIds }, is_delete: 0 },
         select: {
           id: true,
+          creative_skill_id: true,
           name: true,
           description: true,
           cover_url: true,
@@ -173,15 +171,12 @@ export function createSkillRepo(prisma: PrismaClient): SkillRepo {
         },
       });
       const skillMap = new Map(skills.map((s) => [s.id.toString(), s]));
-      const creativeIds = await mapCreativeSkillIds(prisma, skillIds);
 
       const official: (SkillMineView & { sort_time: Date })[] = rels.map((r) => {
         const s = skillMap.get(r.skill_id.toString());
         return {
-          creative_skill_id: s
-            ? (creativeIds.get(s.id.toString()) ?? null)
-            : null,
-          name: s ? resolveName("zh", s as SkillRow) : null,
+          creative_skill_id: s?.creative_skill_id ?? null,
+          name: s ? resolveName("zh", s) : null,
           description: s?.description ?? null,
           cover_url: s?.cover_url ?? null,
           source: s?.source ?? null,
@@ -190,26 +185,30 @@ export function createSkillRepo(prisma: PrismaClient): SkillRepo {
           sort_time: r.gmt_create,
         };
       });
-      let personal: (SkillMineView & { sort_time: Date })[] = [];
-      try {
-        const personalRows = await prisma.$queryRawUnsafe<
-          { creative_skill_id: string; name: string; description: string | null; gmt_create: Date }[]
-        >(
-          `SELECT creative_skill_id, name, description, gmt_create FROM catalog_creative_skills WHERE owner_user_id = ? AND asset_domain = 'personal' ORDER BY gmt_create DESC`,
-          BigInt(userId),
-        );
-        personal = personalRows.map((p) => ({
-          creative_skill_id: p.creative_skill_id,
-          name: p.name,
-          description: p.description,
-          cover_url: null,
-          source: null,
-          skill_code: null,
-          asset_domain: "personal",
-          sort_time: p.gmt_create,
-        }));
-      } catch {
-      }
+      const personalRows = await prisma.catalog_skills.findMany({
+        where: {
+          owner_user_id: BigInt(userId),
+          source: "personal",
+          is_delete: 0,
+        },
+        orderBy: { gmt_create: "desc" },
+        select: {
+          creative_skill_id: true,
+          name: true,
+          description: true,
+          gmt_create: true,
+        },
+      });
+      const personal: (SkillMineView & { sort_time: Date })[] = personalRows.map((p) => ({
+        creative_skill_id: p.creative_skill_id,
+        name: p.name,
+        description: p.description,
+        cover_url: null,
+        source: null,
+        skill_code: null,
+        asset_domain: "personal",
+        sort_time: p.gmt_create,
+      }));
 
       const merged = [...official, ...personal].sort(
         (a, b) => b.sort_time.getTime() - a.sort_time.getTime(),
@@ -230,19 +229,16 @@ export function createSkillRepo(prisma: PrismaClient): SkillRepo {
 
     async findAssetDomainInfo(creativeSkillId) {
       try {
-        const rows = await prisma.$queryRawUnsafe<
-          { asset_domain: string; owner_user_id: bigint }[]
-        >(
-          `SELECT asset_domain, owner_user_id FROM catalog_creative_skills WHERE creative_skill_id = ?`,
-          creativeSkillId,
-        );
-        const row = rows[0];
-        return row
-          ? {
-              asset_domain: row.asset_domain,
-              owner_user_id: row.owner_user_id.toString(),
-            }
-          : null;
+        const row = await prisma.catalog_skills.findFirst({
+          where: { creative_skill_id: creativeSkillId },
+          select: { owner_user_id: true },
+        });
+        if (!row) return null;
+        return {
+          asset_domain:
+            row.owner_user_id === BigInt(0) ? "official" : "personal",
+          owner_user_id: row.owner_user_id.toString(),
+        };
       } catch {
         return null;
       }
@@ -257,7 +253,7 @@ export function createSkillRepo(prisma: PrismaClient): SkillRepo {
         const nameKey = normalizeNameKey(official.name);
         try {
           const conflicts = await prisma.$queryRawUnsafe<{ c: bigint }[]>(
-            `SELECT COUNT(*) AS c FROM catalog_creative_skills WHERE owner_user_id = ? AND asset_domain = 'personal' AND name_key = ?`,
+            `SELECT COUNT(*) AS c FROM catalog_skills WHERE owner_user_id = ? AND source = 'personal' AND name_key = ?`,
             BigInt(userId),
             nameKey,
           );
@@ -285,43 +281,31 @@ export function createSkillRepo(prisma: PrismaClient): SkillRepo {
     },
 
     async findPersonalContent(ownerUserId, creativeSkillId) {
-      try {
-        const rows = await prisma.$queryRawUnsafe<
-          { name: string; description: string | null; body: string }[]
-        >(
-          `SELECT cs.name, cs.description, v.body FROM catalog_creative_skills cs JOIN catalog_creative_skill_versions v ON v.creative_skill_id = cs.creative_skill_id WHERE cs.owner_user_id = ? AND cs.creative_skill_id = ? AND cs.asset_domain = 'personal' ORDER BY v.id DESC LIMIT 1`,
-          BigInt(ownerUserId),
-          creativeSkillId,
-        );
-        return rows[0] ?? null;
-      } catch {
-        return null;
-      }
+      const row = await prisma.catalog_skills.findFirst({
+        where: {
+          owner_user_id: BigInt(ownerUserId),
+          creative_skill_id: creativeSkillId,
+          source: "personal",
+        },
+        select: { name: true, description: true, content: true },
+      });
+      if (!row?.content) return null;
+      return {
+        name: row.name,
+        description: row.description,
+        body: row.content,
+      };
     },
 
     async deletePersonal(ownerUserId, creativeSkillId) {
-      return prisma.$transaction(async (tx) => {
-        const rows = await tx.$queryRawUnsafe<{ name: string }[]>(
-          `SELECT name FROM catalog_creative_skills WHERE creative_skill_id = ? AND asset_domain = 'personal' AND owner_user_id = ? LIMIT 1`,
-          creativeSkillId,
-          BigInt(ownerUserId),
-        );
-        const skill = rows[0];
-        if (!skill) return false;
-
-        const deleted = await tx.$executeRawUnsafe(
-          `DELETE FROM catalog_creative_skills WHERE creative_skill_id = ? AND asset_domain = 'personal' AND owner_user_id = ?`,
-          creativeSkillId,
-          BigInt(ownerUserId),
-        );
-        if (deleted === 0) return false;
-
-        await tx.$executeRawUnsafe(
-          `DELETE FROM catalog_creative_skill_versions WHERE creative_skill_id = ?`,
-          creativeSkillId,
-        );
-        return true;
+      const deleted = await prisma.catalog_skills.deleteMany({
+        where: {
+          creative_skill_id: creativeSkillId,
+          source: "personal",
+          owner_user_id: BigInt(ownerUserId),
+        },
       });
+      return deleted.count > 0;
     },
 
     async createPersonalSkill(userId, input) {
@@ -335,27 +319,17 @@ export function createSkillRepo(prisma: PrismaClient): SkillRepo {
       if (availability === "conflict") throw new SkillNameConflictError(nameKey);
 
       const creativeSkillId = await generateCreativeSkillId(prisma, input.name);
-      const contentDigest = `sha256:${createHash("sha256").update(input.body).digest("hex")}`;
-      const creativeSkillVersionId = randomUUID();
 
-      await prisma.$transaction(async (tx) => {
-        await tx.$executeRawUnsafe(
-          `INSERT INTO catalog_creative_skills (creative_skill_id, name, description, owner_user_id, asset_domain, name_key, active_version_id) VALUES (?, ?, ?, ?, 'personal', ?, ?)`,
-          creativeSkillId,
-          input.name,
-          input.description,
-          BigInt(userId),
-          nameKey,
-          creativeSkillVersionId,
-        );
-        await tx.$executeRawUnsafe(
-          `INSERT INTO catalog_creative_skill_versions (creative_skill_version_id, creative_skill_id, display_version, body, content_digest, resource_digest) VALUES (?, ?, '1.0.0', ?, ?, ?)`,
-          creativeSkillVersionId,
-          creativeSkillId,
-          input.body,
-          contentDigest,
-          contentDigest,
-        );
+      await prisma.catalog_skills.create({
+        data: {
+          creative_skill_id: creativeSkillId,
+          owner_user_id: BigInt(userId),
+          name: input.name,
+          name_key: nameKey,
+          description: input.description,
+          content: input.body,
+          source: "personal",
+        },
       });
 
       return {
