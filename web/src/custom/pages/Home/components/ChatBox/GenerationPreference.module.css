@@ -1,0 +1,250 @@
+.root {
+  position: relative;
+  min-width: 0;
+}
+
+.trigger {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  max-width: 100%;
+  padding: 6px 8px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 14px;
+  cursor: pointer;
+  transition: color var(--transition-fast), background-color var(--transition-fast);
+}
+
+.trigger:hover,
+.trigger[aria-expanded='true'] {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.summary {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.panel {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 10px);
+  z-index: 20;
+  box-sizing: border-box;
+  width: 480px;
+  max-width: calc(100vw - 32px);
+  max-height: 70vh;
+  overflow-y: auto;
+  padding: 16px;
+  border-radius: 12px;
+  border: 1px solid #333;
+  background: #232323;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
+  animation: popupFadeIn 0.15s ease;
+}
+
+@keyframes popupFadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #8f9198;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: color var(--transition-fast), background-color var(--transition-fast);
+  z-index: 1;
+}
+
+.close:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.label {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 13px;
+  color: #8f9198;
+}
+
+.row {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.row > * {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 16px;
+}
+
+.options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.option {
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: rgba(255, 255, 255, 0.05);
+  color: #bbb;
+  font-size: 13px;
+  cursor: pointer;
+  transition: color var(--transition-fast), background-color var(--transition-fast);
+}
+
+.option:hover:not(:disabled) {
+  color: #fff;
+  background: #2a2a2a;
+}
+
+.option[aria-pressed='true'] {
+  color: #fff;
+  background: #333;
+  border-color: #555;
+}
+
+.option:disabled {
+  color: #5a5c61;
+  cursor: not-allowed;
+}
+
+.durationHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.durationValue {
+  margin-bottom: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #fff;
+}
+
+.slider {
+  width: 100%;
+}
+
+.auto {
+  display: block;
+  margin: 0 0 8px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: #bbb;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.auto[aria-pressed='true'] {
+  color: #fff;
+}
+
+.ticks {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 6px;
+  padding: 0 6px;
+}
+
+.tick {
+  width: 2px;
+  height: 6px;
+  border-radius: 1px;
+  background-color: #4a4a4a;
+}
+
+.tickActive {
+  height: 8px;
+  background-color: #fff;
+}
+
+.range {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 4px;
+  margin-bottom: 16px;
+  font-size: 13px;
+  color: #8f9198;
+}
+
+.ratio {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.toggleRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.switch {
+  position: relative;
+  width: 36px;
+  height: 20px;
+  padding: 0;
+  border-radius: 999px;
+  background-color: #3a3a3a;
+  border: none;
+  cursor: pointer;
+  transition: background-color var(--transition-fast);
+  flex-shrink: 0;
+}
+
+.switchOn {
+  background-color: var(--color-accent-primary);
+}
+
+.switchKnob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background-color: #fff;
+  transition: transform var(--transition-fast);
+}
+
+.switchOn .switchKnob {
+  transform: translateX(16px);
+}
+
+.hint {
+  margin: 0;
+  font-size: 13px;
+  color: #8f9198;
+  line-height: 1.5;
+}

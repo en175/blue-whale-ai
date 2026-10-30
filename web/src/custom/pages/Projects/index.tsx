@@ -13,12 +13,14 @@ import {
   pinProject,
   projectKeys,
   projectPageQueryOptions,
+  projectPreviews,
   renameProject,
   type ProjectPageData,
   type ProjectRecord,
 } from '@/custom/api/projects';
 import { isApiError } from '@/shared/api/http';
 import { defaultProjectName } from '@/custom/utils/projectName';
+import { openCanvasTab } from '@/custom/utils/open-canvas-tab';
 import { remoteImageCrossOrigin, resolveMediaSrc } from '@/shared/utils/remoteImageCors';
 import styles from './index.module.css';
 
@@ -68,7 +70,7 @@ function updateCachedProjectPages(
 }
 
 function PreviewGallery({ project }: { project: ProjectRecord }) {
-  const previews = project.previews?.slice(0, 3) ?? [];
+  const previews = projectPreviews(project).slice(0, 3);
 
   if (previews.length === 0) {
     return (
@@ -243,7 +245,7 @@ export default function Projects() {
       toggleProjectSelection(project.id);
       return;
     }
-    navigate(`/canvas?project=${encodeURIComponent(String(project.id))}`);
+    openCanvasTab(project.id);
   };
 
   const onCardKeyDown = (event: KeyboardEvent<HTMLElement>, project: ProjectRecord) => {

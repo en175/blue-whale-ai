@@ -109,12 +109,9 @@ describe('RatioIcon 接入点收敛', () => {
     expect(bottomDialog).not.toMatch(/import RatioIcon from '@\/custom\/components\/RatioIcon'/);
   });
 
-  it('ChatBox 引用共享组件并以 size={22} 调用，查表法已拆除', () => {
-    expect(chatBox).toMatch(/import RatioIcon from '@\/custom\/components\/RatioIcon'/);
+  it('ChatBox 不再自带比例图标实现（V1.3.0 参数收进生成偏好弹层）', () => {
     expect(chatBox).not.toMatch(/function RatioIcon/);
     expect(chatBox).not.toMatch(/ratioDims/);
-    const calls = chatBox.match(/<RatioIcon ratio=\{[^}]+\} size=\{22\} \/>/g) ?? [];
-    expect(calls).toHaveLength(4);
   });
 
   it('CropDialog（IKGW1N 裁切比例选项）引用共享组件且不保留本地实现', () => {

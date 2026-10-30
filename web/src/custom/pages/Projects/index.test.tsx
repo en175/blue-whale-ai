@@ -16,24 +16,28 @@ const projectApi = vi.hoisted(() => ({
   pinProject: vi.fn(),
 }));
 
-vi.mock('@/custom/api/projects', () => ({
-  touchProjectLastOpened: vi.fn(async () => undefined),
-  projectKeys: {
-    all: ['projects'],
-    pages: (size: number) => ['projects', 'pages', size],
-  },
-  projectPageQueryOptions: () => ({
-    queryKey: ['projects', 'pages', 30],
-    initialPageParam: 1,
-    queryFn: ({ pageParam }: { pageParam: number }) => projectApi.fetchProjectPage(pageParam),
-    getNextPageParam: () => undefined,
-  }),
-  createProject: projectApi.createProject,
-  renameProject: projectApi.renameProject,
-  deleteProject: projectApi.deleteProject,
-  batchDeleteProjects: projectApi.batchDeleteProjects,
-  pinProject: projectApi.pinProject,
-}));
+vi.mock('@/custom/api/projects', async () => {
+  const actual = await vi.importActual<typeof import('@/custom/api/projects')>('@/custom/api/projects');
+  return {
+    ...actual,
+    touchProjectLastOpened: vi.fn(async () => undefined),
+    projectKeys: {
+      all: ['projects'],
+      pages: (size: number) => ['projects', 'pages', size],
+    },
+    projectPageQueryOptions: () => ({
+      queryKey: ['projects', 'pages', 30],
+      initialPageParam: 1,
+      queryFn: ({ pageParam }: { pageParam: number }) => projectApi.fetchProjectPage(pageParam),
+      getNextPageParam: () => undefined,
+    }),
+    createProject: projectApi.createProject,
+    renameProject: projectApi.renameProject,
+    deleteProject: projectApi.deleteProject,
+    batchDeleteProjects: projectApi.batchDeleteProjects,
+    pinProject: projectApi.pinProject,
+  };
+});
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -167,15 +171,22 @@ describe('Projects 项目卡片页', () => {
     expect(document.body.querySelector('[aria-label="暂无内容预览"]')?.textContent).toContain('暂无内容预览');
   });
 
-  it('点击项目卡片会带项目 id 跳转到画布', async () => {
-    await renderPage();
-    const card = document.body.querySelector<HTMLElement>('[aria-label="打开项目 有预览项目"]');
-    if (!card) throw new Error('项目卡片未渲染');
+  it('点击项目卡片在新标签页打开该项目，当前页不停留跳转', async () => {
+    const open = vi.fn(() => ({}));
+    const originalOpen = window.open;
+    window.open = open as unknown as typeof window.open;
+    try {
+      await renderPage();
+      const card = document.body.querySelector<HTMLElement>('[aria-label="打开项目 有预览项目"]');
+      if (!card) throw new Error('项目卡片未渲染');
 
-    await act(async () => { card.click(); });
+      await act(async () => { card.click(); });
 
-    expect(document.body.querySelector('[data-testid="location"]')?.textContent)
-      .toBe('/canvas?project=with-previews');
+      expect(open).toHaveBeenCalledWith('/canvas?project=with-previews', '_blank');
+      expect(document.body.querySelector('[data-testid="location"]')?.textContent).toBe('/projects');
+    } finally {
+      window.open = originalOpen;
+    }
   });
 
   it('多选时卡片本身不变色，仅通过勾选控件标记已选', async () => {
