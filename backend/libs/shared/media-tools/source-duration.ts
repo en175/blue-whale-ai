@@ -19,12 +19,13 @@ export interface ResolvedSourceDuration {
   height: number | null;
 }
 
-export type SecondsPolicy = "round" | "floor" | "ceil";
+export type SecondsPolicy = "round" | "floor";
 
 function toSeconds(durationMs: number, policy: SecondsPolicy): number {
-  const raw = durationMs / 1000;
   const seconds =
-    policy === "floor" ? Math.floor(raw) : policy === "ceil" ? Math.ceil(raw) : Math.round(raw);
+    policy === "floor"
+      ? Math.floor(durationMs / 1000)
+      : Math.round(durationMs / 1000);
   return Math.max(1, seconds);
 }
 

@@ -41,7 +41,7 @@ const ASSETS = new Map<string, AssetRow>([
   ["4", assetRow({ type: "video", duration_ms: 10_200, width: 1920, height: 1080 })],
   ["5", assetRow({ duration_ms: null })],
   ["6", assetRow({ type: "video", duration_ms: 4_900, width: 854, height: 480 })],
-  ["7", assetRow({ type: "video", duration_ms: 61_046, width: 1920, height: 1080 })],
+  ["7", assetRow({ type: "video", duration_ms: 61_600, width: 1920, height: 1080 })],
 ]);
 
 const quote = vi.fn();
@@ -294,13 +294,13 @@ describe("MediaToolQuoteService：5 秒档工具时长向下取整（IKRQYW）",
     );
   });
 
-  it("分钟档工具保持四舍五入：61.046 秒按 61 秒", async () => {
+  it("分钟档工具保持四舍五入：61.6 秒按 62 秒", async () => {
     const service = makeService();
     await service.quote("video_scene_split", "9", { source_asset_id: "7" });
     expect(quote).toHaveBeenCalledWith(
       "video_scene_split",
       "9",
-      expect.objectContaining({ duration: 61 }),
+      expect.objectContaining({ duration: 62 }),
     );
   });
 });

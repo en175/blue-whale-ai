@@ -312,4 +312,21 @@ describe("VideoSubtitleErasuresService.create：计费输入", () => {
     );
     expect(enqueueVideoSubtitleEraseJob).toHaveBeenCalledWith("400");
   });
+
+  it("4.9 秒源按 4 秒进档，不越到 10 秒档", async () => {
+    const jobBilling = vi.fn().mockResolvedValue(undefined);
+    const { service } = makeService({
+      assets: {
+        findOwnedSource: vi.fn().mockResolvedValue(makeVideoAsset({ duration_ms: 4_900 })),
+      },
+      billing: { jobBilling, release: vi.fn() },
+    });
+    const result = await service.create("9", "55", VALID_SMART_BODY);
+    expect(result.code).toBe(200);
+    expect(jobBilling).toHaveBeenCalledWith(
+      "video_subtitle_erase",
+      "9",
+      expect.objectContaining({ source_asset_id: "88", duration: 4 }),
+    );
+  });
 });

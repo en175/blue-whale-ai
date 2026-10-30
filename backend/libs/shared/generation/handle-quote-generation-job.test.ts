@@ -130,6 +130,7 @@ function createDeps(
   client: BillingClient,
   resolveTier: (userId: string) => Promise<string>,
   assetsOverride?: { resolveInputAssets: unknown },
+  models?: ReturnType<typeof modelWhitelist>,
 ) {
   const createJob = vi.fn(
     async (
@@ -142,7 +143,7 @@ function createDeps(
   );
   const deps = {
     projects: { findOwnedById: ownedProject() },
-    models: { listEnabledByType: modelWhitelist() },
+    models: { listEnabledByType: models ?? modelWhitelist() },
     command: { createJob },
     assets:
       assetsOverride ??
@@ -1103,6 +1104,11 @@ describe("报价按能力行配置校验（IKRQYW）", () => {
     expect(quote).not.toHaveBeenCalled();
   });
 
+  const quoteBodyWithVideoRef = (parameters: Record<string, unknown> = {}) => ({
+    ...quoteBody(parameters),
+    references: [{ role: "reference", type: "video", material_id: "asset-vid-1" }],
+  });
+
   it("显式模式未在能力行配置 → 不报价", async () => {
     const models = [
       modelRow({
@@ -1112,9 +1118,43 @@ describe("报价按能力行配置校验（IKRQYW）", () => {
         },
       }),
     ];
-    const { quote, result } = run(quoteBody({ mode: "extend" }), models);
+    const { quote, result } = run(quoteBodyWithVideoRef({ mode: "extend" }), models);
     expect((await result).data).toEqual({ credits: null, quote_revision: null });
     expect(quote).not.toHaveBeenCalled();
+  });
+
+  it("同一参考素材换用已配置模式 → 正常报价（排除参考校验误伤）", async () => {
+    const models = [
+      modelRow({
+        features: {
+          ...modelRow().features,
+          task_types: { text2video: {}, image_reference: {} },
+        },
+      }),
+    ];
+    const { quote, result } = run(quoteBodyWithVideoRef({ mode: "image_reference" }), models);
+    expect((await result).data?.credits).toBe(42);
+    expect(quote).toHaveBeenCalled();
+  });
+
+  it("提交侧同样拒绝未配置的显式模式 → 1060", async () => {
+    const models = vi.fn().mockResolvedValue([
+      modelRow({
+        features: {
+          ...modelRow().features,
+          task_types: { text2video: {}, image_reference: {} },
+        },
+      }),
+    ]);
+    const { client } = fakeBilling();
+    const created = await handleCreateGenerationJob(
+      USER_ID,
+      PROJECT_ID,
+      quoteBodyWithVideoRef({ mode: "extend" }) as never,
+      null,
+      createDeps(client, vi.fn().mockResolvedValue("free"), undefined, models),
+    );
+    expect(created.code).toBe(1060);
   });
 
   it("合法组合仍正常报价", async () => {

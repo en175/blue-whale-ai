@@ -165,6 +165,14 @@ export async function handleQuoteGenerationJob(
     }
   }
 
+  if (
+    effectiveBody !== body &&
+    (type === "video" || type === "audio") &&
+    validateGenerationRequest(type, effectiveBody, capability)
+  ) {
+    return ok(EMPTY_QUOTE);
+  }
+
   let quoteReferenceAssetIds: Array<string | number> | undefined;
   if (type === "image" && targetNodeId !== null) {
     const imageReferenceMax =
