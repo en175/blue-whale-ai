@@ -5,7 +5,7 @@ import { useState, useRef, useEffect, useLayoutEffect, useMemo, useSyncExternalS
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useDismissOnOutside } from '@/custom/pages/CanvasPage/hooks/shared/useDismissOnOutside';
 import { createPortal } from 'react-dom';
-import { Plus, ChevronUp, Music, BookOpen, BookText, X, Upload, FolderOpen } from 'lucide-react';
+import { Plus, ChevronUp, Loader2, Music, BookOpen, BookText, X, Upload, FolderOpen } from 'lucide-react';
 import SkillModal from '../SkillModal';
 import LoginModal from '@/custom/components/LoginModal';
 import { useLoginDialogStore } from '@/shared/stores/loginDialog';
@@ -30,14 +30,15 @@ import { aspectRatioOptions, hasAspectRatio, pickRatioForSize, ratiosForSelected
 import { pickDefaultVideoRatio, videoRatioLabel } from '@/custom/utils/video-aspect-ratio';
 import { type SkillRecord } from '@/custom/api/skills';
 import { createProject } from '@/custom/api/projects';
-import { setGenHandoff } from '@/custom/utils/gen-handoff';
+import { setGenHandoff, type GenHandoff } from '@/custom/utils/gen-handoff';
 import { setAgentHandoff } from '@/custom/utils/agent-handoff';
 import { classifyRefOverflow } from '@/custom/utils/ref-overflow';
 import { videoReferenceMaxOf, audioReferenceMaxOf, imageReferenceMaxOf, supportsVideoReferenceOf, UNRESOLVED_IMAGE_REFERENCE_LIMIT } from '@/custom/utils/model-reference-limits';
 import { promptCharCountLabel, promptMaxLengthOf } from '@/custom/utils/prompt-max-length';
 import { VIDEO_REFERENCE_NOT_APPROVED_MESSAGE, isUnapprovedVideoMaterialStatus } from '@/custom/utils/video-reference-compliance';
 import { OMNI_REFERENCE_FOLLOW_HINT } from '@/custom/utils/video-reference-hints';
-import { showToast as pushToast } from '@/custom/components/Toast';
+import { showToast as pushToast, toast } from '@/custom/components/Toast';
+import { isApiError, silentInit } from '@/shared/api/http';
 import { resolveHomeLoginResume, type HomePendingAction } from './homeLoginResume';
 import { limitPromptInput } from './promptInput';
 import GenerationPreference, { type PreferenceField, type PreferenceToggle } from './GenerationPreference';
@@ -67,12 +68,23 @@ function makeProjectName(): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-async function navigateToNewProject(navigate: ReturnType<typeof useNavigate>, state: unknown) {
+async function navigateToNewProject(
+  navigate: ReturnType<typeof useNavigate>,
+  state: unknown,
+  prepare?: () => void,
+): Promise<boolean> {
   try {
-    const created = await createProject(makeProjectName(), undefined, 'dialog');
+    const created = await createProject(makeProjectName(), silentInit({ silent: true }), 'dialog');
+    prepare?.();
     navigate(`/canvas?project=${created.id}`, { state });
-  } catch {
-    navigate('/canvas', { state });
+    return true;
+  } catch (error) {
+    const message =
+      isApiError(error) && error.status >= 400 && error.status < 500
+        ? '项目创建失败，请稍后再试'
+        : '创建结果未知，请刷新查看后再试';
+    toast.error(message);
+    return false;
   }
 }
 
@@ -86,6 +98,8 @@ export default function ChatBox({
   const showToast = (msg: string) => pushToast('warn', msg);
   const [activeTab, setActiveTab] = useState<ChatMode>('agent');
   const [inputValue, setInputValue] = useState('');
+  const [sending, setSending] = useState(false);
+  const sendingRef = useRef(false);
   const [expanded, setExpanded] = useState(false);
   const justExpanded = useRef(false);
   const composerRef = useRef<HTMLDivElement>(null);
@@ -307,36 +321,39 @@ export default function ChatBox({
     { open: refMenu !== null, ref: [refMenuRef, refCardRef], dismiss: () => setRefMenu(null) },
   ]);
 
-  const goCanvasWithText = (text: string, skillId?: string, skillName?: string, allowCreate = true) => {
-    setInputValue('');
-    if (skillId) setArmedSkill(null);
+  const goCanvasWithText = async (text: string, skillId?: string, skillName?: string, allowCreate = true) => {
+    const media = agentFiles.filter((f) => f.kind !== 'audio');
+    const audioCount = agentFiles.length - media.length;
+    if (audioCount > 0) showToast('音频附件暂不支持带入画布，已忽略');
 
-    if (agentFiles.length > 0) {
-      const media = agentFiles.filter((f) => f.kind !== 'audio');
-      const audioCount = agentFiles.length - media.length;
-      if (audioCount > 0) showToast('音频附件暂不支持带入画布，已忽略');
-      if (media.length > 0) {
-        setAgentHandoff(
-          media.map((f) => ({
-            file: f.file,
-            preview: f.url,
-            name: f.name,
-            kind: f.kind as 'image' | 'video',
-            assetId: f.assetId,
-          })),
-        );
+    const applied = () => {
+      setInputValue('');
+      if (skillId) setArmedSkill(null);
+      if (agentFiles.length > 0) {
+        if (media.length > 0) {
+          setAgentHandoff(
+            media.map((f) => ({
+              file: f.file,
+              preview: f.url,
+              name: f.name,
+              kind: f.kind as 'image' | 'video',
+              assetId: f.assetId,
+            })),
+          );
+        }
+        setAgentFiles([]);
       }
-      setAgentFiles([]);
-    }
-    const state = { agentText: text, skillId: skillId ?? '', skillName: skillName ?? '' };
+    };
+    const state = { agentText: text, skillId: skillId ?? '', skillName: skillName ?? '', agentAutoSend: true };
     if (!allowCreate) {
+      applied();
       navigate('/canvas', { state });
       return;
     }
-    navigateToNewProject(navigate, state);
+    await navigateToNewProject(navigate, state, applied);
   };
 
-  const dispatchByTab = (text: string, allowCreate = true) => {
+  const dispatchByTab = async (text: string, allowCreate = true) => {
     if (activeTab === 'video') {
       if (!selectedVideoModel) {
         showToast('视频模型能力加载中，请稍后重试');
@@ -352,7 +369,22 @@ export default function ChatBox({
         aspectRatio,
         duration,
       });
-      setGenHandoff({
+      const refs = isKeyframe
+        ? ([keyframeRefs.first, keyframeRefs.last].filter(Boolean) as (
+            { file?: File; preview: string; type: 'image'; assetId?: string | number }
+          )[]).map((r) => ({
+            preview: r.preview,
+            type: r.type,
+            file: r.file,
+            assetId: r.assetId,
+          }))
+        : refFiles.map((r) => ({
+            preview: r.preview,
+            type: r.type,
+            file: r.file,
+            assetId: r.assetId,
+          }));
+      const videoGenHandoff: GenHandoff = {
         kind: 'video',
         text,
         modelId: videoModel,
@@ -362,30 +394,20 @@ export default function ChatBox({
         mode: videoMode,
 
         generateAudio,
-        refs: isKeyframe
-          ? ([keyframeRefs.first, keyframeRefs.last].filter(Boolean) as (
-              { file?: File; preview: string; type: 'image'; assetId?: string | number }
-            )[]).map((r) => ({
-              preview: r.preview,
-              type: r.type,
-              file: r.file,
-              assetId: r.assetId,
-            }))
-          : refFiles.map((r) => ({
-              preview: r.preview,
-              type: r.type,
-              file: r.file,
-              assetId: r.assetId,
-            })),
-      });
-      setInputValue('');
-      if (isKeyframe) setKeyframeRefs({});
-      else setRefFiles([]);
+        refs,
+      };
+      const applied = () => {
+        setGenHandoff(videoGenHandoff);
+        setInputValue('');
+        if (isKeyframe) setKeyframeRefs({});
+        else setRefFiles([]);
+      };
       if (!allowCreate) {
+        applied();
         navigate('/canvas', { state: { genKind: 'video' } });
         return;
       }
-      navigateToNewProject(navigate, { genKind: 'video' });
+      await navigateToNewProject(navigate, { genKind: 'video' }, applied);
       return;
     }
     if (activeTab === 'image') {
@@ -393,31 +415,36 @@ export default function ChatBox({
         showToast('图片模型能力加载中，请稍后重试');
         return;
       }
-      setGenHandoff({
+      const files = imageRefFiles.map((r) => ({
+        id: `home-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        url: r.preview,
+        type: 'image' as const,
+        name: r.name ?? '参考图',
+        file: r.file,
+        assetId: r.assetId,
+      }));
+      const imageGenHandoff: GenHandoff = {
         kind: 'image',
         text,
         modelId: imageModel,
         size: imageResolution,
         ratio: imageAspectRatio,
-        files: imageRefFiles.map((r) => ({
-          id: `home-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-          url: r.preview,
-          type: 'image' as const,
-          name: r.name ?? '参考图',
-          file: r.file,
-          assetId: r.assetId,
-        })),
-      });
-      setInputValue('');
-      setImageRefFiles([]);
+        files,
+      };
+      const applied = () => {
+        setGenHandoff(imageGenHandoff);
+        setInputValue('');
+        setImageRefFiles([]);
+      };
       if (!allowCreate) {
+        applied();
         navigate('/canvas', { state: { genKind: 'image' } });
         return;
       }
-      navigateToNewProject(navigate, { genKind: 'image' });
+      await navigateToNewProject(navigate, { genKind: 'image' }, applied);
       return;
     }
-    goCanvasWithText(text, armedSkill?.id, armedSkill?.name, allowCreate);
+    await goCanvasWithText(text, armedSkill?.id, armedSkill?.name, allowCreate);
   };
 
   const handleUseSkill = (skill: SkillRecord) => {
@@ -432,9 +459,10 @@ export default function ChatBox({
     setArmedSkill({ id: skill.creative_skill_id, name: skill.name ?? '' });
   };
 
-  const handleSend = () => {
+  const handleSend = async () => {
     const text = inputValue.trim();
     if (!text) return;
+    if (sendingRef.current) return;
 
     if (keyframeSendHint) {
       showToast(keyframeSendHint);
@@ -446,7 +474,14 @@ export default function ChatBox({
       setShowLogin(true);
       return;
     }
-    dispatchByTab(text);
+    sendingRef.current = true;
+    setSending(true);
+    try {
+      await dispatchByTab(text);
+    } finally {
+      sendingRef.current = false;
+      setSending(false);
+    }
   };
 
   const handleLoginClose = () => {
@@ -464,7 +499,7 @@ export default function ChatBox({
         handleUseSkill(resume.skill);
         return;
       case 'send':
-        dispatchByTab(resume.text, false);
+        void dispatchByTab(resume.text, false);
         return;
       case 'launch':
         navigate('/canvas', { state: resume.state });
@@ -1091,10 +1126,10 @@ export default function ChatBox({
                 type="button"
                 className={`${styles.sendBtn} ${inputValue.trim() ? styles.sendBtnActive : ''}`}
                 onClick={handleSend}
-                disabled={!inputValue.trim()}
+                disabled={!inputValue.trim() || sending}
                 title="发送"
               >
-                <ChevronUp size={18} strokeWidth={2.5} />
+                {sending ? <Loader2 size={18} strokeWidth={2.5} className={styles.sendSpin} /> : <ChevronUp size={18} strokeWidth={2.5} />}
               </button>
             </div>
           </div>
@@ -1248,10 +1283,10 @@ export default function ChatBox({
                 <button
                   className={`${styles.sendBtn} ${inputValue.trim() ? styles.sendBtnActive : ''}`}
                   onClick={handleSend}
-                  disabled={!inputValue.trim()}
+                  disabled={!inputValue.trim() || sending}
                   title={keyframeSendHint || '发送'}
                 >
-                  <ChevronUp size={18} strokeWidth={2.5} />
+                  {sending ? <Loader2 size={18} strokeWidth={2.5} className={styles.sendSpin} /> : <ChevronUp size={18} strokeWidth={2.5} />}
                 </button>
               </div>
             </div>
@@ -1337,9 +1372,9 @@ export default function ChatBox({
                 <button
                   className={`${styles.sendBtn} ${inputValue.trim() ? styles.sendBtnActive : ''}`}
                   onClick={handleSend}
-                  disabled={!inputValue.trim()}
+                  disabled={!inputValue.trim() || sending}
                 >
-                  <ChevronUp size={18} strokeWidth={2.5} />
+                  {sending ? <Loader2 size={18} strokeWidth={2.5} className={styles.sendSpin} /> : <ChevronUp size={18} strokeWidth={2.5} />}
                 </button>
               </div>
             </div>
@@ -1483,9 +1518,9 @@ export default function ChatBox({
                 <button
                   className={`${styles.sendBtn} ${inputValue.trim() ? styles.sendBtnActive : ''}`}
                   onClick={handleSend}
-                  disabled={!inputValue.trim()}
+                  disabled={!inputValue.trim() || sending}
                 >
-                  <ChevronUp size={18} strokeWidth={2.5} />
+                  {sending ? <Loader2 size={18} strokeWidth={2.5} className={styles.sendSpin} /> : <ChevronUp size={18} strokeWidth={2.5} />}
                 </button>
               </div>
             </div>

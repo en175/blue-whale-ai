@@ -200,7 +200,10 @@ interface CanvasPageShellProps {
       skillName?: string;
       ts: number;
       mediaBlocks?: AgentProps['mediaBlocks'];
+      autoSend?: boolean;
+      autoSendPayload?: AgentProps['autoSendPayload'];
     } | null;
+    agentHandoffSettled: boolean;
     agentCandidate: AgentProps['candidateBlocks'];
     confirmAgentCandidate: NonNullable<AgentProps['onPrepareCandidate']>;
     cancelAgentCandidate: () => void;
@@ -554,6 +557,9 @@ export default function CanvasPageShell(props: CanvasPageShellProps) {
           initialSkillId={agent.agentContext?.skillId ?? ''}
           initialSkillName={agent.agentContext?.skillName ?? ''}
           mediaBlocks={agent.agentContext?.mediaBlocks}
+          autoSend={agent.agentContext?.autoSend}
+          autoSendPayload={agent.agentContext?.autoSendPayload}
+          autoSendReady={agent.agentHandoffSettled}
           candidateBlocks={agent.agentCandidate}
           onPrepareCandidate={agent.confirmAgentCandidate}
           onCancelCandidate={agent.cancelAgentCandidate}
