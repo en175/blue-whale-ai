@@ -154,7 +154,49 @@ describe("handleEstimateGeneration", () => {
     );
 
     expect(result.code).toBe(200);
-    expect(quoteSpecs(quote).specs.duration).toBe("12");
+    const specs = quoteSpecs(quote).specs;
+    expect(specs.duration).toBe("12");
+    expect(specs.video_edit).toBe("1");
+    expect(specs.reference_seconds).toBe("0");
+  });
+
+  it("未传 mode 时按参考与提示词推断编辑模式，口径与画布一致", async () => {
+    const { client, quote } = fakeClient();
+    const models = vi.fn().mockResolvedValue([
+      {
+        model_id: VIDEO_MODEL_ID,
+        version: 5,
+        features: {
+          audio: true,
+          video_reference: true,
+          task_types: {
+            default: { allowed_ratios: ["adaptive"] },
+            edit: { allowed_ratios: ["adaptive"] },
+          },
+        },
+      },
+    ]);
+    const result = await handleEstimateGeneration(
+      USER_ID,
+      {
+        type: "video",
+        expected_output_count: 1,
+        references: [{ type: "video", duration: 12 }],
+        parameters: {
+          model_id: VIDEO_MODEL_ID,
+          prompt: "把视频里的路牌去掉",
+          aspect_ratio: "adaptive",
+          resolution: "720p",
+          duration: -1,
+        },
+      },
+      deps(client, models),
+    );
+
+    expect(result.code).toBe(200);
+    const specs = quoteSpecs(quote).specs;
+    expect(specs.video_edit).toBe("1");
+    expect(specs.duration).toBe("12");
   });
 
   it("模型不在启用白名单时不报价，也不打计费服务", async () => {

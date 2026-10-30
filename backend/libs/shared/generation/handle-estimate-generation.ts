@@ -1,5 +1,11 @@
 import type { ResultEnvelope } from "@lib/contracts";
-import { frozenVideoModeOf, ok } from "@lib/contracts";
+import {
+  FROZEN_VIDEO_MODE_KEY,
+  frozenVideoModeOf,
+  normalizeVideoMode,
+  ok,
+  resolveVideoMode,
+} from "@lib/contracts";
 import type { ModelCapabilityRepo } from "@lib/shared/persistence/index.js";
 
 import type { BillingQuote } from "../billing/billing-quote.js";
@@ -32,7 +38,13 @@ export async function handleEstimateGeneration(
   if (type !== "image" && type !== "video") return ok(EMPTY_ESTIMATE);
 
   const params = body.parameters as
-    | { model_id?: unknown; sample_mode?: unknown; resolution?: unknown }
+    | {
+        model_id?: unknown;
+        sample_mode?: unknown;
+        resolution?: unknown;
+        mode?: unknown;
+        prompt?: unknown;
+      }
     | undefined;
   const modelId = typeof params?.model_id === "string" ? params.model_id : null;
   if (modelId === null) return ok(EMPTY_ESTIMATE);
@@ -65,7 +77,13 @@ export async function handleEstimateGeneration(
   );
   if (input === null) return ok(EMPTY_ESTIMATE);
 
-  applyEstimateReferences(input, type, body.references);
+  const estimateReferences = applyEstimateReferences(input, type, body.references);
+  if (type === "video" && normalizeVideoMode(params?.mode) === null) {
+    input[FROZEN_VIDEO_MODE_KEY] = resolveVideoMode(
+      estimateReferences,
+      typeof params?.prompt === "string" ? params.prompt : "",
+    );
+  }
   applyEditSourceDurationBasis(
     input,
     frozenVideoModeOf(input),
@@ -84,18 +102,20 @@ export async function handleEstimateGeneration(
   return ok({ credits: Number(quote.credits) });
 }
 
+type EstimateReference = {
+  role: "reference";
+  type: "image" | "video";
+  duration?: number;
+};
+
 function applyEstimateReferences(
   input: Record<string, unknown>,
   type: GenerationType,
   raw: unknown,
-): void {
-  if (!Array.isArray(raw) || raw.length === 0) return;
+): EstimateReference[] {
+  if (!Array.isArray(raw) || raw.length === 0) return [];
 
-  const references: Array<{
-    role: "reference";
-    type: "image" | "video";
-    duration?: number;
-  }> = [];
+  const references: EstimateReference[] = [];
   for (const item of raw) {
     if (typeof item !== "object" || item === null) continue;
     const { type: refType, duration } = item as { type?: unknown; duration?: unknown };
@@ -111,11 +131,12 @@ function applyEstimateReferences(
       ...(seconds !== undefined ? { duration: seconds } : {}),
     });
   }
-  if (references.length === 0) return;
+  if (references.length === 0) return references;
 
   if (type === "image") {
     input.input_asset_ids = references.map((_, index) => String(index + 1));
-    return;
+    return references;
   }
   input.references = references;
+  return references;
 }
