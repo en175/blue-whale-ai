@@ -210,7 +210,7 @@ describe('IKJ794 adaptive 档文案（ChatBox，沿用上游 IKJ4W6 auto 显示�
     const dialog = mountNode.querySelector<HTMLElement>('[role="dialog"][aria-label="生成偏好"]')!;
     expect(dialog.textContent).not.toContain('adaptive');
 
-    const ratioLabel = [...dialog.querySelectorAll<HTMLElement>('span')].find((el) => el.textContent === '画面比例')!;
+    const ratioLabel = [...dialog.querySelectorAll<HTMLElement>('span')].find((el) => el.textContent === '宽高比')!;
     const autoOption = [...ratioLabel.parentElement!.querySelectorAll<HTMLButtonElement>('button')]
       .find((b) => b.textContent === 'auto')!;
     expect(autoOption).toBeTruthy();
@@ -223,17 +223,20 @@ describe('IKJ794 adaptive 档文案（ChatBox，沿用上游 IKJ4W6 auto 显示�
 });
 
 describe('IKLUVP 首页延长时长', () => {
-  it('生成偏好含时长项，选项来自当前模型能力', async () => {
+  it('生成偏好时长滑块范围来自当前模型能力', async () => {
     fetchGenerationModels.mockResolvedValue([seedance25]);
     await renderChatBox();
     await switchMode('视频');
     await openPreference();
 
     const dialog = mountNode.querySelector<HTMLElement>('[role="dialog"][aria-label="生成偏好"]')!;
-    const label = [...dialog.querySelectorAll<HTMLElement>('span')].find((el) => el.textContent === '时长')!;
-    const options = [...label.parentElement!.querySelectorAll('button')].map((b) => b.textContent);
-    expect(options).toContain('5s');
-    expect(options.every((option) => /^(\d+s|自动)$/.test(option ?? ''))).toBe(true);
+    const head = [...dialog.querySelectorAll<HTMLElement>('span')].find((el) => el.textContent === '时长')!;
+    expect(head.parentElement!.textContent).toContain('10s');
+
+    const slider = dialog.querySelector<HTMLElement>('[role="slider"]')!;
+    expect(slider.getAttribute('aria-valuemin')).toBe('4');
+    expect(slider.getAttribute('aria-valuemax')).toBe('15');
+    expect(dialog.textContent).toContain('15s');
   });
 });
 
@@ -249,10 +252,71 @@ describe('V1.3.0 首页输入区模式', () => {
     expect(mountNode.textContent).not.toContain('AI 视频');
   });
 
-  it('画布方式下不提供 Agent 模式', async () => {
+  it('画布方式下输入框收起，点击后展开完整输入区且不提供 Agent 模式', async () => {
     await renderChatBox({ workspace: 'canvas' });
+    expect(mountNode.querySelector<HTMLElement>('[data-testid="home-composer"]')?.className).toContain('collapsed');
+    expect(mountNode.querySelector('button[aria-haspopup="menu"]')).toBeNull();
+    expect(mountNode.querySelector('button[aria-haspopup="dialog"]')).toBeNull();
+
+    await act(async () => {
+      mountNode.querySelector<HTMLTextAreaElement>('[data-testid="home-composer"] textarea')!.focus();
+    });
+    expect(mountNode.querySelector<HTMLElement>('[data-testid="home-composer"]')?.className).not.toContain('collapsed');
+    expect(mountNode.querySelector('button[aria-haspopup="dialog"]')).not.toBeNull();
+
     const options = await openModeOptions();
     expect(options).toEqual(['图片生成', '视频生成']);
+  });
+
+  it('切回生成方式时输入框恢复完整状态', async () => {
+    await renderChatBox({ workspace: 'canvas' });
+    await act(async () => {
+      mountNode.querySelector<HTMLTextAreaElement>('[data-testid="home-composer"] textarea')!.focus();
+    });
+    await act(async () => {
+      root.render(createElement(ChatBox, { draft: null, workspace: 'create' }));
+    });
+    expect(mountNode.querySelector<HTMLElement>('[data-testid="home-composer"]')?.className).not.toContain('collapsed');
+    expect(mountNode.querySelector('button[aria-haspopup="menu"]')).not.toBeNull();
+  });
+
+  it('点击聊天窗口外区域重新收起', async () => {
+    await renderChatBox({ workspace: 'canvas' });
+    await act(async () => {
+      mountNode.querySelector<HTMLTextAreaElement>('[data-testid="home-composer"] textarea')!.focus();
+    });
+    expect(mountNode.querySelector<HTMLElement>('[data-testid="home-composer"]')?.className).not.toContain('collapsed');
+
+    await act(async () => {
+      document.body.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    });
+    expect(mountNode.querySelector<HTMLElement>('[data-testid="home-composer"]')?.className).toContain('collapsed');
+  });
+
+  it('点击聊天窗口内部（含弹出的面板）不收起', async () => {
+    await renderChatBox({ workspace: 'canvas' });
+    await act(async () => {
+      mountNode.querySelector<HTMLTextAreaElement>('[data-testid="home-composer"] textarea')!.focus();
+    });
+
+    const summary = [...mountNode.querySelectorAll<HTMLButtonElement>('button')].find(
+      (b) => b.getAttribute('aria-haspopup') === 'dialog',
+    )!;
+    await act(async () => { summary.click(); });
+    const panel = mountNode.querySelector<HTMLElement>('[role="dialog"][aria-label="生成偏好"]')!;
+
+    await act(async () => {
+      panel.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+    });
+    expect(mountNode.querySelector<HTMLElement>('[data-testid="home-composer"]')?.className).not.toContain('collapsed');
+  });
+
+  it('技能入口文案为「技能库」，Agent 模式不展示模型选择', async () => {
+    await renderChatBox();
+
+    expect(mountNode.textContent).toContain('技能库');
+    expect(mountNode.textContent).not.toContain('Skill');
+    expect(mountNode.querySelector('[aria-label="选择生成模型"]')).toBeNull();
   });
 
   it('空白输入时发送按钮禁用', async () => {
@@ -268,5 +332,14 @@ describe('V1.3.0 首页输入区模式', () => {
       textarea.dispatchEvent(new Event('input', { bubbles: true }));
     });
     expect(mountNode.querySelector<HTMLButtonElement>(`button[class*="sendBtn"]`)!.disabled).toBe(true);
+  });
+
+  it('发送按钮左侧常驻预计消耗积分位，未接入报价时不显示数字', async () => {
+    await renderChatBox();
+
+    const quote = mountNode.querySelector<HTMLElement>('[data-testid="home-quote"]')!;
+    expect(quote).not.toBeNull();
+    expect(quote.querySelector('svg')).not.toBeNull();
+    expect(quote.textContent ?? '').toBe('');
   });
 });

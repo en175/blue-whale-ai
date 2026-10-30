@@ -130,4 +130,48 @@ describe('CardGallery', () => {
     expect(cards()[0].querySelector('svg')).not.toBeNull();
     expect(cards()[0].getAttribute('data-media-kind')).toBe('video');
   });
+
+  it('视频卡直接自动播放，不依赖鼠标悬停', async () => {
+    await mountGallery();
+
+    await act(async () => {
+      filterButton('人物种草')?.click();
+    });
+    const video = cards()[0].querySelector<HTMLVideoElement>('[data-testid="gallery-video"]')!;
+    expect(video).not.toBeNull();
+    expect(video.autoplay).toBe(true);
+    expect(video.muted).toBe(true);
+    expect(video.loop).toBe(true);
+    expect(mountNode.querySelector('[data-testid="gallery-hover-video"]')).toBeNull();
+  });
+
+  it('当前 tab 的封面与视频走预加载', async () => {
+    api.fetchTemplateTags.mockResolvedValue([
+      { tag_code: 'a', label: '场景A' },
+      { tag_code: 'b', label: '场景B' },
+    ]);
+    api.fetchTemplatePage.mockImplementation(async (tagCode: string) =>
+      pageOf([
+        {
+          title: `${tagCode}-案例`,
+          video: tagCode === 'b' ? 'https://example.com/b.mp4' : '',
+          images: [`https://example.com/${tagCode}.jpg`],
+          layout: 'wide',
+          content: null,
+        },
+      ]),
+    );
+
+    await mountGallery();
+
+    const eagerImg = cards()[0].querySelector<HTMLImageElement>('img')!;
+    expect(eagerImg.getAttribute('loading')).toBe('eager');
+
+    await act(async () => {
+      filterButton('场景B')?.click();
+    });
+    const video = cards()[0].querySelector<HTMLVideoElement>('[data-testid="gallery-video"]')!;
+    expect(video.getAttribute('data-preload')).toBe('eager');
+    expect(video.preload).toBe('auto');
+  });
 });

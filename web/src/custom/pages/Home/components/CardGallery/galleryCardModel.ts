@@ -13,3 +13,7 @@ export function galleryCoverSrc(images: string[] | null | undefined): string {
 export function shouldShowVideoChrome(kind: GalleryMediaKind): boolean {
   return kind === 'video';
 }
+
+export function galleryPreloadMode(activeTag: string, tagCode: string): 'eager' | 'lazy' {
+  return activeTag !== '' && activeTag === tagCode ? 'eager' : 'lazy';
+}

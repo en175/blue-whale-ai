@@ -10,7 +10,7 @@ import {
   type TemplateRecord,
 } from '@/custom/api/agent';
 import { remoteImageCrossOrigin, resolveMediaSrc } from '@/shared/utils/remoteImageCors';
-import { galleryCoverSrc, shouldShowVideoChrome } from './galleryCardModel';
+import { galleryCoverSrc, galleryPreloadMode, shouldShowVideoChrome } from './galleryCardModel';
 
 const FALLBACK_TAGS: TemplateTag[] = [
   { tag_code: 'video', label: '视频' },
@@ -31,18 +31,19 @@ function GalleryCard({
   record,
   mediaKind,
   purposeLabel,
+  preload,
   onClick,
 }: {
   record: TemplateRecord;
   mediaKind: GalleryMediaKind;
   purposeLabel: string;
+  preload: 'eager' | 'lazy';
   onClick?: () => void;
 }) {
-  const [hovered, setHovered] = useState(false);
   const cover = galleryCoverSrc(record.images);
   const videoChrome = shouldShowVideoChrome(mediaKind);
-  const playingHoverVideo = Boolean(hovered && videoChrome && record.video);
   const TypeIcon = videoChrome ? Video : ImageIcon;
+  const video = videoChrome ? record.video : '';
 
   return (
     <button
@@ -51,17 +52,29 @@ function GalleryCard({
       data-testid="gallery-card"
       data-media-kind={mediaKind}
       onClick={onClick}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
     >
       <div className={styles.cover}>
-        {cover ? (
+        {video ? (
+          <video
+            className={styles.coverVideo}
+            data-testid="gallery-video"
+            data-preload={preload}
+            src={resolveMediaSrc(video)}
+            poster={cover ? resolveMediaSrc(cover) : undefined}
+            autoPlay
+            muted
+            loop
+            playsInline
+            disablePictureInPicture
+            preload={preload === 'eager' ? 'auto' : 'metadata'}
+          />
+        ) : cover ? (
           <img
             className={styles.coverImg}
             src={resolveMediaSrc(cover)}
             crossOrigin={remoteImageCrossOrigin(cover)}
             alt={record.title}
-            loading="lazy"
+            loading={preload}
           />
         ) : (
           <span className={styles.coverEmpty}>暂无内容预览</span>
@@ -70,18 +83,6 @@ function GalleryCard({
           <TypeIcon size={15} strokeWidth={1.8} />
         </span>
       </div>
-      {playingHoverVideo && (
-        <video
-          className={styles.hoverVideo}
-          data-testid="gallery-hover-video"
-          src={resolveMediaSrc(record.video)}
-          autoPlay
-          muted
-          loop
-          playsInline
-          disablePictureInPicture
-        />
-      )}
       <span className={styles.cardTitle}>{truncate(record.title)}</span>
       <span className={styles.cardTags}>{purposeLabel}</span>
     </button>
@@ -155,6 +156,7 @@ export default function CardGallery({ onCardClick }: { onCardClick?: (text: stri
             record={record}
             mediaKind={mediaKind}
             purposeLabel={tag.label}
+            preload={galleryPreloadMode(activeTag, tag.tag_code)}
             onClick={() => {
               const text = record.content?.trim() || record.title;
               onCardClick?.(text, mediaKind);

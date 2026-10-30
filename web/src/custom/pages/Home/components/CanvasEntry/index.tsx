@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { LayoutGrid, Plus } from 'lucide-react';
-import { createProject, fetchRecentProjects, type ProjectRecord } from '@/custom/api/projects';
+import { createProject, fetchRecentProjects, projectPreviews, type ProjectRecord } from '@/custom/api/projects';
 import LoginModal from '@/custom/components/LoginModal';
 import { showToast } from '@/custom/components/Toast';
 import { getCurrentUser } from '@/shared/utils/auth';
 import { resolveMediaSrc } from '@/shared/utils/remoteImageCors';
+import { openCanvasTab } from '@/custom/utils/open-canvas-tab';
 import styles from './index.module.css';
 
 const RECENT_LIMIT = 3;
@@ -66,17 +67,21 @@ export default function CanvasEntry() {
         <span className={styles.newCanvasLabel}>新建画布</span>
       </button>
       {recent.map((project) => {
-        const cover = project.previews?.find((preview) => preview.type === 'image');
+        const cover = projectPreviews(project)[0];
         return (
           <button
             key={project.id}
             type="button"
             className={styles.recentCard}
             data-testid="canvas-recent-card"
-            onClick={() => navigate(`/canvas?project=${project.id}`)}
+            onClick={() => openCanvasTab(project.id)}
           >
             {cover ? (
-              <img className={styles.recentCover} src={resolveMediaSrc(cover.url)} alt="" loading="lazy" />
+              cover.type === 'video' ? (
+                <video className={styles.recentCover} src={resolveMediaSrc(cover.url)} muted playsInline preload="metadata" />
+              ) : (
+                <img className={styles.recentCover} src={resolveMediaSrc(cover.url)} alt="" loading="lazy" />
+              )
             ) : (
               <span className={styles.recentEmpty} data-testid="canvas-recent-empty">
                 <LayoutGrid size={26} strokeWidth={1.4} aria-hidden="true" />

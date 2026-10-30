@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Check, ChevronDown, Image as ImageIcon, Sparkles, Video } from 'lucide-react';
-import styles from './index.module.css';
+import styles from './ModeMenu.module.css';
 
 export type ChatModeKey = 'agent' | 'image' | 'video';
 

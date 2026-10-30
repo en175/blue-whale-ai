@@ -1,18 +1,19 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Home, FolderOpen, Image, LayoutGrid, PanelLeft, Search } from 'lucide-react';
-import { useAppStore } from '@/custom/stores';
+import { Home, FolderOpen, Image, LayoutGrid, MessageSquare, PanelLeft, Search } from 'lucide-react';
 import { getCurrentUser, subscribe } from '@/shared/utils/auth';
 import LoginModal from '@/custom/components/LoginModal';
 import { showToast } from '@/custom/components/Toast';
 import {
   deleteProject,
   fetchProjectListQuery,
+  projectPreviews,
   renameProject,
   type ProjectRecord,
   type ProjectSource,
 } from '@/custom/api/projects';
 import { resolveMediaSrc } from '@/shared/utils/remoteImageCors';
+import { openCanvasTab } from '@/custom/utils/open-canvas-tab';
 import styles from './index.module.css';
 
 const menuItems = [
@@ -48,7 +49,6 @@ export default function HomeSidebar({
 }) {
   const navigate = useNavigate();
   const location = useLocation();
-  const { setActiveMenu } = useAppStore();
   const user = useSyncExternalStore(subscribe, getCurrentUser);
   const [showLogin, setShowLogin] = useState(false);
   const [keyword, setKeyword] = useState('');
@@ -58,21 +58,18 @@ export default function HomeSidebar({
   const pendingItem = useRef<(typeof menuItems)[0] | null>(null);
   const requestRef = useRef(0);
 
+  const historyOpen = location.pathname === '/';
+
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedKeyword(keyword), SEARCH_DEBOUNCE_MS);
     return () => clearTimeout(timer);
   }, [keyword]);
 
-  useEffect(() => {
-    const matched = menuItems.find((item) => item.path === location.pathname);
-    if (matched) setActiveMenu(matched.key);
-  }, [location.pathname, setActiveMenu]);
-
   const load = (source: ProjectSource, page: number, search: string) =>
     fetchProjectListQuery({ source, page, size: PAGE_SIZE, keyword: search || undefined });
 
   useEffect(() => {
-    if (!user || !expanded) return;
+    if (!user || !historyOpen) return;
     const ticket = ++requestRef.current;
     const search = debouncedKeyword.trim();
     setGroups({ dialog: { ...EMPTY_GROUP, loading: true }, canvas: { ...EMPTY_GROUP, loading: true } });
@@ -83,7 +80,7 @@ export default function HomeSidebar({
         canvas: pages[1] ? { records: pages[1].records, page: 1, total: pages[1].total, loading: false } : EMPTY_GROUP,
       });
     });
-  }, [debouncedKeyword, user, expanded]);
+  }, [debouncedKeyword, user, historyOpen]);
 
   const loadMore = async (source: ProjectSource) => {
     const group = groups[source];
@@ -106,24 +103,25 @@ export default function HomeSidebar({
     );
   };
 
+  const go = (item: (typeof menuItems)[0]) => {
+    navigate(item.path);
+    onExpandedChange(false);
+  };
+
   const handleClick = (item: (typeof menuItems)[0]) => {
     if (item.key !== 'home' && !user) {
       pendingItem.current = item;
       setShowLogin(true);
       return;
     }
-    setActiveMenu(item.key);
-    navigate(item.path);
+    go(item);
   };
 
   const handleLoginClose = () => {
     setShowLogin(false);
     const pending = pendingItem.current;
     pendingItem.current = null;
-    if (pending && getCurrentUser()) {
-      setActiveMenu(pending.key);
-      navigate(pending.path);
-    }
+    if (pending && getCurrentUser()) go(pending);
   };
 
   const handleKeyword = (value: string) => {
@@ -182,10 +180,10 @@ export default function HomeSidebar({
   const hasHistory = GROUPS.some((group) => groups[group.key].records.length > 0);
 
   return (
-    <aside className={`${styles.sidebar} ${styles.onGlass} ${expanded ? styles.expanded : ''}`}>
+    <aside className={`${styles.sidebar} ${expanded ? styles.expanded : ''}`}>
       <div className={styles.brandRow}>
         <button className={styles.brand} onClick={() => handleClick(menuItems[0])} aria-label="蓝鲸首页">
-          <img src="/blue_whale.svg" alt="" className={styles.logoIcon} />
+          <img src="/project.png" alt="" className={styles.logoIcon} />
         </button>
         <button
           className={styles.sidebarControl}
@@ -216,17 +214,19 @@ export default function HomeSidebar({
         })}
       </nav>
 
-      {expanded && (
+      {historyOpen && (
         <section className={styles.historyPanel} aria-label="历史项目">
-          <label className={styles.search}>
-            <Search size={14} strokeWidth={2} />
-            <input
-              value={keyword}
-              onChange={(event) => handleKeyword(event.target.value)}
-              placeholder="搜索项目"
-              aria-label="搜索项目"
-            />
-          </label>
+          {expanded && (
+            <label className={styles.search}>
+              <Search size={14} strokeWidth={2} />
+              <input
+                value={keyword}
+                onChange={(event) => handleKeyword(event.target.value)}
+                placeholder="搜索项目"
+                aria-label="搜索项目"
+              />
+            </label>
+          )}
           <div className={styles.historyScroll}>
             {pendingSearch ? (
               <p className={styles.historyEmpty}>搜索中…</p>
@@ -237,7 +237,14 @@ export default function HomeSidebar({
                 const items = groups[group.key].records;
                 return (
                   <section key={group.key} className={styles.historyGroup} aria-label={group.label}>
-                    <h3 className={styles.historyHeading}>{group.label}</h3>
+                    <h3 className={styles.historyHeading} title={group.label}>
+                      {group.key === 'dialog' ? (
+                        <MessageSquare size={16} strokeWidth={1.8} aria-hidden="true" className={styles.headingIcon} />
+                      ) : (
+                        <LayoutGrid size={16} strokeWidth={1.8} aria-hidden="true" className={styles.headingIcon} />
+                      )}
+                      <span className={styles.headingLabel}>{group.label}</span>
+                    </h3>
                     {items.length === 0 ? (
                       <p className={styles.historyEmpty}>
                         {groups[group.key].loading ? '加载中…' : `暂无${group.label}`}
@@ -245,17 +252,27 @@ export default function HomeSidebar({
                     ) : (
                       <ul className={styles.historyItems}>
                         {items.map((record) => {
-                          const cover = record.previews?.find((preview) => preview.type === 'image');
+                          const cover = projectPreviews(record)[0];
                           return (
                             <li key={record.id} className={styles.historyItem}>
                               <button
                                 className={styles.historyRow}
                                 title={record.name}
-                                onClick={() => navigate(`/canvas?project=${record.id}`)}
+                                onClick={() => openCanvasTab(record.id)}
                               >
                                 <span className={styles.historyThumb}>
                                   {cover ? (
-                                    <img src={resolveMediaSrc(cover.url)} alt="" loading="lazy" />
+                                    cover.type === 'video' ? (
+                                      <video
+                                        src={resolveMediaSrc(cover.url)}
+                                        muted
+                                        playsInline
+                                        preload="metadata"
+                                        aria-hidden="true"
+                                      />
+                                    ) : (
+                                      <img src={resolveMediaSrc(cover.url)} alt="" loading="lazy" />
+                                    )
                                   ) : (
                                     <LayoutGrid size={16} strokeWidth={1.8} aria-hidden="true" />
                                   )}

@@ -1,9 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
-import Sidebar from '@/custom/components/Sidebar';
 import HomeSidebar from '@/custom/pages/Home/components/HomeSidebar';
 import { useDocumentTitle } from '@/shared/seo/useDocumentTitle';
-import HeroVideoCarousel from '@/custom/pages/Home/components/HeroVideoCarousel';
 import styles from './index.module.css';
 
 export default function MainLayout() {
@@ -11,18 +9,18 @@ export default function MainLayout() {
   const [homeSidebarExpanded, setHomeSidebarExpanded] = useState(false);
   useDocumentTitle();
   const isCanvasPage = location.pathname === '/canvas';
-  const isHomePage = location.pathname === '/';
-  const hasGlassBackground = ['/', '/projects', '/library', '/history'].includes(location.pathname);
-  const hasInterfaceBackground = isHomePage ? false : hasGlassBackground;
+
+  useEffect(() => {
+    setHomeSidebarExpanded(false);
+  }, [location.pathname]);
 
   return (
-    <div className={`${styles.layout} ${isHomePage ? styles.homeLayout : ''} ${isHomePage && homeSidebarExpanded ? styles.layoutWideSidebar : ''}`}>
-      {!isCanvasPage && !isHomePage && <Sidebar />}
-      {!isCanvasPage && isHomePage && (
-        <HomeSidebar expanded={homeSidebarExpanded} onExpandedChange={setHomeSidebarExpanded} />
-      )}
-      <main className={`${styles.main} ${isCanvasPage ? styles.mainFull : ''} ${hasInterfaceBackground ? styles.mainGlass : ''}`}>
-        {hasInterfaceBackground && <HeroVideoCarousel />}
+    <div
+      className={`${styles.layout} ${homeSidebarExpanded ? styles.layoutWideSidebar : ''}`}
+      data-sidebar={isCanvasPage ? 'none' : homeSidebarExpanded ? 'wide' : 'compact'}
+    >
+      {!isCanvasPage && <HomeSidebar expanded={homeSidebarExpanded} onExpandedChange={setHomeSidebarExpanded} />}
+      <main className={`${styles.main} ${isCanvasPage ? styles.mainFull : ''}`}>
         <Outlet />
       </main>
     </div>

@@ -101,7 +101,7 @@ describe('Home 主语与切换', () => {
     expect(items).toEqual(['生成', '画布']);
   });
 
-  it('只在「生成」下展示案例，「画布」下换成新建与最近项目位', async () => {
+  it('「画布」下追加新建与最近项目位，案例区保持展示', async () => {
     await renderHome();
 
     expect(mountNode.querySelector('[data-testid="chat-box"]')?.getAttribute('data-workspace')).toBe('create');
@@ -116,7 +116,7 @@ describe('Home 主语与切换', () => {
     });
 
     expect(mountNode.querySelector('[data-testid="chat-box"]')?.getAttribute('data-workspace')).toBe('canvas');
-    expect(mountNode.querySelector('[data-testid="card-gallery"]')).toBeNull();
+    expect(mountNode.querySelector('[data-testid="card-gallery"]')).not.toBeNull();
     expect(mountNode.querySelector('[data-testid="canvas-entry"]')).not.toBeNull();
   });
 });

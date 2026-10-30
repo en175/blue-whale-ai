@@ -6,9 +6,17 @@ export interface ProjectPreview {
   type: 'image' | 'video';
 }
 
-export interface ProjectPreview {
-  url: string;
-  type: 'image' | 'video';
+export type PreviewSource = { url: string; type: 'image' | 'video' };
+
+function normalizePreview(item: ProjectPreview | string): PreviewSource {
+  if (typeof item === 'string') {
+    return { url: item, type: /\.(mp4|webm|mov|m3u8)(?:$|[?#])/i.test(item) ? 'video' : 'image' };
+  }
+  return { url: item.url, type: item.type === 'video' ? 'video' : 'image' };
+}
+
+export function projectPreviews(record: ProjectRecord): PreviewSource[] {
+  return (record.previews ?? []).map(normalizePreview).filter((preview) => preview.url);
 }
 
 export type ProjectSource = 'dialog' | 'canvas';

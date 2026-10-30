@@ -1,7 +1,7 @@
 
 
 import { PANEL_REF_MEDIA_TYPES, VIDEO_MODE_LABEL } from '@/custom/enums';
-import { useState, useRef, useEffect, useCallback, useLayoutEffect, useMemo, useSyncExternalStore } from 'react';
+import { useState, useRef, useEffect, useLayoutEffect, useMemo, useSyncExternalStore } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useDismissOnOutside } from '@/custom/pages/CanvasPage/hooks/shared/useDismissOnOutside';
 import { createPortal } from 'react-dom';
@@ -9,7 +9,6 @@ import { Plus, ChevronUp, Music, BookOpen, BookText, X, Upload, FolderOpen } fro
 import SkillModal from '../SkillModal';
 import LoginModal from '@/custom/components/LoginModal';
 import { useLoginDialogStore } from '@/shared/stores/loginDialog';
-import RatioIcon from '@/custom/components/RatioIcon';
 import Select from '@/custom/components/Select';
 import AssetsPickerModal from '@/custom/pages/CanvasPage/components/AssetsPickerModal';
 
@@ -43,6 +42,7 @@ import { resolveHomeLoginResume, type HomePendingAction } from './homeLoginResum
 import { limitPromptInput } from './promptInput';
 import GenerationPreference, { type PreferenceField, type PreferenceToggle } from './GenerationPreference';
 import ModeMenu from './ModeMenu';
+import QuoteBadge from './QuoteBadge';
 
 const modeItems = [
   { key: 'agent', label: 'Agent' },
@@ -86,10 +86,45 @@ export default function ChatBox({
   const showToast = (msg: string) => pushToast('warn', msg);
   const [activeTab, setActiveTab] = useState<ChatMode>('agent');
   const [inputValue, setInputValue] = useState('');
+  const [expanded, setExpanded] = useState(false);
+  const justExpanded = useRef(false);
+  const composerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const navigate = useNavigate();
   const location = useLocation();
   const user = useSyncExternalStore(subscribe, getCurrentUser);
+
+  const collapsed = workspace === 'canvas' && !expanded;
+
+  useEffect(() => {
+    setExpanded(false);
+  }, [workspace]);
+
+  useEffect(() => {
+    if (!justExpanded.current) return;
+    justExpanded.current = false;
+    const el = textareaRef.current;
+    el?.focus();
+    el?.setSelectionRange(el.value.length, el.value.length);
+  });
+
+  useEffect(() => {
+    if (!expanded || workspace !== 'canvas') return;
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as Element | null;
+      if (!target || composerRef.current?.contains(target)) return;
+      if (target.closest('[role="dialog"], [role="menu"], [role="listbox"], [role="tooltip"], [data-radix-popper-content-wrapper]')) return;
+      setExpanded(false);
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    return () => document.removeEventListener('pointerdown', onPointerDown);
+  }, [expanded, workspace]);
+
+  const activateComposer = () => {
+    if (!collapsed) return;
+    justExpanded.current = true;
+    setExpanded(true);
+  };
 
   const visibleModes = modeItems.filter((item) => workspace === 'create' || item.key !== 'agent');
 
@@ -131,9 +166,13 @@ export default function ChatBox({
   useLayoutEffect(() => {
     const textarea = textareaRef.current;
     if (!textarea) return;
+    if (collapsed) {
+      textarea.style.height = '';
+      return;
+    }
     textarea.style.height = 'auto';
     textarea.style.height = `${textarea.scrollHeight}px`;
-  }, [activeTab, inputValue]);
+  }, [activeTab, inputValue, collapsed]);
 
   const [agentFiles, setAgentFiles] = useState<
     { id: string; url: string; kind: 'image' | 'video' | 'audio'; name: string; file?: File; assetId?: string | number }[]
@@ -644,6 +683,7 @@ export default function ChatBox({
           {
             key: 'duration',
             label: '时长',
+            numeric: true,
             value: String(duration),
             onChange: (value: string) => setDuration(Number(value)),
             options: durationOptions,
@@ -652,7 +692,7 @@ export default function ChatBox({
   ];
 
   const videoPreferenceToggles: PreferenceToggle[] = supportsVideoAudio
-    ? [{ key: 'audio', label: '声音', value: generateAudio, onChange: setGenerateAudio }]
+    ? [{ key: 'audio', label: '音频', hint: '生成的视频是否带声音', value: generateAudio, onChange: setGenerateAudio }]
     : [];
 
   const imagePreferenceSummary = [
@@ -676,13 +716,6 @@ export default function ChatBox({
       options: imageModelOptions.map((m) => ({ value: m.key, label: m.label })),
     },
     {
-      key: 'ratio',
-      label: '画面比例',
-      value: imageAspectRatio,
-      onChange: setImageAspectRatio,
-      options: imageRatioOptions.map((ratio) => ({ value: ratio.id, label: ratio.label })),
-    },
-    {
       key: 'resolution',
       label: '清晰度',
       value: imageResolution,
@@ -691,6 +724,13 @@ export default function ChatBox({
         if (selectedImageModel) setImageAspectRatio(pickRatioForSize(selectedImageModel, key, imageAspectRatio));
       },
       options: imageSizeItems.map((r) => ({ value: r.key, label: r.label })),
+    },
+    {
+      key: 'ratio',
+      label: '画面比例',
+      value: imageAspectRatio,
+      onChange: setImageAspectRatio,
+      options: imageRatioOptions.map((ratio) => ({ value: ratio.id, label: ratio.label })),
     },
   ];
 
@@ -1021,7 +1061,46 @@ export default function ChatBox({
   };
 
   return (
-    <>
+    <div
+      ref={composerRef}
+      className={`${styles.composer} ${collapsed ? styles.collapsed : ''}`}
+      data-workspace={workspace}
+      data-testid="home-composer"
+    >
+      {collapsed ? (
+        <>
+          <div className={styles.inputArea}>
+            <textarea
+              ref={textareaRef}
+              className={styles.textarea}
+              placeholder="描述主体、场景、动作和镜头，或添加一张参考图片…"
+              value={inputValue}
+              onChange={(e) => handleInputChange(e.target.value)}
+              onKeyDown={handleKeyDown}
+              onFocus={activateComposer}
+              onClick={activateComposer}
+              onCompositionStart={handleCompositionStart}
+              onCompositionEnd={handleCompositionEnd}
+              rows={3}
+            />
+          </div>
+          <div className={`${styles.paramBar} ${styles.paramBarEmpty}`}>
+            <div className={styles.paramBarRight}>
+              <QuoteBadge />
+              <button
+                type="button"
+                className={`${styles.sendBtn} ${inputValue.trim() ? styles.sendBtnActive : ''}`}
+                onClick={handleSend}
+                disabled={!inputValue.trim()}
+                title="发送"
+              >
+                <ChevronUp size={18} strokeWidth={2.5} />
+              </button>
+            </div>
+          </div>
+        </>
+      ) : (
+        <>
       <div className={styles.chatBox}>
         { }
 
@@ -1165,6 +1244,7 @@ export default function ChatBox({
                 <GenerationPreference summary={videoPreferenceSummary} fields={videoPreferenceFields} toggles={videoPreferenceToggles} />
               </div>
               <div className={styles.paramBarRight}>
+                <QuoteBadge />
                 <button
                   className={`${styles.sendBtn} ${inputValue.trim() ? styles.sendBtnActive : ''}`}
                   onClick={handleSend}
@@ -1253,6 +1333,7 @@ export default function ChatBox({
                 <GenerationPreference summary={imagePreferenceSummary} fields={imagePreferenceFields} />
               </div>
               <div className={styles.paramBarRight}>
+                <QuoteBadge />
                 <button
                   className={`${styles.sendBtn} ${inputValue.trim() ? styles.sendBtnActive : ''}`}
                   onClick={handleSend}
@@ -1378,24 +1459,27 @@ export default function ChatBox({
                   }}
                 >
                   <BookOpen size={16} strokeWidth={2} />
-                  <span>Skill</span>
+                  <span>技能库</span>
                 </button>
 
                 { }
-                <Select
-                  value={creationModel}
-                  onChange={setCreationModel}
-                  size="sm"
-                  side="top"
-                  ariaLabel="选择生成模型"
-                  triggerClassName={styles.modelBtn}
-                  options={creationModelOptions.map((m) => ({ value: m.key, label: m.label }))}
-                />
+                {activeTab !== 'agent' && (
+                  <Select
+                    value={creationModel}
+                    onChange={setCreationModel}
+                    size="sm"
+                    side="top"
+                    ariaLabel="选择生成模型"
+                    triggerClassName={styles.modelBtn}
+                    options={creationModelOptions.map((m) => ({ value: m.key, label: m.label }))}
+                  />
+                )}
               </div>
 
               { }
               <div className={styles.paramBarRight}>
                 { }
+                <QuoteBadge />
                 <button
                   className={`${styles.sendBtn} ${inputValue.trim() ? styles.sendBtnActive : ''}`}
                   onClick={handleSend}
@@ -1470,6 +1554,8 @@ export default function ChatBox({
           rejectUnapprovedForVideo={assetsPickerTarget === 'video'}
         />
       )}
-    </>
+        </>
+      )}
+    </div>
   );
 }

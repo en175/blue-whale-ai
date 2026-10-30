@@ -45,17 +45,14 @@ export default function Home() {
           )}
 
           {}
-          <div className={styles.chatWrap}>
+          <div className={styles.chatWrap} data-workspace={workspace}>
             <ChatBox draft={chatDraft} workspace={workspace} />
           </div>
         </div>
 
-        {}
-        {workspace === 'create' && (
-          <div className={styles.inspirationWrap}>
-            <CardGallery onCardClick={(text, mediaType) => setChatDraft({ text, mediaType, ts: Date.now() })} />
-          </div>
-        )}
+        <div className={styles.inspirationWrap}>
+          <CardGallery onCardClick={(text, mediaType) => setChatDraft({ text, mediaType, ts: Date.now() })} />
+        </div>
       </div>
     </div>
   );

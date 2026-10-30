@@ -5,21 +5,9 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import MainLayout from './MainLayout';
 
-vi.mock('@/custom/components/Sidebar', () => ({
-  default: function MockSidebar() {
-    return createElement('aside', { 'data-testid': 'shared-sidebar' });
-  },
-}));
-
 vi.mock('@/custom/pages/Home/components/HomeSidebar', () => ({
-  default: function MockHomeSidebar() {
-    return createElement('aside', { 'data-testid': 'home-sidebar' });
-  },
-}));
-
-vi.mock('@/custom/pages/Home/components/HeroVideoCarousel', () => ({
-  default: function MockHeroVideoCarousel() {
-    return null;
+  default: function MockHomeSidebar({ expanded }: { expanded: boolean }) {
+    return createElement('aside', { 'data-testid': 'home-sidebar', 'data-expanded': String(expanded) });
   },
 }));
 
@@ -57,24 +45,24 @@ afterEach(async () => {
 });
 
 describe('MainLayout 侧栏归属', () => {
-  it('首页使用专属侧栏，不渲染共用侧栏', async () => {
-    await renderAt('/');
-
-    expect(mountNode.querySelector('[data-testid="home-sidebar"]')).not.toBeNull();
-    expect(mountNode.querySelector('[data-testid="shared-sidebar"]')).toBeNull();
-  });
-
-  it.each(['/projects', '/library', '/history'])('%s 继续使用共用侧栏', async (pathname) => {
+  it.each(['/', '/projects', '/library'])('%s 使用统一侧栏', async (pathname) => {
     await renderAt(pathname);
 
-    expect(mountNode.querySelector('[data-testid="shared-sidebar"]')).not.toBeNull();
-    expect(mountNode.querySelector('[data-testid="home-sidebar"]')).toBeNull();
+    expect(mountNode.querySelector('[data-testid="home-sidebar"]')).not.toBeNull();
+    expect(mountNode.querySelector('[data-sidebar="compact"]')).not.toBeNull();
   });
 
-  it('画布页不渲染任何侧栏', async () => {
+  it('画布页不渲染侧栏', async () => {
     await renderAt('/canvas');
 
-    expect(mountNode.querySelector('[data-testid="shared-sidebar"]')).toBeNull();
     expect(mountNode.querySelector('[data-testid="home-sidebar"]')).toBeNull();
+    expect(mountNode.querySelector('[data-sidebar="none"]')).not.toBeNull();
+  });
+
+  it('非首页不渲染背景轮播', async () => {
+    await renderAt('/projects');
+
+    expect(mountNode.querySelector('video')).toBeNull();
+    expect(mountNode.querySelector('section')).toBeNull();
   });
 });

@@ -81,7 +81,7 @@ describe('CanvasEntry', () => {
     expect(mountNode.textContent).not.toContain('第四个');
   });
 
-  it('取列表里第一张图片作为封面，视频项不当封面', async () => {
+  it('取列表里第一张图片作为封面，只有视频时用视频首帧', async () => {
     await renderEntry();
 
     const cards = [...mountNode.querySelectorAll<HTMLElement>('[data-testid="canvas-recent-card"]')];
@@ -89,25 +89,33 @@ describe('CanvasEntry', () => {
     expect(cover?.getAttribute('src')).toBe('https://cdn.example.test/a.png');
     expect(cards[0].querySelector('video')).toBeNull();
     expect(cards[1].querySelector('img')).toBeNull();
-    expect(cards[1].querySelector('[data-testid="canvas-recent-empty"]')).not.toBeNull();
+    expect(cards[1].querySelector('video')?.getAttribute('src')).toBe('https://cdn.example.test/b.mp4');
   });
 
-  it('没有可用图片时显示占位与「暂无内容预览」', async () => {
+  it('没有可用素材时显示占位与「暂无内容预览」', async () => {
     await renderEntry();
 
     const empty = mountNode.querySelectorAll('[data-testid="canvas-recent-empty"]');
-    expect(empty).toHaveLength(2);
+    expect(empty).toHaveLength(1);
     expect(empty[0].textContent).toContain('暂无内容预览');
   });
 
-  it('点最近项目进入该项目画布', async () => {
-    await renderEntry();
+  it('点最近项目在新标签页打开，不创建项目也不离开当前页', async () => {
+    const open = vi.fn(() => ({}));
+    const originalOpen = window.open;
+    window.open = open as unknown as typeof window.open;
+    try {
+      await renderEntry();
 
-    await act(async () => {
-      mountNode.querySelector<HTMLButtonElement>('[data-testid="canvas-recent-card"]')!.click();
-    });
-    expect(api.navigate).toHaveBeenCalledWith('/canvas?project=1');
-    expect(api.createProject).not.toHaveBeenCalled();
+      await act(async () => {
+        mountNode.querySelector<HTMLButtonElement>('[data-testid="canvas-recent-card"]')!.click();
+      });
+      expect(open).toHaveBeenCalledWith('/canvas?project=1', '_blank');
+      expect(api.navigate).not.toHaveBeenCalled();
+      expect(api.createProject).not.toHaveBeenCalled();
+    } finally {
+      window.open = originalOpen;
+    }
   });
 
   it('新建画布以 source=canvas 创建并在当前页进入', async () => {

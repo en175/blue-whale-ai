@@ -6,7 +6,6 @@ import CanvasPage from '@/custom/pages/CanvasPage';
 import Projects from '@/custom/pages/Projects';
 import Assets from '@/custom/pages/Assets';
 import AccountCredits from '@/custom/pages/AccountCredits';
-import History from '@/custom/pages/History';
 import AuthSuccess from '@/custom/pages/AuthSuccess';
 import LoginDialog from '@/custom/components/LoginDialog';
 import { adminRoutes } from '@/shared/router/adminRoutes';
@@ -68,10 +67,6 @@ const router = createBrowserRouter([
               {
                 path: 'library',
                 element: <Assets />,
-              },
-              {
-                path: 'history',
-                element: <History />,
               },
             ],
           },
