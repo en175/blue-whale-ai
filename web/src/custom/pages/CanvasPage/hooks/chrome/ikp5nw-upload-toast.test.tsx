@@ -9,12 +9,13 @@ import {
   type CanvasUploadDropHost,
 } from './useCanvasUploadDrop';
 
-const uploadMock = vi.hoisted(() => ({ uploadAssetFile: vi.fn() }));
+const uploadMock = vi.hoisted(() => ({ uploadAssetFile: vi.fn(), probeMediaMeta: vi.fn(async () => ({})) }));
 const clipboardMock = vi.hoisted(() => ({ readCanvasClipboard: vi.fn() }));
 
 vi.mock('@/custom/utils/upload', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/custom/utils/upload')>()),
   uploadAssetFile: uploadMock.uploadAssetFile,
+  probeMediaMeta: uploadMock.probeMediaMeta,
 }));
 
 vi.mock('./clipboardPaste', async (importOriginal) => ({
@@ -37,6 +38,7 @@ function setup() {
     currentId: 'p1',
     toolMode: 'select',
     spawnPosition: () => ({ x: 0, y: 0 }),
+    spawnBatch: (items: unknown[]) => items.map((_, index) => ({ x: index * 328, y: 0 })),
     handleMediaDims: vi.fn(),
     dockToolCallbacks: {},
     actionsRef: { current: {} },

@@ -2,13 +2,15 @@ import type { Dispatch, RefObject, SetStateAction } from 'react';
 import type { Node } from '@xyflow/react';
 import { UPLOAD_SIZE_LIMIT } from '@/custom/api/assets';
 import type { SnapshotAsset } from '@/custom/api/projects';
-import { uploadAssetFile, uploadSizeLimitMessage } from '@/custom/utils/upload';
+import { uploadAssetFile, probeMediaMeta, uploadSizeLimitMessage } from '@/custom/utils/upload';
 import { compliancePatchFromMaterialStatus } from '@/custom/utils/video-reference-compliance';
 import { FileRejectedError, isFileRejected } from '@/custom/utils/fileSignature';
 import type { MediaDims } from '../../components/MediaNode/mediaContentSize';
 import { copyImageToClipboard, readCanvasClipboard } from './clipboardPaste';
 import { hasCustomName } from '../../graph/canvasNodeUtils';
 import { newNodeId } from '../../graph/nodeId';
+import type { BatchAnchor, BatchItemLayout } from '../../graph/batchLayout';
+import type { SpawnBatchOptions } from './useCanvasSpawn';
 import type { CanvasNodeActions } from './useCanvasNodeFactories';
 
 export type UploadDropActions = CanvasNodeActions & {
@@ -21,6 +23,7 @@ export interface CanvasUploadDropHost {
   currentId: string;
   toolMode: string;
   spawnPosition: () => { x: number; y: number };
+  spawnBatch: (items: BatchItemLayout[], options?: SpawnBatchOptions) => Array<{ x: number; y: number }>;
   handleMediaDims: (id: string, dims: MediaDims) => void;
   dockToolCallbacks: Record<string, unknown>;
   actionsRef: RefObject<UploadDropActions>;
@@ -38,6 +41,10 @@ export interface CanvasUploadDropHandles {
     file: File,
     opts?: { position?: { x: number; y: number }; replaceNodeId?: string },
   ) => Promise<{ asset_id: string; url: string; nodeId: string }>;
+  handleUploadFiles: (
+    files: File[],
+    opts?: { screen?: { x: number; y: number }; placement?: BatchAnchor['placement']; anchor?: { x: number; y: number }; focus?: SpawnBatchOptions['focus'] },
+  ) => void;
   handleUploadFile: (files: File[]) => void;
   handleCopyImage: (id: string) => Promise<void>;
   handleFillEmptyShell: (id: string, file: File) => void;
@@ -49,6 +56,7 @@ export function useCanvasUploadDrop(host: CanvasUploadDropHost): CanvasUploadDro
     currentId,
     toolMode,
     spawnPosition,
+    spawnBatch,
     handleMediaDims,
     dockToolCallbacks,
     actionsRef,
@@ -70,20 +78,26 @@ export function useCanvasUploadDrop(host: CanvasUploadDropHost): CanvasUploadDro
     return Promise.reject(err);
   };
 
-  const placeFileOnCanvas = (
-    file: File,
-    opts?: { position?: { x: number; y: number }; replaceNodeId?: string },
-  ): Promise<{ asset_id: string; url: string; nodeId: string }> => {
+  const checkFile = (file: File) => {
     const isImage = file.type.startsWith('image/');
     const isVideo = file.type.startsWith('video/');
     const isAudio = file.type.startsWith('audio/');
-    if (!isImage && !isVideo && !isAudio) {
-      return rejectFile(file, new Error('只支持图片、视频或音频'));
-    }
+    if (!isImage && !isVideo && !isAudio) throw new Error('只支持图片、视频或音频');
     const limit = UPLOAD_SIZE_LIMIT[isImage ? 'image' : isVideo ? 'video' : 'audio'];
-    if (file.size > limit) {
-      return rejectFile(file, new FileRejectedError(uploadSizeLimitMessage(file.name, limit)));
+    if (file.size > limit) throw new FileRejectedError(uploadSizeLimitMessage(file.name, limit));
+  };
+
+  const placeFileOnCanvas = (
+    file: File,
+    opts?: { position?: { x: number; y: number }; replaceNodeId?: string; batchItem?: BatchItemLayout },
+  ): Promise<{ asset_id: string; url: string; nodeId: string }> => {
+    try {
+      checkFile(file);
+    } catch (err) {
+      return rejectFile(file, err instanceof Error ? err : new Error('只支持图片、视频或音频'));
     }
+    const isVideo = file.type.startsWith('video/');
+    const isAudio = file.type.startsWith('audio/');
     const nodeId = opts?.replaceNodeId ?? newNodeId('media');
     const localSrc = URL.createObjectURL(file);
     pendingNodeIdsRef.current.add(nodeId);
@@ -136,6 +150,8 @@ export function useCanvasUploadDrop(host: CanvasUploadDropHost): CanvasUploadDro
           fileName: file.name,
           mediaType,
           toolMode,
+          ...(typeof opts?.batchItem?.width === 'number' ? { width: opts.batchItem.width } : {}),
+          ...(typeof opts?.batchItem?.height === 'number' ? { height: opts.batchItem.height } : {}),
           ...mediaCallbacks,
         },
       },
@@ -201,11 +217,38 @@ export function useCanvasUploadDrop(host: CanvasUploadDropHost): CanvasUploadDro
       });
   };
 
-  const handleUploadFile = (files: File[]) => {
-    files.forEach((file) => {
-      void placeFileOnCanvas(file).catch(() => undefined);
-    });
+  const probeItem = async (file: File): Promise<BatchItemLayout> => {
+    const mediaType = file.type.startsWith('video/') ? 'video' : file.type.startsWith('audio/') ? 'audio' : 'image';
+    if (mediaType === 'audio') return { mediaType };
+    const dims = await probeMediaMeta(file, mediaType).catch(() => ({}) as MediaDims);
+    return { mediaType, width: dims.width, height: dims.height };
   };
+
+  const handleUploadFiles = (
+    files: File[],
+    opts?: { screen?: { x: number; y: number }; placement?: BatchAnchor['placement']; anchor?: { x: number; y: number }; focus?: SpawnBatchOptions['focus'] },
+  ) => {
+    const accepted = files.filter((file) => {
+      try {
+        checkFile(file);
+        return true;
+      } catch (err) {
+        toastUploadFailure(file, err);
+        return false;
+      }
+    });
+    if (accepted.length === 0) return;
+    void (async () => {
+      const items: BatchItemLayout[] = [];
+      for (const file of accepted) items.push(await probeItem(file));
+      const positions = spawnBatch(items, { screen: opts?.screen, placement: opts?.placement, anchor: opts?.anchor, focus: opts?.focus });
+      accepted.forEach((file, index) => {
+        void placeFileOnCanvas(file, { position: positions[index], batchItem: items[index] }).catch(() => undefined);
+      });
+    })();
+  };
+
+  const handleUploadFile = (files: File[]) => handleUploadFiles(files);
 
   const applyClipboardAtFlow = async (position: { x: number; y: number }) => {
     const payload = await readCanvasClipboard();
@@ -239,5 +282,5 @@ export function useCanvasUploadDrop(host: CanvasUploadDropHost): CanvasUploadDro
     void placeFileOnCanvas(file, { replaceNodeId: id }).catch(() => undefined);
   };
 
-  return { placeFileOnCanvas, handleUploadFile, handleCopyImage, handleFillEmptyShell, applyClipboardAtFlow };
+  return { placeFileOnCanvas, handleUploadFiles, handleUploadFile, handleCopyImage, handleFillEmptyShell, applyClipboardAtFlow };
 }

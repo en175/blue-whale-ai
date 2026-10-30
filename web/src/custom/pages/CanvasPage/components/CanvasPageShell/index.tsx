@@ -1,6 +1,6 @@
 import { type PickChannel as CanvasPickChannel, type VideoRefRole, type AssetsPickerTarget, type AssetCardKind } from '@/custom/enums';
 import type { ComponentProps, Dispatch, ReactNode, RefObject, SetStateAction } from 'react';
-import type { Node } from '@xyflow/react';
+import type { Node, Viewport } from '@xyflow/react';
 import { createCanvasToolSessions } from '../../tool-runtime/canvasToolSessions';
 import type { CanvasHistoryApi } from '../../hooks/document/useCanvasHistory';
 
@@ -78,6 +78,7 @@ interface CanvasPageShellProps {
     handleConnectEnd: FlowProps['onConnectEnd'];
     isValidCanvasConnection: FlowProps['isValidConnection'];
     focusViewport: FlowProps['viewport'];
+    setFocusViewport: (viewport: FlowProps['viewport']) => void;
     docViewport: FlowProps['viewport'];
     setViewport: FlowProps['onViewportChange'];
     setLiveViewport: FlowProps['onViewportLive'];
@@ -113,7 +114,7 @@ interface CanvasPageShellProps {
     paneUploadPosRef: RefObject<{ x: number; y: number } | null>;
     placeFileOnCanvas: (file: File, options?: { position?: { x: number; y: number } }) => Promise<unknown>;
     handleToolMenuSelect: ToolbarProps['onMenuSelect'];
-    handleUploadFile: ToolbarProps['onUploadFile'];
+    handleUploadFiles: (files: File[], opts?: { screen?: { x: number; y: number }; placement?: 'stack' | 'drop'; anchor?: { x: number; y: number }; focus?: (viewport: Viewport) => void }) => void;
     placeNodeFile: NonNullable<AgentProps['onPlaceFileOnCanvas']>;
     findCanvasNode: (id: string) => Node | undefined;
     showToast: (type: 'success' | 'error' | 'warn', msg: string) => void;
@@ -410,6 +411,9 @@ export default function CanvasPageShell(props: CanvasPageShellProps) {
           onConnectGroupDrop={groupActions.handleConnectGroupDrop}
           onConnectSourceToGroup={groupActions.handleConnectSourceToGroup}
           onPaneContextMenu={(pt) => menus.setPaneMenu({ x: pt.clientX, y: pt.clientY })}
+          onDropFiles={(files, flowPoint) =>
+            menus.handleUploadFiles(files, { placement: 'drop', anchor: flowPoint, focus: canvas.setFocusViewport })
+          }
           onAnchoredOverlayDragHideChange={canvas.setAnchoredOverlayHiddenIds}
           onUpdateGenerate={canvas.onUpdateGenerate}
         />
@@ -464,11 +468,7 @@ export default function CanvasPageShell(props: CanvasPageShellProps) {
           onChange={(e) => {
             const files = Array.from(e.target.files ?? []);
             const pos = menus.paneUploadPosRef.current;
-            files.forEach((file, index) => {
-              void menus.placeFileOnCanvas(file, {
-                position: pos ? { x: pos.x + index * 24, y: pos.y + index * 24 } : undefined,
-              }).catch(() => undefined);
-            });
+            menus.handleUploadFiles(files, { screen: pos ?? undefined, focus: canvas.setFocusViewport });
             e.target.value = '';
             menus.paneUploadPosRef.current = null;
           }}
@@ -476,7 +476,7 @@ export default function CanvasPageShell(props: CanvasPageShellProps) {
         <CanvasToolbar
           mode={canvas.toolMode}
           onModeChange={canvas.setToolMode}
-          onUploadFile={menus.handleUploadFile}
+          onUploadFile={(files) => menus.handleUploadFiles(files, { focus: canvas.setFocusViewport })}
           onOpenAssetsPicker={() => pick.openAssetsPicker('toolbar')}
           onToggleVideoDialog={() => {
             if (!nodeActions.canOpenEditor()) return;
