@@ -22,6 +22,9 @@ import {
 import type { VideoMediaRef, VideoMediaRefs } from '@/custom/pages/CanvasPage/tools/video/videoMediaRefs';
 import { allowsAutoDurationOf, configuredVideoModes, effectiveVideoParams, frameSlotCountOf, isFrameMode, lockedDurationOf, lockedRatioOf, type VideoMode } from '@/custom/utils/video-modes';
 import { type AssetRecord } from '@/custom/api/assets';
+import type { HomeQuoteRef } from '@/custom/api/homeQuote';
+import { buildImageQuotePayload, buildVideoQuotePayload } from './homeQuoteParams';
+import { useHomeQuote } from './useHomeQuote';
 import { getCurrentUser, subscribe } from '@/shared/utils/auth';
 import { remoteImageCrossOrigin, resolveMediaSrc } from '@/shared/utils/remoteImageCors';
 import styles from './index.module.css';
@@ -75,6 +78,29 @@ function slashTriggerIndex(text: string, caret: number): number | null {
   const idx = before.length - 1;
   if (idx > 0 && !/\s/.test(text[idx - 1])) return null;
   return idx;
+}
+
+function probeVideoDuration(src: string): Promise<number | null> {
+  return new Promise((resolve) => {
+    const video = document.createElement('video');
+    let settled = false;
+    const done = (seconds: number | null) => {
+      if (settled) return;
+      settled = true;
+      video.onloadedmetadata = null;
+      video.onerror = null;
+      video.removeAttribute('src');
+      resolve(seconds);
+    };
+    video.preload = 'metadata';
+    video.onloadedmetadata = () => {
+      done(Number.isFinite(video.duration) && video.duration > 0 ? Math.round(video.duration) : null);
+    };
+    video.onerror = () => done(null);
+    const cors = remoteImageCrossOrigin(src);
+    if (cors) video.crossOrigin = cors;
+    video.src = resolveMediaSrc(src);
+  });
 }
 
 async function navigateToNewProject(
@@ -225,7 +251,7 @@ export default function ChatBox({
   const [generateAudio, setGenerateAudio] = useState(true);
 
   const [refFiles, setRefFiles] = useState<
-    { file?: File; preview: string; type: 'image' | 'video'; assetId?: string | number }[]
+    { file?: File; preview: string; type: 'image' | 'video'; assetId?: string | number; duration?: number }[]
   >([]);
 
   const isKeyframe = isFrameMode(videoMode);
@@ -671,6 +697,16 @@ export default function ChatBox({
       ...(keyframeRefs.last ? { last: asRef(keyframeRefs.last, 1, 'home-last') } : {}),
     };
   }, [refFiles, keyframeRefs]);
+  const videoQuoteReferences = useMemo<HomeQuoteRef[]>(() => {
+    const source = isKeyframe ? [keyframeRefs.first, keyframeRefs.last] : refFiles;
+    return source
+      .filter((item): item is NonNullable<typeof item> => Boolean(item))
+      .map((item) => (item.type === 'image' ? { type: 'image' as const } : { type: 'video' as const, duration: item.duration }));
+  }, [refFiles, keyframeRefs, isKeyframe]);
+  const imageQuoteReferences = useMemo<HomeQuoteRef[]>(
+    () => imageRefFiles.map(() => ({ type: 'image' as const })),
+    [imageRefFiles],
+  );
   const videoConfiguredModes = configuredVideoModes(selectedVideoModel?.features);
   const videoEnabledModes = enabledVideoModes(videoRefsProjection, videoConfiguredModes);
   const videoModeOptions = videoConfiguredModes.map((key) => ({ key, label: VIDEO_MODE_LABEL[key] }));
@@ -825,6 +861,32 @@ export default function ChatBox({
       : selectedCreationModel;
   const activePromptCap = promptMaxLengthOf(selectedPromptModel?.features?.max_prompt_length);
   const imagePromptCap = promptMaxLengthOf(selectedImageModel?.features?.max_prompt_length);
+
+  const videoQuoteCredits = useHomeQuote(
+    isVideoTab && user
+      ? buildVideoQuotePayload({
+          model: selectedVideoModel,
+          mode: videoMode,
+          aspectRatio,
+          resolution,
+          duration,
+          generateAudio,
+          prompt: inputValue,
+          references: videoQuoteReferences,
+        })
+      : null,
+  );
+  const imageQuoteCredits = useHomeQuote(
+    isImageTab && user
+      ? buildImageQuotePayload({
+          model: selectedImageModel,
+          size: imageResolution,
+          aspectRatio: imageAspectRatio,
+          prompt: inputValue,
+          references: imageQuoteReferences,
+        })
+      : null,
+  );
   const agentMaxImages = selectedCreationModel?.features?.image_reference_max ?? 0;
   const agentMaxVideos = videoReferenceMaxOf(selectedCreationModel?.features);
   const agentMaxAudios = audioReferenceMaxOf(selectedCreationModel?.features);
@@ -948,6 +1010,16 @@ export default function ChatBox({
     else if (overflow === 'image') showToast(`参考图最多 ${videoMaxImages} 张，请减少图片`);
     else if (overflow === 'video') showToast(`参考视频最多 ${videoMaxVideos} 个`);
     setRefFiles((prev) => [...prev, ...newFiles]);
+    newFiles
+      .filter((item) => item.type === 'video')
+      .forEach((item) => {
+        void probeVideoDuration(item.preview).then((seconds) => {
+          if (seconds == null) return;
+          setRefFiles((prev) =>
+            prev.map((ref) => (ref.preview === item.preview && ref.duration == null ? { ...ref, duration: seconds } : ref)),
+          );
+        });
+      });
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
@@ -1115,6 +1187,7 @@ export default function ChatBox({
           preview: a.url,
           type: (a.type === 'video' ? 'video' : 'image') as 'image' | 'video',
           assetId: a.id,
+          ...(a.type === 'video' && typeof a.duration === 'number' ? { duration: Math.round(a.duration) } : {}),
         }));
       if (videoRefUnsupported && assets.some((a) => a.type === 'video')) {
         showToast('当前模型不支持视频素材参考，已跳过视频素材');
@@ -1169,7 +1242,7 @@ export default function ChatBox({
           </div>
           <div className={`${styles.paramBar} ${styles.paramBarEmpty}`}>
             <div className={styles.paramBarRight}>
-              <QuoteBadge />
+              <QuoteBadge credits={videoQuoteCredits} />
               <button
                 type="button"
                 className={`${styles.sendBtn} ${inputValue.trim() ? styles.sendBtnActive : ''}`}
@@ -1342,7 +1415,7 @@ export default function ChatBox({
                 <GenerationPreference summary={videoPreferenceSummary} fields={videoPreferenceFields} toggles={videoPreferenceToggles} />
               </div>
               <div className={styles.paramBarRight}>
-                <QuoteBadge />
+                <QuoteBadge credits={videoQuoteCredits} />
                 <button
                   className={`${styles.sendBtn} ${inputValue.trim() ? styles.sendBtnActive : ''}`}
                   onClick={handleSend}
@@ -1440,7 +1513,7 @@ export default function ChatBox({
                 <GenerationPreference summary={imagePreferenceSummary} fields={imagePreferenceFields} />
               </div>
               <div className={styles.paramBarRight}>
-                <QuoteBadge />
+                <QuoteBadge credits={imageQuoteCredits} />
                 <button
                   className={`${styles.sendBtn} ${inputValue.trim() ? styles.sendBtnActive : ''}`}
                   onClick={handleSend}
