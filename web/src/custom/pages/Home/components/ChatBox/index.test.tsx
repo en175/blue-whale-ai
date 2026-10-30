@@ -29,7 +29,10 @@ vi.mock('@/shared/utils/auth', () => {
 
 vi.mock('@/custom/api/projects', () => ({ createProject }));
 
-vi.mock('../SkillModal', () => ({ default: () => null }));
+vi.mock('../SkillModal', () => ({
+  default: ({ open }: { open: boolean }) =>
+    open ? createElement('div', { role: 'dialog', 'aria-label': '技能库' }) : null,
+}));
 vi.mock('@/custom/components/LoginModal', () => ({ default: () => null }));
 
 vi.mock('@/custom/pages/CanvasPage/components/AssetsPickerModal', async () => {
@@ -351,12 +354,73 @@ function typePrompt(value: string) {
   const textarea = mountNode.querySelector('textarea')!;
   const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;
   setter.call(textarea, value);
+  textarea.setSelectionRange(value.length, value.length);
   textarea.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
 function sendButton(): HTMLButtonElement {
   return mountNode.querySelector<HTMLButtonElement>(`button[class*="sendBtn"]`)!;
 }
+
+describe('IKR63N 参考展示与技能指令', () => {
+  it('参考入口在缩略图之前，缩略图在入口右侧', async () => {
+    await renderChatBox();
+    await switchMode('视频');
+    await act(async () => { refCard().click(); });
+    const fromAssets = [...document.body.querySelectorAll<HTMLButtonElement>('button')]
+      .find((b) => b.textContent === '从资产中选择')!;
+    await act(async () => { fromAssets.click(); });
+    await act(async () => { pickerOnSelect.current!([imageAsset]); });
+
+    const area = mountNode.querySelector<HTMLElement>(`.${styles.refArea}`)!;
+    const first = area.firstElementChild as HTMLElement;
+    expect(first.className).toContain(styles.refCard);
+    expect(first.textContent).toContain('参考');
+  });
+
+  it('点击图片缩略图打开大图预览，Esc 关闭', async () => {
+    await renderChatBox();
+    await switchToVideoTabAndInject([imageAsset]);
+
+    const thumb = mountNode.querySelector<HTMLImageElement>(`.${styles.refThumb} img`)!;
+    await act(async () => { thumb.click(); });
+    const overlay = document.body.querySelector<HTMLElement>('[aria-label="参考图预览"]');
+    expect(overlay).not.toBeNull();
+
+    await act(async () => {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    });
+    expect(document.body.querySelector('[aria-label="参考图预览"]')).toBeNull();
+  });
+
+  it('移除缩略图不打开预览', async () => {
+    await renderChatBox();
+    await switchToVideoTabAndInject([imageAsset]);
+
+    const remove = mountNode.querySelector<HTMLButtonElement>(`.${styles.refThumbRemove}`)!;
+    await act(async () => { remove.click(); });
+    expect(document.body.querySelector('[aria-label="参考图预览"]')).toBeNull();
+    expect(mountNode.querySelector(`.${styles.refThumb}`)).toBeNull();
+  });
+
+  it('正文开头键入 / 打开技能库，继续输入不清空正文', async () => {
+    await renderChatBox();
+    await act(async () => { typePrompt('/'); });
+
+    expect(mountNode.querySelector('[role="dialog"][aria-label="技能库"]')).not.toBeNull();
+
+    await act(async () => { typePrompt('/帮我做一条宣传片'); });
+    expect((mountNode.querySelector('textarea') as HTMLTextAreaElement).value).toBe('/帮我做一条宣传片');
+    expect(sendButton().disabled).toBe(false);
+  });
+
+  it('网址中的斜杠不触发技能库', async () => {
+    await renderChatBox();
+    await act(async () => { typePrompt('参考 https://example.com/a 的风格'); });
+
+    expect(mountNode.querySelector('[role="dialog"][aria-label="技能库"]')).toBeNull();
+  });
+});
 
 describe('IKR63U 首页发送只提交一次', () => {
   it('创建中连点发送只创建一个项目，按钮锁定', async () => {

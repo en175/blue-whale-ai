@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import { getBezierPath, useReactFlow, useStore, type EdgeProps } from '@xyflow/react';
 import { Scissors } from 'lucide-react';
 import { placeScissorsOnEdge } from './edgeGeometry';
@@ -46,6 +46,20 @@ export default function CustomEdge({
     targetY,
     targetPosition,
   });
+
+  const glowRef = useRef<SVGPathElement>(null);
+  const [edgeLength, setEdgeLength] = useState(0);
+  useLayoutEffect(() => {
+    const el = glowRef.current;
+    setEdgeLength(el && typeof el.getTotalLength === 'function' ? el.getTotalLength() : 0);
+  }, [edgePath]);
+
+  const glowLength = 26;
+  const drawnLeftToRight = sourceX <= targetX;
+
+  const gradientId = `edge-glow-${id.replace(/[^\w-]/g, '')}`;
+  const gradientFrom = drawnLeftToRight ? sourceX : targetX;
+  const gradientTo = drawnLeftToRight ? targetX : sourceX;
 
   const clearDwellTimer = useCallback(() => {
     if (dwellTimerRef.current !== null) {
@@ -116,12 +130,40 @@ export default function CustomEdge({
   return (
     <g
       className={connectedToSelected ? `${styles.edgeGroup} ${styles.selectedConnected}` : styles.edgeGroup}
+      style={{ '--edge-length': edgeLength } as CSSProperties}
       onMouseMove={handleMouseMove}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
     >
       {}
+      <defs>
+        <linearGradient
+          id={gradientId}
+          gradientUnits="userSpaceOnUse"
+          x1={gradientFrom}
+          y1={0}
+          x2={gradientTo}
+          y2={0}
+        >
+          <stop offset="0%" stopColor="#ffffff" />
+          <stop offset="55%" stopColor="#9cc9ff" />
+          <stop offset="100%" stopColor="#9cc9ff" stopOpacity={0} />
+        </linearGradient>
+      </defs>
       <path d={edgePath} fill="none" className={styles.basePath} />
+
+      {}
+      <path
+        ref={glowRef}
+        d={edgePath}
+        fill="none"
+        stroke={`url(#${gradientId})`}
+        strokeWidth={3}
+        strokeLinecap="round"
+        strokeDasharray={edgeLength > 0 ? `${glowLength} ${Math.max(edgeLength - glowLength, glowLength)}` : undefined}
+        strokeDashoffset={edgeLength}
+        className={styles.glowPath}
+      />
 
       {}
       <path

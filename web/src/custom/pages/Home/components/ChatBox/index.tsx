@@ -41,6 +41,7 @@ import { showToast as pushToast, toast } from '@/custom/components/Toast';
 import { isApiError, silentInit } from '@/shared/api/http';
 import { resolveHomeLoginResume, type HomePendingAction } from './homeLoginResume';
 import { limitPromptInput } from './promptInput';
+import { imageParamsRejected, videoParamsRejected } from './sendParamGuard';
 import GenerationPreference, { type PreferenceField, type PreferenceToggle } from './GenerationPreference';
 import ModeMenu from './ModeMenu';
 import QuoteBadge from './QuoteBadge';
@@ -66,6 +67,14 @@ function makeProjectName(): string {
   const d = new Date();
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function slashTriggerIndex(text: string, caret: number): number | null {
+  const before = text.slice(0, caret);
+  if (!before.endsWith('/')) return null;
+  const idx = before.length - 1;
+  if (idx > 0 && !/\s/.test(text[idx - 1])) return null;
+  return idx;
 }
 
 async function navigateToNewProject(
@@ -168,6 +177,7 @@ export default function ChatBox({
   const pendingAction = useRef<HomePendingAction | null>(null);
 
   const [armedSkill, setArmedSkill] = useState<{ id: string; name: string } | null>(null);
+  const [slashPos, setSlashPos] = useState<number | null>(null);
 
   useEffect(() => {
     if (draft?.ts) {
@@ -193,6 +203,16 @@ export default function ChatBox({
   >([]);
   const agentFileInputRef = useRef<HTMLInputElement>(null);
   const [showSkillModal, setShowSkillModal] = useState(false);
+  const [previewSrc, setPreviewSrc] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!previewSrc) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setPreviewSrc(null);
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [previewSrc]);
 
   const [creationModel, setCreationModel] = useState('');
 
@@ -363,6 +383,16 @@ export default function ChatBox({
         showToast('当前模型未配置视频模式，请更换模型');
         return;
       }
+      const refImages = refFiles.filter((f) => f.type === 'image').length;
+      const refVideos = refFiles.filter((f) => f.type === 'video').length;
+      const paramInvalid =
+        videoParamsRejected(selectedVideoModel, { aspectRatio, resolution, duration, mode: videoMode })
+        || refImages > videoMaxImages
+        || refVideos > videoMaxVideos;
+      if (paramInvalid) {
+        showToast('当前参数不受支持，请调整后再发送。');
+        return;
+      }
 
       const sizeEntry = selectedVideoModel.supported_sizes.find((s) => s.id === resolution);
       const handoffParams = effectiveVideoParams(selectedVideoModel.features, videoMode, {
@@ -415,6 +445,10 @@ export default function ChatBox({
         showToast('图片模型能力加载中，请稍后重试');
         return;
       }
+      if (imageParamsRejected(selectedImageModel, { ratio: imageAspectRatio, size: imageResolution })) {
+        showToast('当前参数不受支持，请调整后再发送。');
+        return;
+      }
       const files = imageRefFiles.map((r) => ({
         id: `home-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         url: r.preview,
@@ -456,6 +490,10 @@ export default function ChatBox({
       return;
     }
     if (!skill.creative_skill_id) return;
+    if (slashPos != null) {
+      setInputValue((prev) => prev.slice(0, slashPos) + prev.slice(slashPos + 1));
+      setSlashPos(null);
+    }
     setArmedSkill({ id: skill.creative_skill_id, name: skill.name ?? '' });
   };
 
@@ -577,9 +615,19 @@ export default function ChatBox({
     }
   };
 
-  const handleInputChange = (value: string) => {
+  const handleInputChange = (value: string, slashAt: number | null = null) => {
     const next = limitPromptInput(value, inputValue, activePromptCap);
     setInputValue(next.value);
+    if (slashAt != null && activeTab === 'agent') {
+      setSlashPos(slashAt);
+      if (!user) {
+        pendingAction.current = { kind: 'open-skill' };
+        setShowLogin(true);
+        return;
+      }
+      setShowSkillModal(true);
+      return;
+    }
     if (next.reachedLimit && activePromptCap != null) showToast(`输入内容最多 ${activePromptCap} 个字符`);
   };
 
@@ -1110,7 +1158,7 @@ export default function ChatBox({
               className={styles.textarea}
               placeholder="描述主体、场景、动作和镜头，或添加一张参考图片…"
               value={inputValue}
-              onChange={(e) => handleInputChange(e.target.value)}
+              onChange={(e) => handleInputChange(e.target.value, slashTriggerIndex(e.target.value, e.target.selectionStart ?? 0))}
               onKeyDown={handleKeyDown}
               onFocus={activateComposer}
               onClick={activateComposer}
@@ -1152,11 +1200,14 @@ export default function ChatBox({
                     {keyframeRefs.first ? (
                       <div className={styles.refSlot}>
                         <div className={styles.refThumb}>
-                          <img src={resolveMediaSrc(keyframeRefs.first.preview)} crossOrigin={remoteImageCrossOrigin(keyframeRefs.first.preview)} alt="" className={styles.refThumbMedia} />
+                          <img src={resolveMediaSrc(keyframeRefs.first.preview)} crossOrigin={remoteImageCrossOrigin(keyframeRefs.first.preview)} alt="" className={styles.refThumbMedia} onClick={() => setPreviewSrc(keyframeRefs.first?.preview ?? null)} />
                           <span className={styles.refSlotBadge}>首帧</span>
                           <button
                             className={styles.refThumbRemove}
-                            onClick={() => removeKeyframeSlot('first')}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              removeKeyframeSlot('first');
+                            }}
                           >
                             <X size={12} strokeWidth={2} />
                           </button>
@@ -1175,11 +1226,14 @@ export default function ChatBox({
                     {keyframeRefs.last ? (
                       <div className={styles.refSlot}>
                         <div className={styles.refThumb}>
-                          <img src={resolveMediaSrc(keyframeRefs.last.preview)} crossOrigin={remoteImageCrossOrigin(keyframeRefs.last.preview)} alt="" className={styles.refThumbMedia} />
+                          <img src={resolveMediaSrc(keyframeRefs.last.preview)} crossOrigin={remoteImageCrossOrigin(keyframeRefs.last.preview)} alt="" className={styles.refThumbMedia} onClick={() => setPreviewSrc(keyframeRefs.last?.preview ?? null)} />
                           <span className={styles.refSlotBadge}>尾帧</span>
                           <button
                             className={styles.refThumbRemove}
-                            onClick={() => removeKeyframeSlot('last')}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              removeKeyframeSlot('last');
+                            }}
                           >
                             <X size={12} strokeWidth={2} />
                           </button>
@@ -1198,26 +1252,6 @@ export default function ChatBox({
                   </div>
                 ) : (
                   <>
-                {refFiles.map((item, idx) => (
-                  <div key={idx} className={styles.refThumbWrap}>
-                    <div className={styles.refThumb}>
-                      {item.type === 'video' ? (
-                        <video src={resolveMediaSrc(item.preview)} className={styles.refThumbMedia} />
-                      ) : (
-                        <img src={resolveMediaSrc(item.preview)} crossOrigin={remoteImageCrossOrigin(item.preview)} alt="" className={styles.refThumbMedia} />
-                      )}
-                      <button
-                        className={styles.refThumbRemove}
-                        onClick={() => removeRefFile(idx)}
-                      >
-                        <X size={12} strokeWidth={2} />
-                      </button>
-                    </div>
-                    <span className={styles.refThumbLabel}>
-                      {item.type === 'video' ? `Video ${idx + 1}` : `Image ${idx + 1}`}
-                    </span>
-                  </div>
-                ))}
                 <div
                   ref={refCardRef}
                   className={styles.refCard}
@@ -1233,6 +1267,35 @@ export default function ChatBox({
                   <Plus size={16} strokeWidth={2} />
                   <span>参考</span>
                 </div>
+                {refFiles.map((item, idx) => (
+                  <div key={idx} className={styles.refThumbWrap}>
+                    <div className={styles.refThumb}>
+                      {item.type === 'video' ? (
+                        <video src={resolveMediaSrc(item.preview)} className={styles.refThumbMedia} />
+                      ) : (
+                        <img
+                          src={resolveMediaSrc(item.preview)}
+                          crossOrigin={remoteImageCrossOrigin(item.preview)}
+                          alt=""
+                          className={styles.refThumbMedia}
+                          onClick={() => setPreviewSrc(item.preview)}
+                        />
+                      )}
+                      <button
+                        className={styles.refThumbRemove}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          removeRefFile(idx);
+                        }}
+                      >
+                        <X size={12} strokeWidth={2} />
+                      </button>
+                    </div>
+                    <span className={styles.refThumbLabel}>
+                      {item.type === 'video' ? `Video ${idx + 1}` : `Image ${idx + 1}`}
+                    </span>
+                  </div>
+                ))}
                   </>
                 )}
               </div>
@@ -1243,7 +1306,7 @@ export default function ChatBox({
                   className={styles.textarea}
                   placeholder={`通过直接控制提示词快速生成单段片段。\n上传参考：图片最多 ${videoMaxImages} 张 / 视频最多 ${videoMaxVideos} 个；首尾帧模式可上传首帧与尾帧参考。`}
                   value={inputValue}
-                  onChange={(e) => handleInputChange(e.target.value)}
+                  onChange={(e) => handleInputChange(e.target.value, slashTriggerIndex(e.target.value, e.target.selectionStart ?? 0))}
                   onKeyDown={handleKeyDown}
                   onCompositionStart={handleCompositionStart}
                   onCompositionEnd={handleCompositionEnd}
@@ -1298,22 +1361,6 @@ export default function ChatBox({
             <div className={styles.videoContent}>
               { }
               <div className={styles.refArea}>
-                {imageRefFiles.map((item, idx) => (
-                  <div key={idx} className={styles.refThumbWrap}>
-                    <div className={styles.refThumb}>
-                      <img src={resolveMediaSrc(item.preview)} crossOrigin={remoteImageCrossOrigin(item.preview)} alt="" className={styles.refThumbMedia} />
-                      <button
-                        className={styles.refThumbRemove}
-                        onClick={() => removeImageRefFile(idx)}
-                      >
-                        <X size={12} strokeWidth={2} />
-                      </button>
-                    </div>
-                    <span className={styles.refThumbLabel}>
-                      图片 {idx + 1}
-                    </span>
-                  </div>
-                ))}
                 <div
                   ref={refCardRef}
                   className={styles.refCard}
@@ -1328,6 +1375,31 @@ export default function ChatBox({
                   <Plus size={16} strokeWidth={2} />
                   <span>参考</span>
                 </div>
+                {imageRefFiles.map((item, idx) => (
+                  <div key={idx} className={styles.refThumbWrap}>
+                    <div className={styles.refThumb}>
+                      <img
+                        src={resolveMediaSrc(item.preview)}
+                        crossOrigin={remoteImageCrossOrigin(item.preview)}
+                        alt=""
+                        className={styles.refThumbMedia}
+                        onClick={() => setPreviewSrc(item.preview)}
+                      />
+                      <button
+                        className={styles.refThumbRemove}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          removeImageRefFile(idx);
+                        }}
+                      >
+                        <X size={12} strokeWidth={2} />
+                      </button>
+                    </div>
+                    <span className={styles.refThumbLabel}>
+                      图片 {idx + 1}
+                    </span>
+                  </div>
+                ))}
               </div>
               { }
               <div className={styles.textareaWrap}>
@@ -1336,7 +1408,7 @@ export default function ChatBox({
                   className={styles.textarea}
                   placeholder={`从文字与参考图生成 AI 图片。\n上传参考图片最多 ${imageMaxImages} 张；描述你想生成的图片，已上传的参考将引导风格与细节。`}
                   value={inputValue}
-                  onChange={(e) => handleInputChange(e.target.value)}
+                  onChange={(e) => handleInputChange(e.target.value, slashTriggerIndex(e.target.value, e.target.selectionStart ?? 0))}
                   onKeyDown={handleKeyDown}
                   onCompositionStart={handleCompositionStart}
                   onCompositionEnd={handleCompositionEnd}
@@ -1402,32 +1474,6 @@ export default function ChatBox({
             <div className={styles.videoContent}>
               { }
               <div className={styles.refArea}>
-                {agentFiles.map((f, idx) => (
-                  <div key={f.id} className={styles.refThumbWrap}>
-                    <div className={styles.refThumb}>
-                      {f.kind === 'image' && (
-                        <img className={styles.refThumbMedia} src={resolveMediaSrc(f.url)} crossOrigin={remoteImageCrossOrigin(f.url)} alt={f.name} />
-                      )}
-                      {f.kind === 'video' && (
-                        <video className={styles.refThumbMedia} src={resolveMediaSrc(f.url)} muted />
-                      )}
-                      {f.kind === 'audio' && (
-                        <div className={styles.refThumbAudio}>
-                          <Music size={20} strokeWidth={2} />
-                        </div>
-                      )}
-                      <button
-                        className={styles.refThumbRemove}
-                        onClick={() => removeAgentFile(f.id)}
-                      >
-                        <X size={12} strokeWidth={2} />
-                      </button>
-                    </div>
-                    <span className={styles.refThumbLabel}>
-                      {f.kind === 'image' ? '图片' : f.kind === 'video' ? '视频' : '音频'} {idx + 1}
-                    </span>
-                  </div>
-                ))}
                 <div
                   ref={refCardRef}
                   className={styles.refCard}
@@ -1442,6 +1488,41 @@ export default function ChatBox({
                   <Plus size={16} strokeWidth={2} />
                   <span>参考</span>
                 </div>
+                {agentFiles.map((f, idx) => (
+                  <div key={f.id} className={styles.refThumbWrap}>
+                    <div className={styles.refThumb}>
+                      {f.kind === 'image' && (
+                        <img
+                          className={styles.refThumbMedia}
+                          src={resolveMediaSrc(f.url)}
+                          crossOrigin={remoteImageCrossOrigin(f.url)}
+                          alt={f.name}
+                          onClick={() => setPreviewSrc(f.url)}
+                        />
+                      )}
+                      {f.kind === 'video' && (
+                        <video className={styles.refThumbMedia} src={resolveMediaSrc(f.url)} muted />
+                      )}
+                      {f.kind === 'audio' && (
+                        <div className={styles.refThumbAudio}>
+                          <Music size={20} strokeWidth={2} />
+                        </div>
+                      )}
+                      <button
+                        className={styles.refThumbRemove}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          removeAgentFile(f.id);
+                        }}
+                      >
+                        <X size={12} strokeWidth={2} />
+                      </button>
+                    </div>
+                    <span className={styles.refThumbLabel}>
+                      {f.kind === 'image' ? '图片' : f.kind === 'video' ? '视频' : '音频'} {idx + 1}
+                    </span>
+                  </div>
+                ))}
               </div>
 
               { }
@@ -1451,7 +1532,7 @@ export default function ChatBox({
                   className={styles.textarea}
                   placeholder="描述你想制作的视频，微电影、产品广告、社媒视频等都可支持。适合 1-5 分钟视频。"
                   value={inputValue}
-                  onChange={(e) => handleInputChange(e.target.value)}
+                  onChange={(e) => handleInputChange(e.target.value, slashTriggerIndex(e.target.value, e.target.selectionStart ?? 0))}
                   onKeyDown={handleKeyDown}
                   onCompositionStart={handleCompositionStart}
                   onCompositionEnd={handleCompositionEnd}
@@ -1531,7 +1612,10 @@ export default function ChatBox({
       { }
       <SkillModal
         open={showSkillModal}
-        onClose={() => setShowSkillModal(false)}
+        onClose={() => {
+          setShowSkillModal(false);
+          setSlashPos(null);
+        }}
         onUseSkill={(s) => handleUseSkill(s)}
       />
 
@@ -1564,6 +1648,21 @@ export default function ChatBox({
           >
             <FolderOpen size={14} strokeWidth={2} />
             <span>从资产中选择</span>
+          </button>
+        </div>,
+        document.body,
+      )}
+
+      {previewSrc && createPortal(
+        <div className={styles.previewOverlay} role="dialog" aria-label="参考图预览" onClick={() => setPreviewSrc(null)}>
+          <img
+            className={styles.previewImage}
+            src={resolveMediaSrc(previewSrc)}
+            crossOrigin={remoteImageCrossOrigin(previewSrc)}
+            alt=""
+          />
+          <button type="button" className={styles.previewClose} onClick={() => setPreviewSrc(null)} title="关闭">
+            <X size={18} strokeWidth={2} />
           </button>
         </div>,
         document.body,

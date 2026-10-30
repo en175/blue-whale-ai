@@ -2,12 +2,15 @@ import { useCallback, useRef, useState } from 'react';
 import { persistSnapAlignmentEnabled, readSnapAlignmentEnabled } from '../../graph/snapPreference';
 
 import { type ToolMode } from '@/custom/enums';
+import type { ConnectDirection } from './useCanvasConnectHandlers';
+
+export type ConnectMenuState = { sourceIds: string[]; x: number; y: number; direction?: ConnectDirection } | null;
 
 export function useCanvasWorkbenchChrome() {
   const [showMiniMap, setShowMiniMap] = useState(false);
   const [toolMode, setToolMode] = useState<ToolMode>('select');
   const [paneMenu, setPaneMenu] = useState<{ x: number; y: number } | null>(null);
-  const [connectMenu, setConnectMenu] = useState<{ sourceIds: string[]; x: number; y: number } | null>(null);
+  const [connectMenu, setConnectMenu] = useState<ConnectMenuState>(null);
   const closeConnectMenu = useCallback(() => setConnectMenu(null), []);
   const connectingSourceRef = useRef<string | null>(null);
   const paneUploadRef = useRef<HTMLInputElement>(null);

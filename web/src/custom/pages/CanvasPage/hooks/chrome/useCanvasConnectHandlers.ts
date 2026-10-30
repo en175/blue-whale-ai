@@ -2,20 +2,28 @@ import { type ConnectGenKind, type VideoRefRole } from '@/custom/enums';
 import type { RefObject } from 'react';
 import type { Edge, Node } from '@xyflow/react';
 import { canConnectSourcesToGen, genKindOf, wouldCreateCycle } from '../../graph/connectAbility';
+import { nodeBoxOf } from '../../graph/canvasPureNodeHelpers';
 import { audioVideoMuxVideoError, isAudioVideoMuxDraftNode } from '../../tools/audio/audioVideoMux';
 
 import type { CanvasDraftCardCreatorsHandles } from '../tools/useCanvasDraftCardCreators';
 
 type ToolSessionsWire = { wireStart: (id: string | null) => void };
 
+export type ConnectDirection = 'left' | 'right';
+
+const SIDE_NODE_WIDTH = 280;
+const SIDE_NODE_HEIGHT = 200;
+const SIDE_GAP = 120;
+
 export interface CanvasConnectHandlersHost {
-  connectMenu: { sourceIds: string[]; x: number; y: number } | null;
+  connectMenu: { sourceIds: string[]; x: number; y: number; direction?: ConnectDirection } | null;
   connectingSourceRef: RefObject<string | null>;
   edgesRef: RefObject<Edge[]>;
   findCanvasNode: (id: string) => Node | undefined;
+  allNodes: () => Node[];
   isConnectableSource: (node: Node | undefined) => boolean;
   availableGenKinds: (sources: Node[]) => Set<ConnectGenKind>;
-  setConnectMenu: (menu: { sourceIds: string[]; x: number; y: number } | null) => void;
+  setConnectMenu: (menu: { sourceIds: string[]; x: number; y: number; direction?: ConnectDirection } | null) => void;
   addCanvasEdge: (source: string, target: string, refRole?: VideoRefRole, marker?: Record<string, unknown>) => void;
   connectPlanToDraft: (planNodeId: string, targetId: string) => void;
   connectPair: (source: string, target: string) => boolean;
@@ -23,6 +31,7 @@ export interface CanvasConnectHandlersHost {
   imageRefSourceError: (node: Node) => string | null;
   audioRefSourceError: (node: Node) => string | null;
   spawnNearScreen: (screenPt: { x: number; y: number }) => { x: number; y: number };
+  addTextNodeAt: (position: { x: number; y: number }) => string;
   withHistoryBatch: (fn: () => void) => void;
   creators: CanvasDraftCardCreatorsHandles;
   openVideoDraftDialog: (nodeId: string) => void;
@@ -45,6 +54,7 @@ export interface CanvasConnectHandlersHandles {
   ) => void;
   handleConnectGroupDrop: (memberIds: string[], _targetId: string | null, client: { x: number; y: number }) => void;
   isValidCanvasConnection: (connection: { source: string | null; target: string | null }) => boolean;
+  openSideAddMenu: (sourceId: string, direction: ConnectDirection, client: { x: number; y: number }) => void;
 }
 
 export function useCanvasConnectHandlers(host: CanvasConnectHandlersHost): CanvasConnectHandlersHandles {
@@ -53,8 +63,8 @@ export function useCanvasConnectHandlers(host: CanvasConnectHandlersHost): Canva
     connectingSourceRef,
     edgesRef,
     findCanvasNode,
+    allNodes,
     isConnectableSource,
-    availableGenKinds,
     setConnectMenu,
     addCanvasEdge,
     connectPlanToDraft,
@@ -63,6 +73,7 @@ export function useCanvasConnectHandlers(host: CanvasConnectHandlersHost): Canva
     imageRefSourceError,
     audioRefSourceError,
     spawnNearScreen,
+    addTextNodeAt,
     withHistoryBatch,
     creators,
     openVideoDraftDialog,
@@ -73,11 +84,40 @@ export function useCanvasConnectHandlers(host: CanvasConnectHandlersHost): Canva
   } = host;
   const { createVideoDraftCard, createImageDraftCard, createAudioDraftCard, createTextGenDraft } = creators;
 
+  const sourcesOf = (sourceIds: string[]) =>
+    sourceIds.map(findCanvasNode).filter((n): n is Node => isConnectableSource(n));
+  const sidePosition = (
+    id: string,
+    direction: ConnectDirection,
+    fallback: { x: number; y: number },
+  ): { x: number; y: number } => {
+    const node = findCanvasNode(id);
+    if (!node) return fallback;
+    const box = nodeBoxOf(node);
+    const baseX = direction === 'left' ? box.x - SIDE_NODE_WIDTH - SIDE_GAP : box.x + box.width + SIDE_GAP;
+    const others = allNodes().filter((n) => n.id !== id && n.type !== 'groupFrameNode').map(nodeBoxOf);
+    for (let step = 0; step < 40; step += 1) {
+      const y = box.y + step * SIDE_GAP;
+      const clashes = others.some((o) => baseX < o.x + o.width
+        && baseX + SIDE_NODE_WIDTH > o.x
+        && y < o.y + o.height
+        && y + SIDE_NODE_HEIGHT > o.y);
+      if (!clashes) return { x: baseX, y };
+    }
+    return { x: baseX, y: box.y };
+  };
   const openConnectTypeMenu = (sourceIds: string[], clientX: number, clientY: number) => {
-    const sources = sourceIds.map(findCanvasNode).filter((n): n is Node => isConnectableSource(n));
+    const sources = sourcesOf(sourceIds);
     if (sources.length === 0) return;
-    if (availableGenKinds(sources).size === 0) return;
     setConnectMenu({ sourceIds: sources.map((n) => n.id), x: clientX, y: clientY });
+  };
+  const openSideAddMenu = (
+    sourceId: string,
+    direction: ConnectDirection,
+    client: { x: number; y: number },
+  ) => {
+    if (!findCanvasNode(sourceId)) return;
+    setConnectMenu({ sourceIds: [sourceId], x: client.x, y: client.y, direction });
   };
   const connectMenuSourcesToDraft = (sourceIds: string[], targetId: string, kind: ConnectGenKind) => {
     sourceIds.forEach((id) => {
@@ -101,30 +141,49 @@ export function useCanvasConnectHandlers(host: CanvasConnectHandlersHost): Canva
   const applyConnectType = (kind: ConnectGenKind) => {
     if (!connectMenu) return;
     const sourceIds = connectMenu.sourceIds;
+    const { direction } = connectMenu;
     const position = spawnNearScreen({ x: connectMenu.x, y: connectMenu.y });
+    const place = (sourceId: string, fallback: { x: number; y: number }) =>
+      direction ? sidePosition(sourceId, direction, fallback) : fallback;
+    const link = (sourceId: string, targetId: string, edgeKind: ConnectGenKind) => {
+      if (!direction) {
+        connectMenuSourcesToDraft([sourceId], targetId, edgeKind);
+        return;
+      }
+      const node = findCanvasNode(sourceId);
+      if (!node) return;
+      if (direction === 'right') {
+        if (isConnectableSource(node)) connectMenuSourcesToDraft([sourceId], targetId, edgeKind);
+        return;
+      }
+      const role = genKindOf(node) === 'video' ? 'reference' : undefined;
+      addCanvasEdge(targetId, sourceId, role);
+    };
     setConnectMenu(null);
     withHistoryBatch(() => {
       let targetId = '';
       if (kind === 'video') {
-        targetId = createVideoDraftCard(undefined, position, { recordHistory: true });
-        connectMenuSourcesToDraft(sourceIds, targetId, 'video');
+        targetId = createVideoDraftCard(undefined, place(sourceIds[0], position), { recordHistory: true });
+        sourceIds.forEach((id) => link(id, targetId, 'video'));
         openVideoDraftDialog(targetId);
         return;
       }
       if (kind === 'image') {
-        targetId = createImageDraftCard(position, { recordHistory: true });
-        connectMenuSourcesToDraft(sourceIds, targetId, 'image');
+        targetId = createImageDraftCard(place(sourceIds[0], position), { recordHistory: true });
+        sourceIds.forEach((id) => link(id, targetId, 'image'));
         openImageDraftDialog(targetId);
         return;
       }
       if (kind === 'audio') {
-        targetId = createAudioDraftCard(position, { recordHistory: true });
-        connectMenuSourcesToDraft(sourceIds, targetId, 'audio');
+        targetId = createAudioDraftCard(place(sourceIds[0], position), { recordHistory: true });
+        sourceIds.forEach((id) => link(id, targetId, 'audio'));
         openAudioDraftDialog(targetId);
         return;
       }
-      targetId = createTextGenDraft(position);
-      sourceIds.forEach((id) => addCanvasEdge(id, targetId));
+      targetId = direction
+        ? addTextNodeAt(place(sourceIds[0], position))
+        : createTextGenDraft(position);
+      sourceIds.forEach((id) => link(id, targetId, 'text'));
       openTextGenDialog(targetId);
     });
   };
@@ -200,5 +259,5 @@ export function useCanvasConnectHandlers(host: CanvasConnectHandlersHost): Canva
     return true;
   };
 
-  return { applyConnectType, handleConnectEnd, handleConnectGroupDrop, isValidCanvasConnection };
+  return { applyConnectType, handleConnectEnd, handleConnectGroupDrop, isValidCanvasConnection, openSideAddMenu };
 }

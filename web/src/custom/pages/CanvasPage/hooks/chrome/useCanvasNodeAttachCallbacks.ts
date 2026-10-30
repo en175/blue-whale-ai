@@ -40,6 +40,7 @@ export interface CanvasNodeAttachCallbacksHost {
     setPickProductId: (id: string) => void;
     setPickAssetId: (id: string) => void;
   };
+  openSideAddMenu: (sourceId: string, direction: 'left' | 'right', client: { x: number; y: number }) => void;
 }
 
 export interface CanvasNodeAttachCallbacksHandles {
@@ -66,10 +67,18 @@ export function useCanvasNodeAttachCallbacks(host: CanvasNodeAttachCallbacksHost
     locateTextSource,
     showToast,
     pickers,
+    openSideAddMenu,
   } = host;
 
   const attachCallbacks = (node: Node): Node => {
     const base: Node = { ...node, position: node.position ?? { x: 0, y: 0 }, data: { ...node.data, toolMode } };
+    if (node.type === 'textNode' || node.type === 'mediaNode' || node.type === 'assetCardNode' || node.type === 'productNode') {
+      base.data = {
+        ...base.data,
+        onAddLeft: (client: { x: number; y: number }) => openSideAddMenu(node.id, 'left', client),
+        onAddRight: (client: { x: number; y: number }) => openSideAddMenu(node.id, 'right', client),
+      };
+    }
     switch (node.type) {
       case 'textNode': {
         if (typeof base.data.html === 'string') {

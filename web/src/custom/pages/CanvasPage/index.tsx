@@ -583,11 +583,12 @@ export default function CanvasPage() {
     setAssetNodes,
     setSelectRequest,
   });
-  const { applyConnectType, handleConnectEnd, handleConnectGroupDrop, isValidCanvasConnection } = useCanvasConnectHandlers({
+  const { applyConnectType, handleConnectEnd, handleConnectGroupDrop, isValidCanvasConnection, openSideAddMenu } = useCanvasConnectHandlers({
     connectMenu,
     connectingSourceRef,
     edgesRef,
     findCanvasNode,
+    allNodes: () => graph.allNodes(),
     isConnectableSource,
     availableGenKinds,
     setConnectMenu,
@@ -598,6 +599,7 @@ export default function CanvasPage() {
     imageRefSourceError: (node) => imageRefSourceError(node),
     audioRefSourceError: (node) => audioRefSourceError(node),
     spawnNearScreen,
+    addTextNodeAt: (position) => handleAddTextNode(position),
     withHistoryBatch,
     creators: { createVideoDraftCard, createImageDraftCard, createAudioDraftCard, createTextGenDraft },
     openVideoDraftDialog,
@@ -771,6 +773,7 @@ export default function CanvasPage() {
     locateTextSource: (nodeId) => locateTextSource(nodeId),
     showToast,
     pickers: { setPickMode, setPickTarget, setPickProductId, setPickAssetId },
+    openSideAddMenu: (sourceId, direction, client) => openSideAddMenu(sourceId, direction, client),
   });
 
   const { handleAssetsPickerSelect } = useCanvasAssetsPlacement({
@@ -1464,6 +1467,7 @@ export default function CanvasPage() {
         findCanvasNode, showToast,
         spawnNearScreen, paneUploadRef, paneUploadPosRef, placeFileOnCanvas,
         handleToolMenuSelect, handleUploadFiles, placeNodeFile: (file) => placeFileOnCanvas(file),
+        allNodes: () => graph.allNodes(),
       }}
       nodeActions={{
         handleAddTextNode, canOpenEditor, openImageDraftDialog, createImageDraftCard,

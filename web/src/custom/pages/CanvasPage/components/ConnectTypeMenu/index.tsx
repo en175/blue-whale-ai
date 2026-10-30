@@ -60,6 +60,7 @@ export default function ConnectTypeMenu({ x, y, enabled, onSelect, onClose }: Co
           </button>
         );
       })}
+      {enabled.size === 0 && <span className={styles.empty}>当前节点暂无可连接的节点类型</span>}
     </div>,
     document.body,
   );

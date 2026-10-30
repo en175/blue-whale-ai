@@ -25,7 +25,9 @@ import MediaNodeToolbar from '../MediaNode/Toolbar';
 import AssetCardToolbar from '../AssetCardNode/Toolbar';
 import { AssetImageRefLimitProvider } from '../../generation/modelCaps';
 import { assetCardToolbarVisible } from '../AssetCardNode/toolbarVisibility';
-import { availableGenKinds } from '../../graph/connectAbility';
+import { availableGenKinds, availableGenKindsAsTarget } from '../../graph/connectAbility';
+import type { ConnectDirection } from '../../hooks/chrome/useCanvasConnectHandlers';
+import type { ConnectGenKind } from '@/custom/enums';
 import { assetsPickerMediaTypes } from '../../assets/assetsPickerTargets';
 import pageStyles from '../../index.module.css';
 
@@ -103,7 +105,7 @@ interface CanvasPageShellProps {
   };
 
   menus: {
-    connectMenu: { sourceIds: string[]; x: number; y: number } | null;
+    connectMenu: { sourceIds: string[]; x: number; y: number; direction?: ConnectDirection } | null;
     closeConnectMenu: () => void;
     applyConnectType: ConnectMenuProps['onSelect'];
     paneMenu: PaneMenuProps['paneMenu'];
@@ -118,6 +120,7 @@ interface CanvasPageShellProps {
     placeNodeFile: NonNullable<AgentProps['onPlaceFileOnCanvas']>;
     findCanvasNode: (id: string) => Node | undefined;
     showToast: (type: 'success' | 'error' | 'warn', msg: string) => void;
+    allNodes: () => Node[];
   };
 
   nodeActions: {
@@ -270,6 +273,14 @@ export default function CanvasPageShell(props: CanvasPageShellProps) {
     overlays,
     shellTop,
   } = props;
+
+  const connectMenuKinds = () => {
+    const menu = menus.connectMenu;
+    if (!menu) return new Set<ConnectGenKind>();
+    const sources = menu.sourceIds.map(menus.findCanvasNode).filter((n): n is Node => !!n);
+    if (menu.direction !== 'left') return availableGenKinds(sources);
+    return availableGenKindsAsTarget(sources[0]);
+  };
 
   return (
     <div className={pageStyles.canvasPage}>
@@ -425,7 +436,7 @@ export default function CanvasPageShell(props: CanvasPageShellProps) {
           <ConnectTypeMenu
             x={menus.connectMenu.x}
             y={menus.connectMenu.y}
-            enabled={availableGenKinds(menus.connectMenu.sourceIds.map(menus.findCanvasNode).filter((n): n is Node => !!n))}
+            enabled={connectMenuKinds()}
             onClose={menus.closeConnectMenu}
             onSelect={menus.applyConnectType}
           />
