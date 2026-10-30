@@ -28,6 +28,7 @@ import {
   resolveSourceDuration,
   storageKeyOfAsset,
   type ResolvedSourceDuration,
+  type SecondsPolicy,
 } from "@lib/shared/media-tools/source-duration.js";
 import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
 import {
@@ -65,6 +66,12 @@ const MAX_DURATION_MS: Record<string, number> = {
   [VIDEO_SCENE_SPLIT_JOB_TYPE]: VIDEO_SCENE_SPLIT_MAX_DURATION_MS,
   [VIDEO_SUBTITLE_ERASE_JOB_TYPE]: VIDEO_SUBTITLE_ERASE_MAX_DURATION_MS,
 };
+
+const FLOOR_SECONDS_TOOLS: ReadonlySet<string> = new Set([
+  VIDEO_FRAME_INTERPOLATION_JOB_TYPE,
+  VIDEO_MATTING_JOB_TYPE,
+  VIDEO_SUBTITLE_ERASE_JOB_TYPE,
+]);
 
 function assetIdOf(value: unknown): string | null {
   return typeof value === "string" && ASSET_ID_PATTERN.test(value) ? value : null;
@@ -115,6 +122,7 @@ export class MediaToolQuoteService {
     expectedTypes: readonly string[],
     maxDurationMs?: number,
     probeDimensions = false,
+    secondsPolicy?: SecondsPolicy,
   ): Promise<ResolvedSourceDuration | null> {
     if (assetId === null) return null;
     const asset = await this.assets.findOwnedSource(assetId, userId);
@@ -130,6 +138,7 @@ export class MediaToolQuoteService {
         height: asset.height,
       },
       probeDimensions,
+      ...(secondsPolicy ? { secondsPolicy } : {}),
     });
     if (resolved === null) return null;
     if (maxDurationMs !== undefined && resolved.durationMs > maxDurationMs) {
@@ -175,6 +184,8 @@ export class MediaToolQuoteService {
       assetIdOf(raw.source_asset_id),
       SINGLE_SOURCE_TYPES[toolType] ?? [],
       MAX_DURATION_MS[toolType],
+      false,
+      FLOOR_SECONDS_TOOLS.has(toolType) ? "floor" : undefined,
     );
     return resolved === null ? null : { ...raw, duration: resolved.seconds };
   }

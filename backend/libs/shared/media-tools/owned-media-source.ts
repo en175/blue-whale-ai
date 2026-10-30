@@ -12,6 +12,7 @@ import type { ProjectService } from "@lib/shared/project/project.service.js";
 import {
   resolveSourceDuration,
   type ResolvedSourceDuration,
+  type SecondsPolicy,
 } from "./source-duration.js";
 
 type OwnedAsset = NonNullable<
@@ -39,6 +40,7 @@ export async function resolveOwnedMediaSource(args: {
   wrongTypeMessage: string;
   durationMessage?: string;
   probeDimensions?: boolean;
+  secondsPolicy?: SecondsPolicy;
   maxDurationMs?: number;
   maxDurationMessage?: string;
 }): Promise<
@@ -69,6 +71,7 @@ export async function resolveOwnedMediaSource(args: {
       ...(args.probeDimensions ? { width: asset.width, height: asset.height } : {}),
     },
     ...(args.probeDimensions ? { probeDimensions: true } : {}),
+    ...(args.secondsPolicy ? { secondsPolicy: args.secondsPolicy } : {}),
   });
   if (duration === null) {
     return {

@@ -40,6 +40,8 @@ const ASSETS = new Map<string, AssetRow>([
   ["3", assetRow({ duration_ms: 62_500 })],
   ["4", assetRow({ type: "video", duration_ms: 10_200, width: 1920, height: 1080 })],
   ["5", assetRow({ duration_ms: null })],
+  ["6", assetRow({ type: "video", duration_ms: 4_900, width: 854, height: 480 })],
+  ["7", assetRow({ type: "video", duration_ms: 61_600, width: 1920, height: 1080 })],
 ]);
 
 const quote = vi.fn();
@@ -274,5 +276,31 @@ describe("MediaToolQuoteService：不报价与降级", () => {
       credits: null,
       quote_revision: null,
     });
+  });
+});
+
+describe("MediaToolQuoteService：5 秒档工具时长向下取整（IKRQYW）", () => {
+  it.each([
+    "video_subtitle_erase",
+    "video_frame_interpolation",
+    "video_matting",
+  ])("%s 的 4.9 秒素材按 4 秒进档，不越到 10 秒档", async (toolType) => {
+    const service = makeService();
+    await service.quote(toolType, "9", { source_asset_id: "6" });
+    expect(quote).toHaveBeenCalledWith(
+      toolType,
+      "9",
+      expect.objectContaining({ duration: 4 }),
+    );
+  });
+
+  it("分钟档工具保持四舍五入：61.6 秒按 62 秒", async () => {
+    const service = makeService();
+    await service.quote("video_scene_split", "9", { source_asset_id: "7" });
+    expect(quote).toHaveBeenCalledWith(
+      "video_scene_split",
+      "9",
+      expect.objectContaining({ duration: 62 }),
+    );
   });
 });

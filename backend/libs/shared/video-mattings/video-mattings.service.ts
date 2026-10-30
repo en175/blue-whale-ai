@@ -161,6 +161,7 @@ export class VideoMattingsService {
       expectedTypes: ["video"],
       wrongTypeMessage: "仅支持对视频资产发起智能抠像",
       durationMessage: "源视频时长读取失败，请稍后重试或更换素材",
+      secondsPolicy: "floor",
       maxDurationMs: VIDEO_MATTING_MAX_DURATION_MS,
       maxDurationMessage: "暂支持 10 分钟以内的视频智能抠像",
     });
