@@ -106,6 +106,7 @@ export class VideoFrameInterpolationsService {
       expectedTypes: ["video"],
       wrongTypeMessage: "仅支持对视频资产发起视频插帧",
       durationMessage: "源视频时长读取失败，请稍后重试或更换素材",
+      secondsPolicy: "floor",
     });
     if (!source.ok) return source.envelope;
     const duration = source.duration!;

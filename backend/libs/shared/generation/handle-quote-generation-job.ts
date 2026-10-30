@@ -1,6 +1,15 @@
 import { createHash } from "node:crypto";
 
-import { RESOURCE_NOT_FOUND_CODE, canonicalSizeValue, fail, frozenVideoModeOf, ok, type ResultEnvelope } from "@lib/contracts";
+import {
+  RESOURCE_NOT_FOUND_CODE,
+  canonicalSizeValue,
+  fail,
+  frozenVideoModeOf,
+  normalizeVideoMode,
+  ok,
+  resolveVideoMode,
+  type ResultEnvelope,
+} from "@lib/contracts";
 import {
   DEFAULT_IMAGE_REFERENCE_MAX,
   type AssetOwnershipOps,
@@ -23,6 +32,8 @@ import {
   resolveReferenceAssets,
   resolveTextIndexReferences,
   ruleSampleMode,
+  validateGenerationRequest,
+  validateVideoParamLimits,
   type CreateGenerationJobBody,
   type GenerationType,
   serializePricingRule,
@@ -102,6 +113,8 @@ export async function handleQuoteGenerationJob(
     }
   }
 
+  if (validateGenerationRequest(type, body, capability)) return ok(EMPTY_QUOTE);
+
   const ruling = ruleSampleMode({
     type,
     sampleMode: params?.sample_mode,
@@ -169,6 +182,26 @@ export async function handleQuoteGenerationJob(
     });
     if (!textIndexRefs.ok) return ok(EMPTY_QUOTE);
     quoteReferenceAssetIds = textIndexRefs.value.merged;
+  }
+
+  if (type === "video") {
+    const videoParams = effectiveBody.parameters as
+      | { mode?: unknown; prompt?: unknown }
+      | undefined;
+    const promptText =
+      typeof videoParams?.prompt === "string" ? videoParams.prompt : "";
+    const parsedRefs = parseReferences(effectiveBody.references);
+    const videoRefItems = parsedRefs.kind === "ok" ? parsedRefs.items : [];
+    const videoMode =
+      normalizeVideoMode(videoParams?.mode) ??
+      resolveVideoMode(videoRefItems, promptText);
+    const videoParamErr = validateVideoParamLimits({
+      body: effectiveBody,
+      capability,
+      videoMode,
+      videoRefItems,
+    });
+    if (videoParamErr) return ok(EMPTY_QUOTE);
   }
 
   const input = projectQuoteInput(type, effectiveBody, capability, quoteReferenceAssetIds);

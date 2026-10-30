@@ -75,7 +75,7 @@ function modelWhitelist(videoRow: Record<string, unknown> = {}) {
   return vi
     .fn()
     .mockResolvedValue([
-      { model_id: MODEL_ID, version: 345, features: { audio: true }, ...videoRow },
+      { model_id: MODEL_ID, version: 345, features: { audio: true, video_reference: true, video_reference_max: 3 }, ...videoRow },
       { model_id: IMAGE_MODEL_ID, features: { image_reference_max: 10 } },
       {
         model_id: "seed-audio-1.0",
@@ -388,7 +388,7 @@ describe("handleQuoteGenerationJob", () => {
 describe("handleQuoteGenerationJob 样片模式（IKIZQ7）", () => {
   const SAMPLE_MODEL_ID = "doubao-seedance-2-5-260628";
 
-  function sampleWhitelist(features: Record<string, unknown> | null = { sample_mode: true }) {
+  function sampleWhitelist(features: Record<string, unknown> | null = { sample_mode: true, video_reference: true, video_reference_max: 3 }) {
     return vi.fn().mockResolvedValue([
       { model_id: SAMPLE_MODEL_ID, version: 345, ...(features ? { features } : {}) },
     ]);
@@ -1039,5 +1039,87 @@ describe("IKJGE6 画布文本带入合并报价口径", () => {
     const quoteArg = quote.mock.calls[0]?.[0] as unknown as QuoteArgs;
     expect(quoteArg.specs.duration).toBe("4");
     expect(result.data?.duration_basis).toBeUndefined();
+  });
+});
+
+describe("报价按能力行配置校验（IKRQYW）", () => {
+  const VALID_MODEL_ID = "doubao-seedance-2-5-260628";
+
+  const modelRow = (overrides: Record<string, unknown> = {}) => ({
+    model_id: VALID_MODEL_ID,
+    version: 7,
+    supported_sizes: [{ id: "720p", label: "720P", api_value: "720p" }],
+    supported_aspect_ratios: ["16:9"],
+    supported_durations: { min: 4, max: 30, step: 1 },
+    features: {
+      video_reference: true,
+      video_reference_max: 10,
+      audio_reference: true,
+      audio_reference_max: 10,
+      image_reference_max: 30,
+      task_types: { text2video: {}, image_reference: {}, extend: {} },
+    },
+    ...overrides,
+  });
+
+  const quoteBody = (parameters: Record<string, unknown> = {}) => ({
+    type: "video" as const,
+    expected_output_count: 1,
+    parameters: {
+      prompt: "人物走过街角",
+      model_id: VALID_MODEL_ID,
+      aspect_ratio: "16:9",
+      resolution: "720p",
+      duration: 5,
+      ...parameters,
+    },
+  });
+
+  const run = (
+    body: unknown,
+    models: Array<Record<string, unknown>> = [modelRow()],
+  ) => {
+    const { client, quote } = fakeBilling();
+    return {
+      quote,
+      result: handleQuoteGenerationJob(
+        USER_ID,
+        PROJECT_ID,
+        body as never,
+        previewDeps(client, vi.fn().mockResolvedValue("free"), vi.fn().mockResolvedValue(models)),
+      ),
+    };
+  };
+
+  it("时长 31 秒超上界 → 不报价", async () => {
+    const { quote, result } = run(quoteBody({ duration: 31 }));
+    expect((await result).data).toEqual({ credits: null, quote_revision: null });
+    expect(quote).not.toHaveBeenCalled();
+  });
+
+  it("时长 3 秒低于下界 → 不报价", async () => {
+    const { quote, result } = run(quoteBody({ duration: 3 }));
+    expect((await result).data).toEqual({ credits: null, quote_revision: null });
+    expect(quote).not.toHaveBeenCalled();
+  });
+
+  it("显式模式未在能力行配置 → 不报价", async () => {
+    const models = [
+      modelRow({
+        features: {
+          ...modelRow().features,
+          task_types: { text2video: {}, image_reference: {} },
+        },
+      }),
+    ];
+    const { quote, result } = run(quoteBody({ mode: "extend" }), models);
+    expect((await result).data).toEqual({ credits: null, quote_revision: null });
+    expect(quote).not.toHaveBeenCalled();
+  });
+
+  it("合法组合仍正常报价", async () => {
+    const { quote, result } = run(quoteBody({ duration: 15 }));
+    expect((await result).data?.credits).toBe(42);
+    expect(quote).toHaveBeenCalled();
   });
 });

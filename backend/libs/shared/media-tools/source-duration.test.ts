@@ -113,6 +113,25 @@ describe("resolveSourceDuration", () => {
     });
   });
 
+  it("secondsPolicy=floor：4.9 秒取 4，5 秒档不越档", async () => {
+    const { args } = makeArgs({
+      asset: { id: "88", storage_key: "k", duration_ms: 4_900 },
+      secondsPolicy: "floor",
+    });
+    await expect(resolveSourceDuration(args as never)).resolves.toMatchObject({
+      seconds: 4,
+    });
+  });
+
+  it("默认仍四舍五入：4.9 秒取 5", async () => {
+    const { args } = makeArgs({
+      asset: { id: "88", storage_key: "k", duration_ms: 4_900 },
+    });
+    await expect(resolveSourceDuration(args as never)).resolves.toMatchObject({
+      seconds: 5,
+    });
+  });
+
   it("没有存储键或探测失败 → null（调用方拒绝提交）", async () => {
     const { args, storage } = makeArgs({
       asset: { id: "88", storage_key: null, duration_ms: null },

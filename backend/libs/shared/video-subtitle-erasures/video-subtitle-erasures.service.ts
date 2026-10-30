@@ -103,6 +103,7 @@ export class VideoSubtitleErasuresService {
       expectedTypes: ["video"],
       wrongTypeMessage: "仅支持对视频资产发起去字幕",
       durationMessage: "源视频时长读取失败，请稍后重试或更换素材",
+      secondsPolicy: "floor",
       probeDimensions: true,
       maxDurationMs: VIDEO_SUBTITLE_ERASE_MAX_DURATION_MS,
       maxDurationMessage: "暂支持 10 分钟以内的视频去字幕",

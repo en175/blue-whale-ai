@@ -883,6 +883,94 @@ const strategies: Record<GenerationType, GenerationTypeStrategy> = {
   audio: audioStrategy,
 };
 
+function validateCapabilityParams(
+  type: GenerationType,
+  body: CreateGenerationJobBody,
+  capability: ModelCapabilityView | undefined,
+): { code: string; message: string } | null {
+  if (!capability) return null;
+  if (type === "video") return validateVideo(body, capability);
+  if (type === "audio") return validateAudioReferences(body, capability.features);
+  return null;
+}
+
+export function validateGenerationRequest(
+  type: GenerationType,
+  body: CreateGenerationJobBody,
+  capability?: ModelCapabilityView,
+): { code: string; message: string } | null {
+  const strategy = strategies[type];
+  if (!strategy) return { code: ERROR_UNSUPPORTED_TYPE, message: "暂不支持该生成类型" };
+  return (
+    strategy.validate(body) ?? validateCapabilityParams(type, body, capability)
+  );
+}
+
+export function validateVideoParamLimits(args: {
+  body: CreateGenerationJobBody;
+  capability: ModelCapabilityView;
+  videoMode: VideoMode | undefined;
+  videoRefItems: ReadonlyArray<{ role: string; type: string }>;
+}): { code: string; message: string } | null {
+  const params = args.body.parameters as GenerationParameters;
+  const explicitMode = normalizeVideoMode(params.mode);
+  const taskTypes = args.capability.features?.task_types;
+  if (
+    explicitMode &&
+    taskTypes &&
+    typeof taskTypes === "object" &&
+    !Array.isArray(taskTypes) &&
+    !(explicitMode in taskTypes)
+  ) {
+    return {
+      code: ERROR_TASK_TYPE_PARAM_CONSTRAINT,
+      message: TASK_TYPE_PARAM_CONSTRAINT_MESSAGE,
+    };
+  }
+  const checked = toGenerationParamCheckInput({
+    resolution: params.resolution,
+    size: params.size,
+    aspect_ratio: params.aspect_ratio,
+    duration: params.duration,
+  });
+  if (checked) {
+    const limitErr = checkGenerationParamLimit(
+      {
+        supported_sizes: args.capability.supported_sizes,
+        supported_aspect_ratios: args.capability.supported_aspect_ratios,
+        supported_durations: args.capability.supported_durations,
+        task_types: args.capability.features?.task_types,
+      },
+      args.videoMode ? { ...checked, mode: args.videoMode } : checked,
+    );
+    if (limitErr) return { code: limitErr.code, message: limitErr.reason };
+  }
+  if (args.videoMode === "edit" || args.videoMode === "extend") {
+    const allowed = modeAllowedRatios(
+      args.capability.features?.task_types,
+      args.videoMode,
+    );
+    const ratio = isStr(params.aspect_ratio) ? params.aspect_ratio : "";
+    if (allowed && !allowed.includes(ratio)) {
+      return {
+        code: ERROR_TASK_TYPE_PARAM_CONSTRAINT,
+        message: TASK_TYPE_PARAM_CONSTRAINT_MESSAGE,
+      };
+    }
+    if (
+      !args.videoRefItems.some(
+        (item) => item.role === "reference" && item.type === "video",
+      )
+    ) {
+      return {
+        code: ERROR_INVALID_INPUT,
+        message: "视频编辑模式至少需要 1 段参考视频",
+      };
+    }
+  }
+  return null;
+}
+
 
 
 
@@ -1820,10 +1908,7 @@ export async function handleCreateGenerationJob(
 
 
   if (capability && (type === "video" || type === "audio")) {
-    const revalidated =
-      type === "video"
-        ? validateVideo(body, capability)
-        : validateAudioReferences(body, capability.features);
+    const revalidated = validateCapabilityParams(type, body, capability);
     if (revalidated)
       return fail(errorCodeToNumeric(revalidated.code), revalidated.message, {
         code: revalidated.code,
@@ -1962,53 +2047,17 @@ export async function handleCreateGenerationJob(
 
 
   if (capability && type === "video") {
-    const checked = toGenerationParamCheckInput({
-      resolution: params.resolution,
-      size: params.size,
-      aspect_ratio: params.aspect_ratio,
-      duration: params.duration,
+    const videoParamErr = validateVideoParamLimits({
+      body,
+      capability,
+      videoMode,
+      videoRefItems,
     });
-    if (checked) {
-      const limitErr = checkGenerationParamLimit(
-        {
-          supported_sizes: capability.supported_sizes,
-          supported_aspect_ratios: capability.supported_aspect_ratios,
-          supported_durations: capability.supported_durations,
-          task_types: capability.features?.task_types,
-        },
-        videoMode ? { ...checked, mode: videoMode } : checked,
-      );
-      if (limitErr) {
-        return fail(errorCodeToNumeric(limitErr.code), limitErr.reason, {
-          code: limitErr.code,
-        });
-      }
+    if (videoParamErr) {
+      return fail(errorCodeToNumeric(videoParamErr.code), videoParamErr.message, {
+        code: videoParamErr.code,
+      });
     }
-  }
-
-
-
-
-
-  if (capability && type === "video" && (videoMode === "edit" || videoMode === "extend")) {
-    const allowed = modeAllowedRatios(capability.features?.task_types, videoMode);
-    const ratio = isStr(params.aspect_ratio) ? params.aspect_ratio : "";
-    if (allowed && !allowed.includes(ratio)) {
-      return fail(
-        errorCodeToNumeric(ERROR_TASK_TYPE_PARAM_CONSTRAINT),
-        TASK_TYPE_PARAM_CONSTRAINT_MESSAGE,
-        { code: ERROR_TASK_TYPE_PARAM_CONSTRAINT },
-      );
-    }
-  }
-  if (
-    type === "video" &&
-    (videoMode === "edit" || videoMode === "extend") &&
-    !videoRefItems.some((item) => item.role === "reference" && item.type === "video")
-  ) {
-    return fail(errorCodeToNumeric(ERROR_INVALID_INPUT), "视频编辑模式至少需要 1 段参考视频", {
-      code: ERROR_INVALID_INPUT,
-    });
   }
 
 
