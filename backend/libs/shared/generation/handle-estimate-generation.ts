@@ -1,11 +1,5 @@
 import type { ResultEnvelope } from "@lib/contracts";
-import {
-  FROZEN_VIDEO_MODE_KEY,
-  frozenVideoModeOf,
-  normalizeVideoMode,
-  ok,
-  resolveVideoMode,
-} from "@lib/contracts";
+import { frozenVideoModeOf, normalizeVideoMode, ok } from "@lib/contracts";
 import type { ModelCapabilityRepo } from "@lib/shared/persistence/index.js";
 
 import type { BillingQuote } from "../billing/billing-quote.js";
@@ -48,6 +42,9 @@ export async function handleEstimateGeneration(
     | undefined;
   const modelId = typeof params?.model_id === "string" ? params.model_id : null;
   if (modelId === null) return ok(EMPTY_ESTIMATE);
+  if (type === "video" && normalizeVideoMode(params?.mode) === null) {
+    return ok(EMPTY_ESTIMATE);
+  }
 
   const capability = (await deps.models.listEnabledByType(type)).find(
     (model) => model.model_id === modelId,
@@ -77,13 +74,7 @@ export async function handleEstimateGeneration(
   );
   if (input === null) return ok(EMPTY_ESTIMATE);
 
-  const estimateReferences = applyEstimateReferences(input, type, body.references);
-  if (type === "video" && normalizeVideoMode(params?.mode) === null) {
-    input[FROZEN_VIDEO_MODE_KEY] = resolveVideoMode(
-      estimateReferences,
-      typeof params?.prompt === "string" ? params.prompt : "",
-    );
-  }
+  applyEstimateReferences(input, type, body.references);
   applyEditSourceDurationBasis(
     input,
     frozenVideoModeOf(input),
@@ -112,8 +103,8 @@ function applyEstimateReferences(
   input: Record<string, unknown>,
   type: GenerationType,
   raw: unknown,
-): EstimateReference[] {
-  if (!Array.isArray(raw) || raw.length === 0) return [];
+): void {
+  if (!Array.isArray(raw) || raw.length === 0) return;
 
   const references: EstimateReference[] = [];
   for (const item of raw) {
@@ -131,12 +122,11 @@ function applyEstimateReferences(
       ...(seconds !== undefined ? { duration: seconds } : {}),
     });
   }
-  if (references.length === 0) return references;
+  if (references.length === 0) return;
 
   if (type === "image") {
     input.input_asset_ids = references.map((_, index) => String(index + 1));
-    return references;
+    return;
   }
   input.references = references;
-  return references;
 }

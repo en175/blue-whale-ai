@@ -105,6 +105,7 @@ describe("handleEstimateGeneration", () => {
           resolution: "720p",
           duration: 8,
           generate_audio: true,
+          mode: "text2video",
         },
       },
       deps(client),
@@ -160,22 +161,8 @@ describe("handleEstimateGeneration", () => {
     expect(specs.reference_seconds).toBe("0");
   });
 
-  it("未传 mode 时按参考与提示词推断编辑模式，口径与画布一致", async () => {
+  it("视频必须带 mode，缺了就不报价", async () => {
     const { client, quote } = fakeClient();
-    const models = vi.fn().mockResolvedValue([
-      {
-        model_id: VIDEO_MODEL_ID,
-        version: 5,
-        features: {
-          audio: true,
-          video_reference: true,
-          task_types: {
-            default: { allowed_ratios: ["adaptive"] },
-            edit: { allowed_ratios: ["adaptive"] },
-          },
-        },
-      },
-    ]);
     const result = await handleEstimateGeneration(
       USER_ID,
       {
@@ -190,13 +177,12 @@ describe("handleEstimateGeneration", () => {
           duration: -1,
         },
       },
-      deps(client, models),
+      deps(client),
     );
 
     expect(result.code).toBe(200);
-    const specs = quoteSpecs(quote).specs;
-    expect(specs.video_edit).toBe("1");
-    expect(specs.duration).toBe("12");
+    expect(result.data).toEqual({ credits: null });
+    expect(quote).not.toHaveBeenCalled();
   });
 
   it("模型不在启用白名单时不报价，也不打计费服务", async () => {
