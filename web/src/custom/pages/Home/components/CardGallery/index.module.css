@@ -41,7 +41,7 @@
 .cardGrid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 32px 22px;
+  gap: 32px 30px;
 }
 
 @media (max-width: 1100px) {

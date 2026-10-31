@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Home, FolderOpen, Image, LayoutGrid, MessageSquare, PanelLeft, Search } from 'lucide-react';
+import { Home, FolderOpen, Image, LayoutGrid, MessageSquare, PanelLeftClose, PanelLeftOpen, Search } from 'lucide-react';
 import { getCurrentUser, subscribe } from '@/shared/utils/auth';
 import LoginModal from '@/custom/components/LoginModal';
 import { showToast } from '@/custom/components/Toast';
@@ -184,14 +184,14 @@ export default function HomeSidebar({
       <div className={styles.brandRow}>
         <button className={styles.brand} onClick={() => handleClick(menuItems[0])} aria-label="蓝鲸首页">
           <img src="/project.png" alt="" className={styles.logoIcon} />
-        </button>
-        <button
+          <span className={styles.brandWord}>蓝鲸 AI</span>
+        </button>        <button
           className={styles.sidebarControl}
           onClick={() => onExpandedChange(!expanded)}
           aria-label={expanded ? '收起侧栏' : '展开侧栏'}
           aria-expanded={expanded}
         >
-          <PanelLeft size={16} strokeWidth={2} />
+          {expanded ? <PanelLeftClose size={18} strokeWidth={1.8} /> : <PanelLeftOpen size={18} strokeWidth={1.8} />}
         </button>
       </div>
 

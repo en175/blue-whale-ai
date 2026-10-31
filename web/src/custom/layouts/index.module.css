@@ -1,5 +1,5 @@
 .layout {
-  --sidebar-width: 72px;
+  --sidebar-width: 64px;
   width: 100%;
   height: 100%;
   display: flex;
@@ -8,7 +8,7 @@
 }
 
 .layoutWideSidebar {
-  --sidebar-width: 260px;
+  --sidebar-width: clamp(280px, 19vw, 380px);
 }
 
 .main {
