@@ -565,6 +565,46 @@ describe('fetchJobStatus', () => {
     });
   });
 
+  it('失败信封保留 category / retryable / charge_state 等失败事实（IKR63Z）', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            code: 1011,
+            msg: '服务暂时异常，本次生成失败。',
+            data: {
+              job_id: '1585',
+              status: 'failed',
+              progress: 0,
+              asset: null,
+              video_stage: null,
+              charge_state: 'released',
+              category: 'transient',
+              retryable: true,
+            },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      ),
+    );
+
+    await expect(fetchJobStatus('1585')).resolves.toEqual({
+      job_id: '1585',
+      status: 'failed',
+      progress: 0,
+      asset: null,
+      video_stage: null,
+      charge_state: 'released',
+      error: {
+        code: 1011,
+        msg: '服务暂时异常，本次生成失败。',
+        category: 'transient',
+        retryable: true,
+      },
+    });
+  });
+
   it('非领域错误码仍然抛出', async () => {
     vi.stubGlobal(
       'fetch',

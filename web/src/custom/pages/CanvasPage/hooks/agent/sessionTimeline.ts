@@ -598,7 +598,7 @@ export function accountOfRun(run: SessionRun, fallbackFinishedAt: number | null 
     tokenUsage: parseRunTokenUsage(run.token_usage),
     contextCapacity: parseRunContextCapacity(run.context_capacity),
     failureText: run.failure?.message || null,
-    failureRetryable: run.failure?.retryable !== false,
+    failureRetryable: run.failure?.retryable === true,
     cardFailureText: run.status === 'completed' ? run.prompt_card_failure?.message || null : null,
     cardFailureRetryable: !NON_RETRYABLE_CARD_FAILURES.has(run.prompt_card_failure?.code ?? ''),
   };

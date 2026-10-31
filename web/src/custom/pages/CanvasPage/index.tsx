@@ -38,6 +38,7 @@ import { useCanvasSessionBootstrap } from './hooks/document/useCanvasSessionBoot
 import { showToast } from '@/custom/components/Toast';
 import { useCanvasViewportSurface } from './hooks/chrome/useCanvasViewportSurface';
 import { useCanvasGenerationModels } from './hooks/generation/useCanvasGenerationModels';
+import { useCanvasFailActions } from './hooks/generation/useCanvasFailActions';
 import { useCanvasProjectRoute } from './hooks/document/useCanvasProjectRoute';
 import { useCanvasWorkbenchChrome } from './hooks/chrome/useCanvasWorkbenchChrome';
 import { useCanvasToolWorkspace } from './hooks/tools/useCanvasToolWorkspace';
@@ -1415,6 +1416,15 @@ export default function CanvasPage() {
     showToast,
   });
 
+  const { requoteByNode, handleEditFailed, handleRechargeFailed, handleRequoteFailed, handleRequoteConfirm } =
+    useCanvasFailActions({
+      mediaNodesRef,
+      edgesRef,
+      textNodesRef,
+      draftModelOf,
+      openMediaDraftDialog,
+      updateGenerate: onUpdateGenerate,
+    });
   bindActions({
     duplicate: handleDuplicateNode,
     addToChat: handleAddToChatNode,
@@ -1432,6 +1442,10 @@ export default function CanvasPage() {
     fillEmptyShell: handleFillEmptyShell,
     cancelJob: handleCancelJob,
     retryJob: handleRetryJob,
+    editFailed: handleEditFailed,
+    rechargeFailed: handleRechargeFailed,
+    requoteFailed: handleRequoteFailed,
+    requoteConfirm: handleRequoteConfirm,
     removeMediaNode: handleRemoveMediaNode,
     download: handleNodeDownload,
     showDetails: handleNodeShowDetails,
@@ -1499,7 +1513,7 @@ export default function CanvasPage() {
       }}
       mediaUpdates={{
         submittingNodeId, audioVideoMuxInFlightSourceIds, finalizeCtaByNodeId,
-        regenerateCtaByNodeId, handleFinalizeSample, handleRegenerateSample,
+        regenerateCtaByNodeId, handleFinalizeSample, handleRegenerateSample, requoteByNode,
       }}
       toolbars={{
         soloMediaToolbarNode, showSoloMediaToolbar, enhancePanelToolbarNode,

@@ -29,6 +29,10 @@ export interface GenerationRuntimeBindingInput {
     removeMediaNode: (id: string) => void;
     cancelJob: (id: string) => void;
     retryJob: (id: string) => void;
+    editFailed: (id: string) => void;
+    rechargeFailed: (id: string) => void;
+    requoteFailed: (id: string) => void;
+    requoteConfirm: (id: string) => void;
     fixFollowVideo: (id: string) => void;
     duplicate: (id: string) => void;
     renameCard: (id: string, name: string) => void;
@@ -74,6 +78,10 @@ export function useGenerationRuntimeBinding(input: GenerationRuntimeBindingInput
           onDelete: (id: string) => actionsRef.current.removeMediaNode(id),
           onCancelJob: (id: string) => actionsRef.current.cancelJob(id),
           onRetryJob: (id: string) => actionsRef.current.retryJob(id),
+          onEditFailed: (id: string) => actionsRef.current.editFailed(id),
+          onRechargeFailed: (id: string) => actionsRef.current.rechargeFailed(id),
+          onRequoteFailed: (id: string) => actionsRef.current.requoteFailed(id),
+          onRequoteConfirm: (id: string) => actionsRef.current.requoteConfirm(id),
           onFixFollowVideo: (id: string) => actionsRef.current.fixFollowVideo(id),
           onDuplicate: (id: string) => actionsRef.current.duplicate(id),
           onTitleChange: (id: string, name: string) => actionsRef.current.renameCard(id, name),

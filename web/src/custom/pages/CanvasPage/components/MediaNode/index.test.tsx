@@ -267,20 +267,20 @@ describe('MediaNode generating overlay', () => {
     expect(labels()).not.toContain('取消生成');
   });
 
-  it('hides fake progress copy and bar for image generation, keeps cancel', async () => {
+  it('图片生成中不展示百分比、进度条，也不提供取消（IKR63Z）', async () => {
     await renderNode('image', { genStatus: 'generating', progress: 0, selected: false });
-    expect(mountNode.textContent).not.toContain('正在生成');
+    expect(mountNode.textContent).toContain('图片生成中…');
     expect(mountNode.textContent).not.toContain('0%');
     expect(mountNode.querySelector('[role="progressbar"]')).toBeNull();
-    expect(labels()).toEqual(['取消生成']);
+    expect(labels()).not.toContain('取消生成');
   });
 
-  it('hides fake progress copy and bar for video generation, keeps cancel', async () => {
+  it('视频生成中不展示百分比、进度条，也不提供取消（IKR63Z）', async () => {
     await renderNode('video', { genStatus: 'generating', progress: 0, selected: false });
-    expect(mountNode.textContent).not.toContain('正在生成');
+    expect(mountNode.textContent).toContain('视频生成中…');
     expect(mountNode.textContent).not.toContain('0%');
     expect(mountNode.querySelector('[role="progressbar"]')).toBeNull();
-    expect(labels()).toEqual(['取消生成']);
+    expect(labels()).not.toContain('取消生成');
   });
 
   it('keeps extract progress copy and bar for audio video split (IKH28X 更名)', async () => {
@@ -295,7 +295,7 @@ describe('MediaNode generating overlay', () => {
     expect(labels()).not.toContain('取消生成');
   });
 
-  it('重新生成中的成品卡继续显示旧素材并叠加状态角标（IKDMQU Q5）', async () => {
+  it('重新生成中的成品卡继续显示旧素材与状态角标，不再提供取消入口（IKR63Z）', async () => {
     await renderNode('image', {
       genStatus: 'generating',
       progress: 30,
@@ -305,7 +305,7 @@ describe('MediaNode generating overlay', () => {
     const overlay = mountNode.querySelector('[data-testid="regen-overlay"]');
     expect(overlay).toBeTruthy();
     expect(overlay!.textContent).toContain('重新生成中 30%');
-    expect(overlay!.textContent).toContain('取消');
+    expect(overlay!.textContent).not.toContain('取消');
     expect(mountNode.querySelector('img')?.getAttribute('src')).toBe('http://img/old.png');
   });
 });
@@ -464,6 +464,122 @@ describe('MediaNode 音频混合失败卡（IKI697）', () => {
     expect(retry).toBeTruthy();
     await act(async () => retry!.click());
     expect(onRetryJob).toHaveBeenCalledWith('audio-mix-73');
+  });
+});
+
+describe('MediaNode 失败卡按分类给主动作（IKR63Z）', () => {
+  it('审核拒绝给「修改内容」，不给重试', async () => {
+    const onEditFailed = vi.fn();
+    const onRetryJob = vi.fn();
+    await renderNode('image', {
+      genStatus: 'failed',
+      errorText: '内容未通过审核，请调整描述或参考素材后再发送。',
+      selected: false,
+      data: { onEditFailed, onRetryJob, errorCategory: 'content_rejected', errorRetryable: false },
+    });
+
+    expect(labels()).toEqual(['修改内容']);
+    await act(async () => {
+      (mountNode.querySelector('[data-testid="fail-action-edit"]') as HTMLElement).click();
+    });
+    expect(onEditFailed).toHaveBeenCalledWith('image-node');
+    expect(onRetryJob).not.toHaveBeenCalled();
+  });
+
+  it('参数不支持给「修改参数」，参考异常给「更换素材」', async () => {
+    await renderNode('image', {
+      genStatus: 'failed',
+      errorText: '当前参数不受支持，请调整后再发送。',
+      selected: false,
+      data: { errorCategory: 'capability', errorRetryable: false },
+    });
+    expect(labels()).toEqual(['修改参数']);
+
+    await renderNode('image', {
+      genStatus: 'failed',
+      errorText: '参考素材无法用于本次生成，请更换后再发送。',
+      selected: false,
+      data: { errorCategory: 'reference', errorRetryable: false },
+    });
+    expect(labels()).toEqual(['更换素材']);
+  });
+
+  it('模型不可用给「修改模型」，平台额度不足不出现重试', async () => {
+    await renderNode('video', {
+      genStatus: 'failed',
+      errorText: '当前模型服务暂不可用，请稍后再试或选择其他可用模型。',
+      selected: false,
+      data: { errorCategory: 'model_unavailable', errorRetryable: false },
+    });
+    expect(labels()).toEqual(['修改模型']);
+  });
+
+  it('积分不足给「去充值」并派发回调', async () => {
+    const onRechargeFailed = vi.fn();
+    await renderNode('image', {
+      genStatus: 'failed',
+      errorText: '积分余额不足，本次尚未提交。',
+      selected: false,
+      data: { onRechargeFailed, errorCategory: 'quota', errorRetryable: false },
+    });
+    expect(labels()).toEqual(['去充值']);
+    await act(async () => {
+      (mountNode.querySelector('[data-testid="fail-action-recharge"]') as HTMLElement).click();
+    });
+    expect(onRechargeFailed).toHaveBeenCalledWith('image-node');
+  });
+
+  it('变价先取新报价，确认后才发送', async () => {
+    const onRequoteFailed = vi.fn();
+    const onRequoteConfirm = vi.fn();
+    await renderNode('video', {
+      genStatus: 'failed',
+      errorText: '预计消耗已更新，请确认后再发送。',
+      selected: false,
+      data: { onRequoteFailed, onRequoteConfirm, errorCategory: 'quote_changed', errorRetryable: false },
+    });
+    await act(async () => {
+      (mountNode.querySelector('[data-testid="fail-action-requote"]') as HTMLElement).click();
+    });
+    expect(onRequoteFailed).toHaveBeenCalledWith('video-node');
+
+    await renderNode('video', {
+      genStatus: 'failed',
+      errorText: '预计消耗已更新，请确认后再发送。',
+      selected: false,
+      data: {
+        onRequoteFailed, onRequoteConfirm, errorCategory: 'quote_changed', errorRetryable: false,
+        requoteState: { phase: 'ready', credits: 42 },
+      },
+    });
+    expect(labels()).toEqual(['确认发送 · 42 积分']);
+    await act(async () => {
+      (mountNode.querySelector('[data-testid="fail-action-requote-confirm"]') as HTMLElement).click();
+    });
+    expect(onRequoteConfirm).toHaveBeenCalledWith('video-node');
+  });
+
+  it('保存失败只显示状态，不给生成动作', async () => {
+    await renderNode('image', {
+      genStatus: 'failed',
+      errorText: '结果保存失败，结果暂未恢复。',
+      selected: false,
+      data: { errorCategory: 'storage', errorRetryable: false },
+    });
+    expect(labels()).toEqual([]);
+  });
+
+  it('明确 retryable=false 的临时失败不出现重试，字段缺失时保持现状', async () => {
+    await renderNode('image', {
+      genStatus: 'failed',
+      errorText: '服务暂时异常，本次生成失败。',
+      selected: false,
+      data: { errorCategory: 'transient', errorRetryable: false },
+    });
+    expect(labels()).toEqual([]);
+
+    await renderNode('image', { genStatus: 'failed', errorText: '创建任务失败', selected: false });
+    expect(labels()).toEqual(['重试']);
   });
 });
 
