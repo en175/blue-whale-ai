@@ -113,6 +113,7 @@ function createBag(nodes: Node[]): Bag {
     setEdges: (() => {}) as CanvasGenerationSubmissionHost['setEdges'],
     actionsRef: { current: {
       removeMediaNode: () => {}, cancelJob: () => {}, retryJob: () => {}, fixFollowVideo: () => {},
+      editFailed: () => {}, rechargeFailed: () => {}, requoteFailed: () => {}, requoteConfirm: () => {},
       duplicate: () => {}, renameCard: () => {}, addToChat: () => {}, download: () => {}, showDetails: () => {},
     } } as CanvasGenerationSubmissionHost['actionsRef'],
     toolMode: 'select',

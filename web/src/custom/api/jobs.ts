@@ -36,8 +36,13 @@ export interface JobAsset {
   duration?: number | null;
 }
 
-export interface JobError {
+import { readJobRecoveryFacts, type JobRecoveryFacts } from './jobRecovery';
+
+export type { JobErrorCategory, JobRecoveryFacts } from './jobRecovery';
+
+export interface JobError extends JobRecoveryFacts {
   code: number | string;
+  reason?: string;
   msg?: string;
   message?: string;
 }
@@ -750,12 +755,24 @@ export async function fetchJobStatus(jobId: number | string): Promise<JobDetail>
     return await apiRequest<JobDetail>(`/api/jobs/${jobId}`, { silent: true });
   } catch (e) {
     if (isGenerationDomainError(e)) {
+      const data = (e.data ?? {}) as Partial<JobDetail> & { category?: unknown; retryable?: unknown };
       return {
         job_id: jobId,
         status: 'failed',
-        progress: 0,
-        asset: null,
-        error: { code: envelopeErrorCode(e), msg: e.message },
+        progress: typeof data.progress === 'number' ? data.progress : 0,
+        asset: data.asset ?? null,
+        ...(data.video_stage !== undefined ? { video_stage: data.video_stage } : {}),
+        ...(data.source_sample_job_id !== undefined ? { source_sample_job_id: data.source_sample_job_id } : {}),
+        ...(data.final_job_id !== undefined ? { final_job_id: data.final_job_id } : {}),
+        ...(data.finalize_deadline_at !== undefined ? { finalize_deadline_at: data.finalize_deadline_at } : {}),
+        ...(data.charge_state !== undefined ? { charge_state: data.charge_state } : {}),
+        ...(data.actual_credits !== undefined ? { actual_credits: data.actual_credits } : {}),
+        error: {
+          code: envelopeErrorCode(e),
+          reason: typeof data.error?.reason === 'string' ? data.error.reason : undefined,
+          msg: e.message,
+          ...readJobRecoveryFacts(data.error ?? data),
+        },
       };
     }
     throw e;

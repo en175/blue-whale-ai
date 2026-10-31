@@ -21,6 +21,10 @@ export interface CanvasNodeActions {
   download: (id: string) => void;
   openImageDialog: () => void;
   showDetails: (id: string) => void;
+  editFailed: (id: string) => void;
+  rechargeFailed: (id: string) => void;
+  requoteFailed: (id: string) => void;
+  requoteConfirm: (id: string) => void;
 }
 
 export interface CanvasNodeFactoriesHost {

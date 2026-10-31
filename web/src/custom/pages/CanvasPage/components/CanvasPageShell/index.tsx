@@ -220,6 +220,7 @@ interface CanvasPageShellProps {
     audioVideoMuxInFlightSourceIds: ReadonlySet<string>;
     finalizeCtaByNodeId: Map<string, unknown>;
     regenerateCtaByNodeId: Map<string, unknown>;
+    requoteByNode: ReadonlyMap<string, { phase: 'loading' | 'ready' | 'unavailable'; credits?: number }>;
     handleFinalizeSample: (nodeId: string) => void;
     handleRegenerateSample: (nodeId: string) => void;
   };
@@ -320,12 +321,14 @@ export default function CanvasPageShell(props: CanvasPageShellProps) {
             const node = shellTop.toolSessions.decorateNode(source);
             const finalizeCta = mediaUpdates.finalizeCtaByNodeId.get(node.id);
             const regenerateCta = mediaUpdates.regenerateCtaByNodeId.get(node.id);
-            if (node.id !== mediaUpdates.submittingNodeId && !mediaUpdates.audioVideoMuxInFlightSourceIds.has(node.id) && !finalizeCta && !regenerateCta) return node;
+            const requoteState = mediaUpdates.requoteByNode.get(node.id);
+            if (node.id !== mediaUpdates.submittingNodeId && !mediaUpdates.audioVideoMuxInFlightSourceIds.has(node.id) && !finalizeCta && !regenerateCta && !requoteState) return node;
             return { ...node, data: { ...node.data,
               ...(node.id === mediaUpdates.submittingNodeId ? { submitting: true } : {}),
               ...(mediaUpdates.audioVideoMuxInFlightSourceIds.has(node.id) ? { audioVideoMuxInFlight: true } : {}),
               ...(finalizeCta ? { finalizeCta, onFinalizeSample: mediaUpdates.handleFinalizeSample } : {}),
               ...(regenerateCta ? { regenerateCta, onRegenerateSample: mediaUpdates.handleRegenerateSample } : {}),
+              ...(requoteState ? { requoteState } : {}),
             } };
           })}
           productNodes={canvas.productNodes}

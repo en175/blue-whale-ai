@@ -3,6 +3,7 @@ import { useCallback, useRef } from 'react';
 import type { Dispatch, RefObject, SetStateAction } from 'react';
 import type { Edge, Node } from '@xyflow/react';
 import { fetchJobStatus, readJobFailText } from '@/custom/api/jobs';
+import { readJobRecoveryFacts } from '@/custom/api/jobRecovery';
 import type { SnapshotAsset } from '@/custom/api/projects';
 import { audioMixTerminalPatch, isAudioMixNodeId } from '../../tools/audio/audioMix';
 import { audioSpeedTerminalPatch, isAudioSpeedNodeId } from '../../tools/audio/audioSpeed';
@@ -420,6 +421,8 @@ export function useCanvasGenerationTerminal(host: CanvasGenerationTerminalHost):
         progress: 100,
         errorText: undefined,
         errorCode: undefined,
+        errorCategory: undefined,
+        errorRetryable: undefined,
         src: detail.asset?.url ?? '',
         mediaType: (assetType === 'audio' || assetType === 'video' || assetType === 'image')
           ? assetType
@@ -455,6 +458,7 @@ export function useCanvasGenerationTerminal(host: CanvasGenerationTerminalHost):
         removeWithPendingDelete();
         return 'terminal';
       }
+      const facts = readJobRecoveryFacts(detail.error);
       patchMediaNode(nodeId, {
         genStatus: 'failed',
         errorText: ((node.data ?? {}) as Record<string, unknown>).videoEnhance
@@ -472,6 +476,8 @@ export function useCanvasGenerationTerminal(host: CanvasGenerationTerminalHost):
         chargeState: detail.charge_state ?? undefined,
         actualCredits: detail.actual_credits ?? undefined,
         errorCode: detail.error?.code,
+        errorCategory: facts.category,
+        errorRetryable: facts.retryable,
       });
       return 'terminal';
     }
