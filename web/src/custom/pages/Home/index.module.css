@@ -23,8 +23,6 @@
   height: 100%;
   overflow-y: auto;
   scrollbar-gutter: stable;
-  padding-left: var(--sidebar-width, 72px);
-  transition: padding-left var(--transition-normal);
 }
 
 .creation {
@@ -32,7 +30,7 @@
   z-index: 2;
   isolation: isolate;
   width: 100%;
-  max-width: 1260px;
+  max-width: 1646px;
   margin: 94px auto 0;
   padding: 0 36px;
 }
@@ -104,7 +102,7 @@
 
 .inspirationWrap {
   width: 100%;
-  max-width: 1392px;
+  max-width: 1646px;
   margin: 46px auto 0;
   padding: 0 36px 48px;
 }

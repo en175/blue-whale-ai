@@ -166,6 +166,25 @@ describe('侧栏导航', () => {
     await act(async () => { toggle.click(); });
     expect(onExpandedChange).toHaveBeenCalledWith(true);
   });
+
+  it('品牌行在收起、展开两态都把图标与开关放在同一行，开关图标随状态切换', async () => {
+    await renderSidebar({ expanded: false });
+    const collapsedRow = mountNode.querySelector('aside')!.firstElementChild!;
+    const collapsedToggle = collapsedRow.querySelector<HTMLButtonElement>('button[aria-expanded]')!;
+    expect(collapsedRow.querySelector('img')).not.toBeNull();
+    expect(collapsedRow.contains(collapsedToggle)).toBe(true);
+    expect(collapsedToggle.querySelector('svg')!.getAttribute('class')).toContain('panel-left-open');
+    await act(async () => root.unmount());
+    mountNode.remove();
+
+    await renderSidebar({ expanded: true });
+    const expandedRow = mountNode.querySelector('aside')!.firstElementChild!;
+    const expandedToggle = expandedRow.querySelector<HTMLButtonElement>('button[aria-expanded]')!;
+    expect(expandedRow.querySelector('img')).not.toBeNull();
+    expect(expandedRow.contains(expandedToggle)).toBe(true);
+    expect([...expandedRow.querySelectorAll('span')].some((el) => el.textContent === '蓝鲸 AI')).toBe(true);
+    expect(expandedToggle.querySelector('svg')!.getAttribute('class')).toContain('panel-left-close');
+  });
 });
 
 describe('首页搜索与项目列表', () => {
