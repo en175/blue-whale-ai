@@ -51,7 +51,12 @@ beforeEach(() => {
     { tag_code: 'marketing', label: '商品展示' },
     { tag_code: 'video', label: '人物种草' },
   ]);
-  api.fetchTemplatePage.mockImplementation(async (tagCode: string) => {
+  api.fetchTemplatePage.mockImplementation(async (tagCode?: string) => {
+    if (tagCode === undefined) {
+      return pageOf([
+        { title: '精选短片', video: 'https://example.com/featured.mp4', images: [], layout: 'wide', content: '精选正文' },
+      ]);
+    }
     if (tagCode === 'marketing') {
       return pageOf([
         { title: '商品图一', video: '', images: [], layout: 'wide', content: '填写商品正文' },
@@ -75,13 +80,15 @@ function filterButton(label: string): HTMLButtonElement | undefined {
 }
 
 describe('CardGallery', () => {
-  it('按场景筛选，默认选第一个场景', async () => {
+  it('精选默认排在最前并默认选中，精选请求不带 tagCode', async () => {
     await mountGallery();
 
     const filters = [...mountNode.querySelectorAll('[aria-label="案例分类"] button')];
-    expect(filters.map((b) => b.textContent)).toEqual(['商品展示', '人物种草']);
+    expect(filters.map((b) => b.textContent)).toEqual(['精选', '商品展示', '人物种草']);
     expect(filters[0].getAttribute('aria-pressed')).toBe('true');
-    expect(cards().map((card) => card.getAttribute('data-media-kind'))).toEqual(['image']);
+    expect(api.fetchTemplatePage).toHaveBeenCalledWith(undefined, 1, 50, { isFeatured: true });
+    expect(cards().map((card) => card.getAttribute('data-media-kind'))).toEqual(['video']);
+    expect(cards()[0].textContent).toContain('精选短片');
   });
 
   it('切换场景后只展示该场景案例', async () => {
@@ -95,6 +102,10 @@ describe('CardGallery', () => {
 
   it('两类卡都带用途标签', async () => {
     await mountGallery();
+
+    await act(async () => {
+      filterButton('商品展示')?.click();
+    });
     expect(cards()[0].textContent).toContain('商品展示');
 
     await act(async () => {
@@ -106,6 +117,9 @@ describe('CardGallery', () => {
   it('过滤「测试20260828144946」', async () => {
     await mountGallery();
 
+    await act(async () => {
+      filterButton('商品展示')?.click();
+    });
     expect(mountNode.textContent).not.toContain('测试20260828144946');
     expect(cards()).toHaveLength(1);
   });
@@ -114,6 +128,9 @@ describe('CardGallery', () => {
     const onCardClick = vi.fn();
     await mountGallery(onCardClick);
 
+    await act(async () => {
+      filterButton('商品展示')?.click();
+    });
     await act(async () => {
       cards()[0].click();
     });

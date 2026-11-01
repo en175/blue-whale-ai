@@ -17,6 +17,8 @@ const FALLBACK_TAGS: TemplateTag[] = [
   { tag_code: 'picture', label: '图片' },
 ];
 
+const FEATURED_TAG: TemplateTag = { tag_code: '__featured', label: '精选' };
+
 const HIDDEN_CASE_TITLES = new Set(['测试20260828144946']);
 
 function mediaKindOf(record: TemplateRecord): GalleryMediaKind {
@@ -97,11 +99,13 @@ export default function CardGallery({ onCardClick }: { onCardClick?: (text: stri
     let alive = true;
     const load = async () => {
       const tags = await fetchTemplateTags().catch(() => FALLBACK_TAGS);
-      const list = tags.length ? tags : FALLBACK_TAGS;
+      const list = [FEATURED_TAG, ...(tags.length ? tags : FALLBACK_TAGS)];
       const loaded = await Promise.all(
         list.map(async (tag) => ({
           tag,
-          records: await fetchTemplatePage(tag.tag_code, 1, 50, { isFeatured: true })
+          records: await fetchTemplatePage(tag.tag_code === FEATURED_TAG.tag_code ? undefined : tag.tag_code, 1, 50, {
+            isFeatured: true,
+          })
             .then((page) => page.records ?? [])
             .catch(() => []),
         })),
