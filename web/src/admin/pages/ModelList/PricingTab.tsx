@@ -29,6 +29,7 @@ import {
   Input,
   MetaRow,
   Select,
+  Table,
   formGrid,
 } from '../../ui';
 import { GRID3 } from './formLayout';
@@ -188,7 +189,7 @@ export default function PricingTab({
         ) : form.priceKind === 'table' ? (
           <Field
             label={`价格表（规格键 → 单价，积分 / ${unitLabel}）`}
-            hint="维度取值勾好后自动铺行；这里只填价"
+            hint="维度取值铺成矩阵；这里只填价"
             info={
               <>
                 每行由一个维度的取值组合而成，规格键由系统生成、不需要手写。
@@ -324,49 +325,115 @@ function PriceTableEditor({
   capability: ModelCapabilityView;
   onChange: (rows: PriceRow[]) => void;
 }) {
-  const combos = combinations(axes).map((picked) => priceKey(axes, picked));
   const byKey = new Map(
     rows.filter((row) => row.key.trim() !== '').map((row) => [normalizeKey(row.key), row]),
   );
-  const known = new Set(combos.map(normalizeKey));
-  const merged = combos.map(
-    (key) => byKey.get(normalizeKey(key)) ?? { key, value: '', originalMc: null },
-  );
+  const known = new Set(combinations(axes).map((picked) => normalizeKey(priceKey(axes, picked))));
   const orphans = rows.filter(
     (row) => row.key.trim() !== '' && !known.has(normalizeKey(row.key)),
   );
 
-  const setPrice = (key: string, value: string) => {
-    const wanted = normalizeKey(key);
-    if (!rows.some((row) => normalizeKey(row.key) === wanted)) {
+  const priceOf = (picked: Record<string, string>): string =>
+    byKey.get(normalizeKey(priceKey(axes, picked)))?.value ?? '';
+
+  const setCell = (picked: Record<string, string>, value: string) => {
+    const key = priceKey(axes, picked);
+    const target = normalizeKey(key);
+    const found = rows.find((row) => normalizeKey(row.key) === target);
+    if (found === undefined) {
       onChange([...rows, { key, value, originalMc: null }]);
       return;
     }
-    onChange(rows.map((row) => (normalizeKey(row.key) === wanted ? { ...row, value } : row)));
+    onChange(rows.map((row) => (row === found ? { ...row, value } : row)));
+  };
+
+  const setRowValue = (key: string, value: string) => {
+    const target = normalizeKey(key);
+    onChange(rows.map((row) => (normalizeKey(row.key) === target ? { ...row, value } : row)));
   };
 
   const removeRow = (key: string) => {
-    const wanted = normalizeKey(key);
-    onChange(rows.filter((row) => normalizeKey(row.key) !== wanted));
+    const target = normalizeKey(key);
+    onChange(rows.filter((row) => normalizeKey(row.key) !== target));
+  };
+
+  const rowAxis = axes.length > 1 ? axes[axes.length - 2]! : axes[0]!;
+  const colAxis = axes.length > 1 ? axes[axes.length - 1]! : null;
+  const prefixAxes = axes.slice(0, Math.max(0, axes.length - 2));
+  const sections = prefixAxes.length > 0 ? combinations(prefixAxes) : [{}];
+
+  const cell = (picked: Record<string, string>) => {
+    const key = priceKey(axes, picked);
+    return (
+      <Input
+        size="sm"
+        aria-label={`价格表 ${key} 单价`}
+        placeholder="70"
+        value={priceOf(picked)}
+        onChange={(event) => setCell(picked, event.target.value)}
+        style={{ width: 100 }}
+      />
+    );
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      {axes.map((axis) => (
-        <div key={axis.name} style={{ fontSize: 'var(--admin-font-xs)', color: 'var(--admin-text-muted)' }}>
-          {AXIS_LABELS[axis.name] ?? axis.name}：
-          {axis.values.map((value) => axisValueLabel(capability, axis.name, value)).join(' / ')}
-        </div>
-      ))}
-      {merged.map((row) => (
-        <PriceRowLine
-          key={row.key}
-          row={row}
-          capability={capability}
-          axes={axes}
-          onPrice={(value) => setPrice(row.key, value)}
-        />
-      ))}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {sections.map((section) => {
+        const sectionLabel = prefixAxes
+          .map((axis) => axisValueLabel(capability, axis.name, section[axis.name] ?? ''))
+          .join(' · ');
+        return (
+          <div key={sectionLabel === '' ? '全部' : sectionLabel}>
+            {sectionLabel !== '' && (
+              <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>{sectionLabel}</div>
+            )}
+            <div
+              style={{
+                fontSize: 'var(--admin-font-xs)',
+                color: 'var(--admin-text-muted)',
+                marginBottom: 4,
+              }}
+            >
+              {AXIS_LABELS[rowAxis.name] ?? rowAxis.name}
+              {colAxis === null ? '' : ` × ${AXIS_LABELS[colAxis.name] ?? colAxis.name}`}
+            </div>
+            <Table>
+              <thead>
+                <tr>
+                  <th style={{ width: 120 }}>{colAxis === null ? '档位' : ''}</th>
+                  {colAxis === null ? (
+                    <th>单价（积分）</th>
+                  ) : (
+                    colAxis.values.map((value) => (
+                      <th key={value}>{axisValueLabel(capability, colAxis.name, value)}</th>
+                    ))
+                  )}
+                </tr>
+              </thead>
+              <tbody>
+                {rowAxis.values.map((rowValue) => (
+                  <tr key={rowValue}>
+                    <td>{axisValueLabel(capability, rowAxis.name, rowValue)}</td>
+                    {colAxis === null ? (
+                      <td>{cell({ ...section, [rowAxis.name]: rowValue })}</td>
+                    ) : (
+                      colAxis.values.map((colValue) => (
+                        <td key={colValue}>
+                          {cell({
+                            ...section,
+                            [rowAxis.name]: rowValue,
+                            [colAxis.name]: colValue,
+                          })}
+                        </td>
+                      ))
+                    )}
+                  </tr>
+                ))}
+              </tbody>
+            </Table>
+          </div>
+        );
+      })}
       {orphans.map((row) => (
         <PriceRowLine
           key={row.key}
@@ -374,15 +441,10 @@ function PriceTableEditor({
           capability={capability}
           axes={axes}
           orphan
-          onPrice={(value) => setPrice(row.key, value)}
+          onPrice={(value) => setRowValue(row.key, value)}
           onRemove={() => removeRow(row.key)}
         />
       ))}
-      {merged.length === 0 && (
-        <div style={{ fontSize: 'var(--admin-font-xs)', color: 'var(--admin-text-muted)' }}>
-          维度没有可用取值，生成不了价格行。
-        </div>
-      )}
       {orphans.length > 0 && (
         <div style={{ fontSize: 'var(--admin-font-xs)', color: 'var(--admin-text-muted)' }}>
           标黄的行在模型配置里没有对应档位，用户选不到它 —— 要么在模型配置里补上，要么删掉。

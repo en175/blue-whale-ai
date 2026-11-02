@@ -752,9 +752,10 @@ describe('ModelList 价格表按维度铺开', () => {
     await openRowEdit('图片');
     await openTab('定价');
 
-    expect(document.body.textContent).toContain('1K · 无参考图');
-    expect(document.body.textContent).toContain('2K · 有参考图');
-    expect(document.body.textContent).toContain('size=2k|image_reference=1');
+    expect(document.body.textContent).toContain('尺寸档 × 参考图');
+    expect(document.body.textContent).toContain('无参考图');
+    expect(document.body.textContent).toContain('有参考图');
+    expect(document.body.textContent).toContain('2K');
     expect(inputByLabel('价格表 size=1k|image_reference=0 单价').value).toBe('7');
     expect(document.body.querySelectorAll('input[aria-label="价格表键"]')).toHaveLength(0);
   });
