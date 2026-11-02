@@ -86,7 +86,7 @@ const RENAMED = new Map([
   ["homepage_hero", "content_homepage_heroes"],
 ]);
 
-const SUPERSEDED_BY_IKRGTJ = new Set(["shared_assets", "material_groups", "material_assets", "media_tool_pricing"]);
+const SUPERSEDED_BY_LATER_TICKETS = new Set(["shared_assets", "material_groups", "material_assets", "media_tool_pricing", "homepage_hero"]);
 
 const SUPERSEDED_INDEX_RENAMES = new Set(["uk_material_assets_material", "idx_material_assets_poll", "idx_material_assets_group", "uk_media_tool_pricing__tool_type"]);
 
@@ -132,7 +132,7 @@ describe("IKQY3N 三轨迁移（目录/素材/技能与模板表改名）", () =
 
   it("Prisma 模型只剩新表名（被后续工单改名/退役的表除外）", () => {
     for (const [from, to] of RENAMED) {
-      if (SUPERSEDED_BY_IKRGTJ.has(from)) continue;
+      if (SUPERSEDED_BY_LATER_TICKETS.has(from)) continue;
       if (SUPERSEDED_BY_SKILL_DOMAIN.has(to)) continue;
       expect(schemaPrisma).toContain("model " + to + " {");
       expect(schemaPrisma).not.toContain("model " + from + " {");
@@ -147,7 +147,7 @@ describe("IKQY3N 三轨迁移（目录/素材/技能与模板表改名）", () =
 
   it("Java 测试 schema 同步新表名（被后续工单改名/退役的表除外）", () => {
     for (const [from, to] of RENAMED) {
-      if (SUPERSEDED_BY_IKRGTJ.has(from)) continue;
+      if (SUPERSEDED_BY_LATER_TICKETS.has(from)) continue;
       if (SUPERSEDED_BY_SKILL_DOMAIN.has(to)) continue;
       expect(javaSchemaSql).not.toContain("CREATE TABLE `" + from + "`");
       expect(javaSchemaSql).toContain("CREATE TABLE `" + to + "`");

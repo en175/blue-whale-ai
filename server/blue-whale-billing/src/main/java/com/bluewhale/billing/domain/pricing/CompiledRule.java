@@ -6,8 +6,6 @@ public record CompiledRule(
         UsageDim baseUnit,
         BasePriceResolver basePrice,
         Map<UsageDim, Integer> dims,
-        Map<UsageDim, Integer> multipliers,
-        Map<UsageDim, DimPrice> dimPrices,
         long unitDenominator,
         long minCredits,
         Long maxCredits,
@@ -16,14 +14,10 @@ public record CompiledRule(
         long quantityStep
 ) {
 
-    public record DimPrice(long unitMc, boolean firstFree) {}
-
     public CompiledRule(UsageDim baseUnit, BasePriceResolver basePrice,
-                        Map<UsageDim, Integer> dims, Map<UsageDim, Integer> multipliers,
-                        Map<UsageDim, DimPrice> dimPrices, long unitDenominator,
+                        Map<UsageDim, Integer> dims, long unitDenominator,
                         long minCredits, Long maxCredits, RoundingPolicy rounding) {
-        this(baseUnit, basePrice, dims, multipliers, dimPrices, unitDenominator,
-                minCredits, maxCredits, rounding, 0L, 1L);
+        this(baseUnit, basePrice, dims, unitDenominator, minCredits, maxCredits, rounding, 0L, 1L);
     }
 
     public CompiledRule {
@@ -53,14 +47,6 @@ public record CompiledRule(
                     "quantityStep 不能为负（0/1 = 不取整）：" + quantityStep);
         }
         dims = dims == null ? Map.of() : Map.copyOf(dims);
-        multipliers = multipliers == null ? Map.of() : Map.copyOf(multipliers);
-        dimPrices = dimPrices == null ? Map.of() : Map.copyOf(dimPrices);
-        for (var e : dimPrices.entrySet()) {
-            if (e.getValue() == null || e.getValue().unitMc() <= 0) {
-                throw new IllegalArgumentException(
-                        "dimPrices 的单价必须为正：" + e.getKey().key() + " → " + e.getValue());
-            }
-        }
         requireNonNegativeBasePrice(basePrice);
         for (var e : dims.entrySet()) {
             if (e.getValue() < 0) {
@@ -68,18 +54,6 @@ public record CompiledRule(
                         "dims 的倍率不能为负：" + e.getKey().key() + " → " + e.getValue()
                                 + "（负倍率把等效数量拉低，等于少收）");
             }
-        }
-        for (var e : multipliers.entrySet()) {
-            if (e.getValue() <= 0) {
-                throw new IllegalArgumentException(
-                        "multipliers 的倍率必须为正：" + e.getKey().key() + " → " + e.getValue()
-                                + "（0 会让整单免费；「这一维不参与」应当是不写它）");
-            }
-        }
-        if (maxCredits != null && !dimPrices.isEmpty()) {
-            throw new IllegalArgumentException(
-                    "maxCredits 与 dimPrices 不能同时配：上限冻结算不到维度绝对加价，"
-                            + "结算会超出预扣并记应收（少收且静默）");
         }
     }
 
@@ -107,26 +81,12 @@ public record CompiledRule(
     }
 
     public static CompiledRule of(UsageDim baseUnit, BasePriceResolver basePrice, long unitDenominator) {
-        return new CompiledRule(baseUnit, basePrice, Map.of(), Map.of(), Map.of(), unitDenominator,
+        return new CompiledRule(baseUnit, basePrice, Map.of(), unitDenominator,
                 1L, null, new RoundingPolicy.HalfUp(), 0L, 1L);
     }
 
-    public CompiledRule withMultiplier(UsageDim dim, int permille) {
-        var next = new java.util.LinkedHashMap<>(multipliers);
-        next.put(dim, permille);
-        return new CompiledRule(baseUnit, basePrice, dims, next, dimPrices, unitDenominator,
-                minCredits, maxCredits, rounding, quantityOffset, quantityStep);
-    }
-
-    public CompiledRule withDimPrice(UsageDim dim, long unitMc, boolean firstFree) {
-        var next = new java.util.LinkedHashMap<>(dimPrices);
-        next.put(dim, new DimPrice(unitMc, firstFree));
-        return new CompiledRule(baseUnit, basePrice, dims, multipliers, next, unitDenominator,
-                minCredits, maxCredits, rounding, quantityOffset, quantityStep);
-    }
-
     public CompiledRule withMaxCredits(long max) {
-        return new CompiledRule(baseUnit, basePrice, dims, multipliers, dimPrices, unitDenominator,
+        return new CompiledRule(baseUnit, basePrice, dims, unitDenominator,
                 minCredits, max, rounding, quantityOffset, quantityStep);
     }
 }

@@ -47,7 +47,7 @@ contracts/
 
 ### 3. `usage` 维度枚举两方一致
 
-catalog 规则里 `baseUnit` / `dims` / `multipliers` 用的 key，
+catalog 规则里 `baseUnit` / `dims` 用的 key，
 与 Java 侧 `UsageDim` 的枚举值 **必须是同一套**（`usage.seconds`、
 `usage.characters`、`usage.referenceSeconds`、`usage.referenceCount`…）。
 

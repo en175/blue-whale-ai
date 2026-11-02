@@ -723,79 +723,216 @@ describe('ModelList 视频模式时长策略（IKLUVP）', () => {
   });
 });
 
-describe('ModelList 维度绝对加价 dimPrices', () => {
+describe('ModelList 价格表按维度铺开', () => {
+  const imageRefPriced: AdminModel = {
+    ...imageDimPriced,
+    id: '12',
+    pricing: {
+      baseUnit: 'usage.succeededSlots',
+      basePrice: {
+        kind: 'table',
+        by: ['size', 'image_reference'],
+        table: {
+          'size=1k|image_reference=0': 7000,
+          'size=1k|image_reference=1': 9000,
+          'size=2k|image_reference=0': 14000,
+          'size=2k|image_reference=1': 16000,
+        },
+      },
+      unitDenominator: 1,
+      minCredits: 1,
+      maxCredits: null,
+      rounding: 'halfUp',
+    },
+  };
 
-  function checkboxByLabel(label: string): HTMLElement {
-    const box = [...document.body.querySelectorAll<HTMLElement>('[role="checkbox"]')].find((el) =>
-      el.textContent?.includes(label),
-    );
-    if (!box) throw new Error(`没有找到复选框：${label}`);
-    return box;
-  }
-
-  it('★ 已配的绝对加价按「积分」显示，「首张免费」是勾着的', async () => {
-    api.fetchAdminModels.mockResolvedValue([imageDimPriced]);
+  it('★ 默认铺开全部组合，规格键只读，只需填价', async () => {
+    api.fetchAdminModels.mockResolvedValue([imageRefPriced]);
     await renderPage();
     await openRowEdit('图片');
     await openTab('定价');
 
-
-    expect(inputByLabel('维度绝对加价第 1 行单价').value).toBe('0.3');
-    expect(checkboxByLabel('首张免费').getAttribute('aria-checked')).toBe('true');
-
-    expect(document.body.textContent).toContain('维度绝对加价（积分 / 每个单位）');
+    expect(document.body.textContent).toContain('尺寸档 × 参考图');
+    expect(document.body.textContent).toContain('无参考图');
+    expect(document.body.textContent).toContain('有参考图');
+    expect(document.body.textContent).toContain('2K');
+    expect(inputByLabel('价格表 size=1k|image_reference=0 单价').value).toBe('7');
+    expect(document.body.querySelectorAll('input[aria-label="价格表键"]')).toHaveLength(0);
   });
 
-  it('★ 改单价：按积分换算成 mc 写回，首张免费跟着走', async () => {
-    api.fetchAdminModels.mockResolvedValue([imageDimPriced]);
+  it('★ 改价按积分换算成 mc 写回，其他档原值不动', async () => {
+    api.fetchAdminModels.mockResolvedValue([imageRefPriced]);
     await renderPage();
     await openRowEdit('图片');
     await openTab('定价');
-    await type(inputByLabel('维度绝对加价第 1 行单价'), '0.05');
+
+    await type(inputByLabel('价格表 size=2k|image_reference=1 单价'), '20');
     await click(button('保存'));
 
-    const payload = api.updateAdminModel.mock.calls[0]?.[1] as { pricing: Record<string, unknown> };
-
-    expect(payload.pricing.dimPrices).toEqual({
-      'usage.referenceCount': { unitMc: 50, firstFree: true },
+    const payload = api.updateAdminModel.mock.calls[0]?.[1] as {
+      pricing: { basePrice: { table: Record<string, number> } };
+    };
+    expect(payload.pricing.basePrice.table).toEqual({
+      'size=1k|image_reference=0': 7000,
+      'size=1k|image_reference=1': 9000,
+      'size=2k|image_reference=0': 14000,
+      'size=2k|image_reference=1': 20000,
     });
   });
 
-  it('★ 碰过定价但没改加价：报「未检测到任何变更」，不把没动过的加价挪走哪怕 1 mc', async () => {
-
+  it('★ 缺一档价：自动补行并拦下保存，指出具体组合', async () => {
     api.fetchAdminModels.mockResolvedValue([
       {
-        ...videoPriced,
+        ...imageRefPriced,
         pricing: {
-
-          ...(videoPriced.pricing as Record<string, unknown>),
-          dimPrices: { 'usage.referenceCount': { unitMc: 100000 } },
+          ...(imageRefPriced.pricing as Record<string, unknown>),
+          basePrice: {
+            kind: 'table',
+            by: ['size', 'image_reference'],
+            table: {
+              'size=1k|image_reference=0': 7000,
+              'size=1k|image_reference=1': 9000,
+              'size=2k|image_reference=0': 14000,
+            },
+          },
         },
       },
     ]);
     await renderPage();
-    await openRowEdit('视频');
+    await openRowEdit('图片');
     await openTab('定价');
 
-    await type(inputByLabel('维度绝对加价第 1 行单价'), '1');
-    await type(inputByLabel('维度绝对加价第 1 行单价'), '100');
+    expect(inputByLabel('价格表 size=2k|image_reference=1 单价').value).toBe('');
     await click(button('保存'));
 
     expect(api.updateAdminModel).not.toHaveBeenCalled();
-    expect(document.body.textContent).toContain('未检测到任何变更');
+    expect(document.body.textContent).toContain('size=2k|image_reference=1');
+    expect(document.body.textContent).toContain('还没填价');
   });
 
-  it('★ 与积分上限互斥：同时配时拦下保存并说清原因（后端写闸门同一条）', async () => {
+  it('★ 尺寸未配置：只读展示库里的价，不出现价格输入框', async () => {
+    api.fetchAdminModels.mockResolvedValue([imageRefPriced]);
+    await renderPage();
+    await openRowEdit('图片');
+    await openTab('尺寸与素材');
+
+    for (let index = 0; index < 5; index += 1) {
+      const remove = document.body.querySelector<HTMLButtonElement>('button[title="删除尺寸行"]');
+      if (!remove) break;
+      await click(remove);
+    }
+
+    await openTab('定价');
+
+    expect(document.body.textContent).toContain('尺寸档没有可用取值');
+    expect(document.body.textContent).toContain('size=1k|image_reference=0');
+    expect(document.body.textContent).toContain('7 积分');
+    expect(document.body.querySelectorAll('input[aria-label*=" 单价"]')).toHaveLength(0);
+  });
+
+  it('★ 整单倍率与维度绝对加价不再出现，附加维度保留', async () => {
     api.fetchAdminModels.mockResolvedValue([imageDimPriced]);
     await renderPage();
     await openRowEdit('图片');
     await openTab('定价');
 
-    await type(inputByLabel('积分上限'), '50');
+    expect(document.body.textContent).not.toContain('整单倍率');
+    expect(document.body.textContent).not.toContain('维度绝对加价');
+    expect(document.body.textContent).toContain('附加维度');
+  });
+
+  it('★ 轴序不同的等价键按同一档识别，不会铺出重复行', async () => {
+    api.fetchAdminModels.mockResolvedValue([
+      {
+        ...imageRefPriced,
+        pricing: {
+          ...(imageRefPriced.pricing as Record<string, unknown>),
+          basePrice: {
+            kind: 'table',
+            by: ['size', 'image_reference'],
+            table: {
+              'image_reference=0|size=1k': 7000,
+              'size=1k|image_reference=1': 9000,
+              'size=2k|image_reference=0': 14000,
+              'size=2k|image_reference=1': 16000,
+            },
+          },
+        },
+      },
+    ]);
+    await renderPage();
+    await openRowEdit('图片');
+    await openTab('定价');
+
+    expect(inputByLabel('价格表 size=1k|image_reference=0 单价').value).toBe('7');
+    await type(inputByLabel('价格表 size=2k|image_reference=1 单价'), '20');
+    await click(button('保存'));
+
+    const payload = api.updateAdminModel.mock.calls[0]?.[1] as {
+      pricing: { basePrice: { table: Record<string, number> } };
+    };
+    expect(Object.keys(payload.pricing.basePrice.table)).toHaveLength(4);
+    expect(payload.pricing.basePrice.table['image_reference=0|size=1k']).toBe(7000);
+  });
+
+  it('★ 库里有等价键时保存被拦下，提示轴顺序不同也算同一档', async () => {
+    api.fetchAdminModels.mockResolvedValue([
+      {
+        ...imageRefPriced,
+        pricing: {
+          ...(imageRefPriced.pricing as Record<string, unknown>),
+          basePrice: {
+            kind: 'table',
+            by: ['size', 'image_reference'],
+            table: {
+              'size=1k|image_reference=0': 7000,
+              'image_reference=0|size=1k': 7000,
+              'size=1k|image_reference=1': 9000,
+              'size=2k|image_reference=0': 14000,
+              'size=2k|image_reference=1': 16000,
+            },
+          },
+        },
+      },
+    ]);
+    await renderPage();
+    await openRowEdit('图片');
+    await openTab('定价');
+
+    await type(inputByLabel('价格表 size=2k|image_reference=1 单价'), '20');
     await click(button('保存'));
 
     expect(api.updateAdminModel).not.toHaveBeenCalled();
-    expect(document.body.textContent).toContain('不能同时配');
+    expect(document.body.textContent).toContain('等价键');
+  });
+
+  it('★ 不可见的整单倍率/维度绝对加价/附加维度在保存时原样保留', async () => {
+    api.fetchAdminModels.mockResolvedValue([
+      {
+        ...imageDimPriced,
+        pricing: {
+          ...(imageDimPriced.pricing as Record<string, unknown>),
+          dims: { 'usage.referenceSeconds': 10000 },
+          multipliers: { 'usage.referenceCount': 12000 },
+        },
+      },
+    ]);
+    await renderPage();
+    await openRowEdit('图片');
+    await openTab('定价');
+
+    await pickFromSelect('舍入方式', 'ceil（向上取整，偏向平台）');
+    await click(button('保存'));
+
+    const payload = api.updateAdminModel.mock.calls[0]?.[1] as {
+      pricing: Record<string, unknown>;
+    };
+    expect(payload.pricing.rounding).toBe('ceil');
+    expect(payload.pricing.dimPrices).toEqual({
+      'usage.referenceCount': { unitMc: 300, firstFree: true },
+    });
+    expect(payload.pricing.multipliers).toEqual({ 'usage.referenceCount': 12000 });
+    expect(payload.pricing.dims).toEqual({ 'usage.referenceSeconds': 10000 });
   });
 });
 

@@ -93,6 +93,38 @@ class CatalogCompilerTest {
     }
 
     @Test
+    void 旧快照携带已删除的倍率与绝对加价_忽略后与不写逐字相同() {
+        var plain = CatalogCompiler.compileRuleSnapshot("""
+                {"baseUnit":"usage.succeededSlots","basePrice":{"kind":"const","value":3000},
+                 "unitDenominator":1,"minCredits":1}
+                """);
+        var legacy = CatalogCompiler.compileRuleSnapshot("""
+                {"baseUnit":"usage.succeededSlots","basePrice":{"kind":"const","value":3000},
+                 "multipliers":{"usage.referenceCount":12000},
+                 "dimPrices":{"usage.referenceCount":{"unitMc":300,"firstFree":true}},
+                 "unitDenominator":1,"minCredits":1}
+                """);
+
+        assertThat(legacy).isEqualTo(plain);
+    }
+
+    @Test
+    void 旧快照的绝对加价里未知维度也被忽略() {
+        assertThatCode(() -> CatalogCompiler.compileRuleSnapshot("""
+                {"baseUnit":"constant:1","basePrice":{"kind":"const","value":3000},
+                 "dimPrices":{"usage.nosuchDim":{"unitMc":300}}}
+                """)).doesNotThrowAnyException();
+    }
+
+    @Test
+    void 附加维度里的未知维度仍然拒绝() {
+        assertThatThrownBy(() -> CatalogCompiler.compileRuleSnapshot("""
+                {"baseUnit":"constant:1","basePrice":{"kind":"const","value":3000},
+                 "dims":{"usage.nosuchDim":10000}}
+                """)).isInstanceOf(CatalogCompiler.CompileException.class);
+    }
+
+    @Test
     @DisplayName("规则快照解析数量偏移与步长")
     void parsesQuantityOffsetAndStep() {
         var rule = CatalogCompiler.compileRuleSnapshot("""

@@ -13,6 +13,7 @@ export interface ModelCapabilityView {
   capabilityType: string;
   sizes: CapabilitySize[];
   ratios: string[];
+  durations: string[];
   defaultRatio: string;
   matrix: Record<string, Record<string, string>>;
 }
@@ -102,22 +103,74 @@ function toView(modelId: string, model: AdminModel): ModelCapabilityView {
     capabilityType: readString(model.capability_type),
     sizes,
     ratios,
+    durations: readDurations(model.supported_durations),
     defaultRatio: readString(model.default_aspect_ratio),
     matrix: readMatrix(model.request_mapping),
   };
 }
 
+function readDurations(raw: unknown): string[] {
+  if (Array.isArray(raw)) {
+    return expandDurations(readNumber(raw[0]), readNumber(raw[1]), readNumber(raw[2]));
+  }
+  if (raw !== null && typeof raw === 'object') {
+    const range = raw as Record<string, unknown>;
+    return expandDurations(readNumber(range.min), readNumber(range.max), readNumber(range.step));
+  }
+  return [];
+}
+
+export function expandDurations(
+  min: number | null,
+  max: number | null,
+  step: number | null,
+): string[] {
+  if (min === null || max === null) return [];
+  if (!Number.isInteger(min) || !Number.isInteger(max) || max < min) return [];
+  const stride = step !== null && Number.isInteger(step) && step > 0 ? step : 1;
+  const count = Math.floor((max - min) / stride) + 1;
+  if (count < 1 || count > 120) return [];
+  return Array.from({ length: count }, (_, index) => String(min + index * stride));
+}
+
 export function axisValues(view: ModelCapabilityView, axisName: string): string[] | null {
   const name = axisName.trim().toLowerCase();
   if (SIZE_AXIS_NAMES.includes(name)) {
-    const ids = view.sizes.map((s) => s.id).filter((id) => id.length > 0);
-    return ids.length ? ids : null;
+    return view.sizes.map((s) => s.id).filter((id) => id.length > 0);
   }
-  if (RATIO_AXIS_NAMES.includes(name)) {
-    return view.ratios.length ? [...view.ratios] : null;
-  }
+  if (RATIO_AXIS_NAMES.includes(name)) return [...view.ratios];
   if (name === VIDEO_TIER_AXIS.name) return [...VIDEO_TIER_AXIS.values];
+  if (name === 'image_reference') return ['0', '1'];
+  if (name === 'duration') return [...view.durations];
   return null;
+}
+
+export function priceTableAxes(
+  view: ModelCapabilityView,
+  by: string[],
+  existingKeys: string[],
+): SpecAxis[] | null {
+  const declared = by.length ? by : axesOfKeys(existingKeys);
+  if (declared.length === 0) return null;
+  const axes: SpecAxis[] = [];
+  for (const name of declared) {
+    const values = axisValues(view, name);
+    if (values === null) return null;
+    axes.push({ name: name.trim().toLowerCase(), values });
+  }
+  return sortAxes(axes);
+}
+
+export function axisValueLabel(view: ModelCapabilityView, axisName: string, value: string): string {
+  const name = axisName.trim().toLowerCase();
+  if (SIZE_AXIS_NAMES.includes(name)) {
+    const size = view.sizes.find((item) => item.id.toLowerCase() === value.toLowerCase());
+    return size !== undefined && size.label ? size.label : value;
+  }
+  if (name === 'image_reference') return value === '1' ? '有参考图' : '无参考图';
+  if (name === VIDEO_TIER_AXIS.name) return value === '1' ? '含视频输入' : '不含视频输入';
+  if (name === 'duration') return `${value} 秒`;
+  return value;
 }
 
 function sortAxes(axes: SpecAxis[]): SpecAxis[] {
@@ -151,6 +204,17 @@ export function axesOfKeys(keys: string[]): string[] {
     }
   }
   return [...seen];
+}
+
+export function canonicalSpecKey(key: string): string {
+  const parts: Array<[string, string]> = [];
+  for (const pair of key.split('|')) {
+    const at = pair.indexOf('=');
+    if (at <= 0) return key.trim().toLowerCase();
+    parts.push([pair.slice(0, at).trim().toLowerCase(), pair.slice(at + 1).trim().toLowerCase()]);
+  }
+  parts.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+  return parts.map(([axis, value]) => `${axis}=${value}`).join('|');
 }
 
 export function priceTableCandidates(

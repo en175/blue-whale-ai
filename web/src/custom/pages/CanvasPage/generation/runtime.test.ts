@@ -235,6 +235,20 @@ describe('生成任务运行时：submit', () => {
     expect(runtime.statusOf('n1')).toMatchObject({ phase: 'generating', jobId: '501', submissionId: 'uuid-0001' });
   });
 
+  it('已有恢复标记的节点重新提交：标记切到本次 submission', async () => {
+    const { fake, runtime, kit } = setup();
+    fake.nodes.set('n1', {
+      id: 'n1', type: 'mediaNode', position: { x: 0, y: 0 },
+      data: { jobId: '401', genStatus: 'failed', generationRecovery: { protocolVersion: 1, submissionId: 'sub-old', outputKey: 'primary' } },
+    });
+    kit.respond.create(async () => ({ jobId: '501', canvasBinding: BINDING_VIEW('uuid-0001', 'n1', '501') }));
+    runtime.submit(kit.def, { payload: {}, target: targetFacts('n1') });
+    await flushMicrotasks();
+    expect(fake.data('n1').generationRecovery).toEqual({
+      protocolVersion: 1, submissionId: 'uuid-0001', outputKey: '$target',
+    });
+  });
+
   it('创建窗口内重复提交被拒（重复点击保护）', async () => {
     const { fake, runtime, kit } = setup();
     fake.nodes.set('n1', { id: 'n1', type: 'mediaNode', position: { x: 0, y: 0 }, data: {} });
@@ -409,6 +423,20 @@ describe('生成任务运行时：retry', () => {
     expect(rt2.bindingRevisionOf('n1')).toBe(4);
     expect(rt2Status.calls).toEqual(['402']);
     expect(fake.data('n1').genStatus).toBe('failed');
+  });
+
+  it('重试受理后节点标记切到新 submission', async () => {
+    const { fake, runtime, kit } = setup();
+    fake.nodes.set('n1', {
+      id: 'n1', type: 'mediaNode', position: { x: 0, y: 0 },
+      data: { jobId: '401', genStatus: 'failed', generationRecovery: { protocolVersion: 1, submissionId: 'sub-old', outputKey: '$target' } },
+    });
+    kit.respond.retry(async () => ({ jobId: '402', canvasBinding: BINDING_VIEW('uuid-7777', 'n1', '402', 4) }));
+    expect(runtime.retry('n1')).toBe(true);
+    await flushMicrotasks();
+    expect(fake.data('n1').generationRecovery).toEqual({
+      protocolVersion: 1, submissionId: 'uuid-7777', outputKey: '$target',
+    });
   });
 
   it('生成中卡片重试被防重入拦截', async () => {
