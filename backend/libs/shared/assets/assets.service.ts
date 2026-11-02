@@ -111,7 +111,7 @@ export class AssetService {
       throw new AdminException(400, "没有可删除的资产 ID");
     }
 
-    const rows = await this.prisma.client.assets.findMany({
+    const rows = await this.prisma.client.user_assets.findMany({
       where: { id: { in: uniqueIds.map((id) => BigInt(id)) } },
       select: { id: true, storage_key: true },
     });

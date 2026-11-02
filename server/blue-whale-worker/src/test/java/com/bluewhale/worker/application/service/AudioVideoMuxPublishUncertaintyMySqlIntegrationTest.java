@@ -13,9 +13,6 @@ import com.bluewhale.worker.infrastructure.persistence.mapper.GenerationJobExtra
 import com.bluewhale.worker.infrastructure.persistence.mapper.GenerationJobLogMapper;
 import com.bluewhale.worker.infrastructure.persistence.mapper.GenerationJobMapper;
 import com.bluewhale.worker.infrastructure.persistence.mapper.GenerationOutputSlotMapper;
-import com.bluewhale.worker.infrastructure.persistence.mapper.ProjectEventMapper;
-import com.bluewhale.worker.infrastructure.persistence.mapper.SceneCardGenerationRecordMapper;
-import com.bluewhale.worker.infrastructure.persistence.mapper.StoryboardPreviewMapper;
 import com.bluewhale.worker.infrastructure.mq.GenerationMessageProducer;
 import com.bluewhale.worker.infrastructure.storage.TosVideoMediaRelay;
 import com.baomidou.mybatisplus.extension.spring.MybatisSqlSessionFactoryBean;
@@ -150,23 +147,8 @@ class AudioVideoMuxPublishUncertaintyMySqlIntegrationTest {
         }
 
         @Bean
-        ProjectEventMapper projectEventMapper(SqlSessionFactory sf) throws Exception {
-            return factory(ProjectEventMapper.class, sf).getObject();
-        }
-
-        @Bean
         GenerationOutputSlotMapper slotMapper(SqlSessionFactory sf) throws Exception {
             return factory(GenerationOutputSlotMapper.class, sf).getObject();
-        }
-
-        @Bean
-        SceneCardGenerationRecordMapper recordMapper(SqlSessionFactory sf) throws Exception {
-            return factory(SceneCardGenerationRecordMapper.class, sf).getObject();
-        }
-
-        @Bean
-        StoryboardPreviewMapper previewMapper(SqlSessionFactory sf) throws Exception {
-            return factory(StoryboardPreviewMapper.class, sf).getObject();
         }
 
         @Bean
@@ -177,24 +159,16 @@ class AudioVideoMuxPublishUncertaintyMySqlIntegrationTest {
         @Bean
         JobStateMachineService service(
                 GenerationJobMapper jm, AssetMapper am, GenerationJobLogMapper jlm,
-                ProjectEventMapper pem, GenerationOutputSlotMapper sm,
-                SceneCardGenerationRecordMapper rm, StoryboardPreviewMapper pm,
+                GenerationOutputSlotMapper sm,
                 GenerationJobExtraMapper em) {
-            return new JobStateMachineService(jm, am, jlm, pem, sm, rm, pm, em);
+            return new JobStateMachineService(jm, am, jlm, sm, em);
         }
 
         @Bean
         JobFinalizer finalizer(
                 GenerationJobMapper jm, AssetMapper am, GenerationJobLogMapper jlm,
-                GenerationOutputSlotMapper sm, GenerationJobExtraMapper em,
-                ProjectEventMapper pem,
-                SceneCardGenerationRecordMapper rm, StoryboardPreviewMapper pm) {
-            ProjectEventPublisher events = new ProjectEventPublisher(pem);
-            return new JobFinalizer(jm, am, jlm, sm, em,
-                    new SceneCardGenerationRecordSync(sm, rm, events),
-                    new StoryboardPreviewSync(sm, pm, events),
-                    events,
-                    TerminalEventOutbox.noop());
+                GenerationOutputSlotMapper sm, GenerationJobExtraMapper em) {
+            return new JobFinalizer(jm, am, jlm, sm, em, TerminalEventOutbox.noop());
         }
 
         private static <T> MapperFactoryBean<T> factory(Class<T> mapperIf, SqlSessionFactory sf)
@@ -271,7 +245,7 @@ class AudioVideoMuxPublishUncertaintyMySqlIntegrationTest {
 
     private int countAssets(long jobId, String storageKey) {
         Integer count = jdbc.queryForObject(
-                "SELECT COUNT(*) FROM assets WHERE generation_job_id=? AND storage_key=?",
+                "SELECT COUNT(*) FROM user_assets WHERE generation_job_id=? AND storage_key=?",
                 Integer.class, jobId, storageKey);
         return count != null ? count : 0;
     }
@@ -391,7 +365,7 @@ class AudioVideoMuxPublishUncertaintyMySqlIntegrationTest {
             assertThat(guard.executeUpdate()).as("在飞发布事务的守卫 CAS 应命中当前租约").isOne();
         }
         try (PreparedStatement asset = raw.prepareStatement("""
-                INSERT INTO assets (user_id, project_id, generation_job_id, type, storage_key, url, mime, size)
+                INSERT INTO user_assets (user_id, project_id, generation_job_id, type, storage_key, url, mime, size)
                 VALUES (9, 99, ?, 'video', ?, ?, 'video/mp4', 100)
                 """)) {
             asset.setLong(1, jobId);
@@ -554,7 +528,7 @@ class AudioVideoMuxPublishUncertaintyMySqlIntegrationTest {
         assertThat(countAssets(jobId, newKey)).isOne();
         assertThat(countAssets(jobId, oldKey)).isZero();
         Integer totalAssets = jdbc.queryForObject(
-                "SELECT COUNT(*) FROM assets WHERE generation_job_id=?", Integer.class, jobId);
+                "SELECT COUNT(*) FROM user_assets WHERE generation_job_id=?", Integer.class, jobId);
         assertThat(totalAssets).isEqualTo(1);
         GenerationJobEntity job = readJob(jobId);
         assertThat(job.getStatus()).isEqualTo("succeeded");

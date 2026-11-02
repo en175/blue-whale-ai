@@ -23,6 +23,7 @@ import {
 import { resolveMediaSrc } from '@/shared/utils/remoteImageCors';
 import { isApiError } from '@/shared/api/http';
 import { toast } from '@/shared/components/Toast';
+import { readSmsLastPhone, SMS_COOLDOWN_SECONDS, useSmsCooldown, writeSmsLastPhone } from '@/custom/api/smsCooldown';
 import { isMainlandPhone, PHONE_FORMAT_MESSAGE, SMS_SENT_MESSAGE } from '@/custom/utils/mainlandPhone';
 import Modal from '@/custom/components/Modal';
 import { useAuthStore, type SessionUser } from '@/shared/stores/auth';
@@ -35,6 +36,7 @@ import {
 } from './agreements';
 
 type LoginView = 'phone' | 'verify' | 'bind';
+type SmsSendState = 'idle' | 'failed' | 'unknown';
 
 interface LoginModalProps {
   onClose: () => void;
@@ -42,11 +44,14 @@ interface LoginModalProps {
   notice?: string;
 }
 
-const SEND_CODE_COOLDOWN_SECONDS = 60;
 const TERMS_REQUIRED_MESSAGE = '请先阅读并同意用户服务协议和隐私政策';
 
 function messageOf(error: unknown, fallback: string) {
   return isApiError(error) ? error.message : fallback;
+}
+
+function smsDeliveryUnknown(error: unknown) {
+  return !isApiError(error) || error.status === 408;
 }
 
 function FormMessages({ notice, error }: { notice?: string; error: string }) {
@@ -134,13 +139,38 @@ function AgreementRow({
   );
 }
 
-function PhoneField({
-  value,
+function SmsDeliveryCheck({
+  onReceived,
+  onResend,
+}: {
+  onReceived: () => void;
+  onResend: () => void;
+}) {
+  return (
+    <div className={styles.deliveryCheck}>
+      <p>
+        短信可能已发出。收到验证码请点「我已收到」；未收到请点「重新发送」。
+      </p>
+      <div className={styles.deliveryActions}>
+        <button type="button" onClick={onReceived}>
+          我已收到
+        </button>
+        <button type="button" onClick={onResend}>
+          重新发送
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function PhoneField({  value,
   onChange,
+  onBlur,
   readOnly = false,
 }: {
   value: string;
   onChange: (value: string) => void;
+  onBlur?: () => void;
   readOnly?: boolean;
 }) {
   return (
@@ -153,6 +183,7 @@ function PhoneField({
         autoComplete="tel"
         placeholder="请输入手机号"
         onChange={(event) => onChange(event.target.value)}
+        onBlur={onBlur}
       />
     </label>
   );
@@ -160,7 +191,7 @@ function PhoneField({
 
 export default function LoginModal({ onClose, onSuccess, notice }: LoginModalProps) {
   const [view, setView] = useState<LoginView>('phone');
-  const [phone, setPhone] = useState('');
+  const [phone, setPhone] = useState(() => readSmsLastPhone('login'));
   const [code, setCode] = useState('');
   const [agreed, setAgreed] = useState(false);
   const [username, setUsername] = useState('');
@@ -172,20 +203,20 @@ export default function LoginModal({ onClose, onSuccess, notice }: LoginModalPro
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [sendingCode, setSendingCode] = useState(false);
-  const [cooldown, setCooldown] = useState(0);
-
-  useEffect(() => {
-    if (cooldown <= 0) return undefined;
-    const timer = window.setInterval(() => setCooldown((current) => Math.max(0, current - 1)), 1000);
-    return () => window.clearInterval(timer);
-  }, [cooldown]);
+  const [sendState, setSendState] = useState<SmsSendState>('idle');
+  const [checkingDelivery, setCheckingDelivery] = useState(false);
 
   const phoneValid = isMainlandPhone(phone);
   const purpose: SmsPurpose = view === 'bind' ? 'bind' : 'login';
+  const [cooldown, startCooldown] = useSmsCooldown(purpose, phone.trim());
 
   const resetCaptcha = () => {
     setCaptcha(null);
     setCaptchaAnswer('');
+  };
+
+  const flagPhoneFormat = () => {
+    if (phone.trim() && !phoneValid) setError(PHONE_FORMAT_MESSAGE);
   };
 
   const applyAuth = async (login: LoginData) => {
@@ -224,6 +255,7 @@ export default function LoginModal({ onClose, onSuccess, notice }: LoginModalPro
       return;
     }
     setSendingCode(true);
+    setCheckingDelivery(false);
     setError('');
     try {
       await loadCaptcha();
@@ -246,16 +278,19 @@ export default function LoginModal({ onClose, onSuccess, notice }: LoginModalPro
         captchaId: captcha.id,
         captchaAnswer: normalized,
       });
-      setCooldown(SEND_CODE_COOLDOWN_SECONDS);
+      startCooldown(SMS_COOLDOWN_SECONDS);
+      writeSmsLastPhone(purpose, phone.trim());
+      setSendState('idle');
       resetCaptcha();
       toast(SMS_SENT_MESSAGE);
     } catch (sendError) {
-      setError(messageOf(sendError, '验证码发送失败，请稍后重试'));
-      setCaptchaAnswer('');
-      try {
-        await loadCaptcha();
-      } catch (captchaError) {
-        setError(messageOf(captchaError, '验证码图片获取失败，请稍后重试'));
+      resetCaptcha();
+      if (smsDeliveryUnknown(sendError)) {
+        setSendState('unknown');
+      } else {
+        setSendState('failed');
+        setError(messageOf(sendError, '验证码发送失败，请稍后重试'));
+        void openCaptcha();
       }
     } finally {
       setSendingCode(false);
@@ -296,7 +331,6 @@ export default function LoginModal({ onClose, onSuccess, notice }: LoginModalPro
       setCode('');
       setAgreed(false);
       resetCaptcha();
-      setCooldown(0);
       setView('bind');
     } catch (verifyError) {
       setError(messageOf(verifyError, '账号或密码不正确，或当前账号不可迁移'));
@@ -357,7 +391,28 @@ export default function LoginModal({ onClose, onSuccess, notice }: LoginModalPro
     resetCaptcha();
   };
 
-  const sendLabel = cooldown > 0 ? `${cooldown}秒后重发` : sendingCode ? '发送中…' : '获取验证码';
+  const markSmsReceived = () => {
+    startCooldown(SMS_COOLDOWN_SECONDS);
+    setSendState('idle');
+    setCheckingDelivery(false);
+    setError('');
+  };
+
+  const toggleDeliveryCheck = () => {
+    setCheckingDelivery((checking) => !checking);
+    setError('');
+  };
+
+  const smsActionLocked = cooldown > 0 || sendingCode;
+  const sendLabel = sendState === 'unknown'
+    ? '核对该短信是否送达'
+    : cooldown > 0
+      ? `${cooldown}秒后重发`
+      : sendingCode
+        ? '发送中…'
+        : sendState === 'failed'
+          ? '重试'
+          : '获取验证码';
   const codeActionClass = cooldown > 0
     ? styles.codeActionCooldown
     : phoneValid
@@ -418,8 +473,10 @@ export default function LoginModal({ onClose, onSuccess, notice }: LoginModalPro
               </div>
               <PhoneField
                 value={phone}
+                onBlur={flagPhoneFormat}
                 onChange={(value) => {
                   setPhone(value);
+                  setSendState('idle');
                   setError((current) => (current === PHONE_FORMAT_MESSAGE ? '' : current));
                   resetCaptcha();
                 }}
@@ -436,12 +493,18 @@ export default function LoginModal({ onClose, onSuccess, notice }: LoginModalPro
                 <button
                   type="button"
                   className={codeActionClass}
-                  disabled={cooldown > 0 || sendingCode}
-                  onClick={() => void openCaptcha()}
+                  disabled={smsActionLocked}
+                  onClick={() => {
+                    if (sendState === 'unknown') toggleDeliveryCheck();
+                    else void openCaptcha();
+                  }}
                 >
                   {sendLabel}
                 </button>
               </label>
+              {sendState === 'unknown' && checkingDelivery && (
+                <SmsDeliveryCheck onReceived={markSmsReceived} onResend={() => void openCaptcha()} />
+              )}
               <FormMessages notice={notice} error={error} />
               <button
                 type="submit"
@@ -541,8 +604,10 @@ export default function LoginModal({ onClose, onSuccess, notice }: LoginModalPro
               </div>
               <PhoneField
                 value={phone}
+                onBlur={flagPhoneFormat}
                 onChange={(value) => {
                   setPhone(value);
+                  setSendState('idle');
                   setError((current) => (current === PHONE_FORMAT_MESSAGE ? '' : current));
                   resetCaptcha();
                 }}
@@ -559,12 +624,18 @@ export default function LoginModal({ onClose, onSuccess, notice }: LoginModalPro
                 <button
                   type="button"
                   className={codeActionClass}
-                  disabled={cooldown > 0 || sendingCode}
-                  onClick={() => void openCaptcha()}
+                  disabled={smsActionLocked}
+                  onClick={() => {
+                    if (sendState === 'unknown') toggleDeliveryCheck();
+                    else void openCaptcha();
+                  }}
                 >
                   {sendLabel}
                 </button>
               </label>
+              {sendState === 'unknown' && checkingDelivery && (
+                <SmsDeliveryCheck onReceived={markSmsReceived} onResend={() => void openCaptcha()} />
+              )}
               <FormMessages notice={notice} error={error} />
               <button
                 type="submit"

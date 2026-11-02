@@ -31,3 +31,11 @@
   color: #666;
   cursor: default;
 }
+
+.empty {
+  display: block;
+  padding: 10px 14px;
+  color: #999;
+  font-size: 13px;
+  white-space: nowrap;
+}

@@ -186,7 +186,7 @@ export class VideoSceneSplitsService {
 
     const replayStored = async () => {
       if (canvasBinding) return null;
-      const existing = await this.prisma.client.command_idempotency.findUnique({
+      const existing = await this.prisma.client.project_command_receipts.findUnique({
         where: {
           project_id_operation_idempotency_key: {
             project_id: BigInt(projectId),

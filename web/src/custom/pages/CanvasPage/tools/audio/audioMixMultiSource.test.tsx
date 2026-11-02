@@ -118,13 +118,7 @@ vi.mock('@/custom/api/assets', () => ({
 
 vi.mock('@/custom/api/canvas', () => ({
   applyPromptPreview: apiMocks.applyPromptPreview,
-  listLegacyCardHistory: vi.fn(async () => ({ items: [] })),
   createConversationQuote: vi.fn(),
-  legacyCardHistoryOptions: (projectId: string) => ({
-    queryKey: ['canvas', projectId, 'legacy-history'],
-    queryFn: () => Promise.resolve({ items: [] }),
-    retry: false,
-  }),
   saveCanvasDoc: apiMocks.saveCanvasDoc,
   serializeNodes: vi.fn((nodes: Node[]) =>
     JSON.stringify(nodes.map((n) => ({ id: n.id, type: n.type, position: n.position, data: n.data }))),
@@ -145,7 +139,6 @@ vi.mock('@/custom/api/jobs', () => ({
   newIdempotencyKey: apiMocks.newIdempotencyKey,
   readJobFailText: apiMocks.readJobFailText,
 }));
-vi.mock('@/custom/api/sharedAssets', () => ({ saveSharedAsset: vi.fn() }));
 vi.mock('@/custom/api/generation', () => ({ fetchGenerationModels: apiMocks.fetchGenerationModels }));
 vi.mock('@/custom/utils/upload', () => ({ uploadAssetFile: apiMocks.uploadAssetFile }));
 

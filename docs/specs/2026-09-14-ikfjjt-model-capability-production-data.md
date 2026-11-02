@@ -49,6 +49,8 @@
 
 ### 视频
 
+> **IKRQZF 订正（2026-10-30）**：本表是 2026-09-14 的生产数据核对快照。`video_reference` 列中 Seedance 2.0 Fast 与 Mini 的 `false` 已被 IKRQZF 取代，现为 `true`、上限 3（见三轨 SQL `091_ikrqzf_seedance_2_0_fast_mini_video_reference`）；标准 2.0 的生产现值需在执行前回读确认。`audio_reference` 是否开启由运营在管理端决定，不在 IKRQZF 范围。
+
 | 模型 | video_reference | video_reference_max | audio_reference | audio_reference_max | max_reference_duration_sec | 时长档 | 档位 | task_types |
 |---|---|---|---|---|---|---|---|---|
 | Seedance 2.0 | false | 3 | **false** | 3 | **15** | 4–15 | 720p/1080p/**4K**（现缺 4K 补）| default/allowed_ratios=[16:9,9:16,1:1]（**不含 adaptive**，见下）, allowed_durations=[4..15] |

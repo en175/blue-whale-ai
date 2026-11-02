@@ -1,26 +1,7 @@
 import type { PromptBinding } from '@lib/contracts/prompt-target';
 import type { PromptPreviewSource } from '@lib/contracts/prompt-preview';
-import type { LegacyCardHistoryItem, LegacyMigrationReport } from '@lib/contracts/legacy-card-migration';
 import { apiRequest, isApiError } from '@/shared/api/http';
-import { queryOptions } from '@tanstack/react-query';
 import type { Edge, Node, Viewport } from '@xyflow/react';
-
-export type { LegacyCardHistoryItem, LegacyMigrationReport };
-
-export function listLegacyCardHistory(projectId: string) {
-  return apiRequest<{ items: LegacyCardHistoryItem[] }>(
-    `/api/canvases/${encodeURIComponent(projectId)}/legacy-card-history`,
-    { silent: true },
-  );
-}
-
-export function legacyCardHistoryOptions(projectId: string) {
-  return queryOptions({
-    queryKey: ['canvas', projectId, 'legacy-history'],
-    queryFn: () => listLegacyCardHistory(projectId),
-    retry: false,
-  });
-}
 
 export function applyPromptPreview(input: { projectId: string; source: PromptPreviewSource; position: { x: number; y: number } }) {
   return apiRequest<{ node: Node; canvas: CanvasRecord; reused: boolean }>(
@@ -76,7 +57,6 @@ export interface CanvasRecord {
   viewport: string | null;
   nodes: string | null;
   edges?: string | null;
-  legacy_migration?: LegacyMigrationReport;
 }
 
 export interface CanvasDoc {
@@ -85,7 +65,6 @@ export interface CanvasDoc {
   viewport: Viewport;
   nodes: Node[];
   edges: Edge[];
-  legacyMigration?: LegacyMigrationReport;
 }
 
 const pendingMap = new Map<string, Promise<CanvasDoc>>();
@@ -118,7 +97,6 @@ export function fetchCanvasDoc(projectId: string): Promise<CanvasDoc> {
         viewport: safeParse<Viewport>(rec?.viewport ?? null, { x: 0, y: 0, zoom: 1.1 }),
         nodes,
         edges: safeParse<Edge[]>(rec?.edges ?? null, []),
-        ...(rec?.legacy_migration ? { legacyMigration: rec.legacy_migration } : {}),
       };
     })
     .finally(() => {

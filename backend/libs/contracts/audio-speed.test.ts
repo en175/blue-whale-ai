@@ -200,7 +200,7 @@ describe("执行面兜底码（error-codes.ts 注册）", () => {
   it("audio_speed_failed → 1052（1051 已由音频混合占用），文案表同步", () => {
     expect(ERROR_AUDIO_SPEED_FAILED).toBe("audio_speed_failed");
     expect(GENERATION_ERROR_NUMERIC_CODES[ERROR_AUDIO_SPEED_FAILED]).toBe(1052);
-    expect(ERROR_CODES[1052]).toBe("音频调速失败，请重试");
+    expect(ERROR_CODES[1052]).toBe("操作未完成，请稍后查看。");
     expect(GENERATION_ERROR_NUMERIC_CODES[ERROR_AUDIO_TRIM_FAILED]).toBe(1048);
     expect(GENERATION_ERROR_NUMERIC_CODES[ERROR_VIDEO_MATTING_FAILED]).toBe(1050);
     expect(

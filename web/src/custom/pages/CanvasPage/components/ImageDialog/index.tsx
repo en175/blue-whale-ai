@@ -293,7 +293,7 @@ export default function ImageDialog({ projectId, onClose, onSend, initialText, i
     : hasInvalidRef ? '正文有已失效的素材标签，请点击标签替换或删除后再发送'
     : maxInput != null && flatValue.length > maxInput ? `提示词超过 ${maxInput} 字上限，请精简后再发送`
     : null;
-  const canSend = !uploading && !readOnly && !pickLocked && !draftBinding?.saveFailed && !configurationError && (flatValue.trim().length > 0 || hasAttachmentText);
+  const canSend = !uploading && !readOnly && !pickLocked && !draftBinding?.saveFailed && !configurationError && selectedModel !== '' && (flatValue.trim().length > 0 || hasAttachmentText);
 
   const syncDraftParams = (patch: { prompt?: string; promptDoc?: StoredPromptDoc; modelId?: string; size?: string; ratio?: string }) => {
     draftBinding?.onParamsChange(patch);
@@ -386,7 +386,10 @@ export default function ImageDialog({ projectId, onClose, onSend, initialText, i
         }
         if (!list.length) return;
         if (initialParams?.modelId && !list.some((m) => m.model_id === initialParams.modelId)) {
-          onToast?.('warn', '原生成模型已不可用，已回退默认模型，请确认后发送');
+          onToast?.('warn', '原生成模型已不可用，请重新选择');
+          setSelectedModel('');
+          setModelsLoaded(true);
+          return;
         }
         const target =
           (initialParams?.modelId && list.find((m) => m.model_id === initialParams.modelId)) ||

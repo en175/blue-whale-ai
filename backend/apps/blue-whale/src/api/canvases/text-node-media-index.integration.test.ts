@@ -53,7 +53,7 @@ describe.skipIf(!process.env.IKFM3Q_DATABASE_URL)("Text node media index contrac
     });
   }
   async function createAsset(projectId: bigint, type: "image" | "video" | "audio", url: string, ownerId = 987654n) {
-    const asset = await prisma.client.assets.create({ data: { user_id: ownerId, project_id: projectId, type, url, width: 640, height: 480 } });
+    const asset = await prisma.client.user_assets.create({ data: { user_id: ownerId, project_id: projectId, type, url, width: 640, height: 480 } });
     return asset.id.toString();
   }
   async function saveCanvas(projectId: bigint, nodes: unknown[], edges: unknown[], version: number | "missing") {
@@ -64,7 +64,7 @@ describe.skipIf(!process.env.IKFM3Q_DATABASE_URL)("Text node media index contrac
     });
   }
   async function readCanvasRow(projectId: bigint) {
-    return prisma.client.canvas.findUnique({ where: { project_id: projectId } });
+    return prisma.client.project_canvas.findUnique({ where: { project_id: projectId } });
   }
   function parseNodes(row: { nodes_json: unknown }): Array<{ id: string; type: string; data: Record<string, unknown> }> {
     const raw = typeof row.nodes_json === "string" ? JSON.parse(row.nodes_json) : row.nodes_json;
@@ -198,7 +198,7 @@ describe.skipIf(!process.env.IKFM3Q_DATABASE_URL)("Text node media index contrac
     const assetId = await createAsset(project.id, "image", url);
     const promptSource = { sessionId: "ikfm3q-session", revisionId: "rev-1", shotNo: 1 };
 
-    await prisma.client.canvas.create({ data: {
+    await prisma.client.project_canvas.create({ data: {
       project_id: project.id,
       nodes_json: [
         mediaNode("media-1", assetId, "image", url),
@@ -242,7 +242,7 @@ describe.skipIf(!process.env.IKFM3Q_DATABASE_URL)("Text node media index contrac
     const assetId = await createAsset(project.id, "image", url);
     const promptSource = { sessionId: "ikh4ef-session", revisionId: "rev-1", shotNo: 1 };
 
-    await prisma.client.canvas.create({ data: {
+    await prisma.client.project_canvas.create({ data: {
       project_id: project.id,
       nodes_json: [
         mediaNode("media-1", assetId, "image", url),
@@ -277,7 +277,7 @@ describe.skipIf(!process.env.IKFM3Q_DATABASE_URL)("Text node media index contrac
     const assetA = await createAsset(project.id, "image", urlA);
     const assetB = await createAsset(project.id, "image", urlB);
     const promptSource = { sessionId: "ikh4ef-dirty", revisionId: "rev-1", shotNo: 1 };
-    await prisma.client.canvas.create({ data: {
+    await prisma.client.project_canvas.create({ data: {
       project_id: project.id,
       nodes_json: [
         mediaNode("media-1", assetA, "image", urlA),

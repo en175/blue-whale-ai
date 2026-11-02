@@ -18,9 +18,6 @@ const IMAGE_JOB_TIMEOUT_MS = 5 * 60_000;
 const VIDEO_JOB_TIMEOUT_MS = 10 * 60_000;
 const JOB_POLL_INTERVAL_MS = 4_000;
 
-const SSE_IDLE_MS = 2_000;
-const SSE_DEADLINE_MS = 30_000;
-const SSE_EMPTY_DEADLINE_MS = 5_000;
 
 const IMAGE_OUTPUT_SIZE = { width: 200, height: 112 };
 const VIDEO_OUTPUT_SIZE = { width: 400, height: 225 };
@@ -106,18 +103,11 @@ export function computeFactDigest(snapshot) {
     messages: (snapshot?.conversation_messages ?? [])
       .map((m) => `${m.message_id}:${m.role}:${m.sequence_no}`)
       .sort(),
-    sceneCards: (snapshot?.scene_cards ?? [])
-      .map((c) => `${c.scene_card_id}:${c.version}`)
-      .sort(),
-    records: (snapshot?.scene_card_generation_records ?? [])
-      .map((r) => `${r.record_id}:${r.summary_status}`)
-      .sort(),
     jobs: (snapshot?.generation_jobs ?? [])
       .map((j) => `${j.job_id}:${j.status}:${j.source}`)
       .sort(),
     assets: Object.keys(snapshot?.assets ?? {}).sort(),
     canvasNodeIds: canvasNodes.map((n) => String(n.id)).sort(),
-    highWatermark: String(snapshot?.high_watermark_cursor ?? "0"),
   };
 }
 
@@ -125,24 +115,13 @@ export function diffFactDigests(expected, actual) {
   const problems = [];
   const fields = [
     "messages",
-    "sceneCards",
-    "records",
     "jobs",
     "assets",
     "canvasNodeIds",
-    "highWatermark",
   ];
   for (const field of fields) {
     const before = expected?.[field];
     const after = actual?.[field];
-    if (field === "highWatermark") {
-      if (String(before) !== String(after)) {
-        problems.push(
-          `字段 highWatermark 不一致：期望 ${before}，实际 ${after}`,
-        );
-      }
-      continue;
-    }
     const beforeList = Array.isArray(before) ? before.map(String) : [];
     const afterList = Array.isArray(after) ? after.map(String) : [];
     const missing = beforeList.filter((item) => !afterList.includes(item));
@@ -155,42 +134,6 @@ export function diffFactDigests(expected, actual) {
     }
   }
   return problems;
-}
-
-
-export function checkSseWindowHealth(events, projectId) {
-  const problems = [];
-  const seenIds = new Set();
-  let previousCursor = null;
-  for (const envelope of events) {
-    if (envelope?.schema_version !== 1) {
-      problems.push(`事件 ${envelope?.event_id} schema_version 非 1`);
-    }
-    if (String(envelope?.project_id) !== String(projectId)) {
-      problems.push(`事件 ${envelope?.event_id} 不属于项目 ${projectId}`);
-    }
-    const eventId = String(envelope?.event_id);
-    if (seenIds.has(eventId)) {
-      problems.push(`事件身份重复：${eventId}`);
-    }
-    seenIds.add(eventId);
-    const cursor = BigInt(envelope?.cursor ?? 0);
-    if (previousCursor !== null && cursor <= previousCursor) {
-      problems.push(`游标未严格递增（${previousCursor} → ${cursor}）`);
-    }
-    previousCursor = cursor;
-  }
-  return problems;
-}
-
-export function mergeSseEventIds(...windows) {
-  const ids = new Set();
-  for (const window of windows) {
-    for (const envelope of window ?? []) {
-      ids.add(String(envelope?.event_id));
-    }
-  }
-  return [...ids].sort();
 }
 
 
@@ -228,10 +171,8 @@ export function checkStorageIdentity(accessUrl, userId, type) {
 }
 
 
-function outputNodeId(slotId, isStoryboardFrame) {
-  return isStoryboardFrame
-    ? `storyboard-frame:${slotId}`
-    : `generation-output:${slotId}`;
+function outputNodeId(slotId) {
+  return `generation-output:${slotId}`;
 }
 
 function isWireInteger(value) {
@@ -249,7 +190,6 @@ export function findPendingOutputPlacements(snapshot) {
       job.input && typeof job.input === "object" && !Array.isArray(job.input)
         ? job.input
         : {};
-    const isStoryboardFrame = input.storyboard_preview === true;
     for (const slot of Array.isArray(job.output_slots)
       ? job.output_slots
       : []) {
@@ -269,10 +209,6 @@ export function findPendingOutputPlacements(snapshot) {
         slot_index: slot.slot_index,
         asset_id: String(slot.asset_id),
         type: job.type,
-        is_storyboard_frame: isStoryboardFrame,
-        scene_card_id: isWireInteger(input.scene_card_id)
-          ? String(input.scene_card_id)
-          : null,
         placement_anchor: placementAnchor(input),
       });
     }
@@ -288,16 +224,6 @@ function placementAnchor(input) {
   return [x, y, width, height].every((v) => typeof v === "number")
     ? { x, y, width, height }
     : null;
-}
-
-function sceneCardIdOf(node) {
-  if (node?.sceneCardId) return String(node.sceneCardId);
-  if (node?.scene_card_id != null) return String(node.scene_card_id);
-  const data = node?.data;
-  if (data && typeof data === "object" && !Array.isArray(data)) {
-    if (data.sceneCardId != null) return String(data.sceneCardId);
-  }
-  return null;
 }
 
 export function viewportAnchorPoint(viewport) {
@@ -351,13 +277,11 @@ function findFreePosition(occupied, anchor, dims) {
 export function buildOutputCanvasNode(output, position) {
   const dims = output.type === "video" ? VIDEO_OUTPUT_SIZE : IMAGE_OUTPUT_SIZE;
   return {
-    id: outputNodeId(output.slot_id, output.is_storyboard_frame === true),
+    id: outputNodeId(output.slot_id),
     type: output.type,
     assetId: String(output.asset_id),
     taskId: String(output.generation_job_id),
     slotIndex: output.slot_index,
-    ...(output.is_storyboard_frame === true ? { storyboardFrame: true } : {}),
-    ...(output.scene_card_id ? { sceneCardId: output.scene_card_id } : {}),
     position,
     width: dims.width,
     height: dims.height,
@@ -370,10 +294,7 @@ export function planOutputCanvasNodes(existingNodes, pendingOutputs, viewport) {
   const occupied = nodes.map(nodeRect);
   const additions = [];
   for (const output of pendingOutputs) {
-    const nodeId = outputNodeId(
-      output.slot_id,
-      output.is_storyboard_frame === true,
-    );
+    const nodeId = outputNodeId(output.slot_id);
     if (
       nodes.some((n) => n?.id === nodeId) ||
       additions.some((n) => n.id === nodeId)
@@ -383,17 +304,7 @@ export function planOutputCanvasNodes(existingNodes, pendingOutputs, viewport) {
     const dims =
       output.type === "video" ? VIDEO_OUTPUT_SIZE : IMAGE_OUTPUT_SIZE;
     let base = null;
-    if (output.scene_card_id) {
-      const card = [...nodes, ...additions].find(
-        (n) =>
-          n?.type === "scene_card" && sceneCardIdOf(n) === output.scene_card_id,
-      );
-      if (card) {
-        const rect = nodeRect(card);
-        base = { x: rect.x, y: rect.y + rect.height + OUTPUT_GAP };
-      }
-    }
-    if (!base && output.placement_anchor) {
+    if (output.placement_anchor) {
       base = {
         x: output.placement_anchor.x,
         y:
@@ -471,72 +382,6 @@ async function fetchSnapshot(projectId, token) {
   }
   return result.body.data;
 }
-
-async function readSseWindow(
-  projectId,
-  token,
-  after,
-  { idleMs = SSE_IDLE_MS, deadlineMs = SSE_DEADLINE_MS } = {},
-) {
-  const controller = new AbortController();
-  const deadline = setTimeout(() => controller.abort(), deadlineMs);
-  const startedAt = Date.now();
-  const events = [];
-  try {
-    const response = await fetch(
-      `${WEB_URL}/api/projects/${projectId}/events?after=${after}`,
-      {
-        headers: { Authorization: `Bearer ${token}` },
-        signal: controller.signal,
-      },
-    );
-    if (response.status !== 200 || !response.body) {
-      throw new Error(`SSE 流建立失败：HTTP ${response.status}`);
-    }
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-    let lastFrameAt = Date.now();
-    try {
-      while (true) {
-        const idleFor = Date.now() - lastFrameAt;
-        if (events.length > 0 && idleFor > idleMs) break;
-        if (
-          events.length === 0 &&
-          Date.now() - startedAt > SSE_EMPTY_DEADLINE_MS
-        ) {
-          break;
-        }
-        const { done, value } = await Promise.race([
-          reader.read(),
-          new Promise((resolve) =>
-            setTimeout(() => resolve({ done: false, value: undefined }), 300),
-          ),
-        ]);
-        if (done) break;
-        if (value === undefined) continue;
-        buffer += decoder.decode(value, { stream: true });
-        let separator;
-        while ((separator = buffer.indexOf("\n\n")) !== -1) {
-          const frame = buffer.slice(0, separator);
-          buffer = buffer.slice(separator + 2);
-          const dataLine = frame
-            .split("\n")
-            .find((line) => line.startsWith("data: "));
-          if (!dataLine) continue;
-          events.push(JSON.parse(dataLine.slice(6)));
-          lastFrameAt = Date.now();
-        }
-      }
-    } catch {
-    }
-    return events;
-  } finally {
-    clearTimeout(deadline);
-    controller.abort();
-  }
-}
-
 
 const evidence = [];
 
@@ -912,10 +757,7 @@ async function placeOutputsOnCanvas(projectId, token, snapshot) {
   const after = await fetchSnapshot(projectId, token);
   const afterNodes = after.canvas?.nodes ? JSON.parse(after.canvas.nodes) : [];
   for (const output of pending) {
-    const nodeId = outputNodeId(
-      output.slot_id,
-      output.is_storyboard_frame === true,
-    );
+    const nodeId = outputNodeId(output.slot_id);
     const job = (after.generation_jobs ?? []).find(
       (item) => String(item?.job_id) === output.generation_job_id,
     );
@@ -945,48 +787,6 @@ async function placeOutputsOnCanvas(projectId, token, snapshot) {
   }
   return after;
 }
-
-async function verifySseResume(projectId, token, beforeWindow, breakCursor) {
-  const resumed = await readSseWindow(projectId, token, breakCursor);
-  if (resumed.length === 0) {
-    abort("SSE 断线续传", "续传窗口含断线期间事件", "空窗口");
-  }
-  if (BigInt(resumed[0].cursor) <= BigInt(breakCursor)) {
-    abort(
-      "SSE 断线续传",
-      `续传首条游标 > 断点 ${breakCursor}`,
-      `${resumed[0].cursor}`,
-    );
-  }
-  for (const [name, window] of [
-    ["断点前", beforeWindow],
-    ["续传", resumed],
-  ]) {
-    const problems = checkSseWindowHealth(window, projectId);
-    if (problems.length > 0) {
-      abort("SSE 断线续传", `${name}窗口健康`, problems.join("；"));
-    }
-  }
-  const fullReplay = await readSseWindow(projectId, token, 0);
-  const fullIds = mergeSseEventIds(fullReplay);
-  const joinedIds = mergeSseEventIds(beforeWindow, resumed);
-  if (JSON.stringify(joinedIds) !== JSON.stringify(fullIds)) {
-    const missing = fullIds.filter((id) => !joinedIds.includes(id));
-    const extra = joinedIds.filter((id) => !fullIds.includes(id));
-    abort(
-      "SSE 断线续传",
-      "断点前+续传 == 全量回放",
-      `缺失 [${missing.join(", ")}] 多出 [${extra.join(", ")}]`,
-    );
-  }
-  record(
-    true,
-    "SSE 断线续传",
-    `断点前 ${beforeWindow.length} 条 + 续传 ${resumed.length} 条 == 全量 ${fullReplay.length} 条，无缺口无重复`,
-  );
-  return fullReplay;
-}
-
 
 async function cmdRun() {
   if (process.env.BW_ALLOW_BILLED_CANARY !== "1") {
@@ -1030,24 +830,6 @@ async function cmdRun() {
   const image = await createGenerationJob(projectId, token, "image", timestamp);
   const video = await createGenerationJob(projectId, token, "video", timestamp);
 
-  const beforeWindow = await readSseWindow(projectId, token, 0);
-  if (beforeWindow.length === 0) {
-    abort(
-      "SSE 断点记录",
-      "断点前窗口至少含 generation_job.created 事件",
-      "空窗口",
-    );
-  }
-  const breakCursor = beforeWindow.reduce(
-    (max, e) => (BigInt(e.cursor) > max ? BigInt(e.cursor) : max),
-    0n,
-  );
-  record(
-    true,
-    "SSE 断点记录",
-    `断点前 ${beforeWindow.length} 条事件，断点游标 ${breakCursor}`,
-  );
-
   await waitJobTerminal(
     projectId,
     token,
@@ -1080,13 +862,6 @@ async function cmdRun() {
 
   const placedSnapshot = await placeOutputsOnCanvas(projectId, token, snapshot);
 
-  const fullReplay = await verifySseResume(
-    projectId,
-    token,
-    beforeWindow,
-    breakCursor,
-  );
-
   const factDigest = computeFactDigest(placedSnapshot);
   writeState({
     version: 1,
@@ -1116,7 +891,6 @@ async function cmdRun() {
     },
     quotaDelta: quotaBefore - quotaAfter,
     factDigest,
-    sseFullEventIds: mergeSseEventIds(fullReplay),
   });
   record(
     true,

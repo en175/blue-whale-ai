@@ -1,3 +1,4 @@
+import { clearEffectiveRecoveryOwners, findEffectiveRecoveryOwner } from "./recovery-owner-test-helpers.js";
 
 
 
@@ -158,14 +159,13 @@ async function submit(
   const service = tool.make(prisma, {
     findOwnedSource: async () => (visible() ? assetOf(tool.kind) : null),
   }) as {
-    create: (userId: string, projectId: string, body: Record<string, unknown>, internal?: unknown, key?: string) => Promise<CreateResult>;
+    create: (userId: string, projectId: string, body: Record<string, unknown>, key?: string) => Promise<CreateResult>;
   };
   const body = tool.body(sid);
   return service.create(
     USER_ID,
     PROJECT_ID,
     { ...body, canvas_binding: bindingOf(sid, node, opts.revision ?? 0) },
-    {},
     tool.name === "抠像" ? undefined : sid,
   );
 }
@@ -191,16 +191,18 @@ describe.skipIf(!databaseUrl)("媒体工具已受理意图重放真库验证（I
 
   beforeEach(async () => {
     for (const pid of [PROJECT_ID, OTHER_PROJECT_ID]) {
-      await prisma.generation_canvas_node_owners.deleteMany({ where: { project_id: BigInt(pid) } });
+      await clearEffectiveRecoveryOwners(prisma, BigInt(pid));
       await prisma.generation_canvas_submissions.deleteMany({ where: { project_id: BigInt(pid) } });
-      await prisma.command_idempotency.deleteMany({ where: { project_id: BigInt(pid) } });
-      await prisma.canvas.deleteMany({ where: { project_id: BigInt(pid) } });
+      await prisma.project_command_receipts.deleteMany({ where: { project_id: BigInt(pid) } });
+      await prisma.project_canvas.deleteMany({ where: { project_id: BigInt(pid) } });
+      await prisma.project_edges.deleteMany({ where: { project_id: BigInt(pid) } });
+      await prisma.project_nodes.deleteMany({ where: { project_id: BigInt(pid) } });
       await prisma.generation_output_slots.deleteMany({ where: { project_id: BigInt(pid) } });
       await prisma.generation_jobs.deleteMany({ where: { project_id: BigInt(pid) } });
     }
     await prisma.generation_canvas_outputs.deleteMany({});
     await prisma.generation_job_logs.deleteMany({});
-    await prisma.cost_reservations.deleteMany({});
+    await prisma.billing_cost_reservations.deleteMany({});
   });
 
   for (const tool of TOOLS) {
@@ -213,14 +215,14 @@ describe.skipIf(!databaseUrl)("媒体工具已受理意图重放真库验证（I
         };
         const body = tool.body(sid);
         const call = () =>
-          service.create(USER_ID, PROJECT_ID, { ...body, canvas_binding: bindingOf(sid, "node-1", 0) }, {}, tool.name === "抠像" ? undefined : sid);
+          service.create(USER_ID, PROJECT_ID, { ...body, canvas_binding: bindingOf(sid, "node-1", 0) }, tool.name === "抠像" ? undefined : sid);
 
         const first = await call();
         expect(first.code).toBe(200);
         const jobId = (first.data as { job_id: string }).job_id;
         const jobsAfterAccept = await prisma.generation_jobs.count({ where: { project_id: BigInt(PROJECT_ID) } });
         const subsAfterAccept = await prisma.generation_canvas_submissions.count({ where: { project_id: BigInt(PROJECT_ID) } });
-        const idemAfterAccept = await prisma.command_idempotency.count({ where: { project_id: BigInt(PROJECT_ID) } });
+        const idemAfterAccept = await prisma.project_command_receipts.count({ where: { project_id: BigInt(PROJECT_ID) } });
 
 
         stub.visible = false;
@@ -235,8 +237,8 @@ describe.skipIf(!databaseUrl)("媒体工具已受理意图重放真库验证（I
 
         expect(await prisma.generation_jobs.count({ where: { project_id: BigInt(PROJECT_ID) } })).toBe(jobsAfterAccept);
         expect(await prisma.generation_canvas_submissions.count({ where: { project_id: BigInt(PROJECT_ID) } })).toBe(subsAfterAccept);
-        expect(await prisma.command_idempotency.count({ where: { project_id: BigInt(PROJECT_ID) } })).toBe(idemAfterAccept);
-        expect(await prisma.cost_reservations.count({})).toBe(0);
+        expect(await prisma.project_command_receipts.count({ where: { project_id: BigInt(PROJECT_ID) } })).toBe(idemAfterAccept);
+        expect(await prisma.billing_cost_reservations.count({})).toBe(0);
       });
 
       it("★ 2. 同键异载荷重放判幂等冲突（100409），零写入", async () => {
@@ -257,7 +259,6 @@ describe.skipIf(!databaseUrl)("媒体工具已受理意图重放真库验证（I
           USER_ID,
           PROJECT_ID,
           { ...body, canvas_binding: bindingOf(sid, "node-2", 3) },
-          {},
           tool.name === "抠像" ? undefined : sid,
         );
         expect(conflict.code).toBe(100409);
@@ -280,9 +281,7 @@ describe.skipIf(!databaseUrl)("媒体工具已受理意图重放真库验证（I
         expect((replayA.data as { job_id: string }).job_id).toBe(jobA);
         const bindingView = (replayA.data as { canvas_binding?: { is_current: boolean } }).canvas_binding;
         expect(bindingView?.is_current).toBe(false);
-        const owner = await prisma.generation_canvas_node_owners.findUnique({
-          where: { project_id_node_id: { project_id: BigInt(PROJECT_ID), node_id: "node-3" } },
-        });
+        const owner = await findEffectiveRecoveryOwner(prisma, BigInt(PROJECT_ID), "node-3");
 
         expect(owner?.binding_revision).toBe(2);
         expect(await prisma.generation_canvas_submissions.count({ where: { project_id: BigInt(PROJECT_ID) } })).toBe(2);
@@ -337,12 +336,12 @@ describe.skipIf(!databaseUrl)("媒体工具已受理意图重放真库验证（I
         create: (userId: string, projectId: string, body: Record<string, unknown>, internal?: unknown, key?: string) => Promise<CreateResult>;
       };
       const body = tool.body(sid);
-      const first = await service.create(USER_ID, PROJECT_ID, { ...body, canvas_binding: bindingOf(sid, "node-x", 0) }, {}, sid);
+      const first = await service.create(USER_ID, PROJECT_ID, { ...body, canvas_binding: bindingOf(sid, "node-x", 0) }, sid);
       expect(first.code).toBe(200);
       const jobId = (first.data as { job_id: string }).job_id;
 
 
-      const other = await service.create(USER_ID, OTHER_PROJECT_ID, { ...body, canvas_binding: bindingOf(sid, "node-x", 0) }, {}, sid);
+      const other = await service.create(USER_ID, OTHER_PROJECT_ID, { ...body, canvas_binding: bindingOf(sid, "node-x", 0) }, sid);
       expect(other.code).toBe(200);
       expect((other.data as { job_id: string }).job_id).not.toBe(jobId);
     });

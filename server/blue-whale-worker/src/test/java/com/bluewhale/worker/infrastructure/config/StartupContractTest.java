@@ -1,5 +1,6 @@
 package com.bluewhale.worker.infrastructure.config;
 
+import com.bluewhale.common.mq.MqEnvSuffix;
 import com.bluewhale.worker.application.consumer.VideoConsumer;
 import com.bluewhale.worker.application.processor.AudioJobProcessor;
 import com.bluewhale.worker.application.processor.ImageCutoutJobProcessor;
@@ -220,7 +221,8 @@ class StartupContractTest {
 
         assertThat(GenerationMqRouteEnum.values()).hasSize(expectedTags.size());
         for (GenerationMqRouteEnum route : GenerationMqRouteEnum.values()) {
-            assertThat(route.topic()).as("%s 的 topic", route).isEqualTo("generation-task");
+            assertThat(route.topicBase()).as("%s 的 topic 基线", route).isEqualTo("generation-task");
+            assertThat(route.topic()).as("%s 的 topic", route).isEqualTo(MqEnvSuffix.apply("generation-task"));
             assertThat(route.tag()).as("%s 的 tag", route).isEqualTo(expectedTags.get(route));
         }
     }

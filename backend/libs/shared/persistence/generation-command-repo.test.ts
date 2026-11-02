@@ -102,40 +102,28 @@ function expectExtraWrite(
 }
 
 describe("generation command placement anchor", () => {
-  it("freezes the SceneCard output anchor in the job input", async () => {
+  it("freezes the viewport anchor in the job input when none was supplied", async () => {
     const createJob = vi.fn().mockResolvedValue({
       id: 300n,
       type: "video",
-      source: "scene_card",
+      source: "bottom_dock",
       status: "queued",
       progress: 0,
       version: 1,
     });
     const tx = {
-      canvas: {
+      project_canvas: {
         findFirst: vi.fn().mockResolvedValue({
-          viewport_json: { x: 0, y: 0, zoom: 1 },
-          nodes_json: [
-            {
-              type: "scene_card",
-              scene_card_id: "66",
-              position: { x: 100, y: 200 },
-              width: 400,
-              height: 320,
-            },
-          ],
+          viewport_json: { x: 100, y: -200, zoom: 2 },
+          nodes_json: [],
+          rows_authoritative: 1,
         }),
       },
       generation_jobs: { create: createJob },
       generation_job_extras: extrasDelegate(),
       generation_output_slots: { create: vi.fn().mockResolvedValue({}) },
-      cost_reservations: { create: vi.fn().mockResolvedValue({}) },
+      billing_cost_reservations: { create: vi.fn().mockResolvedValue({}) },
       generation_job_logs: { create: vi.fn().mockResolvedValue({}) },
-      project_events: {
-        create: vi.fn(
-          async ({ data }: { data: Record<string, unknown> }) => data,
-        ),
-      },
     };
 
     await createJobWithinTx(tx as never, {
@@ -146,133 +134,66 @@ describe("generation command placement anchor", () => {
       input: { prompt: "whale" },
       actionIdentity: "generate-300",
       actionType: "video.generate",
-      source: "scene_card",
-      sceneCardId: "66",
+      source: "bottom_dock",
     });
 
     expect(createJob).toHaveBeenCalledWith({
       data: expect.objectContaining({
         input: {
           prompt: "whale",
-          placement_anchor: { x: 100, y: 200, width: 400, height: 320 },
+          placement_anchor: { x: -50, y: 100, width: 0, height: 0 },
           expected_output_count: 1,
         },
       }),
     });
   });
 
-  it("SceneCard 尚未落库时把无尺寸卡片视为完整兼容矩形", async () => {
+  it("keeps the caller-supplied anchor untouched", async () => {
     const createJob = vi.fn().mockResolvedValue({
       id: 300n,
       type: "video",
-      source: "scene_card",
+      source: "bottom_dock",
       status: "queued",
       progress: 0,
       version: 1,
     });
     const tx = {
-      canvas: {
-        findFirst: vi.fn().mockResolvedValue({
-          viewport_json: { x: 0, y: 0, zoom: 1 },
-          nodes_json: [
-            {
-              id: "blocker",
-              type: "scene_card",
-              position: { x: -624, y: -1104 },
-            },
-          ],
+      project_canvas: { findFirst: vi.fn() },
+      generation_jobs: { create: createJob },
+      generation_job_extras: extrasDelegate(),
+      generation_output_slots: { create: vi.fn().mockResolvedValue({}) },
+      billing_cost_reservations: { create: vi.fn().mockResolvedValue({}) },
+      generation_job_logs: { create: vi.fn().mockResolvedValue({}) },
+    };
+
+    await createJobWithinTx(tx as never, {
+      projectId: "55",
+      userId: "9",
+      type: "video",
+      expectedOutputCount: 1,
+      input: {
+        prompt: "whale",
+        placement_anchor: { x: 10, y: 20, width: 400, height: 300 },
+      },
+      actionIdentity: "generate-300",
+      actionType: "video.generate",
+      source: "bottom_dock",
+    });
+
+    expect(tx.project_canvas.findFirst).not.toHaveBeenCalled();
+    expect(createJob).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        input: expect.objectContaining({
+          placement_anchor: { x: 10, y: 20, width: 400, height: 300 },
         }),
-      },
-      generation_jobs: { create: createJob },
-      generation_job_extras: extrasDelegate(),
-      generation_output_slots: { create: vi.fn().mockResolvedValue({}) },
-      cost_reservations: { create: vi.fn().mockResolvedValue({}) },
-      generation_job_logs: { create: vi.fn().mockResolvedValue({}) },
-      project_events: {
-        create: vi.fn(
-          async ({ data }: { data: Record<string, unknown> }) => data,
-        ),
-      },
-    };
-
-    await createJobWithinTx(tx as never, {
-      projectId: "55",
-      userId: "9",
-      type: "video",
-      expectedOutputCount: 1,
-      input: { prompt: "whale" },
-      actionIdentity: "generate-300",
-      actionType: "video.generate",
-      source: "scene_card",
-      sceneCardId: "66",
-    });
-
-    expect(createJob).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        input: {
-          prompt: "whale",
-          placement_anchor: { x: 0, y: -1104, width: 400, height: 1080 },
-          expected_output_count: 1,
-        },
-      }),
-    });
-  });
-
-  it("Canvas 行不存在时也冻结非零的兼容矩形", async () => {
-    const createJob = vi.fn().mockResolvedValue({
-      id: 300n,
-      type: "video",
-      source: "scene_card",
-      status: "queued",
-      progress: 0,
-      version: 1,
-    });
-    const tx = {
-      canvas: { findFirst: vi.fn().mockResolvedValue(null) },
-      generation_jobs: { create: createJob },
-      generation_job_extras: extrasDelegate(),
-      generation_output_slots: { create: vi.fn().mockResolvedValue({}) },
-      cost_reservations: { create: vi.fn().mockResolvedValue({}) },
-      generation_job_logs: { create: vi.fn().mockResolvedValue({}) },
-      project_events: {
-        create: vi.fn(
-          async ({ data }: { data: Record<string, unknown> }) => data,
-        ),
-      },
-    };
-
-    await createJobWithinTx(tx as never, {
-      projectId: "55",
-      userId: "9",
-      type: "video",
-      expectedOutputCount: 1,
-      input: { prompt: "whale" },
-      actionIdentity: "generate-300",
-      actionType: "video.generate",
-      source: "scene_card",
-      sceneCardId: "66",
-    });
-
-    expect(createJob).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        input: {
-          prompt: "whale",
-          placement_anchor: { x: -424, y: -1104, width: 400, height: 1080 },
-          expected_output_count: 1,
-        },
       }),
     });
   });
 });
 
 describe("generation command repo retry", () => {
-  it("keeps the logical slot index and marks its record generating", async () => {
+  it("keeps the logical slot index on retry", async () => {
     const createSlot = vi.fn().mockResolvedValue({});
-    const updateRecord = vi.fn().mockResolvedValue({
-      id: 88n,
-      project_id: 55n,
-      version: 2,
-    });
     const tx = {
       generation_jobs: {
         findFirst: vi.fn().mockResolvedValue({
@@ -280,14 +201,14 @@ describe("generation command repo retry", () => {
           project_id: 55n,
           user_id: 9n,
           type: "video",
-          source: "scene_card",
+          source: "bottom_dock",
           status: "failed",
           input: RETRY_VIDEO_INPUT,
         }),
         create: vi.fn().mockResolvedValue({
           id: 301n,
           type: "video",
-          source: "scene_card",
+          source: "bottom_dock",
           status: "queued",
           progress: 0,
           version: 1,
@@ -302,14 +223,12 @@ describe("generation command repo retry", () => {
             slot_index: 3,
             status: "failed",
             retry_of_slot_id: null,
-            scene_card_generation_record_id: 88n,
           },
         ]),
         create: createSlot,
       },
-      scene_card_generation_records: { update: updateRecord },
       generation_job_extras: extrasDelegate(),
-      cost_reservations: {
+      billing_cost_reservations: {
         findFirst: vi.fn().mockResolvedValue({
           reserved_amount_fen: 1234n,
           price_catalog_version: "v-pricing",
@@ -319,19 +238,14 @@ describe("generation command repo retry", () => {
         }),
         create: vi.fn().mockResolvedValue({}),
       },
-      command_idempotency: {
+      project_command_receipts: {
         findUnique: vi.fn().mockResolvedValue(null),
         create: vi.fn().mockResolvedValue({}),
-      },
-      project_events: {
-        create: vi.fn(
-          async ({ data }: { data: Record<string, unknown> }) => data,
-        ),
       },
       generation_job_logs: { create: vi.fn().mockResolvedValue({}) },
     };
     const prisma = {
-      generation_model_capability: capabilityDelegate([capabilityRow()]),
+      catalog_models: capabilityDelegate([capabilityRow()]),
       $transaction: vi.fn(
         async (callback: (client: typeof tx) => Promise<unknown>) =>
           callback(tx),
@@ -339,7 +253,9 @@ describe("generation command repo retry", () => {
     };
     const repo = createGenerationCommandRepo(prisma as never);
 
-    await repo.retryJob("300", "55", "9", "retry-300", "hash-300");
+    const result = (await repo.retryJob("300", "55", "9", "retry-300", "hash-300")) as {
+      cursor: number;
+    };
 
     expect(tx.generation_jobs.findFirst).toHaveBeenCalledWith({
       where: {
@@ -353,30 +269,11 @@ describe("generation command repo retry", () => {
     expect(createSlot).toHaveBeenCalledWith({
       data: expect.objectContaining({ slot_index: 3, retry_of_slot_id: 77n }),
     });
-    expect(updateRecord).toHaveBeenCalledWith({
-      where: { id: 88n },
-      data: { summary_status: "generating", version: { increment: 1 } },
+    expect(tx.project_command_receipts.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ accepted_cursor: expect.any(BigInt) }),
     });
-    expect(tx.project_events.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        event_type: "scene_card_generation_record.summary_changed",
-        aggregate_version: 2,
-        payload: { record_id: "88", summary_status: "generating" },
-      }),
-    });
-    const jobEventCall = tx.project_events.create.mock.calls.find(
-      ([args]) =>
-        (args as { data: { event_type: string } }).data.event_type ===
-        "generation_job.created",
-    );
-    const eventCursor = (
-      jobEventCall?.[0] as {
-        data: { cursor: bigint };
-      }
-    ).data.cursor;
-    expect(tx.command_idempotency.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({ accepted_cursor: eventCursor }),
-    });
+    const accepted = tx.project_command_receipts.create.mock.calls[0]![0].data.accepted_cursor;
+    expect(accepted).toBe(BigInt(result.cursor));
   });
 
   it("★ 重试是新建任务 → 对新 job 扣一次费（提交即扣）", async () => {
@@ -387,14 +284,14 @@ describe("generation command repo retry", () => {
           project_id: 55n,
           user_id: 9n,
           type: "video",
-          source: "scene_card",
+          source: "bottom_dock",
           status: "failed",
           input: RETRY_VIDEO_INPUT,
         }),
         create: vi.fn().mockResolvedValue({
           id: 301n,
           type: "video",
-          source: "scene_card",
+          source: "bottom_dock",
           status: "queued",
           progress: 0,
           version: 1,
@@ -405,16 +302,13 @@ describe("generation command repo retry", () => {
         create: vi.fn().mockResolvedValue({}),
       },
       generation_job_extras: extrasDelegate(),
-      cost_reservations: {
+      billing_cost_reservations: {
         findFirst: vi.fn().mockResolvedValue(null),
         create: vi.fn().mockResolvedValue({}),
       },
-      command_idempotency: {
+      project_command_receipts: {
         findUnique: vi.fn().mockResolvedValue(null),
         create: vi.fn().mockResolvedValue({}),
-      },
-      project_events: {
-        create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => data),
       },
       generation_job_logs: { create: vi.fn().mockResolvedValue({}) },
     };
@@ -424,7 +318,7 @@ describe("generation command repo retry", () => {
           callback(tx),
       ),
       generation_jobs: { findUnique: vi.fn().mockResolvedValue(null) },
-      generation_model_capability: capabilityDelegate([capabilityRow()]),
+      catalog_models: capabilityDelegate([capabilityRow()]),
     };
     const repo = createGenerationCommandRepo(prisma as never);
     const charge = vi.fn(async () => {});
@@ -464,14 +358,14 @@ describe("generation command repo retry", () => {
           project_id: 55n,
           user_id: 9n,
           type: "video",
-          source: "scene_card",
+          source: "bottom_dock",
           status: "failed",
           input: RETRY_VIDEO_INPUT,
         }),
         create: vi.fn().mockResolvedValue({
           id: 301n,
           type: "video",
-          source: "scene_card",
+          source: "bottom_dock",
           status: "queued",
           progress: 0,
           version: 1,
@@ -482,16 +376,13 @@ describe("generation command repo retry", () => {
         create: vi.fn().mockResolvedValue({}),
       },
       generation_job_extras: extrasDelegate(),
-      cost_reservations: {
+      billing_cost_reservations: {
         findFirst: vi.fn().mockResolvedValue(null),
         create: vi.fn().mockResolvedValue({}),
       },
-      command_idempotency: {
+      project_command_receipts: {
         findUnique: vi.fn().mockResolvedValue(null),
         create: vi.fn().mockResolvedValue({}),
-      },
-      project_events: {
-        create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => data),
       },
       generation_job_logs: {
         create: vi
@@ -507,7 +398,7 @@ describe("generation command repo retry", () => {
           callback(tx),
       ),
       generation_jobs: { findUnique: vi.fn().mockResolvedValue(null) },
-      generation_model_capability: capabilityDelegate([capabilityRow()]),
+      catalog_models: capabilityDelegate([capabilityRow()]),
     };
     const repo = createGenerationCommandRepo(prisma as never);
     const charge = vi.fn(async () => {});
@@ -535,7 +426,6 @@ describe("generation command repo retry", () => {
         slot_index: 0,
         status: "failed",
         retry_of_slot_id: null,
-        scene_card_generation_record_id: null,
       },
       {
         id: 79n,
@@ -544,7 +434,6 @@ describe("generation command repo retry", () => {
         slot_index: 1,
         status: "failed",
         retry_of_slot_id: null,
-        scene_card_generation_record_id: null,
       },
       {
         id: 78n,
@@ -553,7 +442,6 @@ describe("generation command repo retry", () => {
         slot_index: 0,
         status: "succeeded",
         retry_of_slot_id: 77n,
-        scene_card_generation_record_id: null,
       },
     ];
     const createSlot = vi.fn().mockResolvedValue({});
@@ -592,11 +480,11 @@ describe("generation command repo retry", () => {
         create: createSlot,
       },
       generation_job_extras: extrasDelegate(),
-      command_idempotency: {
+      project_command_receipts: {
         findUnique: vi.fn().mockResolvedValue(null),
         create: vi.fn().mockResolvedValue({}),
       },
-      cost_reservations: {
+      billing_cost_reservations: {
         findFirst: vi.fn().mockResolvedValue({
           reserved_amount_fen: 1234n,
           price_catalog_version: "v-pricing",
@@ -605,11 +493,6 @@ describe("generation command repo retry", () => {
           cost_rule_version: "v1",
         }),
         create: vi.fn().mockResolvedValue({}),
-      },
-      project_events: {
-        create: vi.fn(
-          async ({ data }: { data: Record<string, unknown> }) => data,
-        ),
       },
       generation_job_logs: { create: vi.fn().mockResolvedValue({}) },
     };
@@ -658,7 +541,6 @@ describe("generation command repo retry", () => {
             slot_index: 0,
             status: "failed",
             retry_of_slot_id: null,
-            scene_card_generation_record_id: null,
           },
           {
             id: 78n,
@@ -667,13 +549,12 @@ describe("generation command repo retry", () => {
             slot_index: 0,
             status: "succeeded",
             retry_of_slot_id: 77n,
-            scene_card_generation_record_id: null,
           },
         ]),
         create: createSlot,
       },
       generation_job_extras: extrasDelegate(),
-      cost_reservations: {
+      billing_cost_reservations: {
         findFirst: vi.fn().mockResolvedValue({
           reserved_amount_fen: 1234n,
           price_catalog_version: "v-pricing",
@@ -683,7 +564,7 @@ describe("generation command repo retry", () => {
         }),
         create: vi.fn().mockResolvedValue({}),
       },
-      command_idempotency: { findUnique: vi.fn().mockResolvedValue(null) },
+      project_command_receipts: { findUnique: vi.fn().mockResolvedValue(null) },
     };
     const prisma = {
       $transaction: vi.fn(
@@ -723,8 +604,8 @@ describe("generation command repo retry", () => {
       },
       generation_output_slots: { findMany: vi.fn(), create: vi.fn() },
       generation_job_extras: extrasDelegate(),
-      cost_reservations: { findFirst: vi.fn(), create: vi.fn() },
-      command_idempotency: { findUnique: vi.fn(), create: vi.fn() },
+      billing_cost_reservations: { findFirst: vi.fn(), create: vi.fn() },
+      project_command_receipts: { findUnique: vi.fn(), create: vi.fn() },
     };
     const prisma = {
       $transaction: vi.fn(
@@ -752,7 +633,7 @@ describe("generation command repo retry", () => {
       project_id: 55n,
       user_id: 9n,
       type: "video",
-      source: "scene_card",
+      source: "bottom_dock",
       status: "failed",
       input: RETRY_VIDEO_INPUT,
     };
@@ -762,7 +643,7 @@ describe("generation command repo retry", () => {
         create: vi.fn().mockResolvedValue({
           id: 301n,
           type: "video",
-          source: "scene_card",
+          source: "bottom_dock",
           status: "queued",
           progress: 0,
           version: 1,
@@ -773,7 +654,7 @@ describe("generation command repo retry", () => {
         create: vi.fn().mockResolvedValue({}),
       },
       generation_job_extras: extrasDelegate(),
-      cost_reservations: {
+      billing_cost_reservations: {
         findFirst: vi.fn().mockResolvedValue({
           reserved_amount_fen: 1234n,
           price_catalog_version: "v-pricing",
@@ -783,7 +664,7 @@ describe("generation command repo retry", () => {
         }),
         create: vi.fn().mockResolvedValue({}),
       },
-      command_idempotency: {
+      project_command_receipts: {
         findUnique: vi.fn().mockResolvedValue(null),
         create: vi
           .fn()
@@ -791,17 +672,12 @@ describe("generation command repo retry", () => {
             Object.assign(new Error("unique"), { code: "P2002" }),
           ),
       },
-      project_events: {
-        create: vi.fn(
-          async ({ data }: { data: Record<string, unknown> }) => data,
-        ),
-      },
       generation_job_logs: { create: vi.fn().mockResolvedValue({}) },
     };
     const secondTx = {
       generation_jobs: { findFirst: vi.fn().mockResolvedValue(original) },
       generation_job_extras: extrasDelegate(),
-      cost_reservations: {
+      billing_cost_reservations: {
         findFirst: vi.fn().mockResolvedValue({
           reserved_amount_fen: 1234n,
           price_catalog_version: "v-pricing",
@@ -810,7 +686,7 @@ describe("generation command repo retry", () => {
           cost_rule_version: "v1",
         }),
       },
-      command_idempotency: {
+      project_command_receipts: {
         findUnique: vi.fn().mockResolvedValue({
           request_hash: "hash-300",
           generation_job_id: 999n,
@@ -820,7 +696,7 @@ describe("generation command repo retry", () => {
     };
     let attempt = 0;
     const prisma = {
-      generation_model_capability: capabilityDelegate([capabilityRow()]),
+      catalog_models: capabilityDelegate([capabilityRow()]),
       $transaction: vi.fn(
         async (callback: (client: never) => Promise<unknown>) => {
           attempt += 1;
@@ -844,7 +720,7 @@ describe("generation command repo retry", () => {
       type: "video",
     });
     expect(prisma.$transaction).toHaveBeenCalledTimes(2);
-    expect(secondTx.command_idempotency.findUnique).toHaveBeenCalledOnce();
+    expect(secondTx.project_command_receipts.findUnique).toHaveBeenCalledOnce();
   });
 
   describe("retryJob 素材状态门（IKF YHJ）", () => {
@@ -852,7 +728,7 @@ describe("generation command repo retry", () => {
       const createJob = vi.fn().mockResolvedValue({
         id: 302n,
         type: "video",
-        source: "scene_card",
+        source: "bottom_dock",
         status: "queued",
         progress: 0,
         version: 1,
@@ -867,7 +743,7 @@ describe("generation command repo retry", () => {
           findMany: vi.fn().mockResolvedValue([]),
           create: vi.fn().mockResolvedValue({}),
         },
-        cost_reservations: {
+        billing_cost_reservations: {
           findFirst: vi.fn().mockResolvedValue({
             reserved_amount_fen: 1234n,
             price_catalog_version: "v-pricing",
@@ -877,19 +753,14 @@ describe("generation command repo retry", () => {
           }),
           create: vi.fn().mockResolvedValue({}),
         },
-        command_idempotency: {
+        project_command_receipts: {
           findUnique: vi.fn().mockResolvedValue(null),
           create: vi.fn().mockResolvedValue({}),
-        },
-        project_events: {
-          create: vi.fn(
-            async ({ data }: { data: Record<string, unknown> }) => data,
-          ),
         },
         generation_job_logs: { create: vi.fn().mockResolvedValue({}) },
       };
       const prisma = {
-        generation_model_capability: capabilityDelegate([capabilityRow()]),
+        catalog_models: capabilityDelegate([capabilityRow()]),
         $transaction: vi.fn(
           async (callback: (client: typeof tx) => Promise<unknown>) =>
             callback(tx),
@@ -903,7 +774,7 @@ describe("generation command repo retry", () => {
       project_id: 55n,
       user_id: 9n,
       type: "video",
-      source: "scene_card",
+      source: "bottom_dock",
       status: "failed",
       input: { ...RETRY_VIDEO_INPUT, video_mode: "image_reference", references: [{ material_id: "asset-abc", role: "reference", type: "image" }], expected_output_count: 1 },
       strategy_version: "seedance-2.0-v1",
@@ -957,7 +828,7 @@ describe("generation command repo retry", () => {
           create: vi.fn(),
         },
         generation_job_extras: extrasDelegate(),
-        cost_reservations: {
+        billing_cost_reservations: {
           findFirst: vi.fn().mockResolvedValue({
             reserved_amount_fen: 1234n,
             price_catalog_version: "v-pricing",
@@ -966,7 +837,7 @@ describe("generation command repo retry", () => {
             cost_rule_version: "v1",
           }),
         },
-        command_idempotency: {
+        project_command_receipts: {
           findUnique: vi.fn().mockResolvedValue({
             request_hash: "hash-402",
             generation_job_id: 999n,
@@ -1027,14 +898,14 @@ describe("retryJob 计费快照（IKL406：重试的 charge 必须带 rule_snaps
           project_id: 55n,
           user_id: 9n,
           type,
-          source: "scene_card",
+          source: "bottom_dock",
           status: "failed",
           input: type === "video" ? RETRY_VIDEO_INPUT : { prompt: "whale", model_id: "image-model", size: "1024x1024", aspect_ratio: "1:1" },
         }),
         create: vi.fn().mockResolvedValue({
           id: 301n,
           type,
-          source: "scene_card",
+          source: "bottom_dock",
           status: "queued",
           progress: 0,
           version: 1,
@@ -1045,16 +916,13 @@ describe("retryJob 计费快照（IKL406：重试的 charge 必须带 rule_snaps
         create: vi.fn().mockResolvedValue({}),
       },
       generation_job_extras: extrasDelegate(),
-      cost_reservations: {
+      billing_cost_reservations: {
         findFirst: vi.fn().mockResolvedValue(null),
         create: vi.fn().mockResolvedValue({}),
       },
-      command_idempotency: {
+      project_command_receipts: {
         findUnique: vi.fn().mockResolvedValue(null),
         create: vi.fn().mockResolvedValue({}),
-      },
-      project_events: {
-        create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => data),
       },
       generation_job_logs: { create: vi.fn().mockResolvedValue({}) },
     };
@@ -1063,7 +931,7 @@ describe("retryJob 计费快照（IKL406：重试的 charge 必须带 rule_snaps
         async (callback: (client: typeof tx) => Promise<unknown>) =>
           callback(tx),
       ),
-      generation_model_capability: capabilityDelegate(capabilityRows),
+      catalog_models: capabilityDelegate(capabilityRows),
     };
     const repo = createGenerationCommandRepo(prisma as never);
     const charge = vi.fn(async (_ctx: BillingChargeContext) => {});
@@ -1170,7 +1038,7 @@ describe("generation command repo billing（预扣与失败补偿）", () => {
       },
       generation_output_slots: { create: vi.fn().mockResolvedValue({}) },
       generation_job_extras: extrasDelegate(),
-      cost_reservations: { create: vi.fn().mockResolvedValue({}) },
+      billing_cost_reservations: { create: vi.fn().mockResolvedValue({}) },
       generation_job_logs: {
         create: options.failAtLog
           ? vi
@@ -1179,11 +1047,6 @@ describe("generation command repo billing（预扣与失败补偿）", () => {
                 new Error("We could not serialize [object Function] value"),
               )
           : vi.fn().mockResolvedValue({}),
-      },
-      project_events: {
-        create: vi.fn(
-          async ({ data }: { data: Record<string, unknown> }) => data,
-        ),
       },
     };
     const prisma = {
@@ -1310,7 +1173,7 @@ describe("建任务幂等：同一把 Idempotency-Key 只建一个 job、只扣�
 
   function uniqueViolation() {
     return Object.assign(
-      new Error("Unique constraint failed: uk_command_idempotency"),
+      new Error("Unique constraint failed: uk_project_command_receipts__key"),
       { code: "P2002" },
     );
   }
@@ -1357,14 +1220,9 @@ describe("建任务幂等：同一把 Idempotency-Key 只建一个 job、只扣�
           },
           generation_output_slots: { create: vi.fn(async () => ({})) },
           generation_job_extras: extrasDelegate(),
-          cost_reservations: { create: vi.fn(async () => ({})) },
+          billing_cost_reservations: { create: vi.fn(async () => ({})) },
           generation_job_logs: { create: vi.fn(async () => ({})) },
-          project_events: {
-            create: vi.fn(
-              async ({ data }: { data: Record<string, unknown> }) => data,
-            ),
-          },
-          command_idempotency: {
+          project_command_receipts: {
             create: vi.fn(async ({ data }: { data: IdemRow }) => {
               const key = rowKey(data);
               if (committed.has(key)) throw uniqueViolation();
@@ -1398,7 +1256,7 @@ describe("建任务幂等：同一把 Idempotency-Key 只建一个 job、只扣�
           }
         }
       },
-      command_idempotency: {
+      project_command_receipts: {
         findUnique: vi.fn(
           async ({
             where,
@@ -1539,13 +1397,12 @@ describe("建任务幂等：同一把 Idempotency-Key 只建一个 job、只扣�
 describe("generation command repo 样片阶段落库（IKIZQ8）", () => {
   function plainTx(createJob: ReturnType<typeof vi.fn>) {
     return {
-      canvas: { findFirst: vi.fn().mockResolvedValue(null) },
+      project_canvas: { findFirst: vi.fn().mockResolvedValue(null) },
       generation_jobs: { create: createJob },
       generation_job_extras: extrasDelegate(),
       generation_output_slots: { create: vi.fn().mockResolvedValue({}) },
-      cost_reservations: { create: vi.fn().mockResolvedValue({}) },
+      billing_cost_reservations: { create: vi.fn().mockResolvedValue({}) },
       generation_job_logs: { create: vi.fn().mockResolvedValue({}) },
-      project_events: { create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => data) },
     };
   }
 

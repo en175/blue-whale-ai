@@ -1,6 +1,15 @@
 import { createHash } from "node:crypto";
 
-import { RESOURCE_NOT_FOUND_CODE, fail, frozenVideoModeOf, ok, type ResultEnvelope } from "@lib/contracts";
+import {
+  RESOURCE_NOT_FOUND_CODE,
+  canonicalSizeValue,
+  fail,
+  frozenVideoModeOf,
+  normalizeVideoMode,
+  ok,
+  resolveVideoMode,
+  type ResultEnvelope,
+} from "@lib/contracts";
 import {
   DEFAULT_IMAGE_REFERENCE_MAX,
   type AssetOwnershipOps,
@@ -12,16 +21,19 @@ import {
 import type { BillingQuote } from "../billing/billing-quote.js";
 import type { AssetProbe } from "../assets/ports.js";
 import {
+  localAssetReferenceIds,
   resolveReferenceDurations,
-  videoAssetIdsForDuration,
 } from "./resolve-reference-durations.js";
 import {
   applyEditSourceDurationBasis,
   canonicalJson,
+  parseReferences,
   projectQuoteInput,
   resolveReferenceAssets,
   resolveTextIndexReferences,
   ruleSampleMode,
+  validateGenerationRequest,
+  validateVideoParamLimits,
   type CreateGenerationJobBody,
   type GenerationType,
   serializePricingRule,
@@ -31,8 +43,10 @@ export interface QuoteGenerationJobDeps {
   projects: Pick<ProjectRepo, "findOwnedById">;
   models: Pick<ModelCapabilityRepo, "listEnabledByType">;
   canvas: Pick<CanvasRepo, "getByProject">;
-  assets: Pick<AssetOwnershipOps, "resolveInputAssets"> &
-    Partial<Pick<AssetOwnershipOps, "findStorageKeys" | "saveMediaInfo">>;
+  assets?:
+    | (Pick<AssetOwnershipOps, "resolveInputAssets"> &
+        Partial<Pick<AssetOwnershipOps, "findStorageKeys" | "saveMediaInfo">>)
+    | undefined;
   probe?: AssetProbe;
   quote: BillingQuote;
 }
@@ -44,6 +58,14 @@ export interface QuoteGenerationJobData {
 }
 
 const EMPTY_QUOTE: QuoteGenerationJobData = { credits: null, quote_revision: null };
+
+export function videoQuoteRevisionInput(
+  quoteInput: Record<string, unknown>,
+): Record<string, unknown> {
+  const input = { ...quoteInput };
+  delete input.prompt_characters;
+  return input;
+}
 
 export function quoteRevisionOf(args: {
   catalogVersion: number;
@@ -70,7 +92,7 @@ export async function handleQuoteGenerationJob(
 
   const type = body.type as GenerationType;
   const params = body.parameters as
-    | { model_id?: unknown; sample_mode?: unknown; resolution?: unknown }
+    | { model_id?: unknown; sample_mode?: unknown; resolution?: unknown; size?: unknown }
     | undefined;
   const modelId = typeof params?.model_id === "string" ? params.model_id : null;
   if (modelId === null) return ok(EMPTY_QUOTE);
@@ -78,6 +100,20 @@ export async function handleQuoteGenerationJob(
   const whitelist = await deps.models.listEnabledByType(type);
   const capability = whitelist.find((m) => m.model_id === modelId);
   if (!capability) return ok(EMPTY_QUOTE);
+
+  const supportedSizes = Array.isArray(capability.supported_sizes)
+    ? capability.supported_sizes
+    : [];
+  if (params !== undefined) {
+    if (typeof params.resolution === "string") {
+      params.resolution = canonicalSizeValue(params.resolution, supportedSizes);
+    }
+    if (typeof params.size === "string") {
+      params.size = canonicalSizeValue(params.size, supportedSizes);
+    }
+  }
+
+  if (validateGenerationRequest(type, body, capability)) return ok(EMPTY_QUOTE);
 
   const ruling = ruleSampleMode({
     type,
@@ -106,20 +142,35 @@ export async function handleQuoteGenerationJob(
     });
     if (!textIndexRefs.ok) return ok(EMPTY_QUOTE);
     if (textIndexRefs.value.videoReferences) {
-      const merged = textIndexRefs.value.videoReferences;
+      effectiveBody = { ...body, references: textIndexRefs.value.videoReferences };
+    }
+  }
+
+  const assetsDep = deps.assets;
+  if ((type === "video" || type === "audio") && assetsDep !== undefined) {
+    const parsedRefs = parseReferences(effectiveBody.references);
+    const items = parsedRefs.kind === "ok" ? parsedRefs.items : [];
+    if (localAssetReferenceIds(items).length > 0) {
       const ruling = await resolveReferenceDurations({
-        references: merged,
-        assetIdsOf: videoAssetIdsForDuration,
+        references: items,
+        assetIdsOf: localAssetReferenceIds,
         userId,
         projectId,
-        assets: deps.assets,
+        assets: assetsDep,
         ...(deps.probe ? { probe: deps.probe } : {}),
       });
-      effectiveBody = {
-        ...body,
-        references: ruling.kind === "resolved" ? ruling.references : merged,
-      };
+      if (ruling.kind === "resolved") {
+        effectiveBody = { ...effectiveBody, references: ruling.references };
+      }
     }
+  }
+
+  if (
+    effectiveBody !== body &&
+    (type === "video" || type === "audio") &&
+    validateGenerationRequest(type, effectiveBody, capability)
+  ) {
+    return ok(EMPTY_QUOTE);
   }
 
   let quoteReferenceAssetIds: Array<string | number> | undefined;
@@ -139,6 +190,26 @@ export async function handleQuoteGenerationJob(
     });
     if (!textIndexRefs.ok) return ok(EMPTY_QUOTE);
     quoteReferenceAssetIds = textIndexRefs.value.merged;
+  }
+
+  if (type === "video") {
+    const videoParams = effectiveBody.parameters as
+      | { mode?: unknown; prompt?: unknown }
+      | undefined;
+    const promptText =
+      typeof videoParams?.prompt === "string" ? videoParams.prompt : "";
+    const parsedRefs = parseReferences(effectiveBody.references);
+    const videoRefItems = parsedRefs.kind === "ok" ? parsedRefs.items : [];
+    const videoMode =
+      normalizeVideoMode(videoParams?.mode) ??
+      resolveVideoMode(videoRefItems, promptText);
+    const videoParamErr = validateVideoParamLimits({
+      body: effectiveBody,
+      capability,
+      videoMode,
+      videoRefItems,
+    });
+    if (videoParamErr) return ok(EMPTY_QUOTE);
   }
 
   const input = projectQuoteInput(type, effectiveBody, capability, quoteReferenceAssetIds);
@@ -167,7 +238,7 @@ export async function handleQuoteGenerationJob(
       catalogVersion: quote.catalogVersion,
       capabilityVersion: capability.version,
       tier: quote.tier,
-      quoteInput: input,
+      quoteInput: type === "video" ? videoQuoteRevisionInput(input) : input,
     }),
     ...(bySourceVideo ? { duration_basis: "source_video" as const } : {}),
   });

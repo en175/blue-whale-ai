@@ -20,14 +20,14 @@ export function createCostAdjustmentRepo(prisma: PrismaClient) {
     async createBatch(
       input: CostAdjustmentBatchInput,
     ): Promise<{ count: number } | null> {
-      const existing = await prisma.cost_adjustments.count({
+      const existing = await prisma.billing_cost_adjustments.count({
         where: { batch_no: input.batchNo, is_delete: 0 },
       });
       if (existing > 0) return null;
 
       try {
         return await prisma.$transaction(async (tx) => {
-          await tx.cost_adjustments.createMany({
+          await tx.billing_cost_adjustments.createMany({
             data: input.items.map((it) => ({
               batch_no: input.batchNo,
               generation_job_id: it.generationJobId
@@ -64,7 +64,7 @@ export async function alignReservationBySettlement(
   jobId: string,
   item: Pick<CostAdjustmentItemInput, "actionType" | "amountFen">,
 ): Promise<void> {
-  const row = await prisma.cost_reservations.findFirst({
+  const row = await prisma.billing_cost_reservations.findFirst({
     where: { generation_job_id: BigInt(jobId), is_delete: 0, status: "settled" },
   });
   if (!row) return;
@@ -73,7 +73,7 @@ export async function alignReservationBySettlement(
     item.actionType === "supplement"
       ? current + item.amountFen
       : current - item.amountFen;
-  await prisma.cost_reservations.update({
+  await prisma.billing_cost_reservations.update({
     where: { id: row.id },
     data: { actual_amount_fen: next < 0n ? 0n : next },
   });

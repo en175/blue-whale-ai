@@ -18,11 +18,13 @@ export function fetchTemplateTags() {
 }
 
 export interface TemplateRecord {
+  tag_code?: string;
   title: string;
-  video: string;
+  video: string | null;
   images: string[];
   layout: string;
   content: string | null;
+  is_featured?: number | boolean;
 }
 
 export interface TemplatePageData {
@@ -35,13 +37,20 @@ export interface TemplatePageData {
 
 const pageCache = new Map<string, Promise<TemplatePageData>>();
 
-export function fetchTemplatePage(tagCode: string, page = 1, size = 50) {
-  const key = `${tagCode}|${page}|${size}`;
+export function fetchTemplatePage(
+  tagCode?: string,
+  page = 1,
+  size = 50,
+  options?: { isFeatured?: boolean },
+) {
+  const featured = options?.isFeatured ? '1' : '';
+  const key = `${tagCode ?? ''}|${page}|${size}|${featured}`;
   let pending = pageCache.get(key);
   if (!pending) {
-    pending = apiRequest<TemplatePageData>(
-      `/api/agent/templates/page?tagCode=${encodeURIComponent(tagCode)}&page=${page}&size=${size}`
-    ).catch((e) => {
+    const params = new URLSearchParams({ page: String(page), size: String(size) });
+    if (tagCode) params.set('tagCode', tagCode);
+    if (featured) params.set('isFeatured', featured);
+    pending = apiRequest<TemplatePageData>(`/api/agent/templates/page?${params.toString()}`).catch((e) => {
       pageCache.delete(key);
       throw e;
     });

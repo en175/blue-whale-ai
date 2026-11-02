@@ -2,8 +2,6 @@ export type AssetType = 'image' | 'video' | 'audio' | 'character';
 
 export type GalleryMediaKind = 'video' | 'image';
 
-export type SharedAssetType = 'card' | 'media' | 'goods' | 'scene' | 'text';
-
 export type PickerMediaType = 'image' | 'video' | 'audio';
 
 export type MediaGenStatus = 'draft' | 'generating' | 'checking' | 'failed' | 'cancelled';

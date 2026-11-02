@@ -11,6 +11,10 @@ export type CanvasPageNodeActions = {
   openImageDialog: () => void;
   cancelJob: (id: string) => void;
   retryJob: (id: string) => void;
+  editFailed: (id: string) => void;
+  rechargeFailed: (id: string) => void;
+  requoteFailed: (id: string) => void;
+  requoteConfirm: (id: string) => void;
   fixFollowVideo: (id: string) => void;
   removeMediaNode: (id: string) => void;
   download: (id: string) => void;
@@ -33,6 +37,10 @@ export function useCanvasNodeActions() {
     openImageDialog: idleAction,
     cancelJob: idleAction,
     retryJob: idleAction,
+    editFailed: idleAction,
+    rechargeFailed: idleAction,
+    requoteFailed: idleAction,
+    requoteConfirm: idleAction,
     fixFollowVideo: idleAction,
     removeMediaNode: idleAction,
     download: idleAction,

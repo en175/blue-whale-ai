@@ -55,31 +55,16 @@ function buildPrisma(
     generation_jobs: { create },
     generation_job_extras: extras,
     generation_output_slots: { create: vi.fn().mockResolvedValue({}) },
-    cost_reservations: { create: vi.fn().mockResolvedValue({}) },
+    billing_cost_reservations: { create: vi.fn().mockResolvedValue({}) },
     generation_job_logs: { create: vi.fn().mockResolvedValue({}) },
-    project_events: {
-      create: vi.fn().mockResolvedValue({
-        event_id: "e1",
-        event_type: "generation_job.created",
-        cursor: 7n,
-        project_id: 1n,
-        aggregate_type: "generation_job",
-        aggregate_id: "305",
-        aggregate_version: 0,
-        correlation_id: null,
-        causation_id: null,
-        occurred_at: new Date(0),
-        payload: null,
-      }),
-    },
-    command_idempotency: { create: idemCreate },
+    project_command_receipts: { create: idemCreate },
   };
   const findFirst = vi.fn().mockResolvedValue(row);
   const idemFindUnique = vi.fn().mockResolvedValue(null);
   const prisma = {
     generation_jobs: { findFirst },
     generation_job_extras: extras,
-    command_idempotency: { findUnique: idemFindUnique, create: vi.fn() },
+    project_command_receipts: { findUnique: idemFindUnique, create: vi.fn() },
     $transaction: vi.fn(async (fn: (t: unknown) => Promise<unknown>) => fn(tx)),
   } as never;
   return { prisma, tx, create, findFirst, idemCreate, idemFindUnique, extras };
@@ -101,7 +86,11 @@ describe("createFinalizeJob（IKIZQC）", () => {
 
     const result = await createFinalizeJob(prisma, INPUT, { billing: { charge, release: vi.fn() } });
 
-    expect(result).toEqual({ generation_job_id: "305", cursor: 7 });
+    expect(result).toEqual({
+      generation_job_id: "305",
+      cursor: expect.any(Number),
+    });
+    expect(result.cursor).toBeGreaterThan(0);
     expect(create.mock.calls[0]![0].data).toMatchObject({
       type: "video",
       status: "queued",
@@ -118,7 +107,7 @@ describe("createFinalizeJob（IKIZQC）", () => {
     expect(charge).toHaveBeenCalledTimes(1);
     expect(charge).toHaveBeenCalledWith(305);
     expect(tx.generation_job_logs.create).toHaveBeenCalled();
-    expect(tx.cost_reservations.create).toHaveBeenCalled();
+    expect(tx.billing_cost_reservations.create).toHaveBeenCalled();
   });
 
   it("★ 样片扩展位已有 final_job_id → 回写守卫不覆盖（并发由来源唯一索引裁决，这条是防御性幂等）", async () => {
@@ -154,7 +143,7 @@ describe("createFinalizeJob（IKIZQC）", () => {
     expect(findFirst).not.toHaveBeenCalled();
   });
 
-  it("★ 幂等分域：command_idempotency 行以 operation=generation.finalize 写入（与建任务互不重放）", async () => {
+  it("★ 幂等分域：project_command_receipts 行以 operation=generation.finalize 写入（与建任务互不重放）", async () => {
     const { prisma, idemCreate } = buildPrisma(jobRow());
 
     await createFinalizeJob(

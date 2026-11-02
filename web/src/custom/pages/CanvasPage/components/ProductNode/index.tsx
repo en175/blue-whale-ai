@@ -10,7 +10,7 @@ import styles from './index.module.css';
 
 const HANDLE_STYLE = { background: 'transparent', border: 'none', width: 24, height: 24 } as const;
 
-function HandlePlus() {
+function HandlePlus({ onAdd }: { onAdd?: (client: { x: number; y: number }) => void }) {
   return (
     <span className="nodrag nopan" style={{
       display: 'flex',
@@ -23,7 +23,14 @@ function HandlePlus() {
       border: '1px solid #555',
       color: '#ccc',
       boxShadow: '0 2px 6px rgba(0,0,0,0.4)',
-    }}>
+      cursor: onAdd ? 'pointer' : undefined,
+    }}
+      onClick={(e) => {
+        if (!onAdd) return;
+        e.stopPropagation();
+        onAdd({ x: e.clientX, y: e.clientY });
+      }}
+    >
       <Plus size={14} strokeWidth={2.5} />
     </span>
   );
@@ -39,6 +46,8 @@ export interface ProductImage {
 }
 
 interface ProductNodeData {
+  onAddLeft?: (client: { x: number; y: number }) => void;
+  onAddRight?: (client: { x: number; y: number }) => void;
   name?: string;
   detail?: string;
   images?: ProductImage[];
@@ -47,7 +56,6 @@ interface ProductNodeData {
   projectId?: string;
   onDelete?: (id: string) => void;
   onAddToChat?: (id: string) => void;
-  onSaveToAssets?: (id: string) => void;
   onProductChange?: (id: string, patch: { images?: ProductImage[]; detail?: string }) => void;
   onPickFromCanvas?: (id: string) => void;
   onToast?: (type: 'success' | 'error' | 'warn', msg: string) => void;
@@ -210,7 +218,7 @@ export default function ProductNode({ id, data, selected }: NodeProps & { data: 
     >
       {!data.isFirst && (
         <Handle type="target" position={Position.Left} style={{ ...HANDLE_STYLE, left: '-16px' }}>
-          <HandlePlus />
+          <HandlePlus onAdd={data.onAddLeft} />
         </Handle>
       )}
 
@@ -364,7 +372,7 @@ export default function ProductNode({ id, data, selected }: NodeProps & { data: 
       </div>
 
       <Handle type="source" position={Position.Right} style={{ ...HANDLE_STYLE, right: '-16px' }}>
-        <HandlePlus />
+        <HandlePlus onAdd={data.onAddRight} />
       </Handle>
 
     </div>

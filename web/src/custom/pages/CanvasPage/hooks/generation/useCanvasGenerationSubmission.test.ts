@@ -1,5 +1,6 @@
 import { createElement } from 'react';
 import { renderToString } from 'react-dom/server';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Edge, Node } from '@xyflow/react';
 import { ApiError } from '@/shared/api/http';
@@ -112,6 +113,7 @@ function createBag(nodes: Node[]): Bag {
     setEdges: (() => {}) as CanvasGenerationSubmissionHost['setEdges'],
     actionsRef: { current: {
       removeMediaNode: () => {}, cancelJob: () => {}, retryJob: () => {}, fixFollowVideo: () => {},
+      editFailed: () => {}, rechargeFailed: () => {}, requoteFailed: () => {}, requoteConfirm: () => {},
       duplicate: () => {}, renameCard: () => {}, addToChat: () => {}, download: () => {}, showDetails: () => {},
     } } as CanvasGenerationSubmissionHost['actionsRef'],
     toolMode: 'select',
@@ -119,7 +121,6 @@ function createBag(nodes: Node[]): Bag {
     spawnPosition: () => ({ x: 10, y: 20 }),
     textAttachmentsForSend: () => [],
     handleMediaDims: () => {},
-    handleSaveMediaToAssets: () => {},
     dockCallbacks: {} as CanvasGenerationSubmissionHost['dockCallbacks'],
   };
   return next;
@@ -132,7 +133,13 @@ function Probe({ bag: b }: { bag: Bag }) {
 
 function mount(nodes: Node[]): void {
   bag = createBag(nodes);
-  renderToString(createElement(Probe, { bag }));
+  renderToString(
+    createElement(
+      QueryClientProvider,
+      { client: new QueryClient() },
+      createElement(Probe, { bag }),
+    ),
+  );
 }
 
 function handles(): CanvasGenerationSubmissionHandles {

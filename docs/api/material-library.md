@@ -71,7 +71,7 @@
 ```
 > `Result` 为分页素材组列表（`TotalCount` / `Items: [Id, Name, GroupType, CoverUrl, CreateTime, UpdateTime]` / `PageNumber` / `PageSize`）。
 >
-> **产品侧行为（IKEXX8 → 2026-10-09 ADR-0126）**：`Filter.GroupType` 为 `AIGC` / `LivenessFace` 时本 Action **不打上游**，改读产品本地 `material_groups`（`AIGC`→`kind="virtual"`，`LivenessFace`→`kind="real"`），返回同款信封，**只含当前用户自己的组**（`RequestId` 为后端合成 `req_<uuid>`）。**缺失或认不出的 `GroupType` 仍透传上游**，所以前端必须继续传 `GroupType`。列表项的 `GroupType` 现在会如实回 `LivenessFace`；`CoverUrl` **恒为 `null`**（上游组信息里没有封面字段，实测过），前端不要依赖。
+> **产品侧行为（IKEXX8 → 2026-10-09 ADR-0126）**：`Filter.GroupType` 为 `AIGC` / `LivenessFace` 时本 Action **不打上游**，改读产品本地 `user_material_groups`（`AIGC`→`kind="virtual"`，`LivenessFace`→`kind="real"`），返回同款信封，**只含当前用户自己的组**（`RequestId` 为后端合成 `req_<uuid>`）。**缺失或认不出的 `GroupType` 仍透传上游**，所以前端必须继续传 `GroupType`。列表项的 `GroupType` 现在会如实回 `LivenessFace`；`CoverUrl` **恒为 `null`**（上游组信息里没有封面字段，实测过），前端不要依赖。
 >
 > 存量真人组**不补偿**（本地无行 → 列表看不到），用户需重走 H5 认证；详见 [`2026-10-09-material-binding-and-delete-cascade-api.md`](./2026-10-09-material-binding-and-delete-cascade-api.md) §3。前端请求形状不变，见 [素材关联对接文档 §6.2](./2026-09-07-material-association-api.md)。
 
@@ -283,13 +283,12 @@
 
 ### 5.1 素材校验门（v2 新增，必读）
 
-**只有 `Status:"Active"` 的素材能用作视频生成参考。** 三条视频创建路径都会校验，不通过直接 400 拒绝、零写入（不建任务）：
+**只有 `Status:"Active"` 的素材能用作视频生成参考。** 两条视频创建路径都会校验，不通过直接 400 拒绝、零写入（不建任务）：
 
 | 入口 | 说明 |
 |---|---|
 | `POST /api/projects/:id/generation-jobs` | 创建期 |
 | `POST /api/projects/:id/generation-jobs/:jobId/retry` | 重试期 |
-| `POST /api/projects/:id/scene-cards/:sceneCardId/generate` | **场景卡再生成**（第三条路径） |
 
 **校验范围**——以下两批素材 id 都会被查：
 

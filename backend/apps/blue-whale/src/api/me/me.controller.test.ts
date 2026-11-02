@@ -60,14 +60,20 @@ function createController(overrides: {
     resolve: vi.fn(async () => null),
     revoke: vi.fn(async () => undefined),
   };
+  const operationLog = {
+    record: vi.fn(async () => undefined),
+    finish: vi.fn(async () => undefined),
+    findByRef: vi.fn(async () => null),
+  };
   const controller = new MeController(
     sessions as never,
     identity as never,
     identity as never,
     identity as never,
     phoneActions as never,
+    operationLog as never,
   );
-  return { controller, sessions, identity, phoneActions };
+  return { controller, sessions, identity, phoneActions, operationLog };
 }
 
 const USER = { userId: "42", username: "alice" } as never;
@@ -470,5 +476,77 @@ describe("MeController 昵称（IKPC9E）", () => {
     const out = await controller.updateNickname({ nickname: "小 明" }, USER);
     expect(out).toMatchObject({ error_code: "nickname_invalid" });
     expect(identity.updateNickname).toHaveBeenCalled();
+  });
+
+  it("携带 operation_id → 写入可查询的操作记录", async () => {
+    const { controller, operationLog } = createController();
+    await controller.updateNickname(
+      { nickname: "新昵称", operation_id: "op-1" },
+      USER,
+    );
+    expect(operationLog.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "nickname_update",
+        ref: "op-1",
+        status: 2,
+      }),
+    );
+  });
+});
+
+describe("MeController 操作结果查询（IKQ1HL）", () => {
+  it("无记录 → operation_not_found", async () => {
+    const { controller } = createController();
+    const out = await controller.operationResult("ref-1", USER);
+    expect(out).toMatchObject({ error_code: "operation_not_found" });
+  });
+
+  it("他人的记录 → operation_forbidden", async () => {
+    const { controller, operationLog } = createController();
+    operationLog.findByRef.mockResolvedValue({
+      id: "1",
+      category: "account",
+      action: "phone_rebind",
+      target: "138****1234",
+      targetUserId: "99",
+      detail: "{}",
+      operator: "138****1234",
+      operatorId: "99",
+      ipAddress: null,
+      status: 2,
+      ref: "ref-1",
+      createdAt: "2026-10-28T00:00:00+08:00",
+    } as never);
+
+    const out = await controller.operationResult("ref-1", USER);
+    expect(out).toMatchObject({ error_code: "operation_forbidden" });
+  });
+
+  it("本人的记录 → 返回操作、状态与明细", async () => {
+    const { controller, operationLog } = createController();
+    operationLog.findByRef.mockResolvedValue({
+      id: "1",
+      category: "account",
+      action: "phone_rebind",
+      target: "138****1234",
+      targetUserId: "42",
+      detail: JSON.stringify({ phone: "139****1234" }),
+      operator: "138****1234",
+      operatorId: "42",
+      ipAddress: null,
+      status: 2,
+      ref: "ref-1",
+      createdAt: "2026-10-28T00:00:00+08:00",
+    } as never);
+
+    const out = await controller.operationResult("ref-1", USER);
+    expect(out).toMatchObject({
+      code: 200,
+      data: {
+        operation: "phone_rebind",
+        status: 2,
+        detail: { phone: "139****1234" },
+      },
+    });
   });
 });

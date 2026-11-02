@@ -7,12 +7,9 @@ import com.bluewhale.worker.domain.entity.GenerationJobLogEntity;
 import com.bluewhale.worker.domain.contract.JobStatusEnum;
 import com.bluewhale.worker.infrastructure.persistence.mapper.GenerationJobMapper;
 import com.bluewhale.worker.infrastructure.persistence.mapper.AssetMapper;
-import com.bluewhale.worker.infrastructure.persistence.mapper.ProjectEventMapper;
 import com.bluewhale.worker.infrastructure.persistence.mapper.GenerationJobLogMapper;
 import com.bluewhale.worker.infrastructure.persistence.mapper.GenerationOutputSlotMapper;
-import com.bluewhale.worker.infrastructure.persistence.mapper.SceneCardGenerationRecordMapper;
 import com.bluewhale.worker.infrastructure.persistence.mapper.GenerationJobExtraMapper;
-import com.bluewhale.worker.infrastructure.persistence.mapper.StoryboardPreviewMapper;
 import com.bluewhale.worker.domain.entity.GenerationOutputSlotEntity;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -50,20 +47,12 @@ public class JobStateMachineService {
             GenerationJobMapper jobMapper,
             AssetMapper assetMapper,
             GenerationJobLogMapper jobLogMapper,
-            ProjectEventMapper projectEventMapper,
             GenerationOutputSlotMapper slotMapper,
-            SceneCardGenerationRecordMapper sceneCardRecordMapper,
-            StoryboardPreviewMapper storyboardPreviewMapper,
             GenerationJobExtraMapper extraMapper
     ) {
         this(jobMapper, jobLogMapper,
                 new JobClaimService(jobMapper, extraMapper),
                 new JobFinalizer(jobMapper, assetMapper, jobLogMapper, slotMapper, extraMapper,
-                        new SceneCardGenerationRecordSync(slotMapper, sceneCardRecordMapper,
-                                new ProjectEventPublisher(projectEventMapper)),
-                        new StoryboardPreviewSync(slotMapper, storyboardPreviewMapper,
-                                new ProjectEventPublisher(projectEventMapper)),
-                        new ProjectEventPublisher(projectEventMapper),
                         TerminalEventOutbox.noop()));
     }
 
@@ -280,15 +269,6 @@ public class JobStateMachineService {
         return ok;
     }
 
-
-    static java.util.List<GenerationOutputSlotEntity> resolveLogicalSlots(
-            java.util.List<GenerationOutputSlotEntity> slots) {
-        return JobStatusEnum.resolveLogicalSlots(slots);
-    }
-
-    static String aggregateSlotStatus(java.util.List<GenerationOutputSlotEntity> resolvedSlots) {
-        return JobStatusEnum.aggregateSlotStatus(resolvedSlots);
-    }
 
 
     public void appendLog(String jobId, String event, String status,

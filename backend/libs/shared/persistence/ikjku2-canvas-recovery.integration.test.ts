@@ -1,3 +1,4 @@
+import { clearEffectiveRecoveryOwners, effectiveCanvasRow } from "./recovery-owner-test-helpers.js";
 
 
 
@@ -169,7 +170,7 @@ describe.skipIf(!databaseUrl)("新协议保存守护未声明受保护卡（IKJK
   }
 
   async function canvasRow() {
-    return prisma.canvas.findFirst({ where: { project_id: BigInt(PROJECT_ID) } });
+    return effectiveCanvasRow(prisma, PROJECT_ID);
   }
 
   async function canvasNodeIds(): Promise<string[]> {
@@ -237,16 +238,18 @@ describe.skipIf(!databaseUrl)("新协议保存守护未声明受保护卡（IKJK
   });
 
   beforeEach(async () => {
-    await prisma.generation_canvas_node_owners.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
+    await clearEffectiveRecoveryOwners(prisma, BigInt(PROJECT_ID));
     await prisma.generation_canvas_outputs.deleteMany({});
     await prisma.generation_canvas_submissions.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
-    await prisma.command_idempotency.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
-    await prisma.canvas.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
+    await prisma.project_command_receipts.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
+    await prisma.project_canvas.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
+    await prisma.project_edges.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
+    await prisma.project_nodes.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
     await prisma.generation_output_slots.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
     await prisma.generation_job_logs.deleteMany({});
-    await prisma.cost_reservations.deleteMany({});
+    await prisma.billing_cost_reservations.deleteMany({});
     await prisma.generation_jobs.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
-    await prisma.prompt_preview_snapshots.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
+    await prisma.project_prompt_preview_snapshots.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
   });
 
   it("★ 1. 合法 apply B 同时省略 present A → 422，整笔回滚且恢复查询与文档一致", async () => {
@@ -264,7 +267,7 @@ describe.skipIf(!databaseUrl)("新协议保存守护未声明受保护卡（IKJK
     expect(await canvasNodeIds()).toEqual([NODE_A, NODE_B]);
     expect(await outputState(UUID_A, PRIMARY_OUTPUT_KEY)).toEqual({ state: "present", revision: 1 });
     expect(await outputState(UUID_B, PRIMARY_OUTPUT_KEY)).toEqual({ state: "present", revision: 1 });
-    expect(await prisma.command_idempotency.findUnique({
+    expect(await prisma.project_command_receipts.findUnique({
       where: { project_id_operation_idempotency_key: { project_id: BigInt(PROJECT_ID), operation: "SAVE_CANVAS_RECOVERY_V1", idempotency_key: CMD("10001") } },
     })).toBeNull();
 
@@ -392,7 +395,7 @@ describe.skipIf(!databaseUrl)("新协议保存守护未声明受保护卡（IKJK
     const { fanned } = await seedTwoPresentCards();
 
     const source = { sessionId: "ikjku2-session-1", revisionId: "rev-1", shotNo: 1 };
-    await prisma.prompt_preview_snapshots.create({
+    await prisma.project_prompt_preview_snapshots.create({
       data: {
         project_id: BigInt(PROJECT_ID),
         source_key: createHash("sha256")

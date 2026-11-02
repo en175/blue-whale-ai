@@ -15,10 +15,10 @@ vi.mock('sonner', () => ({
 const project = {
   id: 'project-1',
   name: '分镜草稿',
-  thumb: null,
   previews: [],
   created_at: '2026-09-04T00:00:00.000Z',
   last_opened_at: null,
+  last_edited_at: '2026-09-04T00:00:00.000Z',
   pinned_at: null,
 };
 

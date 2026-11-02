@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   galleryCoverSrc,
+  galleryPreloadMode,
   mediaKindFromTagCode,
   shouldShowVideoChrome,
 } from './galleryCardModel';
@@ -32,5 +33,16 @@ describe('galleryCoverSrc', () => {
   it('第二张优先，否则第一张', () => {
     expect(galleryCoverSrc(['a.jpg'])).toBe('a.jpg');
     expect(galleryCoverSrc(['a.jpg', 'b.jpg', 'c.jpg'])).toBe('b.jpg');
+  });
+});
+
+describe('galleryPreloadMode', () => {
+  it('只有当前 tab 走预加载', () => {
+    expect(galleryPreloadMode('video', 'video')).toBe('eager');
+    expect(galleryPreloadMode('video', 'picture')).toBe('lazy');
+  });
+
+  it('首个 tab 确定前不预加载', () => {
+    expect(galleryPreloadMode('', 'video')).toBe('lazy');
   });
 });

@@ -19,16 +19,12 @@ import com.bluewhale.worker.domain.entity.AssetEntity;
 import com.bluewhale.worker.domain.entity.GenerationJobEntity;
 import com.bluewhale.worker.domain.entity.GenerationJobLogEntity;
 import com.bluewhale.worker.domain.entity.GenerationOutputSlotEntity;
-import com.bluewhale.worker.domain.entity.ProjectEventEntity;
 import com.bluewhale.worker.infrastructure.persistence.mapper.AssetMapper;
 import com.bluewhale.worker.infrastructure.persistence.mapper.GenerationJobExtraMapper;
 import com.bluewhale.worker.infrastructure.persistence.mapper.GenerationJobLogMapper;
 import com.bluewhale.worker.infrastructure.persistence.mapper.GenerationJobMapper;
 import com.bluewhale.worker.infrastructure.persistence.mapper.GenerationOutputSlotMapper;
 import com.bluewhale.worker.infrastructure.persistence.mapper.GenerationOutboxMapper;
-import com.bluewhale.worker.infrastructure.persistence.mapper.ProjectEventMapper;
-import com.bluewhale.worker.infrastructure.persistence.mapper.SceneCardGenerationRecordMapper;
-import com.bluewhale.worker.infrastructure.persistence.mapper.StoryboardPreviewMapper;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitMixAudioClient;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitExtractAudioClient;
 import com.bluewhale.worker.infrastructure.gateway.NewApiMediaKitExtractAudioClient.ExtractAudioTaskObservation;
@@ -125,7 +121,6 @@ class JobStateMachineMySqlIntegrationTest {
     static GenerationJobMapper jobMapper;
     static AssetMapper assetMapper;
     static GenerationJobLogMapper jobLogMapper;
-    static ProjectEventMapper projectEventMapper;
     static GenerationOutputSlotMapper slotMapper;
     static GenerationJobExtraMapper extraMapper;
     static GenerationOutboxMapper outboxMapper;
@@ -174,23 +169,8 @@ class JobStateMachineMySqlIntegrationTest {
         }
 
         @Bean
-        ProjectEventMapper projectEventMapper(SqlSessionFactory sf) throws Exception {
-            return factory(ProjectEventMapper.class, sf).getObject();
-        }
-
-        @Bean
         GenerationOutputSlotMapper slotMapper(SqlSessionFactory sf) throws Exception {
             return factory(GenerationOutputSlotMapper.class, sf).getObject();
-        }
-
-        @Bean
-        SceneCardGenerationRecordMapper recordMapper(SqlSessionFactory sf) throws Exception {
-            return factory(SceneCardGenerationRecordMapper.class, sf).getObject();
-        }
-
-        @Bean
-        StoryboardPreviewMapper previewMapper(SqlSessionFactory sf) throws Exception {
-            return factory(StoryboardPreviewMapper.class, sf).getObject();
         }
 
         @Bean
@@ -206,24 +186,17 @@ class JobStateMachineMySqlIntegrationTest {
         @Bean
         JobStateMachineService service(
                 GenerationJobMapper jm, AssetMapper am, GenerationJobLogMapper jlm,
-                ProjectEventMapper pem, GenerationOutputSlotMapper sm,
-                SceneCardGenerationRecordMapper rm, StoryboardPreviewMapper pm,
+                GenerationOutputSlotMapper sm,
                 GenerationJobExtraMapper em) {
-            return new JobStateMachineService(jm, am, jlm, pem, sm, rm, pm, em);
+            return new JobStateMachineService(jm, am, jlm, sm, em);
         }
 
         @Bean
         JobFinalizer finalizer(
                 GenerationJobMapper jm, AssetMapper am, GenerationJobLogMapper jlm,
                 GenerationOutputSlotMapper sm, GenerationJobExtraMapper em,
-                ProjectEventMapper pem,
-                SceneCardGenerationRecordMapper rm, StoryboardPreviewMapper pm,
                 GenerationOutboxMapper om) {
-            ProjectEventPublisher events = new ProjectEventPublisher(pem);
             return new JobFinalizer(jm, am, jlm, sm, em,
-                    new SceneCardGenerationRecordSync(sm, rm, events),
-                    new StoryboardPreviewSync(sm, pm, events),
-                    events,
                     new TerminalEventOutbox(om, jm, BillingEventPublisher.noop(), new MockEnvironment()));
         }
 
@@ -251,7 +224,6 @@ class JobStateMachineMySqlIntegrationTest {
         jdbc = new JdbcTemplate(ctx.getBean(DataSource.class));
         assetMapper = ctx.getBean(AssetMapper.class);
         jobLogMapper = ctx.getBean(GenerationJobLogMapper.class);
-        projectEventMapper = ctx.getBean(ProjectEventMapper.class);
         slotMapper = ctx.getBean(GenerationOutputSlotMapper.class);
         outboxMapper = ctx.getBean(GenerationOutboxMapper.class);
     }
@@ -309,40 +281,18 @@ class JobStateMachineMySqlIntegrationTest {
     }
 
     private long seedSlot(long jobId, long projectId, int slotIndex, String status) {
-        return seedSlot(jobId, projectId, slotIndex, status, null);
-    }
-
-    private long seedSlot(long jobId, long projectId, int slotIndex, String status, Long recordId) {
         jdbc.update("""
                 INSERT INTO generation_output_slots
                   (generation_job_id, project_id, slot_index, status,
-                   scene_card_generation_record_id, gmt_create, gmt_modified)
-                VALUES (?,?,?,?,?,NOW(),NOW())
-                """, jobId, projectId, slotIndex, status, recordId);
-        Long id = jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
-        return id != null ? id : -1;
-    }
-
-    private long seedStoryboardPreview(long jobId, long projectId) {
-        jdbc.update("""
-                INSERT INTO storyboard_previews
-                  (scene_card_id, project_id, first_generation_job_id, command_id,
-                   summary_status, capability_snapshot_version,
-                   gmt_create, gmt_modified, version, is_delete)
-                VALUES (1,?,?,?,  'generating','{}',NOW(),NOW(),1,0)
-                """, projectId, jobId, "cmd-" + jobId);
+                   gmt_create, gmt_modified)
+                VALUES (?,?,?,?,NOW(),NOW())
+                """, jobId, projectId, slotIndex, status);
         Long id = jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
         return id != null ? id : -1;
     }
 
     private GenerationJobEntity readJob(long id) {
         return jobMapper.selectById(id);
-    }
-
-    private long countEvents(long projectId) {
-        return projectEventMapper.selectCount(
-                new LambdaQueryWrapper<ProjectEventEntity>()
-                        .eq(ProjectEventEntity::getProjectId, projectId));
     }
 
     private long countLogs(long jobId) {
@@ -780,7 +730,6 @@ class JobStateMachineMySqlIntegrationTest {
             long jobId = seedClaimedJob(9L, "image", "bottom_dock", "worker-1", 1L);
             long slot0 = seedSlot(jobId, 99L, 0, "pending");
             long slot1 = seedSlot(jobId, 99L, 1, "pending");
-            seedStoryboardPreview(jobId, 99L);
 
             long assetA = 2001L, assetB = 2002L;
             boolean ok = finalizer.completeJob(
@@ -802,7 +751,6 @@ class JobStateMachineMySqlIntegrationTest {
             assertThat(s0.getAssetId()).isEqualTo(assetA);
             assertThat(s1.getStatus()).isEqualTo("succeeded");
             assertThat(s1.getAssetId()).isEqualTo(assetB);
-            assertThat(countEvents(99L)).isEqualTo(4);
         }
 
         @Test
@@ -821,7 +769,6 @@ class JobStateMachineMySqlIntegrationTest {
             assertThat(slotMapper.selectById(slot0).getAssetId()).isEqualTo(3001L);
             assertThat(slotMapper.selectById(slot1).getStatus()).isEqualTo("failed");
             assertThat(slotMapper.selectById(slot1).getAssetId()).isNull();
-            assertThat(countEvents(99L)).isEqualTo(3);
         }
 
         @Test
@@ -838,7 +785,6 @@ class JobStateMachineMySqlIntegrationTest {
             assertThat(readJob(jobId).getStatus()).isEqualTo("failed");
             assertThat(slotMapper.selectById(slot0).getStatus()).isEqualTo("failed");
             assertThat(slotMapper.selectById(slot1).getStatus()).isEqualTo("failed");
-            assertThat(countEvents(99L)).isEqualTo(3);
         }
 
         @Test
@@ -852,7 +798,6 @@ class JobStateMachineMySqlIntegrationTest {
 
             assertThat(ok).isFalse();
             assertThat(readJob(jobId).getStatus()).isEqualTo("processing");
-            assertThat(countEvents(99L)).isEqualTo(0);
         }
 
         @Test
@@ -865,7 +810,6 @@ class JobStateMachineMySqlIntegrationTest {
                     String.valueOf(jobId), List.of("5001"), "worker-1", 1L);
 
             assertThat(ok).isTrue();
-            assertThat(countEvents(99L)).isEqualTo(0);
         }
     }
 
@@ -897,7 +841,6 @@ class JobStateMachineMySqlIntegrationTest {
                     new LambdaQueryWrapper<GenerationJobLogEntity>()
                             .eq(GenerationJobLogEntity::getGenerationJobId, jobId)).get(0);
             assertThat(failedLog.getPayload()).contains("provider_failed").contains("上游挂了");
-            assertThat(countEvents(99L)).isEqualTo(3);
         }
 
         @Test
@@ -1095,7 +1038,6 @@ class JobStateMachineMySqlIntegrationTest {
             assertThat(asset.getUserId()).isEqualTo(9L);
             assertThat(asset.getProjectId()).isEqualTo(99L);
             assertThat(asset.getGenerationJobId()).isEqualTo(jobId);
-            assertThat(countEvents(99L)).isEqualTo(1);
         }
 
         @Test
@@ -1111,7 +1053,6 @@ class JobStateMachineMySqlIntegrationTest {
 
             assertThat(assetId).isNull();
             assertThat(countAssets(jobId)).isEqualTo(0);
-            assertThat(countEvents(99L)).isEqualTo(0);
         }
     }
 
@@ -1405,7 +1346,8 @@ class JobStateMachineMySqlIntegrationTest {
                 LocalDateTime.now().minusSeconds(10), 99L,
                 "{\"prompt\":\"一只猫在跑步\","
                         + "\"model_id\":\"seedance-2\",\"duration\":5.0,"
-                        + "\"resolution\":\"720p\",\"aspect_ratio\":\"16:9\"}");
+                        + "\"resolution\":\"720p\",\"aspect_ratio\":\"16:9\","
+                        + "\"output_width\":1280,\"output_height\":720}");
         jdbc.update("UPDATE generation_jobs SET retry_of_job_id=?, "
                 + "gmt_create=DATE_SUB(NOW(), INTERVAL 119 MINUTE) WHERE id=?", parentId, retryId);
         String retry = String.valueOf(retryId);
@@ -1454,7 +1396,7 @@ class JobStateMachineMySqlIntegrationTest {
 
         assertThat(readJob(retryId).getStatus()).isEqualTo("succeeded");
         assertThat(readJob(retryId).getFencingToken()).isEqualTo(2L);
-        assertThat(jdbc.queryForObject("SELECT url FROM assets WHERE generation_job_id=?",
+        assertThat(jdbc.queryForObject("SELECT url FROM user_assets WHERE generation_job_id=?",
                 String.class, retryId)).isEqualTo("http://cdn/video.mp4");
         assertThat(countAssets(retryId)).isEqualTo(1);
         assertThat(countLogs(retryId)).isEqualTo(1);
@@ -1635,9 +1577,9 @@ class JobStateMachineMySqlIntegrationTest {
                 500L, "0123456789abcdef0123456789abcdef", 12.5))).isTrue();
 
         assertThat(readJob(jobId).getStatus()).isEqualTo("succeeded");
-        assertThat(jdbc.queryForObject("SELECT url FROM assets WHERE generation_job_id=?", String.class, jobId))
+        assertThat(jdbc.queryForObject("SELECT url FROM user_assets WHERE generation_job_id=?", String.class, jobId))
                 .isEqualTo("https://our-tos.example/audio.mp3");
-        assertThat(jdbc.queryForObject("SELECT duration_ms FROM assets WHERE generation_job_id=?", Integer.class, jobId))
+        assertThat(jdbc.queryForObject("SELECT duration_ms FROM user_assets WHERE generation_job_id=?", Integer.class, jobId))
                 .isEqualTo(12_500);
         assertThat(countAssets(jobId)).isEqualTo(1);
     }
@@ -1714,11 +1656,11 @@ class JobStateMachineMySqlIntegrationTest {
             processor.handle(String.valueOf(jobId));
             assertThat(readJob(jobId).getStatus()).isEqualTo("succeeded");
             assertThat(countAssets(jobId)).isEqualTo(1);
-            String assetUrl = jdbc.queryForObject("SELECT url FROM assets WHERE generation_job_id=?", String.class, jobId);
+            String assetUrl = jdbc.queryForObject("SELECT url FROM user_assets WHERE generation_job_id=?", String.class, jobId);
             assertThat(assetUrl).isEqualTo(base.get() + "/stored/out.mp3")
                     .isNotEqualTo(base.get() + "/temporary/out.mp3");
             assertThat(java.net.URI.create(assetUrl).toURL().openStream().readAllBytes()).isEqualTo(audio);
-            assertThat(jdbc.queryForObject("SELECT duration_ms FROM assets WHERE generation_job_id=?", Integer.class, jobId))
+            assertThat(jdbc.queryForObject("SELECT duration_ms FROM user_assets WHERE generation_job_id=?", Integer.class, jobId))
                     .isEqualTo(12_500);
         } finally {
             gateway.stop(0);
@@ -1760,7 +1702,6 @@ class JobStateMachineMySqlIntegrationTest {
             assertThat(readJob(jobId).getStatus()).isEqualTo("processing");
             assertThat(readJob(jobId).getNextActionAt()).isEqualTo(originalNextActionAt);
             assertThat(countAssets(jobId)).isZero();
-            assertThat(countEvents(99L)).isZero();
             assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM generation_job_logs WHERE generation_job_id=?",
                     Integer.class, jobId)).isZero();
         }
@@ -1820,7 +1761,6 @@ class JobStateMachineMySqlIntegrationTest {
             assertThat(row.getOutputAssetIds()).isNotNull();
             assertThat(countAssets(jobId)).isEqualTo(1);
             assertThat(countLogs(jobId)).isEqualTo(1);
-            assertThat(countEvents(99L)).isEqualTo(2);
         }
 
         @Test
@@ -1837,7 +1777,6 @@ class JobStateMachineMySqlIntegrationTest {
             assertThat(row.getStatus()).isEqualTo("failed");
             assertThat(row.getError()).contains("video_has_no_audio_track");
             assertThat(countLogs(jobId)).isEqualTo(1);
-            assertThat(countEvents(99L)).isEqualTo(1);
         }
     }
 }

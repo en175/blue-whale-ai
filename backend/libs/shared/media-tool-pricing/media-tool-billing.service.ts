@@ -129,7 +129,7 @@ export class MediaToolBillingService {
   }
 
   private async load(toolType: string) {
-    const row = await this.prisma.client.media_tool_pricing.findUnique({
+    const row = await this.prisma.client.bw_media_tools.findUnique({
       where: { tool_type: toolType },
       select: {
         label: true,

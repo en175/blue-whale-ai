@@ -12,9 +12,8 @@
   box-sizing: border-box;
   position: relative;
   z-index: 1;
-  padding-left: var(--sidebar-width);
   overflow-y: auto;
-  background: rgba(7, 7, 10, 0.2);
+  background: #000;
 }
 
 .container {

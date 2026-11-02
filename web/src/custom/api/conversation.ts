@@ -3,10 +3,8 @@ import { newIdempotencyKey } from '@/shared/api/idempotencyKey';
 import { handleUnauthorized } from '@/shared/utils/auth';
 
 export interface MentionPayload {
-  type: 'asset' | 'scene_card';
+  type: 'asset';
   asset_id?: string;
-  scene_card_id?: string;
-  scene_card_version?: number;
   display_name: string;
 }
 

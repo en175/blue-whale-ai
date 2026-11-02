@@ -160,7 +160,7 @@ export default function ModelList() {
     <Page>
       <PageHeader
         title="模型列表"
-        subtitle="管理前端 dock 展示与后端调用所依赖的模型能力目录（generation_model_capability）"
+        subtitle="管理前端 dock 展示与后端调用所依赖的模型能力目录（catalog_models）"
         extra={
           <Button
             variant="primary"

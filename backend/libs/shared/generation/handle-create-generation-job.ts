@@ -7,7 +7,12 @@ import {
 import type { ReferenceItemInput } from "./reference-item-input.js";
 import { freezePromptPlans } from "./prompt-plan-snapshot.js";
 import { checkReferenceLimits } from "../generation-runtime/reference-limits.js";
-import { freezeReferenceLimits } from "../generation-runtime/video-reference-validation.js";
+import { validateReferenceImages } from "../generation-runtime/image-reference-validation.js";
+import {
+  freezeReferenceLimits,
+  validateReferences,
+} from "../generation-runtime/video-reference-validation.js";
+import { VideoInputError } from "../generation-runtime/material-reference.js";
 import type { CanvasEdge } from "@lib/contracts";
 import {
   type PromptTargetNode,
@@ -29,12 +34,15 @@ import {
   ERROR_UNSUPPORTED_TYPE,
   ERROR_CAPABILITY_UNSUPPORTED_PARAM,
   ERROR_QUOTE_STALE,
+  ERROR_QUOTE_UNAVAILABLE,
   VIDEO_SAMPLE_RESOLUTION,
   PARAM_MISSING_CODE,
   RESOURCE_NOT_FOUND_CODE,
   errorCodeToNumeric,
+  messageOf,
   checkGenerationParamLimit,
   toGenerationParamCheckInput,
+  canonicalSizeValue,
   resolveVideoMode,
   normalizeVideoMode,
   frozenVideoModeOf,
@@ -104,7 +112,7 @@ import {
   DURATION_BASIS_KEY,
   OMNI_TASK_TYPE_ALLOWED_KEY,
 } from "@lib/shared/billing/billing-specs.js";
-import { quoteRevisionOf } from "./handle-quote-generation-job.js";
+import { quoteRevisionOf, videoQuoteRevisionInput } from "./handle-quote-generation-job.js";
 
 import {
   channelOf,
@@ -218,7 +226,7 @@ function uniqueMaterialRefs(
 
 
 
-function parseReferences(
+export function parseReferences(
   v: unknown,
 ): { kind: "absent" } | { kind: "ok"; items: ReferenceItemInput[] } | { kind: "invalid" } {
   if (v === undefined || v === null) return { kind: "absent" };
@@ -874,6 +882,94 @@ const strategies: Record<GenerationType, GenerationTypeStrategy> = {
   video: videoStrategy,
   audio: audioStrategy,
 };
+
+function validateCapabilityParams(
+  type: GenerationType,
+  body: CreateGenerationJobBody,
+  capability: ModelCapabilityView | undefined,
+): { code: string; message: string } | null {
+  if (!capability) return null;
+  if (type === "video") return validateVideo(body, capability);
+  if (type === "audio") return validateAudioReferences(body, capability.features);
+  return null;
+}
+
+export function validateGenerationRequest(
+  type: GenerationType,
+  body: CreateGenerationJobBody,
+  capability?: ModelCapabilityView,
+): { code: string; message: string } | null {
+  const strategy = strategies[type];
+  if (!strategy) return { code: ERROR_UNSUPPORTED_TYPE, message: "暂不支持该生成类型" };
+  return (
+    strategy.validate(body) ?? validateCapabilityParams(type, body, capability)
+  );
+}
+
+export function validateVideoParamLimits(args: {
+  body: CreateGenerationJobBody;
+  capability: ModelCapabilityView;
+  videoMode: VideoMode | undefined;
+  videoRefItems: ReadonlyArray<{ role: string; type: string }>;
+}): { code: string; message: string } | null {
+  const params = args.body.parameters as GenerationParameters;
+  const explicitMode = normalizeVideoMode(params.mode);
+  const taskTypes = args.capability.features?.task_types;
+  if (
+    explicitMode &&
+    taskTypes &&
+    typeof taskTypes === "object" &&
+    !Array.isArray(taskTypes) &&
+    !(explicitMode in taskTypes)
+  ) {
+    return {
+      code: ERROR_TASK_TYPE_PARAM_CONSTRAINT,
+      message: TASK_TYPE_PARAM_CONSTRAINT_MESSAGE,
+    };
+  }
+  const checked = toGenerationParamCheckInput({
+    resolution: params.resolution,
+    size: params.size,
+    aspect_ratio: params.aspect_ratio,
+    duration: params.duration,
+  });
+  if (checked) {
+    const limitErr = checkGenerationParamLimit(
+      {
+        supported_sizes: args.capability.supported_sizes,
+        supported_aspect_ratios: args.capability.supported_aspect_ratios,
+        supported_durations: args.capability.supported_durations,
+        task_types: args.capability.features?.task_types,
+      },
+      args.videoMode ? { ...checked, mode: args.videoMode } : checked,
+    );
+    if (limitErr) return { code: limitErr.code, message: limitErr.reason };
+  }
+  if (args.videoMode === "edit" || args.videoMode === "extend") {
+    const allowed = modeAllowedRatios(
+      args.capability.features?.task_types,
+      args.videoMode,
+    );
+    const ratio = isStr(params.aspect_ratio) ? params.aspect_ratio : "";
+    if (allowed && !allowed.includes(ratio)) {
+      return {
+        code: ERROR_TASK_TYPE_PARAM_CONSTRAINT,
+        message: TASK_TYPE_PARAM_CONSTRAINT_MESSAGE,
+      };
+    }
+    if (
+      !args.videoRefItems.some(
+        (item) => item.role === "reference" && item.type === "video",
+      )
+    ) {
+      return {
+        code: ERROR_INVALID_INPUT,
+        message: "视频编辑模式至少需要 1 段参考视频",
+      };
+    }
+  }
+  return null;
+}
 
 
 
@@ -1777,6 +1873,18 @@ export async function handleCreateGenerationJob(
 
   const capability = whitelist.find((m) => m.model_id === resolvedModelId);
 
+  if (capability) {
+    const supportedSizes = Array.isArray(capability.supported_sizes)
+      ? capability.supported_sizes
+      : [];
+    if (typeof params.resolution === "string") {
+      params.resolution = canonicalSizeValue(params.resolution, supportedSizes);
+    }
+    if (typeof params.size === "string") {
+      params.size = canonicalSizeValue(params.size, supportedSizes);
+    }
+  }
+
 
 
   const sampleRuling = ruleSampleMode({
@@ -1800,10 +1908,7 @@ export async function handleCreateGenerationJob(
 
 
   if (capability && (type === "video" || type === "audio")) {
-    const revalidated =
-      type === "video"
-        ? validateVideo(body, capability)
-        : validateAudioReferences(body, capability.features);
+    const revalidated = validateCapabilityParams(type, body, capability);
     if (revalidated)
       return fail(errorCodeToNumeric(revalidated.code), revalidated.message, {
         code: revalidated.code,
@@ -1942,27 +2047,16 @@ export async function handleCreateGenerationJob(
 
 
   if (capability && type === "video") {
-    const checked = toGenerationParamCheckInput({
-      resolution: params.resolution,
-      size: params.size,
-      aspect_ratio: params.aspect_ratio,
-      duration: params.duration,
+    const videoParamErr = validateVideoParamLimits({
+      body,
+      capability,
+      videoMode,
+      videoRefItems,
     });
-    if (checked) {
-      const limitErr = checkGenerationParamLimit(
-        {
-          supported_sizes: capability.supported_sizes,
-          supported_aspect_ratios: capability.supported_aspect_ratios,
-          supported_durations: capability.supported_durations,
-          task_types: capability.features?.task_types,
-        },
-        videoMode ? { ...checked, mode: videoMode } : checked,
-      );
-      if (limitErr) {
-        return fail(errorCodeToNumeric(limitErr.code), limitErr.reason, {
-          code: limitErr.code,
-        });
-      }
+    if (videoParamErr) {
+      return fail(errorCodeToNumeric(videoParamErr.code), videoParamErr.message, {
+        code: videoParamErr.code,
+      });
     }
   }
 
@@ -1970,31 +2064,10 @@ export async function handleCreateGenerationJob(
 
 
 
-  if (capability && type === "video" && (videoMode === "edit" || videoMode === "extend")) {
-    const allowed = modeAllowedRatios(capability.features?.task_types, videoMode);
-    const ratio = isStr(params.aspect_ratio) ? params.aspect_ratio : "";
-    if (allowed && !allowed.includes(ratio)) {
-      return fail(
-        errorCodeToNumeric(ERROR_TASK_TYPE_PARAM_CONSTRAINT),
-        TASK_TYPE_PARAM_CONSTRAINT_MESSAGE,
-        { code: ERROR_TASK_TYPE_PARAM_CONSTRAINT },
-      );
-    }
-  }
-  if (
-    type === "video" &&
-    (videoMode === "edit" || videoMode === "extend") &&
-    !videoRefItems.some((item) => item.role === "reference" && item.type === "video")
-  ) {
-    return fail(errorCodeToNumeric(ERROR_INVALID_INPUT), "视频编辑模式至少需要 1 段参考视频", {
-      code: ERROR_INVALID_INPUT,
-    });
-  }
 
-
-
-
-
+  let resolvedReferenceAssets: Awaited<
+    ReturnType<typeof deps.assets.resolveInputAssets>
+  > = [];
 
   if (type !== "audio" && referenceAssetIds.length > 0) {
     const ids = referenceAssetIds.map(String);
@@ -2005,12 +2078,23 @@ export async function handleCreateGenerationJob(
         code: ERROR_INVALID_REFERENCE,
       });
     }
+    resolvedReferenceAssets = resolved;
 
 
     if (type === "image" && resolved.some((a) => a.type !== "image")) {
       return fail(errorCodeToNumeric(ERROR_INVALID_REFERENCE_TYPE), "参考素材必须是图片", {
         code: ERROR_INVALID_REFERENCE_TYPE,
       });
+    }
+
+    if (type === "image") {
+      const limitErr = validateReferenceImages(resolved, capability?.features ?? null);
+      if (limitErr) {
+        return fail(errorCodeToNumeric(ERROR_INVALID_REFERENCE), limitErr.message, {
+          code: ERROR_INVALID_REFERENCE,
+          params: limitErr.params,
+        });
+      }
     }
   }
 
@@ -2098,6 +2182,64 @@ export async function handleCreateGenerationJob(
       });
     }
 
+    if (type === "video" && capability?.features) {
+      const referenceItems = ruling.references.filter((item) => item.role === "reference");
+      const probedDurations = new Map(
+        referenceItems
+          .filter((item) => item.asset_id !== undefined && item.duration !== undefined)
+          .map((item) => [String(item.asset_id), item.duration!]),
+      );
+      const itemAssets = referenceItems
+        .map((item) =>
+          item.asset_id !== undefined
+            ? ruling.assetsById.get(String(item.asset_id))
+            : undefined,
+        )
+        .filter((asset): asset is NonNullable<typeof asset> => asset !== undefined)
+        .map((asset) =>
+          probedDurations.has(asset.id)
+            ? { ...asset, duration: probedDurations.get(asset.id)! }
+            : asset,
+        );
+      const parsedBodyRefs = parseReferences(body.references);
+      const referencesProvided =
+        parsedBodyRefs.kind === "ok" && parsedBodyRefs.items.length > 0;
+      const legacyIds = referencesProvided
+        ? []
+        : uniqueAssetIds(referenceAssetIds.map(String)).filter(
+            (id) => !ruling.assetsById.has(id),
+          );
+      const legacyAssets =
+        legacyIds.length > 0
+          ? resolvedReferenceAssets.filter((asset) => legacyIds.includes(asset.id))
+          : [];
+      const referenceAssets = [
+        ...itemAssets,
+        ...legacyAssets.filter((asset) => !itemAssets.some((item) => item.id === asset.id)),
+      ];
+      const materialReferences = uniqueMaterialRefs([
+        ...referenceItems
+          .filter((item) => item.material_id !== undefined)
+          .map((item) => ({ id: item.material_id!, type: item.type })),
+        ...(materialRefs(body.reference_materials) ?? []),
+      ]);
+      try {
+        validateReferences(
+          capability.features,
+          referenceAssets,
+          materialReferences,
+          videoMode ?? null,
+        );
+      } catch (error) {
+        const code = error instanceof VideoInputError ? error.code : ERROR_UNSUPPORTED_INPUT;
+        return fail(
+          errorCodeToNumeric(code),
+          error instanceof Error ? error.message : "参考素材不受支持",
+          { code },
+        );
+      }
+    }
+
 
 
 
@@ -2133,8 +2275,8 @@ export async function handleCreateGenerationJob(
     }
     const quoteDep = deps.quote;
     if (quoteDep === undefined) {
-      return fail(errorCodeToNumeric(ERROR_QUOTE_STALE), "价格已更新，请刷新后重新确认提交", {
-        code: ERROR_QUOTE_STALE,
+      return fail(errorCodeToNumeric(ERROR_QUOTE_UNAVAILABLE), messageOf(errorCodeToNumeric(ERROR_QUOTE_UNAVAILABLE)), {
+        code: ERROR_QUOTE_UNAVAILABLE,
       });
     }
 
@@ -2164,15 +2306,16 @@ export async function handleCreateGenerationJob(
             catalogVersion: quote.catalogVersion,
             capabilityVersion: capability?.version,
             tier: quote.tier,
-            quoteInput,
+            quoteInput: type === "video" ? videoQuoteRevisionInput(quoteInput) : quoteInput,
           })
         : null;
-    if (
-      quote === null ||
-      Number(quote.credits) !== credits ||
-      currentRevision !== revision
-    ) {
-      return fail(errorCodeToNumeric(ERROR_QUOTE_STALE), "价格已更新，请刷新后重新确认提交", {
+    if (quote === null) {
+      return fail(errorCodeToNumeric(ERROR_QUOTE_UNAVAILABLE), messageOf(errorCodeToNumeric(ERROR_QUOTE_UNAVAILABLE)), {
+        code: ERROR_QUOTE_UNAVAILABLE,
+      });
+    }
+    if (Number(quote.credits) !== credits || currentRevision !== revision) {
+      return fail(errorCodeToNumeric(ERROR_QUOTE_STALE), messageOf(errorCodeToNumeric(ERROR_QUOTE_STALE)), {
         code: ERROR_QUOTE_STALE,
       });
     }

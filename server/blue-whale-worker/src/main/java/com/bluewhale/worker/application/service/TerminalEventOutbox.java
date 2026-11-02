@@ -1,5 +1,6 @@
 package com.bluewhale.worker.application.service;
 
+import com.bluewhale.common.mq.MqEnvSuffix;
 import com.bluewhale.worker.domain.contract.JobStatusEnum;
 import com.bluewhale.worker.domain.entity.GenerationJobEntity;
 import com.bluewhale.worker.domain.entity.GenerationOutboxEntity;
@@ -46,7 +47,9 @@ public class TerminalEventOutbox {
         this.outboxMapper = outboxMapper;
         this.jobMapper = jobMapper;
         this.producer = producer;
-        this.terminalTopic = env.getProperty("worker.billing.topic-terminal", "generation-job-terminal");
+        this.terminalTopic = MqEnvSuffix.apply(
+                env.getProperty("worker.billing.topic-terminal", "generation-job-terminal"),
+                env.getProperty("MQ_ENV_SUFFIX"));
     }
 
     public static TerminalEventOutbox noop() {

@@ -92,7 +92,7 @@ describe.skipIf(!process.env.IKHSFE_DATABASE_URL)(
     });
 
     async function createVideoAsset(projectId: string) {
-      const row = await prisma.client.assets.create({
+      const row = await prisma.client.user_assets.create({
         data: {
           user_id: BigInt(OWNER),
           project_id: BigInt(projectId),

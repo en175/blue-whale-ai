@@ -16,6 +16,13 @@ const { FakeRedis } = vi.hoisted(() => {
       }
     }
 
+    async zrem(key: string, member: string): Promise<number> {
+      this.fail();
+      const zset = this.zsets.get(key);
+      if (!zset) return 0;
+      return zset.delete(member) ? 1 : 0;
+    }
+
     async eval(
       _script: string,
       _numKeys: number,
@@ -99,8 +106,8 @@ describe("RateLimiter", () => {
 
   it("allows takes until the limit then returns retryAfter", async () => {
     const bucket = { scope: "login", key: "1.1.1.1", limit: 2, windowMs: 1000 };
-    await expect(limiter.take(bucket)).resolves.toEqual({ allowed: true });
-    await expect(limiter.take(bucket)).resolves.toEqual({ allowed: true });
+    await expect(limiter.take(bucket)).resolves.toMatchObject({ allowed: true });
+    await expect(limiter.take(bucket)).resolves.toMatchObject({ allowed: true });
     await expect(limiter.take(bucket)).resolves.toEqual({
       allowed: false,
       retryAfter: 1,
@@ -112,7 +119,16 @@ describe("RateLimiter", () => {
     await limiter.take(bucket);
     await expect(limiter.take(bucket)).resolves.toMatchObject({ allowed: false });
     await limiter.reset("login", "acct", 1000);
-    await expect(limiter.take(bucket)).resolves.toEqual({ allowed: true });
+    await expect(limiter.take(bucket)).resolves.toMatchObject({ allowed: true });
+  });
+
+  it("refund 退回本次占用的成员，额度立即恢复", async () => {
+    const bucket = { scope: "sms", key: "13800001234", limit: 1, windowMs: 60_000 };
+    const first = await limiter.take(bucket);
+    expect(first.member).toBeTruthy();
+    await expect(limiter.take(bucket)).resolves.toMatchObject({ allowed: false });
+    await limiter.refund(bucket.scope, bucket.key, String(first.member));
+    await expect(limiter.take(bucket)).resolves.toMatchObject({ allowed: true });
   });
 
   it("reset does not clear a different identity even if it looks like a glob", async () => {
@@ -121,7 +137,7 @@ describe("RateLimiter", () => {
     await limiter.take(foo);
     await limiter.take(glob);
     await limiter.reset("login", "foo", 1000);
-    await expect(limiter.take(foo)).resolves.toEqual({ allowed: true });
+    await expect(limiter.take(foo)).resolves.toMatchObject({ allowed: true });
     await expect(limiter.take(glob)).resolves.toMatchObject({ allowed: false });
   });
 
@@ -150,7 +166,7 @@ describe("RateLimiter", () => {
     redis.redis.failNext = true;
     await expect(
       limiter.take({ scope: "login", key: "x", limit: 1, windowMs: 1000 }),
-    ).resolves.toEqual({ allowed: true });
+    ).resolves.toMatchObject({ allowed: true });
     redis.redis.failNext = true;
     await expect(limiter.isBlocked("login", "x")).resolves.toBe(false);
   });
@@ -163,14 +179,14 @@ describe("RateLimiter 滚动窗口", () => {
       vi.setSystemTime(new Date("2026-10-21T12:00:00.000Z"));
       const limiter = new RateLimiter();
       const bucket = { scope: "sms", key: "13800001234", limit: 1, windowMs: 60_000 };
-      await expect(limiter.take(bucket)).resolves.toEqual({ allowed: true });
+      await expect(limiter.take(bucket)).resolves.toMatchObject({ allowed: true });
       await expect(limiter.take(bucket)).resolves.toMatchObject({ allowed: false });
 
       vi.setSystemTime(new Date("2026-10-21T12:00:30.000Z"));
       await expect(limiter.take(bucket)).resolves.toMatchObject({ allowed: false });
 
       vi.setSystemTime(new Date("2026-10-21T12:01:01.000Z"));
-      await expect(limiter.take(bucket)).resolves.toEqual({ allowed: true });
+      await expect(limiter.take(bucket)).resolves.toMatchObject({ allowed: true });
       await limiter.onModuleDestroy();
     } finally {
       vi.useRealTimers();

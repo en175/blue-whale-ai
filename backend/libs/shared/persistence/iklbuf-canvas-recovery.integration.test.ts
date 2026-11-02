@@ -1,3 +1,4 @@
+import { clearEffectiveRecoveryOwners, findEffectiveRecoveryOwner } from "./recovery-owner-test-helpers.js";
 import { PrismaMariaDb } from "@prisma/adapter-mariadb";
 import type { Pool } from "mariadb";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -147,9 +148,7 @@ describe.skipIf(!databaseUrl)("陈旧标记推进到持有者同提交的产物�
   }
 
   async function ownerOf(nodeId: string) {
-    const owner = await prisma.generation_canvas_node_owners.findUnique({
-      where: { project_id_node_id: { project_id: BigInt(PROJECT_ID), node_id: nodeId } },
-    });
+    const owner = await findEffectiveRecoveryOwner(prisma, BigInt(PROJECT_ID), nodeId);
     if (owner === null) return null;
     const submission = await prisma.generation_canvas_submissions.findUnique({ where: { id: owner.generation_canvas_submission_id } });
     return { submissionId: submission?.submission_id ?? null, outputKey: owner.output_key };
@@ -230,14 +229,16 @@ describe.skipIf(!databaseUrl)("陈旧标记推进到持有者同提交的产物�
   });
 
   beforeEach(async () => {
-    await prisma.generation_canvas_node_owners.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
+    await clearEffectiveRecoveryOwners(prisma, BigInt(PROJECT_ID));
     await prisma.generation_canvas_outputs.deleteMany({});
     await prisma.generation_canvas_submissions.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
-    await prisma.command_idempotency.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
-    await prisma.canvas.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
+    await prisma.project_command_receipts.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
+    await prisma.project_canvas.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
+    await prisma.project_edges.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
+    await prisma.project_nodes.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
     await prisma.generation_output_slots.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
     await prisma.generation_job_logs.deleteMany({});
-    await prisma.cost_reservations.deleteMany({});
+    await prisma.billing_cost_reservations.deleteMany({});
     await prisma.generation_jobs.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
   });
 

@@ -15,6 +15,7 @@ import {
   PLATFORM_PRIVACY_POLICY_HREF,
   USER_SERVICES_AGREEMENT_HREF,
 } from './agreements';
+import { ApiError } from '@/shared/api/http';
 import { toast } from '@/shared/components/Toast';
 import LoginModal from './index';
 import styles from './index.module.css';
@@ -78,6 +79,15 @@ function buttonByText(text: string): HTMLButtonElement | null {
 
 function inputByPlaceholder(placeholder: string): HTMLInputElement | null {
   return document.body.querySelector<HTMLInputElement>(`input[placeholder="${placeholder}"]`);
+}
+
+async function typePhone(phone: string) {
+  await act(async () => setInputValue(inputByPlaceholder('请输入手机号')!, phone));
+}
+
+async function sendLoginCode() {
+  await act(async () => buttonByText('获取验证码')?.click());
+  await act(async () => setInputValue(inputByPlaceholder('请输入图中字符')!, 'ab2c'));
 }
 
 function setInputValue(input: HTMLInputElement, value: string) {
@@ -176,7 +186,132 @@ describe('LoginModal 手机号登录', () => {
     await act(async () => setInputValue(phone!, '12345'));
     await act(async () => buttonByText('获取验证码')?.click());
     expect(fetchCaptcha).not.toHaveBeenCalled();
-    expect(document.body.textContent).toContain('请输入正确的手机号');
+    expect(document.body.textContent).toContain('请输入中国大陆11位手机号');
+  });
+
+  it('号码不足 11 位时移开焦点即提示，修正后提示消失', async () => {
+    await renderLoginModal();
+    const phone = inputByPlaceholder('请输入手机号');
+    await act(async () => setInputValue(phone!, '1380000123'));
+    await act(async () => phone!.dispatchEvent(new FocusEvent('focusout', { bubbles: true })));
+    expect(document.body.textContent).toContain('请输入中国大陆11位手机号');
+
+    await act(async () => setInputValue(phone!, '13800001234'));
+    expect(document.body.textContent).not.toContain('请输入中国大陆11位手机号');
+  });
+});
+
+describe('LoginModal 短信冷却与发码重试', () => {
+  it('发码后卸载再挂载，冷却仍在（SMS_046）', async () => {
+    await renderLoginModal();
+    await typePhone('13800001234');
+    await sendLoginCode();
+    expect(buttonByText('60秒后重发')).not.toBeNull();
+
+    await act(async () => root.unmount());
+    const expiresAt = Number(localStorage.getItem('bw_sms_cooldown:login:13800001234'));
+    expect(expiresAt).toBeGreaterThan(Date.now());
+
+    mountNode.remove();
+    mountNode = document.createElement('div');
+    document.body.appendChild(mountNode);
+    root = createRoot(mountNode);
+    await act(async () => {
+      root.render(
+        createElement(
+          QueryClientProvider,
+          { client: new QueryClient({ defaultOptions: { queries: { retry: false } } }) },
+          createElement(LoginModal, { onClose: vi.fn() }),
+        ),
+      );
+    });
+    await typePhone('13800001234');
+
+    expect(buttonByText('60秒后重发')).not.toBeNull();
+    expect(buttonByText('获取验证码')).toBeNull();
+  });
+
+  it('发码后刷新，手机号与冷却自动回填（验证码留空）', async () => {
+    await renderLoginModal();
+    await typePhone('13800001234');
+    await sendLoginCode();
+    await act(async () => setInputValue(inputByPlaceholder('请输入验证码')!, '123456'));
+
+    await act(async () => root.unmount());
+    mountNode.remove();
+    mountNode = document.createElement('div');
+    document.body.appendChild(mountNode);
+    root = createRoot(mountNode);
+    await act(async () => {
+      root.render(
+        createElement(
+          QueryClientProvider,
+          { client: new QueryClient({ defaultOptions: { queries: { retry: false } } }) },
+          createElement(LoginModal, { onClose: vi.fn() }),
+        ),
+      );
+    });
+
+    expect(inputByPlaceholder('请输入手机号')?.value).toBe('13800001234');
+    expect(inputByPlaceholder('请输入验证码')?.value).toBe('');
+    expect(buttonByText('60秒后重发')).not.toBeNull();
+  });
+
+  it('冷却中换手机号，新号码重新可获取（SMS_048）', async () => {
+    await renderLoginModal();
+    await typePhone('13800001234');
+    await sendLoginCode();
+    expect(buttonByText('60秒后重发')).not.toBeNull();
+
+    await typePhone('13800005678');
+    expect(buttonByText('获取验证码')).not.toBeNull();
+    expect(buttonByText('60秒后重发')).toBeNull();
+  });
+
+  it('网络异常视为结果未知，展示核对入口且不重发（SMS_068/069）', async () => {
+    vi.mocked(sendCode).mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    await renderLoginModal();
+    await typePhone('13800001234');
+    await sendLoginCode();
+
+    expect(buttonByText('核对该短信是否送达')).not.toBeNull();
+    expect(vi.mocked(sendCode)).toHaveBeenCalledTimes(1);
+    expect(document.body.querySelector('[aria-label="安全验证"]')).toBeNull();
+
+    await act(async () => buttonByText('核对该短信是否送达')?.click());
+    expect(document.body.textContent).toContain('短信可能已发出');
+    expect(vi.mocked(sendCode)).toHaveBeenCalledTimes(1);
+  });
+
+  it('明确失败后展示重试，点击重新取图再发码（SMS_067）', async () => {
+    vi.mocked(sendCode).mockRejectedValueOnce(new ApiError(500, '短信发送失败'));
+    await renderLoginModal();
+    await typePhone('13800001234');
+    await sendLoginCode();
+
+    expect(vi.mocked(fetchCaptcha)).toHaveBeenCalledTimes(2);
+    await act(async () => buttonByText('← 返回')?.click());
+    expect(buttonByText('重试')).not.toBeNull();
+
+    await act(async () => buttonByText('重试')?.click());
+    expect(fetchCaptcha).toHaveBeenCalledTimes(3);
+    await act(async () => setInputValue(inputByPlaceholder('请输入图中字符')!, 'ab2c'));
+    expect(vi.mocked(sendCode)).toHaveBeenCalledTimes(2);
+  });
+
+  it('「我已收到」立即进入冷却且不发请求（SMS_070）', async () => {
+    vi.mocked(sendCode).mockRejectedValueOnce(new ApiError(408, '请求超时，请稍后重试'));
+    await renderLoginModal();
+    await typePhone('13800001234');
+    await sendLoginCode();
+    expect(buttonByText('核对该短信是否送达')).not.toBeNull();
+
+    await act(async () => buttonByText('核对该短信是否送达')?.click());
+    await act(async () => buttonByText('我已收到')?.click());
+
+    expect(buttonByText('60秒后重发')).not.toBeNull();
+    expect(document.body.textContent).not.toContain('短信可能已发出');
+    expect(vi.mocked(sendCode)).toHaveBeenCalledTimes(1);
   });
 });
 

@@ -25,7 +25,7 @@ describe("建任务幂等依赖的库契约（command_idempotency）", () => {
 
   it("schema.prisma 是同一把复合唯一键（Prisma 按它生成 findUnique 的 where 形状）", () => {
     expect(schemaPrisma).toContain(
-      '@@unique([project_id, operation, idempotency_key], map: "uk_command_idempotency")',
+      '@@unique([project_id, operation, idempotency_key], map: "uk_project_command_receipts__key")',
     );
   });
 

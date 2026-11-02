@@ -33,7 +33,7 @@ GET /api/projects/:id/snapshot
 
 **当前 `snapshot.assets` 的语义（IKCNLP 改造后）**：该项目可用的素材集合 =
 - 本项目 `project_asset` 关联的素材（含跨项目复用、`project_id=0` 全局素材）
-- ± `assets.project_id=pid` 的直接归属素材（兼容过渡期）
+- ± `user_assets.project_id=pid` 的直接归属素材（兼容过渡期）
 - 同一素材**去重**（一个项目里同一素材只出现一次）
 
 ### 1.2 前端判断逻辑
@@ -91,7 +91,7 @@ GET /api/assets/:assetId/references
 ```
 
 **语义**：`projectCount` = 引用该素材的项目数（并集去重）——
-- 素材表直接归属（`assets.project_id` ≠ 0）∪ `project_asset` 关联（`is_delete = 0`）
+- 素材表直接归属（`user_assets.project_id` ≠ 0）∪ `project_asset` 关联（`is_delete = 0`）
 - **只计存活项目**：已删除项目（`projects.is_delete = 0`）不计
 - 同一项目多来源只计一次
 
@@ -109,7 +109,7 @@ GET /api/assets/:assetId/references
 
 ## 4. 删除素材（后端已处理，前端仅感知变化）
 
-后端删除素材 = 软删 `assets` + 软删 `project_asset` 关联，**画布节点不动**。前端删除素材后无需改画布——下次进画布时，被删素材的节点因 `snapshot.assets` 查不到而显示占位图。
+后端删除素材 = 软删 `user_assets` + 软删 `project_asset` 关联，**画布节点不动**。前端删除素材后无需改画布——下次进画布时，被删素材的节点因 `snapshot.assets` 查不到而显示占位图。
 
 > **2026-10-09 增补（ADR-0126）**：若该资产**已入库素材库**（`material_id` 非空），后端会**先删上游素材库里的那条素材**，成功才软删本地；上游删不掉则接口报 400（`code 2013`）且本地一行不动。前端删除前要弹框提示「会一并删除素材库素材，不可恢复」，详见 [`2026-10-09-material-binding-and-delete-cascade-api.md`](./2026-10-09-material-binding-and-delete-cascade-api.md) §2。
 

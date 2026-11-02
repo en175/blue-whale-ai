@@ -23,14 +23,16 @@ spec:
       - name: ccr-secret
       affinity:
         podAntiAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
-          - labelSelector:
-              matchExpressions:
-              - key: app
-                operator: In
-                values:
-                - blue-whale-backend
-            topologyKey: kubernetes.io/hostname
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - blue-whale-backend
+              topologyKey: kubernetes.io/hostname
       containers:
       - name: blue-whale-backend
         image: "xf-bluewhale-cn-beijing.cr.volces.com/bluewhale/bluewhale-backend:$(tag)"
@@ -162,7 +164,7 @@ spec:
         - name: PORT
           value: "3100"
         - name: NEW_API_BASE_URL
-          value: "http://blue-whale-api-svc:3000"
+          value: "https://yunjizi.cn"
         - name: AGENT_SERVICE_BASE_URL
           value: "http://blue-whale-agent-svc:4112"
         - name: BILLING_GRPC_URL
@@ -176,7 +178,7 @@ spec:
         - name: VOLC_SMS_ACCOUNT
           value: "8c026cce"
         - name: VOLC_SMS_SIGN
-          value: "玄浮科技"
+          value: "杭州玄浮科技"
         - name: VOLC_SMS_TEMPLATE_ID
           value: "S1T_1y2pbbfa2t4oy"
         - name: AGENT_MODEL_DRAIN_TIMEOUT_MS

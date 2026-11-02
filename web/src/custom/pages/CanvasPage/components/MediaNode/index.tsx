@@ -25,6 +25,8 @@ import VideoPlayerControls from './VideoPlayerControls';
 import { sampleDeadlineExpired, videoSourceList, videoLoadErrorMessage, toggleVideoPlayback } from './mediaPlayback';
 import { commitCardName } from '../cardName';
 import { mediaNodeFailHeadline } from './failHeadline';
+import { MEDIA_FAIL_ACTION_LABELS, mediaFailAction } from './failAction';
+import type { JobErrorCategory } from '@/custom/api/jobRecovery';
 import { isCanvasToolGeneration, mediaNodeGenerationOverlay } from './generationOverlay';
 import { mediaContentBox, type MediaDims } from './mediaContentSize';
 import { HOVER_PREVIEW_DELAY_MS, videoHoverPreviewBlocked, videoHoverPreviewEligible } from './hoverPreview';
@@ -37,7 +39,7 @@ import styles from './index.module.css';
 
 const HANDLE_STYLE = { background: 'transparent', border: 'none', width: 24, height: 24 } as const;
 
-function HandlePlus() {
+function HandlePlus({ onAdd }: { onAdd?: (client: { x: number; y: number }) => void }) {
   return (
     <span className="nodrag nopan" style={{
       display: 'flex',
@@ -50,7 +52,14 @@ function HandlePlus() {
       border: '1px solid #555',
       color: '#ccc',
       boxShadow: '0 2px 6px rgba(0,0,0,0.4)',
-    }}>
+      cursor: onAdd ? 'pointer' : undefined,
+    }}
+      onClick={(e) => {
+        if (!onAdd) return;
+        e.stopPropagation();
+        onAdd({ x: e.clientX, y: e.clientY });
+      }}
+    >
       <Plus size={14} strokeWidth={2.5} />
     </span>
   );
@@ -143,6 +152,9 @@ export interface MediaNodeData {
   progress?: number;
   errorText?: string;
   errorCode?: number | string;
+  errorCategory?: JobErrorCategory;
+  errorRetryable?: boolean;
+  requoteState?: { phase: 'loading' | 'ready' | 'unavailable'; credits?: number };
   prompt?: string;
   assetId?: string | number;
   materialId?: string;
@@ -193,9 +205,14 @@ export interface MediaNodeData {
   onDelete?: (id: string) => void;
   onDuplicate?: (id: string) => void;
   onAddToChat?: (id: string) => void;
-  onSaveToAssets?: (id: string) => void;
   onCancelJob?: (id: string) => void;
   onRetryJob?: (id: string) => void;
+  onEditFailed?: (id: string) => void;
+  onRechargeFailed?: (id: string) => void;
+  onRequoteFailed?: (id: string) => void;
+  onRequoteConfirm?: (id: string) => void;
+  onAddLeft?: (client: { x: number; y: number }) => void;
+  onAddRight?: (client: { x: number; y: number }) => void;
   onFixFollowVideo?: (id: string) => void;
   onTitleChange?: (id: string, name: string) => void;
   onEnhanceImage?: (id: string) => void;
@@ -712,11 +729,13 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
   const frameInterpolationRetryable =
     frameInterpolationIdentity == null
     || (typeof frameInterpolationIdentity.sourceAssetId === 'string' && frameInterpolationIdentity.sourceAssetId !== '');
+  const isCanvasTool = isCanvasToolGeneration(data as Record<string, unknown>);
+  const isToolCard = isCanvasTool || data.frameInterpolation != null || data.smartMatting != null;
   const hideCancel = isMediaExtraction
     || isAudioTrimCard
     || isAudioMixCard
-    || isCanvasToolGeneration(data as Record<string, unknown>);
-  const generationOverlay = mediaNodeGenerationOverlay(isMediaExtraction, hideCancel);
+    || isCanvasTool;
+  const generationOverlay = mediaNodeGenerationOverlay(data.mediaType, isMediaExtraction, hideCancel, isToolCard);
   const failHeadline = mediaNodeFailHeadline({
     genStatus: data.genStatus,
     errorText: data.errorText,
@@ -727,6 +746,71 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
     && data.mediaType === 'video'
     && isTaskTypeParamConstraintCode(data.errorCode)
     && data.onFixFollowVideo != null;
+  const hasRetryIdentity = (!isMediaExtraction || data.mediaExtract != null)
+    && (!isAudioTrimCard || data.audioTrim != null)
+    && (!isAudioMixCard || data.jobId != null)
+    && frameInterpolationRetryable;
+  const failAction = mediaFailAction({
+    genStatus: data.genStatus,
+    errorCode: data.errorCode,
+    category: data.errorCategory,
+    retryable: data.errorRetryable,
+    videoStage: data.videoStage,
+    hasRetryIdentity,
+  });
+
+  const failActionButton = (action: typeof failAction, buttonClass = styles.genBtn) => {
+    const label = MEDIA_FAIL_ACTION_LABELS[action];
+    if (label == null) return null;
+    if (action === 'checking') {
+      return (
+        <span className={styles.genSub} data-testid="fail-action-checking">提交结果核对中，请勿重复提交</span>
+      );
+    }
+    if (action === 'requote') {
+      const state = data.requoteState;
+      if (state?.phase === 'ready' && state.credits != null) {
+        return (
+          <button
+            className={buttonClass}
+            data-testid="fail-action-requote-confirm"
+            onClick={() => data.onRequoteConfirm?.(id)}
+          >
+            确认发送 · {state.credits} 积分
+          </button>
+        );
+      }
+      return (
+        <button
+          className={buttonClass}
+          data-testid="fail-action-requote"
+          disabled={state?.phase === 'loading'}
+          onClick={() => data.onRequoteFailed?.(id)}
+        >
+          {state?.phase === 'loading' ? '正在获取新报价' : '重新报价'}
+        </button>
+      );
+    }
+    if (action === 'recharge') {
+      return (
+        <button className={buttonClass} data-testid="fail-action-recharge" onClick={() => data.onRechargeFailed?.(id)}>
+          {label}
+        </button>
+      );
+    }
+    if (action === 'retry' || action === 'legacy-retry') {
+      return (
+        <button className={buttonClass} onClick={() => data.onRetryJob?.(id)}>
+          {label}
+        </button>
+      );
+    }
+    return (
+      <button className={buttonClass} data-testid="fail-action-edit" onClick={() => data.onEditFailed?.(id)}>
+        {label}
+      </button>
+    );
+  };
 
   const contentBox = mediaContentBox({
     mediaType: data.mediaType,
@@ -770,6 +854,9 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
           <div className={styles.genSpinner} />
           {isAudioMixCard && data.audioMixCancelPending === true &&
             <span className={styles.genText}>正在取消</span>}
+          {!generationOverlay.showProgress && generationOverlay.progressLabel != null && (
+            <span className={styles.genText}>{generationOverlay.progressLabel}</span>
+          )}
           {generationOverlay.showProgress && (
             <>
               <span className={styles.genText}>
@@ -805,23 +892,13 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
       );
     }
     if (isGenDone) {
-      const canRetry = data.genStatus === 'failed'
-        && data.videoStage !== 'final'
-        && (!isMediaExtraction || data.mediaExtract != null)
-        && (!isAudioTrimCard || data.audioTrim != null)
-        && (!isAudioMixCard || data.jobId != null)
-        && frameInterpolationRetryable;
       return (
         <div className={styles.genBox}>
           <span className={styles.genFailText}>{failHeadline}</span>
           {data.chargeState === 'released' && (
             <span className={styles.genSub} data-testid="charge-refund-note">本次未消耗积分，预扣已退回</span>
           )}
-          {canRetry && (
-            <button className={styles.genBtn} onClick={() => data.onRetryJob?.(id)}>
-              重试
-            </button>
-          )}
+          {failActionButton(failAction)}
           {}
           {data.videoStage === 'final' && data.regenerateCta && (() => {
             const cta = data.regenerateCta;
@@ -1028,7 +1105,7 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
       >
         {showTargetHandle && (
           <Handle type="target" position={Position.Left} className={styles.handle} style={{ ...HANDLE_STYLE, left: '-16px' }}>
-          <HandlePlus />
+          <HandlePlus onAdd={data.onAddLeft} />
         </Handle>
         )}
         {isEmptyShell ? (
@@ -1244,7 +1321,7 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
             <span className={styles.regenText}>
               重新生成中{typeof data.progress === 'number' ? ` ${data.progress}%` : ''}
             </span>
-            {!hideCancel && (
+            {generationOverlay.showCancel && (
               <button className={styles.regenCancel} onClick={() => data.onCancelJob?.(id)}>
                 取消
               </button>
@@ -1255,14 +1332,7 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
         {isGenDone && hasMediaSrc && (
           <div className={`nodrag nopan ${styles.regenOverlay}`} data-testid="fail-overlay">
             <span className={styles.failOverlayText} title={failHeadline}>{failHeadline}</span>
-            {data.genStatus === 'failed'
-              && (!isMediaExtraction || data.mediaExtract != null)
-              && (!isAudioTrimCard || data.audioTrim != null)
-              && frameInterpolationRetryable && (
-              <button className={styles.regenCancel} onClick={() => data.onRetryJob?.(id)}>
-                重试
-              </button>
-            )}
+            {failActionButton(failAction, styles.regenCancel)}
             {showFixFollowVideo && (
               <button className={styles.regenCancel} onClick={() => data.onFixFollowVideo?.(id)}>
                 重新编辑
@@ -1272,7 +1342,7 @@ export default function MediaNode({ id, data, selected }: NodeProps & { data: Me
         )}
         {showSourceHandle && (
         <Handle type="source" position={Position.Right} className={styles.handle} style={{ ...HANDLE_STYLE, right: '-16px' }}>
-        <HandlePlus />
+        <HandlePlus onAdd={data.onAddRight} />
       </Handle>
         )}
       </div>

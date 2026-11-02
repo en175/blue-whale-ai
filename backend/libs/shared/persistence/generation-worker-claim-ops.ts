@@ -10,7 +10,7 @@ async function loadReservationFen(
   jobId: bigint,
 ): Promise<bigint | null> {
   try {
-    const row = await prisma.cost_reservations.findFirst({
+    const row = await prisma.billing_cost_reservations.findFirst({
       where: { generation_job_id: jobId, is_delete: 0 },
       select: { reserved_amount_fen: true },
     });

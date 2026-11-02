@@ -137,7 +137,7 @@ export class AdminRechargeCustomConfigController {
       await this.operationLog.create({
         category: "recharge_custom",
         action: "编辑",
-        target: "system_settings.rechargeCustom",
+        target: "bw_platform_settings.rechargeCustom",
         detail: describeCustomConfigChanges(before, after),
         operator: "admin",
       });

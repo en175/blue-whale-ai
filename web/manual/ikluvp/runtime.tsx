@@ -44,7 +44,7 @@ setSession({ userId: 900001, username: '本地验收用户', email: '', phone: '
 const client = new QueryClient({ defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false } } });
 const preview = (parent as Window & { ikluvpPreview?: string }).ikluvpPreview;
 const videoRef = { nodeId: 'reference', assetId: '42', mediaType: 'video' as const, name: '验收参考视频 · 6 秒',
-  url: preview ?? '', duration: 6, width: 640, height: 360 };
+  url: preview ?? '', duration: 6, width: 1280, height: 720 };
 
 async function submit(parameters: Record<string, unknown>, references: unknown[]) {
   const response = await fetch('/api/projects/manual-project/generation-jobs', { method: 'POST',

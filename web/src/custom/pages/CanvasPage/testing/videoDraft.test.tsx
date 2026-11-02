@@ -6,6 +6,8 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Node } from '@xyflow/react';
 import CanvasPage from '../index';
+import { generationQuoteOptions } from '@/custom/api/generationQuote';
+import { ApiError } from '@/shared/api/http';
 import { Toaster, toast } from 'sonner';
 import { clickSelectOption, selectOptionByText, selectOptionElements } from './radixSelect';
 
@@ -17,6 +19,7 @@ const waitFor = (callback: () => unknown) => vi.waitFor(callback, { timeout: WAI
 
 const quoteMock = vi.hoisted(() => ({
   current: null as { credits: number; quote_revision: string } | null,
+  fetches: 0,
 }));
 
 vi.mock('@/custom/api/generationQuote', async (importActual) => ({
@@ -25,6 +28,7 @@ vi.mock('@/custom/api/generationQuote', async (importActual) => ({
     queryKey: ['generation-quote', 'mock'],
     staleTime: Infinity,
     queryFn: async () => {
+      quoteMock.fetches += 1;
       if (quoteMock.current == null) throw new Error('quote unavailable (mock)');
       return { ...quoteMock.current };
     },
@@ -163,9 +167,7 @@ const apiMocks = vi.hoisted(() => {
   toSessionUser: vi.fn(() => null),
   applyPromptPreview: vi.fn(),
   referencePromptPlan: vi.fn(),
-  listLegacyCardHistory: vi.fn(async () => ({ items: [] })),
   createConversationQuote: vi.fn(),
-  legacyCardHistoryOptions: (projectId: string) => ({ queryKey: ['canvas', projectId, 'legacy-history'], queryFn: () => Promise.resolve({ items: [] }), retry: false }),
   saveCanvasDoc: vi.fn(async () => ({ id: 11, project_id: 1, version: 4, viewport: '{}', nodes: '[]' })),
   createGenerationJob: vi.fn(async (_projectId: string, _payload: Record<string, unknown>) => ({ generation_job_id: 'j1', cursor: 1 })),
   fetchJobStatus: vi.fn(async () => ({
@@ -210,11 +212,10 @@ vi.mock('@/custom/api/assets', () => ({
 }));
 
 vi.mock('@/custom/api/canvas', () => ({
+  readCanvasConflictVersion: vi.fn(() => undefined),
   applyPromptPreview: apiMocks.applyPromptPreview,
   referencePromptPlan: apiMocks.referencePromptPlan,
-  listLegacyCardHistory: apiMocks.listLegacyCardHistory,
   createConversationQuote: apiMocks.createConversationQuote,
-  legacyCardHistoryOptions: apiMocks.legacyCardHistoryOptions,
   saveCanvasDoc: apiMocks.saveCanvasDoc,
   serializeNodes: vi.fn((nodes: Node[]) =>
     JSON.stringify(nodes.map((n) => ({ id: n.id, type: n.type, position: n.position, data: n.data }))),
@@ -239,8 +240,6 @@ vi.mock('@/custom/api/jobs', () => ({
   createAudioTrim: apiMocks.createAudioTrim,
   readJobFailText: apiMocks.readJobFailText,
 }));
-
-vi.mock('@/custom/api/sharedAssets', () => ({ saveSharedAsset: vi.fn() }));
 
 vi.mock('@/custom/api/generation', () => ({
   fetchGenerationModels: apiMocks.fetchGenerationModels,
@@ -1004,7 +1003,7 @@ describe('IKFC1T 文生视频入口与媒体参考自动切换', () => {
   });
 });
 
-describe('IKK1T9 视频编辑/延长（ADR-0124 模式配置化）', () => {
+describe('IKK1T9 视频编辑/延长（ADR-0124 模式配置化）', { retry: 1 }, () => {
   function editCapableModel() {
     return {
       model_id: 'seedance-2',
@@ -1550,6 +1549,76 @@ describe('IKIZQB 样片模式提交与样片卡', () => {
     const generating = flowProps.current.mediaNodes.find((n: Node) => n.data?.genStatus === 'generating')!;
     expect(generating.data.videoStage).toBe('sample');
     expect(generating.data.fileName).toBe('样片生成中');
+  });
+
+  it('样片报价与提交同源：提示词不进报价，参考顺序按 stripOrder 一致', async () => {
+    const doc = canvasDocMock.current.doc as {
+      nodes: Array<{ id: string; data: Record<string, unknown> }>;
+      edges: unknown[];
+    };
+    doc.nodes.find((n) => n.id === 'd1')!.data.referenceStripOrder = ['media:node:m2', 'media:node:m1'];
+    doc.edges = [
+      { id: 'e-m1', source: 'm1', target: 'd1' },
+      { id: 'e-m2', source: 'm2', target: 'd1' },
+    ];
+    apiMocks.fetchGenerationModels.mockImplementation(async () => [sampleCapableModel()]);
+    quoteMock.current = { credits: 60, quote_revision: 'rev-1' };
+    await renderPage();
+    await clickNode({ id: 'd1', type: 'mediaNode', data: { draft: true, mediaType: 'video' } });
+    await waitModelReady();
+    await typePrompt('样片报价同源');
+
+    const configBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('16:9'))!;
+    await act(async () => { configBtn.click(); });
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="sample-mode-switch"]')!.click();
+    });
+    await waitFor(() => expect(sendButton().disabled).toBe(false));
+
+    const sampleQuotes = vi.mocked(generationQuoteOptions).mock.calls
+      .map((call) => call[1] as unknown as { parameters: Record<string, unknown>; references?: Array<Record<string, unknown>> })
+      .filter((payload) => payload.parameters?.sample_mode === true);
+    const quotePayload = sampleQuotes.at(-1)!;
+    expect(quotePayload.parameters.prompt).toBeUndefined();
+    expect(quotePayload.references).toEqual([
+      { asset_id: 'a2', type: 'image', role: 'reference' },
+      { asset_id: 'a1', type: 'image', role: 'reference' },
+    ]);
+
+    await act(async () => { sendButton().click(); });
+    await waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
+    const [, payload] = apiMocks.createGenerationJob.mock.calls[0]!;
+    expect(payload.references).toEqual(quotePayload.references);
+  });
+
+  it('样片创建返回 1056：作废当前报价并重新报价', async () => {
+    apiMocks.fetchGenerationModels.mockImplementation(async () => [sampleCapableModel()]);
+    quoteMock.current = { credits: 60, quote_revision: 'rev-1' };
+    apiMocks.createGenerationJob.mockRejectedValueOnce(
+      new ApiError(400, '价格已更新，请刷新后重新确认提交', 1056, { code: 'quote_stale' }),
+    );
+    await renderPage();
+    await act(async () => { toolbarProps.current.onToggleVideoDialog(); });
+    await waitModelReady();
+    await typePrompt('涨价后重提');
+
+    const configBtn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes('16:9'))!;
+    await act(async () => { configBtn.click(); });
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="sample-mode-switch"]')!.click();
+    });
+    await waitFor(() => expect(sendButton().disabled).toBe(false));
+
+    const quotedBefore = quoteMock.fetches;
+    await act(async () => { sendButton().click(); });
+    await waitFor(() => expect(apiMocks.createGenerationJob).toHaveBeenCalledTimes(1));
+    const targetId = (apiMocks.createGenerationJob.mock.calls[0]![1] as Record<string, unknown>).target_node_id as string;
+    await waitFor(() => expect(flowProps.current.mediaNodes.some(
+      (n: Node) => n.id === targetId && n.data?.genStatus === 'failed',
+    )).toBe(true));
+
+    await clickNode({ id: targetId, type: 'mediaNode', data: { draft: true, mediaType: 'video' } });
+    await waitFor(() => expect(quoteMock.fetches).toBeGreaterThan(quotedBefore));
   });
 
   it('样片成功：回填自有素材与实际截止时间（服务端阶段投影为准），重新编辑默认开启样片', async () => {

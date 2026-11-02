@@ -31,9 +31,6 @@ class JobFinalizerAudioVideoMuxTest {
     @Mock GenerationJobLogMapper jobLogMapper;
     @Mock GenerationOutputSlotMapper slotMapper;
     @Mock GenerationJobExtraMapper extraMapper;
-    @Mock SceneCardGenerationRecordSync recordSync;
-    @Mock StoryboardPreviewSync previewSync;
-    @Mock ProjectEventPublisher eventPublisher;
     @Mock TerminalEventOutbox settlementPublisher;
 
     private JobFinalizer finalizer;
@@ -41,7 +38,7 @@ class JobFinalizerAudioVideoMuxTest {
     @BeforeEach
     void setUp() {
         finalizer = new JobFinalizer(jobMapper, assetMapper, jobLogMapper, slotMapper, extraMapper,
-                recordSync, previewSync, eventPublisher, settlementPublisher);
+                settlementPublisher);
         lenient().when(assetMapper.insert(any(AssetEntity.class))).thenAnswer(invocation -> {
             ((AssetEntity) invocation.getArgument(0)).setId(99L);
             return 1;

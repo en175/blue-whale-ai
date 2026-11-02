@@ -5,11 +5,12 @@ import type { RefObject } from 'react';
 import type { Node } from '@xyflow/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const uploadMocks = vi.hoisted(() => ({ uploadAssetFile: vi.fn() }));
+const uploadMocks = vi.hoisted(() => ({ uploadAssetFile: vi.fn(), probeMediaMeta: vi.fn(async () => ({})) }));
 
 vi.mock('@/custom/utils/upload', async (importActual) => ({
   ...(await importActual<typeof import('@/custom/utils/upload')>()),
   uploadAssetFile: uploadMocks.uploadAssetFile,
+  probeMediaMeta: uploadMocks.probeMediaMeta,
 }));
 
 import {
@@ -36,8 +37,8 @@ function host(over: Partial<CanvasUploadDropHost> = {}): CanvasUploadDropHost {
     currentId: 'p1',
     toolMode: 'select',
     spawnPosition: () => ({ x: 0, y: 0 }),
+    spawnBatch: (items) => items.map((_, index) => ({ x: index * 328, y: 0 })),
     handleMediaDims: () => {},
-    handleSaveMediaToAssets: () => {},
     dockToolCallbacks: {},
     actionsRef: ref({}) as unknown as CanvasUploadDropHost['actionsRef'],
     setMediaNodes: () => {},
@@ -88,6 +89,7 @@ async function render(input: CanvasUploadDropHost) {
 async function run(fn: () => void) {
   await act(async () => {
     fn();
+    await new Promise((resolve) => setTimeout(resolve, 0));
     await new Promise((resolve) => setTimeout(resolve, 0));
   });
 }

@@ -1,8 +1,10 @@
 import { type MediaGenStatus, type VideoRefRole } from '@/custom/enums';
+import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import type { Dispatch, RefObject, SetStateAction } from 'react';
 import type { Edge, Node } from '@xyflow/react';
 import { envelopeErrorCode, isApiError } from '@/shared/api/http';
+import { generationQuoteKeys } from '@/custom/api/generationQuote';
 import {
   quoteSampleRegenerate,
   quoteVideoFinalize,
@@ -39,6 +41,10 @@ type ActionsRef = RefObject<{
   cancelJob: (id: string) => void;
   retryJob: (id: string) => void;
   fixFollowVideo: (id: string) => void;
+  editFailed: (id: string) => void;
+  rechargeFailed: (id: string) => void;
+  requoteFailed: (id: string) => void;
+  requoteConfirm: (id: string) => void;
   duplicate: (id: string) => void;
   renameCard: (id: string, name: string) => void;
   addToChat: (id: string) => void;
@@ -59,7 +65,6 @@ export interface CanvasGenerationSubmissionHost extends CanvasGenerationTerminal
   spawnPosition: () => { x: number; y: number };
   textAttachmentsForSend: (targetNodeId: string) => ImageTextAttachment[];
   handleMediaDims: (nodeId: string, dims: MediaDims) => void;
-  handleSaveMediaToAssets: (nodeId: string) => void;
   dockCallbacks: ReturnType<typeof createCanvasToolSessions>['callbacks'] & {
     onEnhanceImage: (id: string) => void;
     onVideoEnhance: (id: string) => void;
@@ -117,6 +122,7 @@ function draftModeOfNodeIn(
 export function useCanvasGenerationSubmission(host: CanvasGenerationSubmissionHost): CanvasGenerationSubmissionHandles {
   const hostRef = useRef(host);
   hostRef.current = host;
+  const queryClient = useQueryClient();
 
   const [finalizeQuotes, setFinalizeQuotes] = useState<
     Record<string, { phase: 'loading' } | { phase: 'ready'; credits: number; revision: string } | { phase: 'empty' }>
@@ -576,7 +582,7 @@ export function useCanvasGenerationSubmission(host: CanvasGenerationSubmissionHo
     const {
       currentId, mediaNodesRef, edgesRef, generationRuntimeRef, setMediaNodes, setEdges,
       actionsRef, toolMode, attachCallbacks, patchMediaNode, dockCallbacks,
-      textAttachmentsForSend, handleMediaDims, handleSaveMediaToAssets, blockInvalidDraft, spawnPosition,
+      textAttachmentsForSend, handleMediaDims, blockInvalidDraft, spawnPosition,
       addCanvasEdge,
     } = hostRef.current;
     const draftModeOfNode = (nodeId: string, data?: Record<string, unknown>) =>
@@ -673,6 +679,10 @@ export function useCanvasGenerationSubmission(host: CanvasGenerationSubmissionHo
         onDelete: (id: string) => actionsRef.current.removeMediaNode(id),
         onCancelJob: (id: string) => actionsRef.current.cancelJob(id),
         onRetryJob: (id: string) => actionsRef.current.retryJob(id),
+        onEditFailed: (id: string) => actionsRef.current.editFailed(id),
+        onRechargeFailed: (id: string) => actionsRef.current.rechargeFailed(id),
+        onRequoteFailed: (id: string) => actionsRef.current.requoteFailed(id),
+        onRequoteConfirm: (id: string) => actionsRef.current.requoteConfirm(id),
         onFixFollowVideo: (id: string) => actionsRef.current.fixFollowVideo(id),
         onDuplicate: (id: string) => actionsRef.current.duplicate(id),
         onTitleChange: (id: string, name: string) => actionsRef.current.renameCard(id, name),
@@ -680,7 +690,6 @@ export function useCanvasGenerationSubmission(host: CanvasGenerationSubmissionHo
         onDownload: (id: string) => actionsRef.current.download(id),
         ...dockCallbacks,
         onShowDetails: (id: string) => actionsRef.current.showDetails(id),
-        onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
         onMediaDims: handleMediaDims,
       },
     };
@@ -799,6 +808,9 @@ export function useCanvasGenerationSubmission(host: CanvasGenerationSubmissionHo
               setMediaNodes((prev) => prev.filter((n) => n.id !== nodeId));
               setEdges(prev => prev.filter(edge => edge.target !== nodeId));
             };
+            if (isApiError(e) && Number(e.code) === 1056) {
+              void queryClient.invalidateQueries({ queryKey: generationQuoteKeys.all });
+            }
             if (openRechargeForCreditsError(e)) {
               if (inPlaceNodeId) rollbackInPlace();
               else removePlaceholder();

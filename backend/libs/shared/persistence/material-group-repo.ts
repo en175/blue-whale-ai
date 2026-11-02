@@ -63,7 +63,7 @@ function toView(row: {
 export function createMaterialGroupRepo(prisma: PrismaClient): MaterialGroupRepo {
   return {
     async upsert({ userId, materialGroupId, kind, name, coverUrl, isDefault }) {
-      const row = await prisma.material_groups.upsert({
+      const row = await prisma.user_material_groups.upsert({
         where: {
           user_id_material_group_id: {
             user_id: BigInt(userId),
@@ -90,7 +90,7 @@ export function createMaterialGroupRepo(prisma: PrismaClient): MaterialGroupRepo
       return toView(row);
     },
     async findVirtualDefault(userId) {
-      const row = await prisma.material_groups.findFirst({
+      const row = await prisma.user_material_groups.findFirst({
         where: {
           user_id: BigInt(userId),
           kind: "virtual",
@@ -102,7 +102,7 @@ export function createMaterialGroupRepo(prisma: PrismaClient): MaterialGroupRepo
       return row ? toView(row) : null;
     },
     async listByUser(userId, kind) {
-      const rows = await prisma.material_groups.findMany({
+      const rows = await prisma.user_material_groups.findMany({
         where: {
           user_id: BigInt(userId),
           is_delete: false,
@@ -115,8 +115,8 @@ export function createMaterialGroupRepo(prisma: PrismaClient): MaterialGroupRepo
     async pageByUser(userId, kind, page, size) {
       const where = { user_id: BigInt(userId), kind, is_delete: false };
       const [total, rows] = await Promise.all([
-        prisma.material_groups.count({ where }),
-        prisma.material_groups.findMany({
+        prisma.user_material_groups.count({ where }),
+        prisma.user_material_groups.findMany({
           where,
           orderBy: [{ gmt_create: "desc" }, { id: "desc" }],
           skip: (page - 1) * size,
@@ -126,7 +126,7 @@ export function createMaterialGroupRepo(prisma: PrismaClient): MaterialGroupRepo
       return { total, rows: rows.map(toView) };
     },
     async findByUserAndUpstream(userId, materialGroupId) {
-      const row = await prisma.material_groups.findFirst({
+      const row = await prisma.user_material_groups.findFirst({
         where: {
           user_id: BigInt(userId),
           material_group_id: materialGroupId,
@@ -136,7 +136,7 @@ export function createMaterialGroupRepo(prisma: PrismaClient): MaterialGroupRepo
       return row ? toView(row) : null;
     },
     async softDelete(userId, materialGroupId) {
-      await prisma.material_groups.updateMany({
+      await prisma.user_material_groups.updateMany({
         where: {
           user_id: BigInt(userId),
           material_group_id: materialGroupId,

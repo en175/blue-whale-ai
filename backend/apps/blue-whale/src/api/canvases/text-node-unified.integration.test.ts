@@ -61,7 +61,7 @@ describe.skipIf(!process.env.IKFM3L_DATABASE_URL)("Unified text node content con
     return response;
   }
   async function readCanvasRow(projectId: bigint) {
-    return prisma.client.canvas.findUnique({ where: { project_id: projectId } });
+    return prisma.client.project_canvas.findUnique({ where: { project_id: projectId } });
   }
   function parseNodes(row: { nodes_json: unknown }): Array<{ id: string; position: { x: number; y: number }; data: Record<string, unknown> }> {
     const raw = typeof row.nodes_json === "string" ? JSON.parse(row.nodes_json) : row.nodes_json;
@@ -125,7 +125,7 @@ describe.skipIf(!process.env.IKFM3L_DATABASE_URL)("Unified text node content con
     const rejected = await saveCanvas(project.id, forged, [], "missing");
     expect(rejected.status).toBe(400);
 
-    await prisma.client.canvas.create({ data: { project_id: project.id, nodes_json: seed, edges_json: [], viewport_json: {}, version: 1 } });
+    await prisma.client.project_canvas.create({ data: { project_id: project.id, nodes_json: seed, edges_json: [], viewport_json: {}, version: 1 } });
     const row = (await readCanvasRow(project.id))!;
     expect(parseNodes(row)[0].data.promptSource).toEqual(promptSource);
 

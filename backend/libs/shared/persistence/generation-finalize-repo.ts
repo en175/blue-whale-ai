@@ -13,7 +13,7 @@ import {
   type CreateJobIdempotency,
   type CreateJobResult,
 } from "./generation-job-idempotency.js";
-import { appendProjectEvent } from "./product-event-repo.js";
+import { nextSnowflake } from "./snowflake.js";
 import {
   extraNumber,
   extraString,
@@ -178,7 +178,7 @@ async function createFinalizeJobWithinTx(
       status: "pending",
     },
   });
-  await tx.cost_reservations.create({
+  await tx.billing_cost_reservations.create({
     data: {
       generation_job_id: job.id,
       user_id: BigInt(input.userId),
@@ -210,31 +210,14 @@ async function createFinalizeJobWithinTx(
       } as never,
     },
   });
-  const event = await appendProjectEvent(tx, {
-    projectId: input.projectId,
-    eventType: "generation_job.created",
-    aggregateType: "generation_job",
-    aggregateId: job.id.toString(),
-    aggregateVersion: job.version,
-    correlationId: input.actionIdentity,
-    payload: {
-      job_id: job.id.toString(),
-      type: job.type,
-      source: job.source,
-      status: job.status,
-      progress: job.progress,
-      output_asset_ids: [],
-      video_stage: "final",
-      source_sample_job_id: input.sourceSampleJobId,
-    },
-  });
+  const cursor = nextSnowflake();
   await writeCreateIdempotency(
     tx,
-    { projectId: input.projectId, jobId: job.id, acceptedCursor: event.cursor },
+    { projectId: input.projectId, jobId: job.id, acceptedCursor: cursor.toString() },
     idempotency,
     FINALIZE_GENERATION_JOB_OPERATION,
   );
-  return { generation_job_id: job.id.toString(), cursor: Number(event.cursor) };
+  return { generation_job_id: job.id.toString(), cursor: Number(cursor) };
 }
 
 export interface FinalizeCommandRepo {

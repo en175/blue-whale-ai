@@ -54,7 +54,7 @@ describe.skipIf(!process.env.IKFA8X_DATABASE_URL)("Card rename public API (IKFA8
   beforeAll(async () => {
     process.env.DATABASE_URL = process.env.IKFA8X_DATABASE_URL;
     const sizes = [{ id: "1024x1024", label: "1024x1024" }];
-    await prisma.client.generation_model_capability.upsert({
+    await prisma.client.catalog_models.upsert({
       where: { provider_id_model_id: { provider_id: "ikfa8x-test", model_id: MODEL_ID } },
       create: {
         provider_id: "ikfa8x-test",
@@ -172,7 +172,7 @@ describe.skipIf(!process.env.IKFA8X_DATABASE_URL)("Card rename public API (IKFA8
     return nodes.find((n) => n.id === nodeId);
   }
   async function createAsset(projectId: string, type: string, url: string) {
-    const asset = await prisma.client.assets.create({
+    const asset = await prisma.client.user_assets.create({
       data: { user_id: BigInt(987654), project_id: BigInt(projectId), type, url, width: 640, height: 480 },
     });
     return asset.id.toString();
@@ -191,7 +191,7 @@ describe.skipIf(!process.env.IKFA8X_DATABASE_URL)("Card rename public API (IKFA8
   }
 
   async function succeedJob(projectId: string, jobId: string, url: string) {
-    const asset = await prisma.client.assets.create({
+    const asset = await prisma.client.user_assets.create({
       data: { user_id: BigInt(987654), project_id: BigInt(projectId), type: "image", url, width: 1024, height: 1024, size: BigInt(2048) },
     });
     await prisma.client.generation_output_slots.updateMany({
@@ -408,10 +408,10 @@ describe.skipIf(!process.env.IKFA8X_DATABASE_URL)("Card rename public API (IKFA8
       expect((await canvasNode(projectId, "aud"))?.id).toBe("aud");
 
 
-      const assetRowBefore = await prisma.client.assets.findUnique({ where: { id: BigInt(assetA) } });
+      const assetRowBefore = await prisma.client.user_assets.findUnique({ where: { id: BigInt(assetA) } });
       expect((await canvasNode(projectId, "img-b"))?.data.fileName).toBe("上传图.png");
       expect((await canvasNode(projectId, "img-b"))?.data.customName).toBeUndefined();
-      const assetRowAfter = await prisma.client.assets.findUnique({ where: { id: BigInt(assetA) } });
+      const assetRowAfter = await prisma.client.user_assets.findUnique({ where: { id: BigInt(assetA) } });
       expect(assetRowAfter?.gmt_modified).toEqual(assetRowBefore?.gmt_modified);
 
 
@@ -645,12 +645,12 @@ describe.skipIf(!process.env.IKFA8X_DATABASE_URL)("Card rename public API (IKFA8
       }, { timeout: 15_000 });
 
 
-      const assetRowBefore = await prisma.client.assets.findUnique({ where: { id: BigInt(assetA) } });
+      const assetRowBefore = await prisma.client.user_assets.findUnique({ where: { id: BigInt(assetA) } });
       await renameCard(page, projectId, "img-a", "只改这张");
       expect((await canvasNode(projectId, "img-a"))?.data.fileName).toBe("只改这张");
       expect((await canvasNode(projectId, "img-b"))?.data.fileName, "同素材另一张卡名称不被联动").toBe("上传图.png");
       expect((await canvasNode(projectId, "img-b"))?.data.customName, "同素材另一张卡自定义状态不被联动").toBeUndefined();
-      const assetRowAfter = await prisma.client.assets.findUnique({ where: { id: BigInt(assetA) } });
+      const assetRowAfter = await prisma.client.user_assets.findUnique({ where: { id: BigInt(assetA) } });
       expect(assetRowAfter?.gmt_modified, "素材库资产行不被改名触碰").toEqual(assetRowBefore?.gmt_modified);
 
 

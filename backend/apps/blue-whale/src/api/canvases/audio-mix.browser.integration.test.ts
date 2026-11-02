@@ -168,7 +168,7 @@ describe.skipIf(process.env.IKI68W_BROWSER !== "1")(
       const { createServer: createVite } = await import("../../../../../../web/node_modules/vite/dist/node/index.js");
       const projectId = (await projects.create("9", "IKI68W browser")).id;
       const createAsset = async (name: string, durationMs: number) => {
-        const row = await prisma.client.assets.create({ data: {
+        const row = await prisma.client.user_assets.create({ data: {
           user_id: 9n, project_id: BigInt(projectId), type: "audio", source: "uploaded", status: "normal",
           storage_key: `uploads/9/${name}.wav`, url: `${mediaBase}/${name}.wav`,
           duration_ms: durationMs, size: BigInt(wav.length),

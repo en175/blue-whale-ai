@@ -6,9 +6,6 @@ import com.bluewhale.worker.application.service.AssetSourceService;
 import com.bluewhale.worker.application.service.JobFinalizer;
 import com.bluewhale.worker.application.service.TerminalEventOutbox;
 import com.bluewhale.worker.application.service.JobStateMachineService;
-import com.bluewhale.worker.application.service.ProjectEventPublisher;
-import com.bluewhale.worker.application.service.SceneCardGenerationRecordSync;
-import com.bluewhale.worker.application.service.StoryboardPreviewSync;
 import com.bluewhale.worker.infrastructure.config.NewApiUpstreamConfig.UpstreamCredential;
 import com.bluewhale.worker.infrastructure.gateway.NewApiVideoClient;
 import com.bluewhale.worker.infrastructure.persistence.mapper.AssetMapper;
@@ -16,9 +13,6 @@ import com.bluewhale.worker.infrastructure.persistence.mapper.GenerationJobLogMa
 import com.bluewhale.worker.infrastructure.persistence.mapper.GenerationJobExtraMapper;
 import com.bluewhale.worker.infrastructure.persistence.mapper.GenerationJobMapper;
 import com.bluewhale.worker.infrastructure.persistence.mapper.GenerationOutputSlotMapper;
-import com.bluewhale.worker.infrastructure.persistence.mapper.ProjectEventMapper;
-import com.bluewhale.worker.infrastructure.persistence.mapper.SceneCardGenerationRecordMapper;
-import com.bluewhale.worker.infrastructure.persistence.mapper.StoryboardPreviewMapper;
 import com.bluewhale.worker.infrastructure.mq.GenerationMessageProducer;
 import com.bluewhale.worker.infrastructure.storage.TosVideoMediaRelay;
 import com.zaxxer.hikari.HikariDataSource;
@@ -66,15 +60,8 @@ class PromptPlanVideoIntegrationTest {
         @Bean
         JobFinalizer finalizer(
                 GenerationJobMapper jm, AssetMapper am, GenerationJobLogMapper jlm,
-                GenerationOutputSlotMapper sm, GenerationJobExtraMapper em,
-                ProjectEventMapper pem,
-                SceneCardGenerationRecordMapper rm, StoryboardPreviewMapper pm) {
-            ProjectEventPublisher events = new ProjectEventPublisher(pem);
-            return new JobFinalizer(jm, am, jlm, sm, em,
-                    new SceneCardGenerationRecordSync(sm, rm, events),
-                    new StoryboardPreviewSync(sm, pm, events),
-                    events,
-                    TerminalEventOutbox.noop());
+                GenerationOutputSlotMapper sm, GenerationJobExtraMapper em) {
+            return new JobFinalizer(jm, am, jlm, sm, em, TerminalEventOutbox.noop());
         }
     }
 

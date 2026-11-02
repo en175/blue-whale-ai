@@ -7,10 +7,7 @@ import {
 
 import { publicGenerationInput } from "./generation-input.js";
 import { classifyMentionAvailability } from "./mention-availability.js";
-import {
-  resolveLogicalSlots,
-  type OutputSlotStatus,
-} from "./generation-output-slot-repo.js";
+import { type OutputSlotStatus } from "./generation-output-slot-repo.js";
 
 
 export interface SnapshotOutputSlotView {
@@ -63,10 +60,6 @@ export interface SnapshotConversationState {
     created_at: string;
     mentions: SnapshotMentionView[];
   }>;
-  scene_cards: SnapshotSceneCardView[];
-  scene_card_generation_records: SnapshotSceneCardGenerationRecordView[];
-  storyboard_previews: SnapshotStoryboardPreviewView[];
-  high_watermark_cursor: string;
 }
 
 export interface SnapshotRepo {
@@ -88,29 +81,6 @@ export interface SnapshotMentionView {
   availability: "available" | "stale" | "unavailable";
   reason: MentionFailureReason | null;
   snapshot?: unknown;
-}
-
-export interface SnapshotSceneCardView {
-  scene_card_id: string;
-  title: string;
-  summary: string | null;
-  content_markdown: string;
-  version: number;
-}
-
-export interface SnapshotSceneCardGenerationRecordView {
-  record_id: string;
-  scene_card_id: string;
-  summary_status: string;
-  first_generation_job_id: string;
-  output_slots: SnapshotOutputSlotView[];
-}
-
-export interface SnapshotStoryboardPreviewView {
-  preview_id: string;
-  scene_card_id: string;
-  first_generation_job_id: string;
-  summary_status: string;
 }
 
 function parseAssetIdList(json: unknown): string[] {
@@ -146,7 +116,7 @@ export function createSnapshotRepo(prisma: PrismaClient): SnapshotRepo {
         })
       ).map((r) => r.asset_id);
 
-      const assetRows = await prisma.assets.findMany({
+      const assetRows = await prisma.user_assets.findMany({
         where: {
           user_id: uid,
           status: "normal",
@@ -191,7 +161,7 @@ export function createSnapshotRepo(prisma: PrismaClient): SnapshotRepo {
         ),
       ];
       if (materialIds.length > 0) {
-        const statusRows = await prisma.material_assets.findMany({
+        const statusRows = await prisma.user_material_info.findMany({
           where: { user_id: uid, material_id: { in: materialIds } },
           select: {
             material_id: true,
@@ -263,72 +233,10 @@ export function createSnapshotRepo(prisma: PrismaClient): SnapshotRepo {
         display_name: string;
         snapshot: unknown;
       }> = [];
-      const [messages, maxCursorRow, sceneCardRows, recordRows, previewRows] =
-        await Promise.all([
-          prisma.conversation_messages.findMany({
-            where: { project_id: pid, is_delete: 0 },
-            orderBy: { sequence_no: "asc" },
-          }),
-          prisma.project_events.aggregate({
-            where: { project_id: pid, is_delete: 0 },
-            _max: { cursor: true },
-          }),
-          prisma.scene_cards.findMany({
-            where: { project_id: pid, is_delete: 0 },
-            orderBy: { id: "asc" },
-            select: {
-              id: true,
-              title: true,
-              summary: true,
-              content_markdown: true,
-              version: true,
-            },
-          }),
-          prisma.scene_card_generation_records.findMany({
-            where: { project_id: pid, is_delete: 0 },
-            orderBy: { id: "asc" },
-            select: {
-              id: true,
-              scene_card_id: true,
-              summary_status: true,
-              first_generation_job_id: true,
-            },
-          }),
-          prisma.storyboard_previews.findMany({
-            where: { project_id: pid, is_delete: 0 },
-            orderBy: { id: "asc" },
-            select: {
-              id: true,
-              scene_card_id: true,
-              first_generation_job_id: true,
-              summary_status: true,
-            },
-          }),
-        ]);
-      const allSlotRows = await prisma.generation_output_slots.findMany({
-        where: { project_id: pid, scene_card_generation_record_id: { not: null } },
-        orderBy: [{ scene_card_generation_record_id: "asc" }, { slot_index: "asc" }, { id: "asc" }],
+      const messages = await prisma.conversation_messages.findMany({
+        where: { project_id: pid, is_delete: 0 },
+        orderBy: { sequence_no: "asc" },
       });
-      const slotsByRecord = new Map<string, SnapshotOutputSlotView[]>();
-      for (const s of allSlotRows) {
-        const rid = s.scene_card_generation_record_id!.toString();
-        const list = slotsByRecord.get(rid) ?? [];
-        list.push({
-          slot_id: s.id.toString(),
-          slot_index: s.slot_index,
-          status: s.status as OutputSlotStatus,
-          asset_id: s.asset_id == null ? null : s.asset_id.toString(),
-          retry_of_slot_id:
-            s.retry_of_slot_id == null ? null : s.retry_of_slot_id.toString(),
-          initial_placement_status: s.initial_placement_status as
-            | "pending"
-            | "placed",
-        });
-        slotsByRecord.set(rid, list);
-      }
-      for (const [recordId, slots] of slotsByRecord) {
-        slotsByRecord.set(recordId, resolveLogicalSlots(slots));
-      }
       const assetIds = [
         ...new Set(
           mentionRows
@@ -336,58 +244,29 @@ export function createSnapshotRepo(prisma: PrismaClient): SnapshotRepo {
             .map((mention) => mention.target_id),
         ),
       ];
-      const sceneCardIds = [
-        ...new Set(
-          mentionRows
-            .filter((mention) => mention.mention_type === "scene_card")
-            .map((mention) => mention.target_id),
-        ),
-      ];
-      const [assets, sceneCards] = await Promise.all([
-        assetIds.length === 0
-          ? []
-          : prisma.assets.findMany({
-              where: { id: { in: assetIds } },
-              select: {
-                id: true,
-                user_id: true,
-                project_id: true,
-                status: true,
-                is_delete: true,
-              },
-            }),
-        sceneCardIds.length === 0
-          ? []
-          : prisma.scene_cards.findMany({
-              where: { id: { in: sceneCardIds } },
-              select: {
-                id: true,
-                project_id: true,
-                version: true,
-                is_delete: true,
-              },
-            }),
-      ]);
+      const assets = assetIds.length === 0
+        ? []
+        : await prisma.user_assets.findMany({
+            where: { id: { in: assetIds } },
+            select: {
+              id: true,
+              user_id: true,
+              project_id: true,
+              status: true,
+              is_delete: true,
+            },
+          });
       const assetById = new Map(
         assets.map((asset) => [asset.id.toString(), asset]),
       );
-      const sceneCardById = new Map(
-        sceneCards.map((sceneCard) => [sceneCard.id.toString(), sceneCard]),
-      );
       const mentionsByMessage = new Map<string, SnapshotMentionView[]>();
       for (const mention of mentionRows) {
-        if (
-          mention.mention_type !== "asset" &&
-          mention.mention_type !== "scene_card"
-        ) {
-          continue;
-        }
+        if (mention.mention_type !== "asset") continue;
         const { availability, reason } = classifyMentionAvailability({
           type: mention.mention_type,
           targetVersion: mention.target_version,
           acceptedUserId: mention.accepted_user_id,
           asset: assetById.get(mention.target_id.toString()),
-          sceneCard: sceneCardById.get(mention.target_id.toString()),
           projectId: pid,
           userId: uid,
         });
@@ -419,27 +298,6 @@ export function createSnapshotRepo(prisma: PrismaClient): SnapshotRepo {
           created_at: wallClockRfc3339(message.gmt_create),
           mentions: mentionsByMessage.get(message.id.toString()) ?? [],
         })),
-        scene_cards: sceneCardRows.map((card) => ({
-          scene_card_id: card.id.toString(),
-          title: card.title,
-          summary: card.summary,
-          content_markdown: card.content_markdown,
-          version: card.version,
-        })),
-        scene_card_generation_records: recordRows.map((record) => ({
-          record_id: record.id.toString(),
-          scene_card_id: record.scene_card_id.toString(),
-          summary_status: record.summary_status,
-          first_generation_job_id: record.first_generation_job_id.toString(),
-          output_slots: slotsByRecord.get(record.id.toString()) ?? [],
-        })),
-        storyboard_previews: previewRows.map((preview) => ({
-          preview_id: preview.id.toString(),
-          scene_card_id: preview.scene_card_id.toString(),
-          first_generation_job_id: preview.first_generation_job_id.toString(),
-          summary_status: preview.summary_status,
-        })),
-        high_watermark_cursor: (maxCursorRow?._max?.cursor ?? 0n).toString(),
       };
     },
   };

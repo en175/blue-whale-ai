@@ -92,7 +92,7 @@ function makeService(options: {
       countAdminUsers: vi.fn().mockResolvedValue(options.totalUsers ?? 7),
     } as never,
     {
-      client: { generation_jobs: { groupBy }, recharge_orders: { groupBy: rechargeGroupBy } },
+      client: { generation_jobs: { groupBy }, billing_recharge_orders: { groupBy: rechargeGroupBy } },
     } as never,
   );
   return { service, groupBy, rechargeGroupBy };

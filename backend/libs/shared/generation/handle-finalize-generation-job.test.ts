@@ -5,7 +5,7 @@ import {
   handleFinalizeGenerationJobCreate,
   handleFinalizeGenerationJobQuote,
 } from "./handle-finalize-generation-job.js";
-import { quoteRevisionOf } from "./handle-quote-generation-job.js";
+import { quoteRevisionOf, videoQuoteRevisionInput } from "./handle-quote-generation-job.js";
 import type { FinalizeSourceJob } from "@lib/shared/persistence/index.js";
 
 
@@ -110,7 +110,7 @@ function confirmationOf(
       catalogVersion: quoteResult.catalogVersion,
       capabilityVersion: capability.version as number | undefined,
       tier: quoteResult.tier,
-      quoteInput: derived,
+      quoteInput: videoQuoteRevisionInput(derived),
     }),
   };
 }
@@ -281,7 +281,7 @@ describe("handleFinalizeGenerationJobCreate（IKIZQC）", () => {
     const res = await handleFinalizeGenerationJobCreate("42", "1", "302", happyBody(), "key-2", deps);
 
     expect(res.code).toBe(1014);
-    expect(res.msg).toBe("无法确认视频任务是否已提交");
+    expect(res.msg).toBe("提交结果核对中，请勿重复提交。");
     expect(createFinalizeJob).not.toHaveBeenCalled();
   });
 
@@ -311,7 +311,7 @@ describe("handleFinalizeGenerationJobCreate（IKIZQC）", () => {
     expect(res2.msg).toContain("截止时间");
   });
 
-  it("★ G03/G04: 确认字段缺失/非法 → 400；变价（credits 不一致）→ 1056；revision 失效 → 1056；算不出价 → 1056；未接报价依赖 → 1056", async () => {
+  it("★ G03/G04: 确认字段缺失/非法 → 400；变价（credits 不一致）→ 1056；revision 失效 → 1056；算不出价 → 1056；未接报价依赖 → 1063", async () => {
     const quote = quoteStub().quote;
     const missing = buildDeps({ quote });
     expect(
@@ -336,11 +336,11 @@ describe("handleFinalizeGenerationJobCreate（IKIZQC）", () => {
     const unpriceable = buildDeps({ quote: vi.fn().mockResolvedValue(null) });
     expect(
       (await handleFinalizeGenerationJobCreate("42", "1", "302", happyBody(), "k", unpriceable.deps)).code,
-    ).toBe(1056);
+    ).toBe(1063);
     const noDep = buildDeps({});
     expect(
       (await handleFinalizeGenerationJobCreate("42", "1", "302", happyBody(), "k", noDep.deps)).code,
-    ).toBe(1056);
+    ).toBe(1063);
   });
 
   it("★ 模型停用 → 400 MODEL_UNAVAILABLE；未放行样片模式 → 400 capability_unsupported_param", async () => {

@@ -174,14 +174,14 @@ const audioModel = {
 };
 
 const apiMocks = vi.hoisted(() => ({
-  fetchProjects: vi.fn(async () => [{ id: 'p1', name: '项目一', thumb: null, previews: [], created_at: '2026-01-01T00:00:00Z', last_opened_at: null, pinned_at: null }]),
+  fetchProjects: vi.fn(async () => [{ id: 'p1', name: '项目一', previews: [], created_at: '2026-01-01T00:00:00Z', last_opened_at: null, last_edited_at: '2026-01-01T00:00:00Z', pinned_at: null }]),
   createProject: vi.fn(async () => ({
     id: 'p2',
     name: '未命名项目',
-    thumb: null,
     previews: [],
     created_at: '2026-01-01T00:00:00Z',
     last_opened_at: null,
+    last_edited_at: '2026-01-01T00:00:00Z',
     pinned_at: null,
   }) satisfies ProjectRecord),
   renameProject: vi.fn(),
@@ -192,9 +192,7 @@ const apiMocks = vi.hoisted(() => ({
   toSessionUser: vi.fn(() => null),
   applyPromptPreview: vi.fn(),
   referencePromptPlan: vi.fn(),
-  listLegacyCardHistory: vi.fn(async () => ({ items: [] })),
   createConversationQuote: vi.fn(),
-  legacyCardHistoryOptions: (projectId: string) => ({ queryKey: ['canvas', projectId, 'legacy-history'], queryFn: () => Promise.resolve({ items: [] }), retry: false }),
   saveCanvasDoc: vi.fn(async () => ({ id: 11, project_id: 1, version: 4, viewport: '{}', nodes: '[]' })),
   createGenerationJob: vi.fn(async () => ({ generation_job_id: 'j1', cursor: 1 })),
   fetchJobStatus: vi.fn(),
@@ -248,9 +246,7 @@ vi.mock('@/custom/api/assets', () => ({
 vi.mock('@/custom/api/canvas', () => ({
   applyPromptPreview: apiMocks.applyPromptPreview,
   referencePromptPlan: apiMocks.referencePromptPlan,
-  listLegacyCardHistory: apiMocks.listLegacyCardHistory,
   createConversationQuote: apiMocks.createConversationQuote,
-  legacyCardHistoryOptions: apiMocks.legacyCardHistoryOptions,
   saveCanvasDoc: apiMocks.saveCanvasDoc,
   serializeNodes: vi.fn((nodes: Node[]) =>
     JSON.stringify(nodes.map((n) => ({ id: n.id, type: n.type, position: n.position, data: n.data }))),
@@ -272,7 +268,6 @@ vi.mock('@/custom/api/jobs', () => ({
   readJobFailText: apiMocks.readJobFailText,
 }));
 
-vi.mock('@/custom/api/sharedAssets', () => ({ saveSharedAsset: vi.fn() }));
 
 vi.mock('@/custom/api/generationQuote', async (importActual) => ({
   ...(await importActual<typeof import('@/custom/api/generationQuote')>()),

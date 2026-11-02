@@ -544,7 +544,7 @@ describe('BottomDialog 样片模式开关（IKIZQB）', () => {
   });
 });
 
-describe('IKJ79D 报价带提示词（防抖 600ms）', () => {
+describe('IKJ79D 报价请求不含提示词（IKRH5I）', () => {
   function quoteResponse() {
     return new Response(JSON.stringify({ code: 200, msg: null, data: { credits: 42 } }), {
       status: 200,
@@ -581,7 +581,7 @@ describe('IKJ79D 报价带提示词（防抖 600ms）', () => {
     fetchGuard.unstubGlobals();
   });
 
-  it('初问无 prompt 键；停笔 600ms 后带 prompt 重问一次', async () => {
+  it('带初始提示词：报价恒不带 prompt 键，停笔后不重问', async () => {
     const quoteFetch = vi.fn().mockResolvedValue(quoteResponse());
     fetchGuard.stub(quoteFetch);
     await renderDialogWithProject('把背景替换成海边沙滩');
@@ -594,14 +594,9 @@ describe('IKJ79D 报价带提示词（防抖 600ms）', () => {
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 750));
     });
-    await vi.waitFor(() => expect(quoteFetch).toHaveBeenCalledTimes(2));
-    const secondBody = JSON.parse((quoteFetch.mock.calls[1]![1] as RequestInit).body as string);
-    expect(secondBody.parameters.prompt).toBe('把背景替换成海边沙滩');
-
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 100));
-    });
-    expect(quoteFetch).toHaveBeenCalledTimes(2);
+    expect(quoteFetch).toHaveBeenCalledTimes(1);
+    expect(JSON.parse((quoteFetch.mock.calls[0]![1] as RequestInit).body as string).parameters)
+      .not.toHaveProperty('prompt');
   });
 
   it('空提示词面板：报价请求恒不带 prompt 键', async () => {

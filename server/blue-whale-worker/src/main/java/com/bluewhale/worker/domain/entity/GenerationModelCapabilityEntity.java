@@ -7,7 +7,7 @@ import com.baomidou.mybatisplus.annotation.TableName;
 
 import java.time.LocalDateTime;
 
-@TableName("generation_model_capability")
+@TableName("catalog_models")
 public class GenerationModelCapabilityEntity {
     @TableId(type = IdType.AUTO)
     private Long id;

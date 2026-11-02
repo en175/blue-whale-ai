@@ -58,13 +58,13 @@ export {
 } from "./jwt.js";
 export {
   requestSmsCode,
+  SmsSendFailedError,
   type RequestSmsCodeInput,
   type RequestSmsCodeDeps,
   type RequestSmsCodeResult,
   type VerificationCodeRecord,
 } from "./auth/request-sms-code.js";
-export { PHONE_RE, isValidPhone, maskPhone } from "./auth/phone.js";
-export { isTelecomPhone } from "./auth/carrier.js";
+export { PHONE_RE, isValidPhone, maskIdentifier, maskPhone } from "./auth/phone.js";
 export {
   CAPTCHA_TTL_MS,
   CAPTCHA_CODE_LENGTH,
@@ -110,8 +110,6 @@ export {
   DEFAULT_NODE_HEIGHT,
   DEFAULT_GAP,
   DEFAULT_MAX_PER_ROW,
-  SCENE_CARD_WIDTH,
-  SCENE_CARD_FALLBACK_HEIGHT,
   type Rect,
   type FindPlacementOptions,
 } from "./placement.js";

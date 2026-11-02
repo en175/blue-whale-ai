@@ -16,7 +16,12 @@ export function isCanvasToolGeneration(data: Record<string, unknown>): boolean {
   return CANVAS_TOOL_IDENTITY_KEYS.some((key) => data[key] != null);
 }
 
-export function mediaNodeGenerationOverlay(isMediaExtraction: boolean, hideCancel = false) {
+export function mediaNodeGenerationOverlay(
+  mediaType: 'image' | 'video' | 'audio' | undefined,
+  isMediaExtraction: boolean,
+  hideCancel = false,
+  isToolCard = false,
+) {
   if (isMediaExtraction) {
     return {
       showProgress: true,
@@ -26,7 +31,7 @@ export function mediaNodeGenerationOverlay(isMediaExtraction: boolean, hideCance
   }
   return {
     showProgress: false,
-    progressLabel: null,
-    showCancel: !hideCancel,
+    progressLabel: mediaType === 'image' ? '图片生成中…' : mediaType === 'video' ? '视频生成中…' : null,
+    showCancel: !hideCancel && (mediaType === 'audio' || isToolCard),
   };
 }

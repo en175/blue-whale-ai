@@ -1,5 +1,7 @@
 package com.bluewhale.worker.domain.contract;
 
+import com.bluewhale.common.mq.MqEnvSuffix;
+
 public enum GenerationMqRouteEnum {
 
     VIDEO("generation-task", "video"),
@@ -47,8 +49,12 @@ public enum GenerationMqRouteEnum {
         this.tag = tag;
     }
 
-    public String topic() {
+    public String topicBase() {
         return topic;
+    }
+
+    public String topic() {
+        return MqEnvSuffix.apply(topicBase());
     }
 
     public String tag() {

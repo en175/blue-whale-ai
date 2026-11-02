@@ -1,4 +1,4 @@
-import { useEffect, useRef, type Dispatch, type SetStateAction } from 'react';
+import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import type { SessionContentBlock } from '@/custom/api/agentSessions';
 import { takeAgentHandoff } from '@/custom/utils/agent-handoff';
 import { rememberAssetUrl } from '../../components/AgentPanel/assetUrlCache';
@@ -7,16 +7,21 @@ export function useCanvasHomeAgentInject(input: {
   doc: unknown | null;
   placeFileOnCanvas: (file: File) => Promise<{ asset_id: string; url: string; nodeId: string }>;
   setAgentAssetPicks: Dispatch<SetStateAction<{ ts: number; blocks: SessionContentBlock[] } | null>>;
-}): void {
+}): { agentHandoffSettled: boolean } {
   const { doc, placeFileOnCanvas, setAgentAssetPicks } = input;
   const homeHandoffDoneRef = useRef(false);
+  const [agentHandoffSettled, setAgentHandoffSettled] = useState(false);
   const placeFileOnCanvasRef = useRef(placeFileOnCanvas);
   placeFileOnCanvasRef.current = placeFileOnCanvas;
   useEffect(() => {
     if (!doc) return;
     if (homeHandoffDoneRef.current) return;
     const attachments = takeAgentHandoff();
-    if (!attachments || attachments.length === 0) return;
+    if (!attachments || attachments.length === 0) {
+      homeHandoffDoneRef.current = true;
+      setAgentHandoffSettled(true);
+      return;
+    }
     homeHandoffDoneRef.current = true;
     let cancelled = false;
     const inject = async () => {
@@ -55,8 +60,10 @@ export function useCanvasHomeAgentInject(input: {
       if (!cancelled && blocks.length > 0) {
         setAgentAssetPicks({ ts: Date.now(), blocks });
       }
+      setAgentHandoffSettled(true);
     };
     void inject();
     return () => { cancelled = true; };
   }, [doc, setAgentAssetPicks]);
+  return { agentHandoffSettled };
 }

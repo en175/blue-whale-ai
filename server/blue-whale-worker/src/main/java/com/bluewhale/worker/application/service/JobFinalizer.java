@@ -42,9 +42,6 @@ public class JobFinalizer {
     private final GenerationOutputSlotMapper slotMapper;
 
     private final GenerationJobExtraMapper extraMapper;
-    private final SceneCardGenerationRecordSync recordSync;
-    private final StoryboardPreviewSync previewSync;
-    private final ProjectEventPublisher eventPublisher;
     private final TerminalEventOutbox outbox;
 
     public JobFinalizer(
@@ -53,9 +50,6 @@ public class JobFinalizer {
             GenerationJobLogMapper jobLogMapper,
             GenerationOutputSlotMapper slotMapper,
             GenerationJobExtraMapper extraMapper,
-            SceneCardGenerationRecordSync recordSync,
-            StoryboardPreviewSync previewSync,
-            ProjectEventPublisher eventPublisher,
             TerminalEventOutbox outbox
     ) {
         this.jobMapper = jobMapper;
@@ -63,9 +57,6 @@ public class JobFinalizer {
         this.jobLogMapper = jobLogMapper;
         this.slotMapper = slotMapper;
         this.extraMapper = extraMapper;
-        this.recordSync = recordSync;
-        this.previewSync = previewSync;
-        this.eventPublisher = eventPublisher;
         this.outbox = outbox;
     }
 
@@ -243,7 +234,6 @@ public class JobFinalizer {
     public boolean completeJob(String jobId, List<String> assetIds,
                                String workerId, long fencingToken) {
         Long jobIdLong = Long.parseLong(jobId);
-        lockProjectForJob(jobIdLong);
 
         String outputAssetIdsJson = toJson(assetIds.stream().map(Long::parseLong).toList());
         int guardAffected = jobMapper.completeJobGuard(
@@ -286,7 +276,7 @@ public class JobFinalizer {
                     "completeJob 守卫通过后任务 " + jobId + " 不存在，数据损坏");
         }
 
-        publishStatusChanged(job, Map.of("job_id", job.getId().toString(),
+        enqueueTerminalEvent(job, Map.of("job_id", job.getId().toString(),
                         "type", job.getType(),
                         "source", job.getSource(),
                         "status", job.getStatus(),
@@ -297,42 +287,6 @@ public class JobFinalizer {
             return true;
         }
 
-        for (int i = 0; i < assetIds.size(); i++) {
-            GenerationOutputSlotEntity slot = i < slots.size() ? slots.get(i) : null;
-            int slotIndex = slot != null ? slot.getSlotIndex() : i;
-            eventPublisher.publish(job.getProjectId(), "generation_job.output_attached",
-                    "generation_job_output",
-                    job.getId().toString() + ":" + slotIndex, 0, "job_" + job.getId(),
-                    Map.of("job_id", job.getId().toString(),
-                            "slot_id", slot != null ? slot.getId().toString() : "",
-                            "slot_index", slotIndex,
-                            "status", JobStatusEnum.SUCCEEDED.value(),
-                            "asset_id", assetIds.get(i),
-                            "retry_of_slot_id", slot != null && slot.getRetryOfSlotId() != null
-                                    ? slot.getRetryOfSlotId().toString() : "",
-                            "initial_placement_status", "pending"));
-        }
-        for (int i = assetIds.size(); i < slots.size(); i++) {
-            GenerationOutputSlotEntity slot = slots.get(i);
-            eventPublisher.publish(job.getProjectId(), "generation_job.output_updated",
-                    "generation_job_output",
-                    job.getId().toString() + ":" + slot.getSlotIndex(), 0, "job_" + job.getId(),
-                    Map.of("job_id", job.getId().toString(),
-                            "slot_id", slot.getId().toString(),
-                            "slot_index", slot.getSlotIndex(),
-                            "status", JobStatusEnum.FAILED.value(),
-                            "asset_id", "",
-                            "retry_of_slot_id", slot.getRetryOfSlotId() != null
-                                    ? slot.getRetryOfSlotId().toString() : "",
-                            "initial_placement_status", "pending"));
-        }
-
-        GenerationOutputSlotEntity firstSlot = slots.isEmpty() ? null : slots.get(0);
-        if (firstSlot != null && firstSlot.getSceneCardGenerationRecordId() != null) {
-            recordSync.sync(firstSlot.getSceneCardGenerationRecordId());
-        }
-        previewSync.sync(jobIdLong);
-
         return true;
     }
 
@@ -341,7 +295,6 @@ public class JobFinalizer {
                            Map<String, Object> details,
                            String workerId, long fencingToken) {
         Long jobIdLong = Long.parseLong(jobId);
-        lockProjectForJob(jobIdLong);
         int guardAffected = jobMapper.failJobGuard(jobIdLong, workerId, fencingToken,
                 toJson(errorObject(errorCode, errorMessage, details)));
         if (guardAffected != 1) {
@@ -357,7 +310,6 @@ public class JobFinalizer {
     @Transactional
     public boolean expireJob(String jobId) {
         Long jobIdLong = Long.parseLong(jobId);
-        lockProjectForJob(jobIdLong);
         int guardAffected = jobMapper.expireJobGuard(jobIdLong,
                 toJson(errorObject(ERROR_TIMED_OUT, ERROR_TIMED_OUT_MESSAGE, Map.of())));
         if (guardAffected != 1) {
@@ -393,38 +345,16 @@ public class JobFinalizer {
                     "failJob 守卫通过后任务 " + jobId + " 不存在，数据损坏");
         }
 
-        GenerationOutputSlotEntity firstFailSlot = slots.isEmpty() ? null : slots.get(0);
-        if (firstFailSlot != null && firstFailSlot.getSceneCardGenerationRecordId() != null) {
-            recordSync.sync(firstFailSlot.getSceneCardGenerationRecordId());
-        }
-        previewSync.sync(jobIdLong);
-
         insertLog(jobIdLong, JobStatusEnum.FAILED, errorCode + ": " + errorMessage,
                 Map.of("code", errorCode, "message", errorMessage,
                         "details", details != null ? details : Map.of()));
 
-        publishStatusChanged(job, Map.of("job_id", job.getId().toString(),
+        enqueueTerminalEvent(job, Map.of("job_id", job.getId().toString(),
                         "type", job.getType(),
                         "source", job.getSource(),
                         "status", job.getStatus(),
                         "progress", job.getProgress(),
                         "error", Map.of("code", errorCode, "message", errorMessage)));
-        if (job.getProjectId() != null) {
-            for (GenerationOutputSlotEntity slot : slots) {
-                eventPublisher.publish(job.getProjectId(), "generation_job.output_updated",
-                        "generation_job_output",
-                        job.getId().toString() + ":" + slot.getSlotIndex(), 0, "job_" + job.getId(),
-                        Map.of("job_id", job.getId().toString(),
-                                "slot_id", slot.getId().toString(),
-                                "slot_index", slot.getSlotIndex(),
-                                "status", JobStatusEnum.FAILED.value(),
-                                "asset_id", "",
-                                "retry_of_slot_id", slot.getRetryOfSlotId() != null
-                                        ? slot.getRetryOfSlotId().toString() : "",
-                                "initial_placement_status", "pending",
-                                "error", Map.of("code", errorCode, "message", errorMessage)));
-            }
-        }
     }
 
     @Transactional
@@ -445,12 +375,6 @@ public class JobFinalizer {
                 url, storageKey, mime, size, md5, width, height, durationMs);
         assetMapper.insert(asset);
 
-        eventPublisher.publish(Long.parseLong(projectId), "asset.created", "asset",
-                asset.getId().toString(), asset.getVersion(), "job_" + generationJobId,
-                Map.of("asset_id", asset.getId().toString(),
-                        "generation_job_id", generationJobId,
-                        "type", asset.getType(),
-                        "access_url", asset.getUrl()));
         return asset.getId().toString();
     }
 
@@ -484,7 +408,6 @@ public class JobFinalizer {
                                       Integer width, Integer height, double duration,
                                       Long upstreamCreatedAtMs, Long finalizeDeadlineMs) {
         Long jobIdLong = Long.parseLong(jobId);
-        lockProjectForJob(jobIdLong);
 
         int guardAffected = jobMapper.publishVideoGuard(jobIdLong, workerId, fencingToken);
         if (guardAffected != 1) {
@@ -510,15 +433,7 @@ public class JobFinalizer {
 
         GenerationJobEntity job = jobMapper.selectById(jobIdLong);
         if (job != null) {
-            if (job.getProjectId() != null) {
-                eventPublisher.publish(job.getProjectId(), "asset.created", "asset",
-                        asset.getId().toString(), asset.getVersion(), "job_" + job.getId(),
-                        Map.of("asset_id", asset.getId().toString(),
-                                "generation_job_id", job.getId().toString(),
-                                "type", asset.getType(),
-                                "access_url", asset.getUrl()));
-            }
-            publishStatusChanged(job, Map.of("job_id", job.getId().toString(),
+            enqueueTerminalEvent(job, Map.of("job_id", job.getId().toString(),
                             "type", job.getType(),
                             "source", job.getSource(),
                             "status", job.getStatus(),
@@ -531,25 +446,8 @@ public class JobFinalizer {
                 .findFirst().orElse(null);
         if (videoSlot != null) {
             slotMapper.updateSlot(videoSlot.getId(), JobStatusEnum.SUCCEEDED.value(), asset.getId());
-            if (videoSlot.getSceneCardGenerationRecordId() != null) {
-                recordSync.sync(videoSlot.getSceneCardGenerationRecordId());
-            }
         }
 
-        if (job != null && job.getProjectId() != null) {
-            eventPublisher.publish(job.getProjectId(), "generation_job.output_attached",
-                    "generation_job_output",
-                    job.getId().toString() + ":" + (videoSlot != null ? videoSlot.getSlotIndex() : 0),
-                    0, "job_" + job.getId(),
-                    Map.of("job_id", job.getId().toString(),
-                            "slot_id", videoSlot != null ? videoSlot.getId().toString() : "",
-                            "slot_index", videoSlot != null ? videoSlot.getSlotIndex() : 0,
-                            "status", JobStatusEnum.SUCCEEDED.value(),
-                            "asset_id", asset.getId().toString(),
-                            "retry_of_slot_id", videoSlot != null && videoSlot.getRetryOfSlotId() != null
-                                    ? videoSlot.getRetryOfSlotId().toString() : "",
-                            "initial_placement_status", "pending"));
-        }
         return true;
     }
 
@@ -558,7 +456,6 @@ public class JobFinalizer {
                                 Map<String, Object> details,
                                 String workerId, long fencingToken) {
         Long jobIdLong = Long.parseLong(jobId);
-        lockProjectForJob(jobIdLong);
         Map<String, Object> errorObj = new java.util.HashMap<>();
         errorObj.put("code", errorCode);
         errorObj.put("message", errorMessage);
@@ -578,36 +475,17 @@ public class JobFinalizer {
         List<GenerationOutputSlotEntity> pendingSlots = slotMapper.findPendingByJobId(jobIdLong);
         for (GenerationOutputSlotEntity slot : pendingSlots) {
             slotMapper.updateSlotStatus(slot.getId(), JobStatusEnum.FAILED.value());
-            if (slot.getSceneCardGenerationRecordId() != null) {
-                recordSync.sync(slot.getSceneCardGenerationRecordId());
-            }
         }
         insertLog(jobIdLong, JobStatusEnum.FAILED, errorCode + ": " + errorMessage,
                 Map.of("code", errorCode, "message", errorMessage,
                         "details", details != null ? details : Map.of()));
         if (job != null) {
-            publishStatusChanged(job, Map.of("job_id", job.getId().toString(),
+            enqueueTerminalEvent(job, Map.of("job_id", job.getId().toString(),
                             "type", job.getType(),
                             "source", job.getSource(),
                             "status", job.getStatus(),
                             "progress", job.getProgress(),
                             "error", Map.of("code", errorCode, "message", errorMessage)));
-        }
-        if (job != null && job.getProjectId() != null) {
-            for (GenerationOutputSlotEntity slot : pendingSlots) {
-                eventPublisher.publish(job.getProjectId(), "generation_job.output_updated",
-                        "generation_job_output",
-                        job.getId().toString() + ":" + slot.getSlotIndex(), 0, "job_" + job.getId(),
-                        Map.of("job_id", job.getId().toString(),
-                                "slot_id", slot.getId().toString(),
-                                "slot_index", slot.getSlotIndex(),
-                                "status", JobStatusEnum.FAILED.value(),
-                                "asset_id", "",
-                                "retry_of_slot_id", slot.getRetryOfSlotId() != null
-                                        ? slot.getRetryOfSlotId().toString() : "",
-                                "initial_placement_status", "pending",
-                                "error", Map.of("code", errorCode, "message", errorMessage)));
-            }
         }
         return true;
     }
@@ -671,18 +549,8 @@ public class JobFinalizer {
                 Map.of("asset_ids", assetIds, "tracks", trackResults));
 
         GenerationJobEntity job = jobMapper.selectById(jobIdLong);
-        if (job != null && job.getProjectId() != null) {
-            for (AssetEntity asset : assets) {
-                eventPublisher.publish(job.getProjectId(), "asset.created", "asset",
-                        asset.getId().toString(), asset.getVersion(), "job_" + job.getId(),
-                        Map.of("asset_id", asset.getId().toString(),
-                                "generation_job_id", job.getId().toString(),
-                                "type", asset.getType(),
-                                "access_url", asset.getUrl()));
-            }
-        }
         if (job != null) {
-            publishStatusChanged(job, Map.of("job_id", job.getId().toString(),
+            enqueueTerminalEvent(job, Map.of("job_id", job.getId().toString(),
                             "type", job.getType(),
                             "source", job.getSource(),
                             "status", job.getStatus(),
@@ -804,17 +672,6 @@ public class JobFinalizer {
         insertLog(jobIdLong, JobStatusEnum.SUCCEEDED, "场景切分完成", resultMeta);
 
         GenerationJobEntity job = jobMapper.selectById(jobIdLong);
-        if (job != null && job.getProjectId() != null) {
-            for (int i = 0; i < assets.size(); i++) {
-                AssetEntity asset = assets.get(i);
-                eventPublisher.publish(job.getProjectId(), "asset.created", "asset",
-                        asset.getId().toString(), asset.getVersion(), "job_" + job.getId(),
-                        Map.of("asset_id", asset.getId().toString(),
-                                "generation_job_id", job.getId().toString(),
-                                "type", asset.getType(),
-                                "access_url", asset.getUrl()));
-            }
-        }
         if (job != null) {
             Map<String, Object> resultPayload = new java.util.LinkedHashMap<>();
             resultPayload.put(
@@ -823,7 +680,7 @@ public class JobFinalizer {
             resultPayload.put(
                     com.bluewhale.worker.domain.contract.VideoSceneSplitContract.RESULT_KEY_SEGMENTS,
                     resultSegments);
-            publishStatusChanged(job, Map.of("job_id", job.getId().toString(),
+            enqueueTerminalEvent(job, Map.of("job_id", job.getId().toString(),
                             "type", job.getType(),
                             "source", job.getSource(),
                             "status", job.getStatus(),
@@ -891,15 +748,7 @@ public class JobFinalizer {
 
         GenerationJobEntity job = jobMapper.selectById(jobIdLong);
         if (job != null) {
-            if (job.getProjectId() != null) {
-                eventPublisher.publish(job.getProjectId(), "asset.created", "asset",
-                        asset.getId().toString(), asset.getVersion(), "job_" + job.getId(),
-                        Map.of("asset_id", asset.getId().toString(),
-                                "generation_job_id", job.getId().toString(),
-                                "type", asset.getType(),
-                                "access_url", asset.getUrl()));
-            }
-            publishStatusChanged(job, Map.of("job_id", job.getId().toString(),
+            enqueueTerminalEvent(job, Map.of("job_id", job.getId().toString(),
                             "type", job.getType(),
                             "source", job.getSource(),
                             "status", job.getStatus(),
@@ -932,7 +781,6 @@ public class JobFinalizer {
                                        String errorMessage, Map<String, Object> details,
                                        String workerId, long fencingToken) {
         Long jobIdLong = Long.parseLong(jobId);
-        lockProjectForJob(jobIdLong);
 
         Map<String, Object> errorObj = new java.util.HashMap<>();
         errorObj.put("code", errorCode);
@@ -956,7 +804,7 @@ public class JobFinalizer {
 
         GenerationJobEntity job = jobMapper.selectById(jobIdLong);
         if (job != null) {
-            publishStatusChanged(job, Map.of("job_id", job.getId().toString(),
+            enqueueTerminalEvent(job, Map.of("job_id", job.getId().toString(),
                             "type", job.getType(),
                             "source", job.getSource(),
                             "status", job.getStatus(),
@@ -967,26 +815,13 @@ public class JobFinalizer {
     }
 
 
-    private void lockProjectForJob(Long jobId) {
-        Long projectId = jobMapper.findProjectId(jobId);
-        if (projectId != null) {
-            eventPublisher.lockProject(projectId);
-        }
-    }
-
-    private void publishStatusChanged(GenerationJobEntity job, Map<String, Object> payload) {
-        if (job.getProjectId() != null) {
-            eventPublisher.publish(job.getProjectId(), "generation_job.status_changed",
-                    "generation_job", job.getId().toString(), job.getVersion(), "job_" + job.getId(),
-                    payload);
-        }
+    private void enqueueTerminalEvent(GenerationJobEntity job, Map<String, Object> payload) {
         outbox.enqueue(job, payload);
     }
 
     @Transactional
     public void cancelJob(String jobId) {
         Long jobIdLong = Long.parseLong(jobId);
-        lockProjectForJob(jobIdLong);
         List<GenerationOutputSlotEntity> slots = slotMapper.findPendingByJobId(jobIdLong);
         for (GenerationOutputSlotEntity slot : slots) {
             slotMapper.updateSlotStatus(slot.getId(), JobStatusEnum.FAILED.value());
@@ -998,34 +833,13 @@ public class JobFinalizer {
             return;
         }
 
-        GenerationOutputSlotEntity firstFailSlot = slots.isEmpty() ? null : slots.get(0);
-        if (firstFailSlot != null && firstFailSlot.getSceneCardGenerationRecordId() != null) {
-            recordSync.sync(firstFailSlot.getSceneCardGenerationRecordId());
-        }
-        previewSync.sync(jobIdLong);
-
         insertLog(jobIdLong, JobStatusEnum.CANCELLED, "用户取消", Map.of());
 
-        publishStatusChanged(job, Map.of("job_id", job.getId().toString(),
+        enqueueTerminalEvent(job, Map.of("job_id", job.getId().toString(),
                 "type", job.getType(),
                 "source", job.getSource(),
                 "status", job.getStatus(),
                 "progress", job.getProgress()));
-        if (job.getProjectId() != null) {
-            for (GenerationOutputSlotEntity slot : slots) {
-                eventPublisher.publish(job.getProjectId(), "generation_job.output_updated",
-                        "generation_job_output",
-                        job.getId().toString() + ":" + slot.getSlotIndex(), 0, "job_" + job.getId(),
-                        Map.of("job_id", job.getId().toString(),
-                                "slot_id", slot.getId().toString(),
-                                "slot_index", slot.getSlotIndex(),
-                                "status", JobStatusEnum.FAILED.value(),
-                                "asset_id", "",
-                                "retry_of_slot_id", slot.getRetryOfSlotId() != null
-                                        ? slot.getRetryOfSlotId().toString() : "",
-                                "initial_placement_status", "pending"));
-            }
-        }
     }
 
     private AssetEntity buildAsset(Long jobIdLong, String projectId, String userId, String type,

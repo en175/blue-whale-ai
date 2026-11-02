@@ -3,6 +3,7 @@ import {
   RESOURCE_NOT_FOUND_CODE,
   VIDEO_SCENE_SPLIT_RESULT_KEYS,
   errorCodeToNumeric,
+  errorRecoveryOf,
   fail,
   ok,
   videoSceneSplitResultSchema,
@@ -134,6 +135,7 @@ export class JobsService {
       const fallback = fallbackErrorCode(job.type);
       const code = projected?.code ?? errorCodeToNumeric(fallback);
       const msg = projected?.message ?? messageFor(fallback, job.type);
+      const recovery = errorRecoveryOf(code);
       return fail(code, msg, {
         code: projected?.reason ?? fallback,
         job_id: job.job_id,
@@ -146,6 +148,8 @@ export class JobsService {
         finalize_deadline_at: job.finalize_deadline_at,
         charge_state: job.charge_state,
         actual_credits: job.actual_credits,
+        category: projected?.category ?? recovery.category,
+        retryable: projected?.retryable ?? recovery.retryable,
       });
     }
 

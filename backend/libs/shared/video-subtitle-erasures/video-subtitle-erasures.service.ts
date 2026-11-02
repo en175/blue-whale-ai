@@ -82,7 +82,7 @@ export class VideoSubtitleErasuresService {
     });
     if (projectError) return projectError;
 
-    const { recovery, replayed } = await replayAcceptedMediaTool(this.prisma.client, {
+    const { recovery, legacy, replayed } = await replayAcceptedMediaTool(this.prisma.client, {
       projectId,
       userId,
       binding,
@@ -90,6 +90,7 @@ export class VideoSubtitleErasuresService {
       operation: IDEMPOTENCY_OPERATION,
       requestPath: REQUEST_PATH,
       body: body ?? {},
+      idempotencyKey,
     });
     if (replayed) return replayed;
 
@@ -102,6 +103,7 @@ export class VideoSubtitleErasuresService {
       expectedTypes: ["video"],
       wrongTypeMessage: "仅支持对视频资产发起去字幕",
       durationMessage: "源视频时长读取失败，请稍后重试或更换素材",
+      secondsPolicy: "floor",
       probeDimensions: true,
       maxDurationMs: VIDEO_SUBTITLE_ERASE_MAX_DURATION_MS,
       maxDurationMessage: "暂支持 10 分钟以内的视频去字幕",
@@ -138,6 +140,7 @@ export class VideoSubtitleErasuresService {
       userId,
       input: frozenInput,
       recovery,
+      legacy,
       createJob: async (db) => {
         const job = await db.generation_jobs.create({
           data: {

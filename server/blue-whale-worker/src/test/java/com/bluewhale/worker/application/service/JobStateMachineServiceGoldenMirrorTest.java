@@ -5,7 +5,6 @@ import com.bluewhale.worker.domain.contract.AudioTrimContract;
 import com.bluewhale.worker.domain.contract.MediaExtractContract;
 import com.bluewhale.worker.domain.entity.GenerationJobEntity;
 import com.bluewhale.worker.domain.entity.AssetEntity;
-import com.bluewhale.worker.domain.entity.ProjectEventEntity;
 import com.bluewhale.worker.domain.entity.GenerationJobLogEntity;
 import com.bluewhale.worker.domain.entity.GenerationOutputSlotEntity;
 import com.bluewhale.worker.domain.dto.ClaimedJob;
@@ -17,12 +16,9 @@ import com.bluewhale.worker.domain.dto.PublishVideoFrameInterpolationDto;
 import com.bluewhale.worker.domain.dto.FailMediaExtractDto;
 import com.bluewhale.worker.infrastructure.persistence.mapper.GenerationJobMapper;
 import com.bluewhale.worker.infrastructure.persistence.mapper.AssetMapper;
-import com.bluewhale.worker.infrastructure.persistence.mapper.ProjectEventMapper;
 import com.bluewhale.worker.infrastructure.persistence.mapper.GenerationJobLogMapper;
 import com.bluewhale.worker.infrastructure.persistence.mapper.GenerationOutputSlotMapper;
 
-import com.bluewhale.worker.domain.entity.SceneCardGenerationRecordEntity;
-import com.bluewhale.worker.domain.entity.StoryboardPreviewEntity;
 import com.bluewhale.worker.infrastructure.persistence.mapper.*;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -59,16 +55,7 @@ class JobStateMachineServiceGoldenMirrorTest {
     private GenerationJobLogMapper jobLogMapper;
 
     @Mock
-    private ProjectEventMapper projectEventMapper;
-
-    @Mock
     private GenerationOutputSlotMapper slotMapper;
-
-    @Mock
-    private SceneCardGenerationRecordMapper sceneCardRecordMapper;
-
-    @Mock
-    private StoryboardPreviewMapper storyboardPreviewMapper;
 
     @Mock
     private GenerationJobExtraMapper extraMapper;
@@ -82,14 +69,8 @@ class JobStateMachineServiceGoldenMirrorTest {
     @BeforeEach
     void setUp() {
         service = new JobStateMachineService(jobMapper, assetMapper, jobLogMapper,
-                projectEventMapper, slotMapper, sceneCardRecordMapper, storyboardPreviewMapper,
-                extraMapper);
+                slotMapper, extraMapper);
         finalizer = new JobFinalizer(jobMapper, assetMapper, jobLogMapper, slotMapper, extraMapper,
-                new SceneCardGenerationRecordSync(slotMapper, sceneCardRecordMapper,
-                        new ProjectEventPublisher(projectEventMapper)),
-                new StoryboardPreviewSync(slotMapper, storyboardPreviewMapper,
-                        new ProjectEventPublisher(projectEventMapper)),
-                new ProjectEventPublisher(projectEventMapper),
                 TerminalEventOutbox.noop());
         claimService = new JobClaimService(jobMapper, extraMapper);
     }
@@ -277,7 +258,6 @@ class JobStateMachineServiceGoldenMirrorTest {
         });
 
         when(jobMapper.selectById(300L)).thenReturn(createJob(300L, 42L, "media_extract", "succeeded", 100));
-        when(projectEventMapper.nextCursor(42L)).thenReturn(1L);
 
         PublishMediaExtractDto input = new PublishMediaExtractDto(
                 "300", "42", "9", "worker-1", 5L,
@@ -306,8 +286,6 @@ class JobStateMachineServiceGoldenMirrorTest {
         assertThat(capturedLog.getEvent()).isEqualTo("succeeded");
         assertThat(capturedLog.getMessage()).isEqualTo("音频已提取");
 
-        ArgumentCaptor<ProjectEventEntity> eventCaptor = ArgumentCaptor.forClass(ProjectEventEntity.class);
-        verify(projectEventMapper, times(2)).insert(eventCaptor.capture());
     }
 
     @Test
@@ -335,7 +313,6 @@ class JobStateMachineServiceGoldenMirrorTest {
     void failMediaExtractJob_happyPath() {
         when(jobMapper.failMediaExtractGuard(anyLong(), anyString(), anyLong(), anyString())).thenReturn(1);
         when(jobMapper.selectById(300L)).thenReturn(createJob(300L, 42L, "media_extract", "failed", 0));
-        when(projectEventMapper.nextCursor(42L)).thenReturn(1L);
 
         FailMediaExtractDto input = new FailMediaExtractDto(
                 "300", "worker-1", 5L,
@@ -367,8 +344,6 @@ class JobStateMachineServiceGoldenMirrorTest {
         assertThat(capturedLog.getEvent()).isEqualTo("failed");
         assertThat(capturedLog.getMessage()).isEqualTo("media_extract_failed: FFmpeg 退出码 1");
 
-        ArgumentCaptor<ProjectEventEntity> eventCaptor = ArgumentCaptor.forClass(ProjectEventEntity.class);
-        verify(projectEventMapper, times(1)).insert(eventCaptor.capture());
     }
 
     @Test
@@ -439,7 +414,6 @@ class JobStateMachineServiceGoldenMirrorTest {
         });
 
         when(jobMapper.selectById(300L)).thenReturn(createJob(300L, 42L, "audio_trim", "succeeded", 100));
-        when(projectEventMapper.nextCursor(42L)).thenReturn(1L);
 
         com.bluewhale.worker.domain.dto.PublishAudioTrimDto input =
                 new com.bluewhale.worker.domain.dto.PublishAudioTrimDto(
@@ -466,8 +440,6 @@ class JobStateMachineServiceGoldenMirrorTest {
         assertThat(capturedLog.getEvent()).isEqualTo("succeeded");
         assertThat(capturedLog.getMessage()).isEqualTo("音频已截取");
 
-        ArgumentCaptor<ProjectEventEntity> eventCaptor = ArgumentCaptor.forClass(ProjectEventEntity.class);
-        verify(projectEventMapper, times(2)).insert(eventCaptor.capture());
     }
 
     @Test
@@ -493,7 +465,6 @@ class JobStateMachineServiceGoldenMirrorTest {
     void failAudioTrimJob_happyPath() {
         when(jobMapper.failMediaExtractGuard(anyLong(), anyString(), anyLong(), anyString())).thenReturn(1);
         when(jobMapper.selectById(300L)).thenReturn(createJob(300L, 42L, "audio_trim", "failed", 0));
-        when(projectEventMapper.nextCursor(42L)).thenReturn(1L);
 
         com.bluewhale.worker.domain.dto.FailAudioTrimDto input =
                 new com.bluewhale.worker.domain.dto.FailAudioTrimDto(
@@ -524,8 +495,6 @@ class JobStateMachineServiceGoldenMirrorTest {
         assertThat(capturedLog.getMessage())
                 .isEqualTo("audio_trim_failed: The parameter `end_time` must be less than audio duration.");
 
-        ArgumentCaptor<ProjectEventEntity> eventCaptor = ArgumentCaptor.forClass(ProjectEventEntity.class);
-        verify(projectEventMapper, times(1)).insert(eventCaptor.capture());
     }
 
     @Test
@@ -665,13 +634,11 @@ class JobStateMachineServiceGoldenMirrorTest {
         when(jobMapper.completeJobGuard(eq(300L), eq("worker-1"), eq(5L), anyString())).thenReturn(1);
         when(slotMapper.findByJobId(300L)).thenReturn(List.of());
         when(jobMapper.selectById(300L)).thenReturn(createJob(300L, 42L, "audio", "succeeded", 100));
-        when(projectEventMapper.nextCursor(42L)).thenReturn(1L);
 
         boolean result = finalizer.completeJob("300", List.of("888"), "worker-1", 5L);
 
         assertThat(result).isTrue();
         verify(jobMapper).completeJobGuard(eq(300L), eq("worker-1"), eq(5L), anyString());
-        verify(projectEventMapper, atLeastOnce()).insert(any(ProjectEventEntity.class));
     }
 
     @Test
@@ -691,7 +658,6 @@ class JobStateMachineServiceGoldenMirrorTest {
         when(jobMapper.failJobGuard(eq(300L), eq("worker-1"), eq(5L), anyString())).thenReturn(1);
         when(slotMapper.findPendingByJobId(300L)).thenReturn(List.of());
         when(jobMapper.selectById(300L)).thenReturn(createJob(300L, 42L, "audio", "failed", 0));
-        when(projectEventMapper.nextCursor(42L)).thenReturn(1L);
 
         boolean result = finalizer.failJob("300", "provider_failed", "TTS 调用失败",
                 Map.of("raw", "connection refused"), "worker-1", 5L);
@@ -831,7 +797,6 @@ class JobStateMachineServiceGoldenMirrorTest {
         slot3.setId(13L); slot3.setSlotIndex(3); slot3.setStatus("pending");
         when(slotMapper.findByJobId(300L)).thenReturn(List.of(slot0, slot1, slot2, slot3));
         when(jobMapper.selectById(300L)).thenReturn(createJob(300L, 42L, "image", "succeeded", 100));
-        when(projectEventMapper.nextCursor(42L)).thenReturn(1L);
 
         boolean result = finalizer.completeJob("300", List.of("100", "101"), "worker-1", 5L);
 
@@ -856,7 +821,6 @@ class JobStateMachineServiceGoldenMirrorTest {
         slot1.setId(11L); slot1.setSlotIndex(1);
         when(slotMapper.findByJobId(300L)).thenReturn(List.of(slot0, slot1));
         when(jobMapper.selectById(300L)).thenReturn(createJob(300L, 42L, "image", "succeeded", 100));
-        when(projectEventMapper.nextCursor(42L)).thenReturn(1L);
 
         boolean result = finalizer.completeJob("300", List.of("100", "101"), "worker-1", 5L);
 
@@ -877,7 +841,6 @@ class JobStateMachineServiceGoldenMirrorTest {
         slot1.setId(11L); slot1.setSlotIndex(1);
         when(slotMapper.findByJobId(300L)).thenReturn(List.of(slot0, slot1));
         when(jobMapper.selectById(300L)).thenReturn(createJob(300L, 42L, "image", "succeeded", 100));
-        when(projectEventMapper.nextCursor(42L)).thenReturn(1L);
 
         boolean result = finalizer.completeJob("300", List.of(), "worker-1", 5L);
 
@@ -887,164 +850,6 @@ class JobStateMachineServiceGoldenMirrorTest {
         verify(jobMapper).updateJobStatus(300L, "failed");
     }
 
-
-    @Test
-    @DisplayName("G42: completeJob 全槽成功 + record 关联 → summary_status='success'")
-    void syncRecord_allSucceeded() {
-        when(jobMapper.completeJobGuard(eq(300L), eq("worker-1"), eq(5L), anyString())).thenReturn(1);
-
-        GenerationOutputSlotEntity slot0 = makeSlot(10L, 0, "succeeded", 99L);
-        GenerationOutputSlotEntity slot1 = makeSlot(11L, 1, "succeeded", 98L);
-        slot0.setSceneCardGenerationRecordId(500L);
-        slot1.setSceneCardGenerationRecordId(500L);
-        when(slotMapper.findByJobId(300L)).thenReturn(List.of(slot0, slot1));
-        when(jobMapper.selectById(300L)).thenReturn(createJob(300L, 42L, "image", "succeeded", 100));
-        when(projectEventMapper.nextCursor(anyLong())).thenReturn(1L);
-
-        when(slotMapper.findBySceneCardRecordId(500L)).thenReturn(List.of(slot0, slot1));
-        when(sceneCardRecordMapper.updateSummaryStatus(500L, "success")).thenReturn(1);
-        SceneCardGenerationRecordEntity record = new SceneCardGenerationRecordEntity();
-        record.setId(500L); record.setProjectId(42L); record.setVersion(2);
-        when(sceneCardRecordMapper.selectById(500L)).thenReturn(record);
-
-        boolean result = finalizer.completeJob("300", List.of("99", "98"), "worker-1", 5L);
-
-        assertThat(result).isTrue();
-        verify(sceneCardRecordMapper).updateSummaryStatus(500L, "success");
-        verify(jobMapper, never()).updateJobStatus(anyLong(), anyString());
-    }
-
-    @Test
-    @DisplayName("G43: completeJob 部分成功 + record → summary_status='partial'")
-    void syncRecord_partiallySucceeded() {
-        when(jobMapper.completeJobGuard(eq(300L), eq("worker-1"), eq(5L), anyString())).thenReturn(1);
-
-        GenerationOutputSlotEntity slot0 = makeSlot(10L, 0, "succeeded", 99L);
-        GenerationOutputSlotEntity slot1 = makeSlot(11L, 1, "failed", null);
-        slot0.setSceneCardGenerationRecordId(500L);
-        slot1.setSceneCardGenerationRecordId(500L);
-        when(slotMapper.findByJobId(300L)).thenReturn(List.of(slot0, slot1));
-        when(jobMapper.selectById(300L)).thenReturn(createJob(300L, 42L, "image", "succeeded", 100));
-        when(projectEventMapper.nextCursor(anyLong())).thenReturn(1L);
-
-        when(slotMapper.findBySceneCardRecordId(500L)).thenReturn(List.of(slot0, slot1));
-        when(sceneCardRecordMapper.updateSummaryStatus(500L, "partial")).thenReturn(1);
-        SceneCardGenerationRecordEntity record = new SceneCardGenerationRecordEntity();
-        record.setId(500L); record.setProjectId(42L); record.setVersion(2);
-        when(sceneCardRecordMapper.selectById(500L)).thenReturn(record);
-
-        finalizer.completeJob("300", List.of("99"), "worker-1", 5L);
-
-        verify(sceneCardRecordMapper).updateSummaryStatus(500L, "partial");
-        verify(jobMapper).updateJobStatus(300L, "partially_succeeded");
-    }
-
-    @Test
-    @DisplayName("G44: completeJob 无 record 关联 → 零副作用")
-    void syncRecord_noRecord_noSideEffect() {
-        when(jobMapper.completeJobGuard(eq(300L), eq("worker-1"), eq(5L), anyString())).thenReturn(1);
-
-        GenerationOutputSlotEntity slot0 = makeSlot(10L, 0, "succeeded", 99L);
-        when(slotMapper.findByJobId(300L)).thenReturn(List.of(slot0));
-        when(jobMapper.selectById(300L)).thenReturn(createJob(300L, 42L, "audio", "succeeded", 100));
-        when(projectEventMapper.nextCursor(anyLong())).thenReturn(1L);
-
-        finalizer.completeJob("300", List.of("99"), "worker-1", 5L);
-
-        verify(sceneCardRecordMapper, never()).updateSummaryStatus(anyLong(), anyString());
-        verify(slotMapper, never()).findBySceneCardRecordId(anyLong());
-    }
-
-    @Test
-    @DisplayName("G45: completeJob + storyboard_preview 关联 → summary_status 同步")
-    void syncStoryboard_happy() {
-        when(jobMapper.completeJobGuard(eq(300L), eq("worker-1"), eq(5L), anyString())).thenReturn(1);
-
-        GenerationOutputSlotEntity slot0 = makeSlot(10L, 0, "succeeded", 99L);
-        when(slotMapper.findByJobId(300L)).thenReturn(List.of(slot0));
-        when(jobMapper.selectById(300L)).thenReturn(createJob(300L, 42L, "image", "succeeded", 100));
-        when(projectEventMapper.nextCursor(anyLong())).thenReturn(1L);
-
-        StoryboardPreviewEntity preview = new StoryboardPreviewEntity();
-        preview.setId(700L); preview.setProjectId(42L); preview.setVersion(1);
-        when(storyboardPreviewMapper.findByFirstGenerationJobId(300L)).thenReturn(preview);
-        when(storyboardPreviewMapper.updateSummaryStatus(700L, "success")).thenReturn(1);
-        StoryboardPreviewEntity updated = new StoryboardPreviewEntity();
-        updated.setId(700L); updated.setVersion(2);
-        when(storyboardPreviewMapper.selectById(700L)).thenReturn(updated);
-
-        finalizer.completeJob("300", List.of("99"), "worker-1", 5L);
-
-        verify(storyboardPreviewMapper).findByFirstGenerationJobId(300L);
-        verify(storyboardPreviewMapper).updateSummaryStatus(700L, "success");
-    }
-
-    @Test
-    @DisplayName("G46: completeJob 无 storyboard_preview 关联 → 零副作用")
-    void syncStoryboard_noPreview_noSideEffect() {
-        when(jobMapper.completeJobGuard(eq(300L), eq("worker-1"), eq(5L), anyString())).thenReturn(1);
-
-        GenerationOutputSlotEntity slot0 = makeSlot(10L, 0, "succeeded", 99L);
-        when(slotMapper.findByJobId(300L)).thenReturn(List.of(slot0));
-        when(jobMapper.selectById(300L)).thenReturn(createJob(300L, 42L, "image", "succeeded", 100));
-        when(projectEventMapper.nextCursor(anyLong())).thenReturn(1L);
-
-        when(storyboardPreviewMapper.findByFirstGenerationJobId(300L)).thenReturn(null);
-
-        finalizer.completeJob("300", List.of("99"), "worker-1", 5L);
-
-        verify(storyboardPreviewMapper).findByFirstGenerationJobId(300L);
-        verify(storyboardPreviewMapper, never()).updateSummaryStatus(anyLong(), anyString());
-    }
-
-
-    @Test
-    @DisplayName("aggregateSlotStatus: 全 succeeded → 'success'")
-    void aggregate_allSucceeded() {
-        var slots = List.of(makeSlot(1L, 0, "succeeded", null), makeSlot(2L, 1, "succeeded", null));
-        assertThat(JobStateMachineService.aggregateSlotStatus(
-                JobStateMachineService.resolveLogicalSlots(slots))).isEqualTo("success");
-    }
-
-    @Test
-    @DisplayName("aggregateSlotStatus: 全 failed → 'failed'")
-    void aggregate_allFailed() {
-        var slots = List.of(makeSlot(1L, 0, "failed", null), makeSlot(2L, 1, "failed", null));
-        assertThat(JobStateMachineService.aggregateSlotStatus(
-                JobStateMachineService.resolveLogicalSlots(slots))).isEqualTo("failed");
-    }
-
-    @Test
-    @DisplayName("aggregateSlotStatus: 混合 → 'partial'")
-    void aggregate_partial() {
-        var slots = List.of(makeSlot(1L, 0, "succeeded", null), makeSlot(2L, 1, "failed", null));
-        assertThat(JobStateMachineService.aggregateSlotStatus(
-                JobStateMachineService.resolveLogicalSlots(slots))).isEqualTo("partial");
-    }
-
-    @Test
-    @DisplayName("aggregateSlotStatus: 含 pending → 'generating'")
-    void aggregate_hasPending() {
-        var slots = List.of(makeSlot(1L, 0, "succeeded", null), makeSlot(2L, 1, "pending", null));
-        assertThat(JobStateMachineService.aggregateSlotStatus(
-                JobStateMachineService.resolveLogicalSlots(slots))).isEqualTo("generating");
-    }
-
-    @Test
-    @DisplayName("aggregateSlotStatus: 空列表 → 'failed'")
-    void aggregate_empty() {
-        assertThat(JobStateMachineService.aggregateSlotStatus(List.of())).isEqualTo("failed");
-    }
-
-    @Test
-    @DisplayName("resolveLogicalSlots: 同 slot_index 重试 → succeeded 优先")
-    void resolveSlots_succeededWins() {
-        var s1 = makeSlot(1L, 0, "failed", null);
-        var s2 = makeSlot(2L, 0, "succeeded", null);
-        var resolved = JobStateMachineService.resolveLogicalSlots(List.of(s1, s2));
-        assertThat(resolved).hasSize(1);
-        assertThat(resolved.get(0).getStatus()).isEqualTo("succeeded");
-    }
 
     private GenerationOutputSlotEntity makeSlot(Long id, int slotIndex, String status, Long assetId) {
         GenerationOutputSlotEntity slot = new GenerationOutputSlotEntity();
@@ -1068,7 +873,6 @@ class JobStateMachineServiceGoldenMirrorTest {
         });
 
         when(jobMapper.selectById(300L)).thenReturn(createJob(300L, 42L, "video_scene_split", "succeeded", 100));
-        when(projectEventMapper.nextCursor(42L)).thenReturn(1L);
 
         PublishVideoSceneSplitDto input = new PublishVideoSceneSplitDto(
                 "300", "42", "9", "worker-1", 5L, 95.5,
@@ -1108,16 +912,6 @@ class JobStateMachineServiceGoldenMirrorTest {
                 .contains("\"segment_index\":2")
                 .contains("\"segment_asset_id\":\"901\"")
                 .contains("\"duration\":95.5");
-
-        ArgumentCaptor<ProjectEventEntity> eventCaptor = ArgumentCaptor.forClass(ProjectEventEntity.class);
-        verify(projectEventMapper, times(3)).insert(eventCaptor.capture());
-        ProjectEventEntity statusChanged = eventCaptor.getAllValues().stream()
-                .filter(e -> "generation_job.status_changed".equals(e.getEventType()))
-                .findFirst().orElseThrow();
-        assertThat(statusChanged.getPayload())
-                .contains("\"result\":{\"duration\":95.5")
-                .contains("\"segments\":[")
-                .contains("\"segment_index\":2");
     }
 
     @Test
@@ -1148,7 +942,6 @@ class JobStateMachineServiceGoldenMirrorTest {
         });
         when(jobMapper.selectById(300L)).thenReturn(
                 createJob(300L, 42L, "video_frame_interpolation", "succeeded", 100));
-        when(projectEventMapper.nextCursor(42L)).thenReturn(1L);
 
         PublishVideoFrameInterpolationDto input = new PublishVideoFrameInterpolationDto(
                 "300", "42", "9", "worker-1", 5L,
@@ -1180,12 +973,6 @@ class JobStateMachineServiceGoldenMirrorTest {
                 .contains("\"duration\":65.5")
                 .contains("\"resolution\":\"1080p\"")
                 .contains("\"fps\":60.0");
-
-        ArgumentCaptor<ProjectEventEntity> eventCaptor = ArgumentCaptor.forClass(ProjectEventEntity.class);
-        verify(projectEventMapper, times(2)).insert(eventCaptor.capture());
-        assertThat(eventCaptor.getAllValues())
-                .extracting(ProjectEventEntity::getEventType)
-                .containsExactlyInAnyOrder("asset.created", "generation_job.status_changed");
     }
 
     @Test

@@ -28,9 +28,22 @@ export function useCanvasAgentSurface() {
     skillName?: string;
     ts: number;
     mediaBlocks?: SessionContentBlock[];
+    autoSend?: boolean;
+    autoSendPayload?: {
+      content: SessionContentBlock[];
+      skillId?: string;
+      skillName?: string;
+      userText?: string;
+      chips?: { id: string; label: string }[];
+    };
   } | null>(null);
   useEffect(() => {
-    const state = location.state as { agentText?: string; skillId?: string; skillName?: string } | null;
+    const state = location.state as {
+      agentText?: string;
+      skillId?: string;
+      skillName?: string;
+      agentAutoSend?: boolean;
+    } | null;
     if (!state?.agentText && !state?.skillId) return;
     setAgentContext({
       text: state.agentText ?? '',
@@ -38,6 +51,10 @@ export function useCanvasAgentSurface() {
       skillName: state.skillName ?? '',
       ts: Date.now(),
       mediaBlocks: undefined,
+      autoSend: state.agentAutoSend === true,
+      autoSendPayload: state.agentAutoSend === true && state.agentText
+        ? { content: [{ type: 'text', text: state.agentText }], skillId: state.skillId || undefined, skillName: state.skillName || undefined, userText: state.agentText }
+        : undefined,
     });
     setShowAgent(true);
     navigate(location.pathname + location.search, { replace: true, state: null });

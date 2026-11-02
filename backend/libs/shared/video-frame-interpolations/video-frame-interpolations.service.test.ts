@@ -41,7 +41,7 @@ function makeService(overrides: {
   const prisma = {
     client: {
       generation_jobs: { create },
-      cost_reservations: { create: costCreate },
+      billing_cost_reservations: { create: costCreate },
     },
   };
   return {
@@ -284,5 +284,22 @@ describe("VideoFrameInterpolationsService.create：计费输入", () => {
       expect.objectContaining({ source_asset_id: "88", duration: 60 }),
     );
     expect(enqueueVideoFrameInterpolationJob).toHaveBeenCalledWith("400");
+  });
+
+  it("4.9 秒源按 4 秒进档，不越到 10 秒档", async () => {
+    const jobBilling = vi.fn().mockResolvedValue(undefined);
+    const { service } = makeService({
+      assets: {
+        findOwnedSource: vi.fn().mockResolvedValue(makeVideoAsset({ duration_ms: 4_900 })),
+      },
+      billing: { jobBilling, release: vi.fn() },
+    });
+    const result = await service.create("9", "55", VALID_BODY);
+    expect(result.code).toBe(200);
+    expect(jobBilling).toHaveBeenCalledWith(
+      "video_frame_interpolation",
+      "9",
+      expect.objectContaining({ source_asset_id: "88", duration: 4 }),
+    );
   });
 });

@@ -7,7 +7,7 @@ import {
 } from "./handle-regenerate-sample-generation-job.js";
 import { handleCreateGenerationJob } from "./handle-create-generation-job.js";
 import { projectQuoteInput } from "./handle-create-generation-job.js";
-import { quoteRevisionOf } from "./handle-quote-generation-job.js";
+import { quoteRevisionOf, videoQuoteRevisionInput } from "./handle-quote-generation-job.js";
 import { handleFinalizeGenerationJobQuote } from "./handle-finalize-generation-job.js";
 import type { FinalizeSourceJob } from "@lib/shared/persistence/index.js";
 
@@ -91,7 +91,7 @@ function quotedViewOf(
       catalogVersion: quoteResult.catalogVersion,
       capabilityVersion: capability.version as number | undefined,
       tier: quoteResult.tier,
-      quoteInput,
+      quoteInput: videoQuoteRevisionInput(quoteInput),
     }),
   };
 }

@@ -4,6 +4,7 @@ import {
   canConnectSourcesToGen,
   isAudioGenEnabled,
   availableGenKinds,
+  availableGenKindsAsTarget,
   sourceKindOf,
   genKindOf,
 } from './connectAbility';
@@ -77,5 +78,38 @@ describe('canConnectSourcesToGen：文本卡 → 音频生成节点（IKFCKS）'
 
   it('IKGRE3：图+音频组不含 audio', () => {
     expect(availableGenKinds([sourceMediaNode('i1', 'image'), sourceMediaNode('a1', 'audio')]).has('audio')).toBe(false);
+  });
+});
+
+describe('IKR643 左侧加号：按目标节点反查可用来源类型', () => {
+  it('目标是视频生成卡时，图片/视频/音频/文本都可作为来源', () => {
+    const kinds = availableGenKindsAsTarget(mediaNode('t1', 'video'));
+    expect([...kinds].sort()).toEqual(['audio', 'image', 'text', 'video']);
+  });
+
+  it('目标是图片生成卡时，视频与音频不能作为来源', () => {
+    const kinds = availableGenKindsAsTarget(mediaNode('t2', 'image'));
+    expect(kinds.has('image')).toBe(true);
+    expect(kinds.has('text')).toBe(true);
+    expect(kinds.has('video')).toBe(false);
+    expect(kinds.has('audio')).toBe(false);
+  });
+
+  it('目标是音频生成卡时无候选，菜单显示无可连接提示', () => {
+    expect(availableGenKindsAsTarget(mediaNode('t3', 'audio')).size).toBe(0);
+  });
+
+  it('目标正在生成或为空壳时无候选', () => {
+    const generating: Node = {
+      id: 'g1', type: 'mediaNode', position: { x: 0, y: 0 },
+      data: { mediaType: 'video', src: 'https://x/g1', draft: true, genStatus: 'generating' },
+    };
+    expect(availableGenKindsAsTarget(generating).size).toBe(0);
+    expect(availableGenKindsAsTarget(undefined).size).toBe(0);
+  });
+
+  it('非生成承载的普通媒体节点不作为连线目标，无候选', () => {
+    const plain: Node = { id: 'm1', type: 'mediaNode', position: { x: 0, y: 0 }, data: { mediaType: 'video', src: 'https://x/m1' } };
+    expect(availableGenKindsAsTarget(plain).size).toBe(0);
   });
 });

@@ -34,11 +34,11 @@ describe.skipIf(!databaseUrl)("audio video mux retry in an isolated MySQL databa
     release = vi.fn().mockResolvedValue(undefined);
     const project = await prisma.client.project.create({ data: { owner_id: 9n, name: "IKIHPL retry" } });
     projectId = String(project.id);
-    const audio = await prisma.client.assets.create({ data: {
+    const audio = await prisma.client.user_assets.create({ data: {
       user_id: 9n, project_id: project.id, type: "audio", source: "uploaded", status: "normal",
       storage_key: "uploads/9/audio/source.mp3", url: "https://our-tos/audio.mp3", duration_ms: 7_200_000,
     } });
-    const video = await prisma.client.assets.create({ data: {
+    const video = await prisma.client.user_assets.create({ data: {
       user_id: 9n, project_id: project.id, type: "video", source: "uploaded", status: "normal",
       storage_key: "uploads/9/video/source.mp4", url: "https://our-tos/video.mp4",
       duration_ms: 7_200_000, width: 1920, height: 1080,
@@ -79,9 +79,9 @@ describe.skipIf(!databaseUrl)("audio video mux retry in an isolated MySQL databa
   afterAll(async () => {
     if (!prisma) return;
     await app?.close();
-    await prisma.client.command_idempotency.deleteMany({ where: { project_id: BigInt(projectId) } });
+    await prisma.client.project_command_receipts.deleteMany({ where: { project_id: BigInt(projectId) } });
     await prisma.client.generation_jobs.deleteMany({ where: { project_id: BigInt(projectId) } });
-    await prisma.client.assets.deleteMany({ where: { id: { in: createdAssets } } });
+    await prisma.client.user_assets.deleteMany({ where: { id: { in: createdAssets } } });
     await prisma.client.project.delete({ where: { id: BigInt(projectId) } });
     await prisma.client.$disconnect();
     if (previousDatabaseUrl === undefined) delete process.env.DATABASE_URL;
@@ -162,7 +162,7 @@ describe.skipIf(!databaseUrl)("audio video mux retry in an isolated MySQL databa
   });
 
   it("rejects retry when a frozen input asset has been deleted", async () => {
-    const gone = await prisma.client.assets.create({ data: {
+    const gone = await prisma.client.user_assets.create({ data: {
       user_id: 9n, project_id: BigInt(projectId), type: "video", source: "uploaded", status: "normal",
       storage_key: "uploads/9/video/gone.mp4", url: "https://our-tos/gone.mp4", duration_ms: 33_000,
       width: 1920, height: 1080,
@@ -172,7 +172,7 @@ describe.skipIf(!databaseUrl)("audio video mux retry in an isolated MySQL databa
       ...snapshot,
       video: { assetId: String(gone.id), nodeId: "node-video", url: "https://our-tos/gone.mp4" },
     });
-    await prisma.client.assets.update({ where: { id: gone.id }, data: { is_delete: true } });
+    await prisma.client.user_assets.update({ where: { id: gone.id }, data: { is_delete: true } });
     await expect(service.retry("9", projectId, String(original.id), "gone-asset"))
       .rejects.toMatchObject({ status: 409, message: expect.stringContaining("输入资产已删除") });
   });

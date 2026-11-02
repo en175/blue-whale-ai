@@ -8,7 +8,7 @@ import { resolveSourceDuration } from "./source-duration.js";
 
 function makeArgs(overrides: Record<string, unknown> = {}) {
   const updateMany = vi.fn().mockResolvedValue({ count: 1 });
-  const prisma = { assets: { updateMany } };
+  const prisma = { user_assets: { updateMany } };
   const storage = { probe: vi.fn() };
   return {
     args: {
@@ -110,6 +110,25 @@ describe("resolveSourceDuration", () => {
       durationMs: 400,
       width: null,
       height: null,
+    });
+  });
+
+  it("secondsPolicy=floor：4.9 秒取 4，5 秒档不越档", async () => {
+    const { args } = makeArgs({
+      asset: { id: "88", storage_key: "k", duration_ms: 4_900 },
+      secondsPolicy: "floor",
+    });
+    await expect(resolveSourceDuration(args as never)).resolves.toMatchObject({
+      seconds: 4,
+    });
+  });
+
+  it("默认仍四舍五入：4.9 秒取 5", async () => {
+    const { args } = makeArgs({
+      asset: { id: "88", storage_key: "k", duration_ms: 4_900 },
+    });
+    await expect(resolveSourceDuration(args as never)).resolves.toMatchObject({
+      seconds: 5,
     });
   });
 

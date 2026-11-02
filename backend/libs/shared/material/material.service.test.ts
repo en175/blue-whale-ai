@@ -186,7 +186,7 @@ describe("MaterialService —— ensureVirtualDefaultGroup（IKDE6X）", () => {
     upsert?: unknown;
   } = {}) {
     const client = {
-      material_groups: {
+      user_material_groups: {
         findFirst: overrides.findVirtualDefault ?? vi.fn().mockResolvedValue(null),
         upsert: overrides.upsert ?? vi.fn().mockResolvedValue(null),
         findMany: vi.fn().mockResolvedValue([]),
@@ -221,7 +221,7 @@ describe("MaterialService —— ensureVirtualDefaultGroup（IKDE6X）", () => {
       Name: "默认分组：9",
       GroupType: "AIGC",
     });
-    expect(prisma.client.material_groups.upsert).toHaveBeenCalledWith(
+    expect(prisma.client.user_material_groups.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
         where: {
           user_id_material_group_id: { user_id: 9n, material_group_id: "group-virt-1" },
@@ -256,7 +256,7 @@ describe("MaterialService —— ensureVirtualDefaultGroup（IKDE6X）", () => {
 
     expect(groupId).toBe("group-virt-1");
     expect(calls).toHaveLength(0);
-    expect(prisma.client.material_groups.upsert).not.toHaveBeenCalled();
+    expect(prisma.client.user_material_groups.upsert).not.toHaveBeenCalled();
   });
 
   it("上游建组返回非 group- 前缀 Id：抛 502，不落表", async () => {
@@ -270,7 +270,7 @@ describe("MaterialService —— ensureVirtualDefaultGroup（IKDE6X）", () => {
       service.ensureVirtualDefaultGroup("9"),
     ).rejects.toMatchObject({ status: 502, code: "create_default_material_group_failed" });
     expect(calls).toHaveLength(1);
-    expect(prisma.client.material_groups.upsert).not.toHaveBeenCalled();
+    expect(prisma.client.user_material_groups.upsert).not.toHaveBeenCalled();
   });
 
   it("上游建组 4xx：透传错误，不落表", async () => {
@@ -284,7 +284,7 @@ describe("MaterialService —— ensureVirtualDefaultGroup（IKDE6X）", () => {
       service.ensureVirtualDefaultGroup("9"),
     ).rejects.toMatchObject({ status: 400 });
     expect(calls).toHaveLength(1);
-    expect(prisma.client.material_groups.upsert).not.toHaveBeenCalled();
+    expect(prisma.client.user_material_groups.upsert).not.toHaveBeenCalled();
   });
 
   it("上游建组成功但本地落表失败：补偿删除上游组并透传异常（契约 §2.2）", async () => {
@@ -323,7 +323,7 @@ describe("MaterialService —— 组查询分流 tryServeLocalGroupAction（IKEX
     findFirst?: unknown;
   } = {}) {
     const client = {
-      material_groups: {
+      user_material_groups: {
         count: overrides.count ?? vi.fn().mockResolvedValue(0),
         findMany: overrides.findMany ?? vi.fn().mockResolvedValue([]),
         findFirst: overrides.findFirst ?? vi.fn().mockResolvedValue(null),
@@ -471,7 +471,7 @@ describe("MaterialService —— 素材失败处置与 GetAsset 本地优先（I
     const clearMany = vi.fn().mockResolvedValue({ count: 1 });
     const prisma = {
       client: {
-        material_assets: {
+        user_material_info: {
           findFirst: vi.fn().mockResolvedValue(
             row === null
               ? null
@@ -485,7 +485,7 @@ describe("MaterialService —— 素材失败处置与 GetAsset 本地优先（I
           ),
           updateMany: mirrorStatus,
         },
-        assets: { updateMany: clearMany },
+        user_assets: { updateMany: clearMany },
       },
     };
     return { prisma, mirrorStatus, clearMany };
@@ -605,7 +605,7 @@ describe("MaterialService —— 上传口回显素材状态的读口（IKI65H�
                 status_checked_at: null,
               },
         );
-    return { prisma: { client: { material_assets: { findFirst } } }, findFirst };
+    return { prisma: { client: { user_material_info: { findFirst } } }, findFirst };
   };
 
   it("有状态行：原样回该行的 status（不推断、不归一）", async () => {
@@ -656,7 +656,7 @@ describe("MaterialService —— ADR-0126 新行为", () => {
     const mirrorMany = vi.fn().mockResolvedValue({ count: 1 });
     const prisma = {
       client: {
-        assets: {
+        user_assets: {
           findMany: vi.fn().mockResolvedValue(
             (input.localRows ?? []).map((r) => ({
               id: BigInt(r.assetId),
@@ -669,7 +669,7 @@ describe("MaterialService —— ADR-0126 新行为", () => {
           ),
           updateMany: clearMany,
         },
-        material_assets: {
+        user_material_info: {
           findFirst: vi.fn().mockResolvedValue(
             input.rowStatus == null
               ? null
@@ -904,7 +904,7 @@ describe("MaterialService —— ADR-0126 新行为", () => {
       return {
         prisma: {
           client: {
-            material_groups: {
+            user_material_groups: {
               findFirst: vi.fn().mockResolvedValue(existing),
               upsert,
             },

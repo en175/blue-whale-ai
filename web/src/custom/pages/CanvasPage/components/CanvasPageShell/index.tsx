@@ -1,6 +1,6 @@
 import { type PickChannel as CanvasPickChannel, type VideoRefRole, type AssetsPickerTarget, type AssetCardKind } from '@/custom/enums';
 import type { ComponentProps, Dispatch, ReactNode, RefObject, SetStateAction } from 'react';
-import type { Node } from '@xyflow/react';
+import type { Node, Viewport } from '@xyflow/react';
 import { createCanvasToolSessions } from '../../tool-runtime/canvasToolSessions';
 import type { CanvasHistoryApi } from '../../hooks/document/useCanvasHistory';
 
@@ -16,9 +16,7 @@ import CanvasPaneContextMenu from '../CanvasPaneContextMenu';
 import ConnectTypeMenu from '../ConnectTypeMenu';
 import AgentPanel from '../AgentPanel';
 import AssetsPickerModal from '../AssetsPickerModal';
-import SharedAssetsModal from '../SharedAssetsModal';
 import CharacterLibraryModal from '../CharacterLibraryModal';
-import LegacyHistoryModal from '../LegacyHistoryModal';
 import AssetDetailModal from '@/custom/pages/Assets/components/AssetDetailModal';
 import ConfirmModal from '@/custom/components/ConfirmModal';
 import FlowCanvas from '../Canvas';
@@ -27,7 +25,9 @@ import MediaNodeToolbar from '../MediaNode/Toolbar';
 import AssetCardToolbar from '../AssetCardNode/Toolbar';
 import { AssetImageRefLimitProvider } from '../../generation/modelCaps';
 import { assetCardToolbarVisible } from '../AssetCardNode/toolbarVisibility';
-import { availableGenKinds } from '../../graph/connectAbility';
+import { availableGenKinds, availableGenKindsAsTarget } from '../../graph/connectAbility';
+import type { ConnectDirection } from '../../hooks/chrome/useCanvasConnectHandlers';
+import type { ConnectGenKind } from '@/custom/enums';
 import { assetsPickerMediaTypes } from '../../assets/assetsPickerTargets';
 import pageStyles from '../../index.module.css';
 
@@ -40,9 +40,7 @@ type PickHintProps = ComponentProps<typeof CanvasPickHint>;
 type PaneMenuProps = ComponentProps<typeof CanvasPaneContextMenu>;
 type HeaderProps = ComponentProps<typeof CanvasHeader>;
 type AgentProps = ComponentProps<typeof AgentPanel>;
-type SharedProps = ComponentProps<typeof SharedAssetsModal>;
 type CharProps = ComponentProps<typeof CharacterLibraryModal>;
-type LegacyProps = ComponentProps<typeof LegacyHistoryModal>;
 type AssetDetailProps = ComponentProps<typeof AssetDetailModal>;
 type ConfirmProps = ComponentProps<typeof ConfirmModal>;
 type FlowProps = ComponentProps<typeof FlowCanvas>;
@@ -82,6 +80,7 @@ interface CanvasPageShellProps {
     handleConnectEnd: FlowProps['onConnectEnd'];
     isValidCanvasConnection: FlowProps['isValidConnection'];
     focusViewport: FlowProps['viewport'];
+    setFocusViewport: (viewport: FlowProps['viewport']) => void;
     docViewport: FlowProps['viewport'];
     setViewport: FlowProps['onViewportChange'];
     setLiveViewport: FlowProps['onViewportLive'];
@@ -106,7 +105,7 @@ interface CanvasPageShellProps {
   };
 
   menus: {
-    connectMenu: { sourceIds: string[]; x: number; y: number } | null;
+    connectMenu: { sourceIds: string[]; x: number; y: number; direction?: ConnectDirection } | null;
     closeConnectMenu: () => void;
     applyConnectType: ConnectMenuProps['onSelect'];
     paneMenu: PaneMenuProps['paneMenu'];
@@ -117,10 +116,11 @@ interface CanvasPageShellProps {
     paneUploadPosRef: RefObject<{ x: number; y: number } | null>;
     placeFileOnCanvas: (file: File, options?: { position?: { x: number; y: number } }) => Promise<unknown>;
     handleToolMenuSelect: ToolbarProps['onMenuSelect'];
-    handleUploadFile: ToolbarProps['onUploadFile'];
+    handleUploadFiles: (files: File[], opts?: { screen?: { x: number; y: number }; placement?: 'stack' | 'drop'; anchor?: { x: number; y: number }; focus?: (viewport: Viewport) => void }) => void;
     placeNodeFile: NonNullable<AgentProps['onPlaceFileOnCanvas']>;
     findCanvasNode: (id: string) => Node | undefined;
     showToast: (type: 'success' | 'error' | 'warn', msg: string) => void;
+    allNodes: () => Node[];
   };
 
   nodeActions: {
@@ -203,7 +203,10 @@ interface CanvasPageShellProps {
       skillName?: string;
       ts: number;
       mediaBlocks?: AgentProps['mediaBlocks'];
+      autoSend?: boolean;
+      autoSendPayload?: AgentProps['autoSendPayload'];
     } | null;
+    agentHandoffSettled: boolean;
     agentCandidate: AgentProps['candidateBlocks'];
     confirmAgentCandidate: NonNullable<AgentProps['onPrepareCandidate']>;
     cancelAgentCandidate: () => void;
@@ -217,6 +220,7 @@ interface CanvasPageShellProps {
     audioVideoMuxInFlightSourceIds: ReadonlySet<string>;
     finalizeCtaByNodeId: Map<string, unknown>;
     regenerateCtaByNodeId: Map<string, unknown>;
+    requoteByNode: ReadonlyMap<string, { phase: 'loading' | 'ready' | 'unavailable'; credits?: number }>;
     handleFinalizeSample: (nodeId: string) => void;
     handleRegenerateSample: (nodeId: string) => void;
   };
@@ -238,9 +242,6 @@ interface CanvasPageShellProps {
     handleDelete: HeaderProps['onDeleteProject'];
     handleToggleProjectPin: NonNullable<HeaderProps['onTogglePinProject']>;
     handleNewProject: HeaderProps['onNewProject'];
-    legacyHistory: LegacyProps['items'] | null | undefined;
-    showLegacyHistory: LegacyProps['open'];
-    setShowLegacyHistory: Dispatch<SetStateAction<boolean>>;
   };
 
   overlays: {
@@ -250,11 +251,6 @@ interface CanvasPageShellProps {
     pendingDeleteGroup: { id: string; count: number } | null;
     setPendingDeleteGroup: Dispatch<SetStateAction<{ id: string; count: number } | null>>;
     confirmDeleteGroup: ConfirmProps['onConfirm'];
-    showAssetsModal: boolean;
-    setShowAssetsModal: Dispatch<SetStateAction<boolean>>;
-    handleAddSharedAsset: NonNullable<SharedProps['onAddItem']>;
-    assetsModalDefaultTab: SharedProps['defaultTab'];
-    assetsModalDefaultFilter: SharedProps['defaultCardFilter'];
     showCharacterLibrary: boolean;
     setShowCharacterLibrary: Dispatch<SetStateAction<boolean>>;
     setCharacterLibraryTarget: Dispatch<SetStateAction<'image' | 'asset' | null>>;
@@ -279,6 +275,14 @@ export default function CanvasPageShell(props: CanvasPageShellProps) {
     shellTop,
   } = props;
 
+  const connectMenuKinds = () => {
+    const menu = menus.connectMenu;
+    if (!menu) return new Set<ConnectGenKind>();
+    const sources = menu.sourceIds.map(menus.findCanvasNode).filter((n): n is Node => !!n);
+    if (menu.direction !== 'left') return availableGenKinds(sources);
+    return availableGenKindsAsTarget(sources[0]);
+  };
+
   return (
     <div className={pageStyles.canvasPage}>
       <CanvasHeader
@@ -290,7 +294,6 @@ export default function CanvasPageShell(props: CanvasPageShellProps) {
         onTogglePinProject={projectHandlers.handleToggleProjectPin}
         onNewProject={projectHandlers.handleNewProject}
         onToggleAgent={() => agent.setShowAgent(!agent.showAgent)}
-        onShowLegacyHistory={projectHandlers.legacyHistory && projectHandlers.legacyHistory.length > 0 ? () => projectHandlers.setShowLegacyHistory(true) : undefined}
         hideAgentEntry={agent.showAgent}
       />
       <AssetDetailModal
@@ -318,12 +321,14 @@ export default function CanvasPageShell(props: CanvasPageShellProps) {
             const node = shellTop.toolSessions.decorateNode(source);
             const finalizeCta = mediaUpdates.finalizeCtaByNodeId.get(node.id);
             const regenerateCta = mediaUpdates.regenerateCtaByNodeId.get(node.id);
-            if (node.id !== mediaUpdates.submittingNodeId && !mediaUpdates.audioVideoMuxInFlightSourceIds.has(node.id) && !finalizeCta && !regenerateCta) return node;
+            const requoteState = mediaUpdates.requoteByNode.get(node.id);
+            if (node.id !== mediaUpdates.submittingNodeId && !mediaUpdates.audioVideoMuxInFlightSourceIds.has(node.id) && !finalizeCta && !regenerateCta && !requoteState) return node;
             return { ...node, data: { ...node.data,
               ...(node.id === mediaUpdates.submittingNodeId ? { submitting: true } : {}),
               ...(mediaUpdates.audioVideoMuxInFlightSourceIds.has(node.id) ? { audioVideoMuxInFlight: true } : {}),
               ...(finalizeCta ? { finalizeCta, onFinalizeSample: mediaUpdates.handleFinalizeSample } : {}),
               ...(regenerateCta ? { regenerateCta, onRegenerateSample: mediaUpdates.handleRegenerateSample } : {}),
+              ...(requoteState ? { requoteState } : {}),
             } };
           })}
           productNodes={canvas.productNodes}
@@ -423,6 +428,9 @@ export default function CanvasPageShell(props: CanvasPageShellProps) {
           onConnectGroupDrop={groupActions.handleConnectGroupDrop}
           onConnectSourceToGroup={groupActions.handleConnectSourceToGroup}
           onPaneContextMenu={(pt) => menus.setPaneMenu({ x: pt.clientX, y: pt.clientY })}
+          onDropFiles={(files, flowPoint) =>
+            menus.handleUploadFiles(files, { placement: 'drop', anchor: flowPoint, focus: canvas.setFocusViewport })
+          }
           onAnchoredOverlayDragHideChange={canvas.setAnchoredOverlayHiddenIds}
           onUpdateGenerate={canvas.onUpdateGenerate}
         />
@@ -431,7 +439,7 @@ export default function CanvasPageShell(props: CanvasPageShellProps) {
           <ConnectTypeMenu
             x={menus.connectMenu.x}
             y={menus.connectMenu.y}
-            enabled={availableGenKinds(menus.connectMenu.sourceIds.map(menus.findCanvasNode).filter((n): n is Node => !!n))}
+            enabled={connectMenuKinds()}
             onClose={menus.closeConnectMenu}
             onSelect={menus.applyConnectType}
           />
@@ -477,11 +485,7 @@ export default function CanvasPageShell(props: CanvasPageShellProps) {
           onChange={(e) => {
             const files = Array.from(e.target.files ?? []);
             const pos = menus.paneUploadPosRef.current;
-            files.forEach((file, index) => {
-              void menus.placeFileOnCanvas(file, {
-                position: pos ? { x: pos.x + index * 24, y: pos.y + index * 24 } : undefined,
-              }).catch(() => undefined);
-            });
+            menus.handleUploadFiles(files, { screen: pos ?? undefined, focus: canvas.setFocusViewport });
             e.target.value = '';
             menus.paneUploadPosRef.current = null;
           }}
@@ -489,7 +493,7 @@ export default function CanvasPageShell(props: CanvasPageShellProps) {
         <CanvasToolbar
           mode={canvas.toolMode}
           onModeChange={canvas.setToolMode}
-          onUploadFile={menus.handleUploadFile}
+          onUploadFile={(files) => menus.handleUploadFiles(files, { focus: canvas.setFocusViewport })}
           onOpenAssetsPicker={() => pick.openAssetsPicker('toolbar')}
           onToggleVideoDialog={() => {
             if (!nodeActions.canOpenEditor()) return;
@@ -567,6 +571,9 @@ export default function CanvasPageShell(props: CanvasPageShellProps) {
           initialSkillId={agent.agentContext?.skillId ?? ''}
           initialSkillName={agent.agentContext?.skillName ?? ''}
           mediaBlocks={agent.agentContext?.mediaBlocks}
+          autoSend={agent.agentContext?.autoSend}
+          autoSendPayload={agent.agentContext?.autoSendPayload}
+          autoSendReady={agent.agentHandoffSettled}
           candidateBlocks={agent.agentCandidate}
           onPrepareCandidate={agent.confirmAgentCandidate}
           onCancelCandidate={agent.cancelAgentCandidate}
@@ -586,19 +593,6 @@ export default function CanvasPageShell(props: CanvasPageShellProps) {
           rejectUnapprovedForVideo={pick.assetsPickerTarget === 'videoDraft'}
         />
       )}
-      {overlays.showAssetsModal && (
-        <SharedAssetsModal
-          onClose={() => overlays.setShowAssetsModal(false)}
-          projectId={shellTop.currentId ?? ''}
-          onAddItem={(item) => overlays.handleAddSharedAsset(item).then((ok) => {
-            if (ok) overlays.setShowAssetsModal(false);
-            return ok;
-          })}
-          onToast={menus.showToast}
-          defaultTab={overlays.assetsModalDefaultTab}
-          defaultCardFilter={overlays.assetsModalDefaultFilter}
-        />
-      )}
       {overlays.showCharacterLibrary && (
         <CharacterLibraryModal
           onClose={() => {
@@ -608,11 +602,6 @@ export default function CanvasPageShell(props: CanvasPageShellProps) {
           onSelectAssets={overlays.handleCharacterLibrarySelect}
         />
       )}
-      <LegacyHistoryModal
-        open={projectHandlers.showLegacyHistory}
-        items={projectHandlers.legacyHistory ?? []}
-        onClose={() => projectHandlers.setShowLegacyHistory(false)}
-      />
     </div>
   );
 }

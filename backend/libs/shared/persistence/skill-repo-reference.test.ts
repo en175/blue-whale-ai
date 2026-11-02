@@ -11,7 +11,7 @@ describe("SkillRepo — 引用注册与 auto 开关", () => {
   }) {
     const executeRaw = vi.fn().mockResolvedValue(1);
     const prisma = {
-      skill: {
+      catalog_skills: {
         findUnique: vi
           .fn()
           .mockResolvedValue(
@@ -118,12 +118,11 @@ describe("SkillRepo — 引用注册与 auto 开关", () => {
     );
   });
 
-  it("removeReferenceByCreativeSkillId resolve 命中后逻辑删对应 user_skill 行", async () => {
+  it("removeReferenceByCreativeSkillId resolve 命中后逻辑删对应 user_skills 行", async () => {
     const updateMany = vi.fn().mockResolvedValue({ count: 1 });
     const prisma = {
-      skill: { count: vi.fn().mockResolvedValue(1) },
-      user_skill: { updateMany },
-      $queryRawUnsafe: vi.fn().mockResolvedValue([{ source_skill_id: 3n }]),
+      user_skills: { updateMany },
+      $queryRawUnsafe: vi.fn().mockResolvedValue([{ id: 3n }]),
     } as unknown as PrismaClient;
 
     await expect(
@@ -141,8 +140,7 @@ describe("SkillRepo — 引用注册与 auto 开关", () => {
   it("removeReferenceByCreativeSkillId 指向个人/未知 ID 时返回 false 且不写库", async () => {
     const updateMany = vi.fn();
     const prisma = {
-      skill: { count: vi.fn() },
-      user_skill: { updateMany },
+      user_skills: { updateMany },
       $queryRawUnsafe: vi.fn().mockResolvedValue([]),
     } as unknown as PrismaClient;
 

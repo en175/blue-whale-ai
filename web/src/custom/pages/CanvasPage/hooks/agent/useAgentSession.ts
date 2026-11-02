@@ -662,7 +662,6 @@ export function useAgentSession(projectId: string) {
       const finalResourceRef = resourceRef ?? content.filter((b) => b.type !== 'text' || b.quote_id);
       if (textBlocks.length === 0 && finalResourceRef.length === 0) return false;
       if (!projectId) return false;
-      if (blockIfCreditsInsufficient()) return false;
       let sid = sessionIdRef.current;
       if (!sid) {
         try {
@@ -787,7 +786,6 @@ export function useAgentSession(projectId: string) {
     const sid = sessionIdRef.current;
     const failedRunId = sessionRef.current.failedRunId;
     if (!projectId || !sid || failedRunId === null) return;
-    if (blockIfCreditsInsufficient()) return;
     api.retrySessionRun(projectId, failedRunId)
       .then(() => {
         commit((prev) => ({ ...prev, failedRunId: null }));

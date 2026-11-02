@@ -151,7 +151,6 @@ vi.mock('@/custom/api/assets', () => ({
 
 vi.mock('@/custom/api/canvas', () => ({
   createConversationQuote: apiMocks.createConversationQuote,
-  legacyCardHistoryOptions: (projectId: string) => ({ queryKey: ['canvas', projectId, 'legacy-history'], queryFn: () => Promise.resolve({ items: [] }), retry: false }),
   applyPromptPreview: apiMocks.applyPromptPreview,
   saveCanvasDoc: apiMocks.saveCanvasDoc,
   serializeNodes: vi.fn((nodes: Node[]) =>
@@ -160,7 +159,6 @@ vi.mock('@/custom/api/canvas', () => ({
   serializeEdges: vi.fn((edges: Array<{ id: string; source: string; target: string }>) =>
     JSON.stringify(edges.map((e) => ({ id: e.id, source: e.source, target: e.target }))),
   ),
-  listLegacyCardHistory: vi.fn(async () => ({ items: [] })),
 }));
 
 vi.mock('@/custom/api/jobs', () => ({
@@ -174,7 +172,6 @@ vi.mock('@/custom/api/jobs', () => ({
   readJobFailText: vi.fn(() => ''),
 }));
 
-vi.mock('@/custom/api/sharedAssets', () => ({ saveSharedAsset: vi.fn() }));
 
 vi.mock('@/custom/api/generation', () => ({
   fetchGenerationModels: apiMocks.fetchGenerationModels,

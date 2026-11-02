@@ -5,7 +5,6 @@ import { createLab } from './server';
 import { handleCreateGenerationJob } from '../../../backend/libs/shared/generation/handle-create-generation-job';
 import { parseModelUpdateBody } from '../../../backend/libs/shared/model-capability/constants';
 import { toFeatures } from '../../../backend/libs/shared/persistence/model-capability-repo';
-import { clickSelectOption } from '@/custom/pages/CanvasPage/testing/radixSelect';
 
 it.each(['C3', 'C4', 'C5', 'H1', 'A1'])('验收场景 %s 可操作并生成证据', async (caseId) => {
   vi.resetModules(); localStorage.clear();
@@ -73,12 +72,24 @@ it.each(['C3', 'C4', 'C5', 'H1', 'A1'])('验收场景 %s 可操作并生成证�
     await click(asset);
     const confirm = [...document.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent?.includes('确认') || item.textContent?.includes('确定'));
     await click(confirm);
-    await click(button('视频编辑')); await clickSelectOption('视频延长');
-    const duration = [...document.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent?.includes('⏱'));
-    await click(duration);
-    const auto = document.querySelector<HTMLInputElement>('[aria-label="自动时长，由模型选择"]');
-    expect(auto).not.toBeNull();
-    if (!auto!.checked) await click(auto);
+    const openPreference = async () => {
+      const existing = document.querySelector<HTMLElement>('[role="dialog"][aria-label="生成偏好"]');
+      if (existing) return existing;
+      const trigger = [...document.querySelectorAll<HTMLButtonElement>('button')].find(item => item.getAttribute('aria-haspopup') === 'dialog')!;
+      await click(trigger);
+      return document.querySelector<HTMLElement>('[role="dialog"][aria-label="生成偏好"]')!;
+    };
+    const field = (dialog: HTMLElement, label: string) =>
+      [...dialog.querySelectorAll<HTMLElement>('span')].find(item => item.textContent === label)?.parentElement!;
+    await click(document.querySelector<HTMLButtonElement>('button[aria-haspopup="menu"]'));
+    await click([...document.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')].find(item => item.textContent?.startsWith('视频')));
+    let dialog = await openPreference();
+    await click([...field(dialog, '生成模式').querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent === '视频编辑'));
+    dialog = await openPreference();
+    await click([...field(dialog, '生成模式').querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent === '视频延长'));
+    dialog = await openPreference();
+    const autoButton = [...dialog.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent?.startsWith('自动'));
+    if (autoButton?.getAttribute('aria-pressed') !== 'true') await click(autoButton);
     const send = document.querySelector<HTMLButtonElement>('button[title*="发送"],button[aria-label*="发送"]');
     if (!send) throw new Error([...document.querySelectorAll('button')].map(item => item.outerHTML).join('\n').slice(-5000));
     await click(send);

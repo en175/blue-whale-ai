@@ -1,3 +1,4 @@
+import { clearEffectiveRecoveryOwners, findEffectiveRecoveryOwner, effectiveCanvasRow } from "./recovery-owner-test-helpers.js";
 
 
 
@@ -181,7 +182,7 @@ describe.skipIf(!databaseUrl)("显式 apply/restore 核对可信产物资产（I
   }
 
   async function canvasRow() {
-    return prisma.canvas.findFirst({ where: { project_id: BigInt(PROJECT_ID) } });
+    return effectiveCanvasRow(prisma, PROJECT_ID);
   }
 
   async function submissionRow(submissionId: string) {
@@ -217,14 +218,16 @@ describe.skipIf(!databaseUrl)("显式 apply/restore 核对可信产物资产（I
   });
 
   beforeEach(async () => {
-    await prisma.generation_canvas_node_owners.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
+    await clearEffectiveRecoveryOwners(prisma, BigInt(PROJECT_ID));
     await prisma.generation_canvas_outputs.deleteMany({});
     await prisma.generation_canvas_submissions.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
-    await prisma.command_idempotency.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
-    await prisma.canvas.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
+    await prisma.project_command_receipts.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
+    await prisma.project_canvas.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
+    await prisma.project_edges.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
+    await prisma.project_nodes.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
     await prisma.generation_output_slots.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
     await prisma.generation_job_logs.deleteMany({});
-    await prisma.cost_reservations.deleteMany({});
+    await prisma.billing_cost_reservations.deleteMany({});
     await prisma.generation_jobs.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
   });
 
@@ -278,11 +281,9 @@ describe.skipIf(!databaseUrl)("显式 apply/restore 核对可信产物资产（I
     expect(submission?.target_state).toBe("pending");
     expect(Number(submission?.target_revision)).toBe(1);
     expect(await outputRow(UUID_A, PRIMARY_OUTPUT_KEY)).toBeNull();
-    const owner = await prisma.generation_canvas_node_owners.findUnique({
-      where: { project_id_node_id: { project_id: BigInt(PROJECT_ID), node_id: "ikjlts-node-a" } },
-    });
+    const owner = await findEffectiveRecoveryOwner(prisma, BigInt(PROJECT_ID), "ikjlts-node-a");
     expect(owner?.output_key).toBe(TARGET_OUTPUT_KEY);
-    expect(await prisma.command_idempotency.count({
+    expect(await prisma.project_command_receipts.count({
       where: { project_id: BigInt(PROJECT_ID), operation: "SAVE_CANVAS_RECOVERY_V1", idempotency_key: CMD("10001") },
     })).toBe(0);
   });
@@ -359,9 +360,9 @@ describe.skipIf(!databaseUrl)("显式 apply/restore 核对可信产物资产（I
     await expectRejection(fanout("702", "702", CMD("40002")));
 
     expect(await prisma.generation_canvas_outputs.count({})).toBe(0);
-    expect(await prisma.canvas.count({ where: { project_id: BigInt(PROJECT_ID) } })).toBe(0);
+    expect(await prisma.project_canvas.count({ where: { project_id: BigInt(PROJECT_ID) } })).toBe(0);
     expect(await submissionRow(UUID_A)).toMatchObject({ target_state: "pending" });
-    expect(await prisma.command_idempotency.count({
+    expect(await prisma.project_command_receipts.count({
       where: { project_id: BigInt(PROJECT_ID), operation: "SAVE_CANVAS_RECOVERY_V1" },
     })).toBe(0);
 
@@ -502,7 +503,7 @@ describe.skipIf(!databaseUrl)("显式 apply/restore 核对可信产物资产（I
     expect(await outputRow(UUID_A, PRIMARY_OUTPUT_KEY)).toMatchObject({ state: "removed", revision: 2 });
     expect((await canvasRow())?.version).toBe(removed.version);
     expect(((await canvasRow())?.nodes_json ?? []) as unknown[]).toHaveLength(0);
-    expect(await prisma.command_idempotency.count({
+    expect(await prisma.project_command_receipts.count({
       where: { project_id: BigInt(PROJECT_ID), operation: "SAVE_CANVAS_RECOVERY_V1", idempotency_key: CMD("70003") },
     })).toBe(0);
   });
@@ -521,9 +522,7 @@ describe.skipIf(!databaseUrl)("显式 apply/restore 核对可信产物资产（I
     const nodes = ((await canvasRow())?.nodes_json ?? []) as Array<{ data: Record<string, unknown> }>;
     expect(nodes[0]!.data.assetId).toBe("11");
 
-    const owner = await prisma.generation_canvas_node_owners.findUnique({
-      where: { project_id_node_id: { project_id: BigInt(PROJECT_ID), node_id: "ikjlts-node-a" } },
-    });
+    const owner = await findEffectiveRecoveryOwner(prisma, BigInt(PROJECT_ID), "ikjlts-node-a");
     expect(owner?.output_key).toBe(PRIMARY_OUTPUT_KEY);
   });
 });

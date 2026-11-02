@@ -1,4 +1,3 @@
-import { Readable } from "node:stream";
 import {
   Body,
   Controller,
@@ -8,46 +7,29 @@ import {
   Post,
   Put,
   Query,
-  Req,
-  Res,
 } from "@nestjs/common";
-import type { Request, Response } from "express";
-import { logger } from "@lib/infra/logging/blue-whale-logger.js";
 import {
   DATA_NOT_EXIST_CODE,
   FAILURE_CODE,
-  RESOURCE_NOT_FOUND_CODE,
   fail,
   ok,
 } from "@lib/contracts";
-import { createProductEventRepo } from "@lib/shared/persistence/index.js";
 import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
 import { CanvasService } from "@lib/shared/canvas/canvas.service.js";
-import { PrismaService } from "@lib/shared/prisma/prisma.service.js";
-import { createProjectEventStream } from "@lib/shared/project-events/project-event-stream.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";
 import { SnapshotService } from "@lib/shared/snapshot/snapshot.service.js";
 import { handleGetSnapshot } from "@lib/shared/snapshot/handle-snapshot.js";
 import type { AuthenticatedUser } from "@lib/shared/types/authenticated-user.js";
 import { resolveProjectListQuery } from "./project-list-query.js";
+import { parseProjectSource } from "./project-source.js";
 
 @Controller("projects")
 export class ProjectsController {
-  private eventRepoInstance?: ReturnType<typeof createProductEventRepo>;
-
   constructor(
     private readonly project: ProjectService,
     private readonly canvas: CanvasService,
     private readonly snapshot: SnapshotService,
-    private readonly prisma: PrismaService,
   ) {}
-
-  private get eventRepo(): ReturnType<typeof createProductEventRepo> {
-    if (!this.eventRepoInstance) {
-      this.eventRepoInstance = createProductEventRepo(this.prisma.client);
-    }
-    return this.eventRepoInstance;
-  }
 
   @Get()
   async list(
@@ -56,16 +38,29 @@ export class ProjectsController {
   ) {
     const resolved = resolveProjectListQuery(query);
     if (resolved.kind === "invalid") {
-      return fail(FAILURE_CODE, "page 与 size 必须成对出现");
+      return fail(FAILURE_CODE, resolved.reason);
     }
+    const options =
+      resolved.keyword || resolved.source
+        ? {
+            ...(resolved.keyword ? { keyword: resolved.keyword } : {}),
+            ...(resolved.source ? { source: resolved.source } : {}),
+          }
+        : undefined;
     if (resolved.kind === "all") {
-      return ok(await this.project.listByOwner(user.userId));
+      return ok(await this.project.listByOwner(user.userId, options));
+    }
+    if (resolved.kind === "limit") {
+      return ok(
+        await this.project.listByOwnerRecent(user.userId, resolved.limit, options),
+      );
     }
     return ok(
       await this.project.listByOwnerPaged(
         user.userId,
         resolved.page,
         resolved.size,
+        options,
       ),
     );
   }
@@ -73,10 +68,12 @@ export class ProjectsController {
   @Post()
   async create(
     @CurrentUser() user: AuthenticatedUser,
-    @Body() body: { name?: unknown },
+    @Body() body: { name?: unknown; source?: unknown },
   ) {
     const name = typeof body.name === "string" ? body.name.trim() : "";
-    return ok(await this.project.create(user.userId, name));
+    const parsedSource = parseProjectSource(body.source);
+    if (!parsedSource.ok) return fail(FAILURE_CODE, parsedSource.reason);
+    return ok(await this.project.create(user.userId, name, parsedSource.source));
   }
 
   @Post("batch-delete")
@@ -152,53 +149,6 @@ export class ProjectsController {
       canvas: this.canvas,
       snapshot: this.snapshot,
     });
-  }
-
-  @Get(":id/events")
-  async events(
-    @CurrentUser() user: AuthenticatedUser,
-    @Param("id") id: string,
-    @Query("after") after: string | undefined,
-    @Res() res: Response,
-    @Req() req: Request,
-  ) {
-    const cursor = after ?? "0";
-    if (!/^[0-9]+$/.test(cursor)) {
-      res.status(400).json(fail(400, "after 游标无效"));
-      return;
-    }
-    const project = await this.project.findOwnedById(id, user.userId);
-    if (!project) {
-      res.status(404).json(fail(RESOURCE_NOT_FOUND_CODE, "资源不存在"));
-      return;
-    }
-
-    const abort = new AbortController();
-    res.on("close", () => abort.abort());
-
-    res.set({
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "private, no-store, no-cache, no-transform",
-      Connection: "keep-alive",
-      "X-Accel-Buffering": "no",
-    });
-    res.flushHeaders?.();
-
-    const stream = Readable.fromWeb(
-      createProjectEventStream({
-        projectId: id,
-        after: cursor,
-        events: this.eventRepo,
-        signal: abort.signal,
-      }) as import("node:stream/web").ReadableStream,
-    );
-    stream.on("error", (error) => {
-      logger.error(
-        `[project-events] stream error: ${error instanceof Error ? error.message : String(error)}`,
-      );
-      if (!res.writableEnded) res.destroy(error instanceof Error ? error : undefined);
-    });
-    stream.pipe(res);
   }
 
   @Delete(":id")

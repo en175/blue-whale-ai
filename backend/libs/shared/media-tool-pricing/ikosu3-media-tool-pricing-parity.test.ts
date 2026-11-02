@@ -77,10 +77,10 @@ describe("IKOSU3 media_tool_pricing 迁移：三轨", () => {
   });
 
   it("Prisma schema 有对应模型与收费状态字段", () => {
-    expect(schemaPrisma).toContain("model media_tool_pricing {");
+    expect(schemaPrisma).toContain("model bw_media_tools {");
     expect(schemaPrisma).toContain("charge_enabled Boolean  @default(true)");
     expect(schemaPrisma).toContain(
-      '@@unique([tool_type], map: "uk_media_tool_pricing__tool_type")',
+      '@@unique([tool_type], map: "uk_bw_media_tools__tool_type")',
     );
   });
 

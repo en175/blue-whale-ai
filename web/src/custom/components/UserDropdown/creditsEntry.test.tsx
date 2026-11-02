@@ -46,6 +46,13 @@ async function renderMenu() {
   });
 }
 
+async function openMenu() {
+  const trigger = document.body.querySelector('button[aria-label]');
+  await act(async () => {
+    trigger?.parentElement?.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, relatedTarget: document.body }));
+  });
+}
+
 beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   localStorage.clear();
@@ -81,6 +88,23 @@ describe('UserDropdown 头像占位', () => {
     setSession({ ...USER, username: 'alice' });
     await renderMenu();
     expect(document.body.querySelector('button[aria-label="alice"]')?.textContent).toBe('A');
+  });
+});
+
+describe('UserDropdown 昵称展示', () => {
+  it('菜单标题展示昵称，缺昵称回退用户名', async () => {
+    setSession({ ...USER, username: 'alice', nickname: '蓝鲸用户' });
+    await renderMenu();
+    await openMenu();
+    const title = [...document.body.querySelectorAll('span')].find((el) => el.textContent === '蓝鲸用户');
+    expect(title?.textContent).toBe('蓝鲸用户');
+    await act(async () => root.unmount());
+    mountNode.remove();
+    setSession({ ...USER, username: 'alice' });
+    await renderMenu();
+    await openMenu();
+    const fallback = [...document.body.querySelectorAll('span')].find((el) => el.textContent === 'alice');
+    expect(fallback?.textContent).toBe('alice');
   });
 });
 

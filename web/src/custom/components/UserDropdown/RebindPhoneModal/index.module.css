@@ -189,3 +189,38 @@
   color: #d64545;
   font-size: 12px;
 }
+
+.deliveryCheck {
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid #ececec;
+  border-radius: 10px;
+  background: #fafafa;
+  color: #63636b;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.deliveryCheck p {
+  margin: 0;
+}
+
+.deliveryActions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.deliveryActions button {
+  padding: 6px 12px;
+  border: 1px solid #d8d8dd;
+  border-radius: 8px;
+  background: #fff;
+  color: #242426;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.deliveryActions button:hover {
+  background: #f2f2f4;
+}

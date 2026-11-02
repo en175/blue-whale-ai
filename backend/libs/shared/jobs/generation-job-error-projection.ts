@@ -13,6 +13,7 @@ import {
   ERROR_VOCAL_SPLIT_FAILED,
   GENERATION_ERROR_NUMERIC_CODES,
   errorCodeToNumeric,
+  errorRecoveryOf,
   isQuotaSignal,
   messageOf,
   type PublicGenerationError,
@@ -72,11 +73,14 @@ export function projectPublicError(
     code = fallbackErrorCode(type);
   }
   const tableMessage = messageFor(code, type);
+  const numericCode = errorCodeToNumeric(code);
+  const recovery = errorRecoveryOf(numericCode);
   if (tableMessage !== "未知错误") {
     return {
-      code: errorCodeToNumeric(code),
+      code: numericCode,
       reason: code,
       message: tableMessage,
+      ...recovery,
     };
   }
   const storedMessage =
@@ -84,8 +88,9 @@ export function projectPublicError(
       ? storedError.message.trim()
       : null;
   return {
-    code: errorCodeToNumeric(code),
+    code: numericCode,
     reason: code,
     message: storedMessage ?? "生成失败",
+    ...recovery,
   };
 }

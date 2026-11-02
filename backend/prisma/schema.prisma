@@ -7,7 +7,7 @@ datasource db {
 }
 
 /// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
-model assets {
+model user_assets {
   id                BigInt   @id @default(autoincrement())
   user_id           BigInt
   project_id        BigInt   @default(0)
@@ -47,7 +47,7 @@ model assets {
 /// kind：virtual=虚拟人像库组（每用户至多 1 个默认组），real=真人像库组（每用户可多个）。
 /// cover_url：封面图（真人组用，虚拟组可空）。material_group_id：上游组 id（group-...）。
 /// is_default 每用户 virtual 至多 1 个用应用层保证（MySQL 唯一索引无法表达条件唯一，不设 DB 约束）。
-model material_groups {
+model user_material_groups {
   id                BigInt    @id @default(autoincrement())
   user_id           BigInt
   material_group_id String    @db.VarChar(128)
@@ -71,9 +71,9 @@ model material_groups {
 /// status = Processing | Active | Failed；素材真身在上游，本表只存状态与失败原文（error_* 仅供内部归因，不展示）。
 /// status_checked_at = 最后一次向上游确认状态的时间。
 /// 无 is_delete/deleted_at：本表行是素材的附属状态，没有独立价值，删除时硬删（ADR-0087 决策 5）。
-model material_assets {
+model user_material_info {
   id                BigInt    @id @default(autoincrement())
-  material_id       String    @unique(map: "uk_material_assets_material") @db.VarChar(128)
+  material_id       String    @unique(map: "uk_user_material_info__material") @db.VarChar(128)
   user_id           BigInt
   material_group_id String    @db.VarChar(128)
   status            String    @db.VarChar(16)
@@ -84,39 +84,14 @@ model material_assets {
   gmt_modified      DateTime  @default(now()) @db.DateTime(0)
   version           Int       @default(0)
 
-  @@index([status, gmt_create], map: "idx_material_assets_poll")
-  @@index([material_group_id], map: "idx_material_assets_group")
-}
-
-/// 画布共享资产（IK9QKP）：用户主动保存、跨项目可复用的自包含快照库。
-/// 两层类型对齐画布节点结构：asset_type = 节点大类（card/media/goods/scene/text），
-/// kind = 节点判别字段（card 的 data.kind / media 的 data.mediaType；goods/scene/text 为 NULL）。
-/// snapshot 统一存各类型全部数据（自包含，不依赖来源表）；name/thumbnail_url 为列表查询冗余列。
-/// dedup_key 幂等去重：媒体 url sha256、卡片 类型+描述 sha256、商品 名称 sha256、场景 内容 sha256、文本 NULL。
-model shared_assets {
-  id            BigInt   @id @default(autoincrement())
-  user_id       BigInt
-  asset_type    String   @db.VarChar(16)
-  kind          String?  @db.VarChar(16)
-  name          String   @db.VarChar(255)
-  thumbnail_url String?  @db.VarChar(512)
-  snapshot      Json
-  dedup_key     String?  @db.VarChar(128)
-  status        String   @default("normal") @db.VarChar(16)
-  gmt_create    DateTime @default(now()) @db.DateTime(0)
-  gmt_modified  DateTime @default(now()) @db.DateTime(0)
-  version       Int      @default(0)
-  is_delete     Int      @default(0) @db.TinyInt
-
-  @@unique([user_id, dedup_key], map: "uk_shared_user_dedup")
-  @@index([user_id, asset_type, kind, is_delete], map: "idx_shared_user_type")
-  @@index([user_id, gmt_create], map: "idx_shared_user_created")
+  @@index([status, gmt_create], map: "idx_user_material_info__poll")
+  @@index([material_group_id], map: "idx_user_material_info__group")
 }
 
 /// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
-model canvas {
+model project_canvas {
   id            BigInt   @id @default(autoincrement())
-  project_id    BigInt   @unique(map: "uk_canvas_project")
+  project_id    BigInt   @unique(map: "uk_project_canvas__project")
   viewport_json Json?
   nodes_json    Json?
   edges_json    Json?
@@ -124,6 +99,7 @@ model canvas {
   gmt_modified  DateTime @default(now()) @db.DateTime(0)
   version       Int      @default(0)
   is_delete     Int      @default(0) @db.TinyInt
+  rows_authoritative Int @default(0) @db.TinyInt
 }
 
 /// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
@@ -218,7 +194,7 @@ model generation_outbox {
 }
 
 /// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
-model generation_model_capability {
+model catalog_models {
   id                      BigInt   @id @default(autoincrement())
   provider_id             String   @db.VarChar(32)
   model_id                String   @db.VarChar(128)
@@ -259,7 +235,7 @@ model generation_model_capability {
   @@index([capability_type, enabled], map: "idx_capability_type_enabled")
 }
 
-model media_tool_pricing {
+model bw_media_tools {
   id             BigInt   @id @default(autoincrement())
   tool_type      String   @db.VarChar(64)
   label          String   @db.VarChar(64)
@@ -271,7 +247,7 @@ model media_tool_pricing {
   gmt_modified   DateTime @default(now()) @db.DateTime(0)
   is_delete      Boolean  @default(false)
 
-  @@unique([tool_type], map: "uk_media_tool_pricing__tool_type")
+  @@unique([tool_type], map: "uk_bw_media_tools__tool_type")
 }
 
 /// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
@@ -281,8 +257,10 @@ model project {
   name           String    @db.VarChar(128)
   thumb          String?   @db.VarChar(512)
   purpose        String    @default("canvas") @db.VarChar(32)
+  source         String    @default("canvas") @db.VarChar(16)
   inbox_guard    BigInt?   @unique(map: "uk_project_inbox_guard")
   last_opened_at DateTime? @db.DateTime(0)
+  last_edited_at DateTime  @default(now()) @db.DateTime(0)
   pinned_at      DateTime? @db.DateTime(0)
   gmt_create     DateTime  @default(now()) @db.DateTime(0)
   gmt_modified   DateTime  @default(now()) @db.DateTime(0)
@@ -290,6 +268,62 @@ model project {
   is_delete      Int       @default(0) @db.TinyInt
 
   @@index([owner_id], map: "idx_project_owner")
+}
+
+model project_nodes {
+  id           BigInt   @id @default(autoincrement())
+  project_id   BigInt
+  node_id      String   @db.VarChar(128)
+  type         String   @db.VarChar(32)
+  name         String?  @db.VarChar(255)
+  source       String   @default("user") @db.VarChar(16)
+  pos_x        Int?
+  pos_y        Int?
+  data_json    Json?
+  gmt_create   DateTime @default(now()) @db.DateTime(0)
+  gmt_modified DateTime @default(now()) @db.DateTime(0)
+  version      Int      @default(0)
+  is_delete    Int      @default(0) @db.TinyInt
+  owner_submission_id    BigInt?
+  owner_output_key       String? @db.VarChar(128)
+  owner_binding_revision Int     @default(0)
+
+  @@unique([project_id, node_id], map: "uk_project_nodes__node")
+  @@index([project_id, type, is_delete], map: "idx_project_nodes__type")
+}
+
+model project_edges {
+  id             BigInt   @id @default(autoincrement())
+  project_id     BigInt
+  edge_id        String   @db.VarChar(128)
+  source_node_id String   @db.VarChar(128)
+  target_node_id String   @db.VarChar(128)
+  ref_role       String?  @db.VarChar(16)
+  data_json      Json?
+  gmt_create     DateTime @default(now()) @db.DateTime(0)
+  gmt_modified   DateTime @default(now()) @db.DateTime(0)
+  version        Int      @default(0)
+  is_delete      Int      @default(0) @db.TinyInt
+
+  @@unique([project_id, edge_id], map: "uk_project_edges__edge")
+  @@unique([project_id, source_node_id, target_node_id], map: "uk_project_edges__pair")
+  @@index([project_id, source_node_id], map: "idx_project_edges__source")
+  @@index([project_id, target_node_id], map: "idx_project_edges__target")
+}
+
+model project_node_revisions {
+  id         BigInt   @id @default(autoincrement())
+  project_id BigInt
+  node_id    String   @db.VarChar(128)
+  revision   Int
+  op         String   @db.VarChar(16)
+  actor      String   @db.VarChar(16)
+  actor_id   String?  @db.VarChar(128)
+  changes    Json?
+  gmt_create DateTime @default(now()) @db.DateTime(0)
+
+  @@unique([project_id, node_id, revision], map: "uk_project_node_revisions__revision")
+  @@index([project_id, gmt_create], map: "idx_project_node_revisions__project_time")
 }
 
 /// IKCNLP（方案C）：素材-项目关联（1 素材可跨多项目）。
@@ -307,17 +341,6 @@ model project_asset {
   @@index([user_id, project_id], map: "idx_pa_user_project")
   @@index([asset_id], map: "idx_pa_asset")
   @@index([project_id], map: "idx_pa_project")
-}
-
-model conversations {
-  id           BigInt   @id @default(autoincrement())
-  project_id   BigInt
-  gmt_create   DateTime @default(now()) @db.DateTime(0)
-  gmt_modified DateTime @default(now()) @db.DateTime(0)
-  version      Int      @default(0)
-  is_delete    Int      @default(0) @db.TinyInt
-
-  @@index([project_id], map: "idx_conversation_project")
 }
 
 model conversation_messages {
@@ -339,56 +362,7 @@ model conversation_messages {
   @@index([project_id], map: "idx_message_project")
 }
 
-/// SceneCard 稳定身份与当前版本。T04 仅建立引用所需的最小资源边界；创建/应用行为由 T11 交付。
-model scene_cards {
-  id               BigInt   @id @default(autoincrement())
-  project_id       BigInt
-  title            String   @db.VarChar(255)
-  summary          String?  @db.Text
-  content_markdown String   @db.LongText
-  gmt_create       DateTime @default(now()) @db.DateTime(0)
-  gmt_modified     DateTime @default(now()) @db.DateTime(0)
-  version          Int      @default(1)
-  is_delete        Int      @default(0) @db.TinyInt
-
-  @@index([project_id], map: "idx_scene_card_project")
-}
-
-/// 旧内嵌 Agent 引擎运行表（已退役，IKCKOW 保留）：支撑「个人技能删除时进行中引用禁删」
-/// 保护（SkillInUseError + run_pin scrub，见 skill-repo deletePersonal），不再有写入方。
-model agent_runs {
-  id                                BigInt    @id @default(autoincrement())
-  project_id                        BigInt
-  conversation_id                   BigInt
-  active_guard                      BigInt?   @unique(map: "uk_agent_run_active_guard")
-  user_id                           BigInt
-  status                            String    @db.VarChar(32)
-  stage                             String?   @db.VarChar(32)
-  engine                            String    @db.VarChar(64)
-  engine_version                    String    @db.VarChar(64)
-  adapter_schema_version            Int
-  input_sequence_no                 Int       @default(0)
-  lease_owner                       String?   @db.VarChar(128)
-  lease_expires_at                  DateTime? @db.DateTime(0)
-  fencing_token                     BigInt    @default(0)
-  terminal_reason                   String?   @db.VarChar(64)
-  failure_code                      String?   @db.VarChar(128)
-  failure_message                   String?   @db.Text
-  /// 手动重试计数（IK67GZ，契约 §8.3）：每次用户重试 failed→queued 递增。
-  retry_count                       Int       @default(0)
-  run_pin                           Json?
-  activated_creative_skill_versions Json?
-  reasoning_summary                 String?   @db.VarChar(280)
-  gmt_create                        DateTime  @default(now()) @db.DateTime(0)
-  gmt_modified                      DateTime  @default(now()) @db.DateTime(0)
-  version                           Int       @default(0)
-  is_delete                         Int       @default(0) @db.TinyInt
-
-  @@index([project_id, status], map: "idx_agent_run_project_status")
-  @@index([status, engine, is_delete, id], map: "idx_agent_run_claim")
-}
-
-model command_idempotency {
+model project_command_receipts {
   id                BigInt   @id @default(autoincrement())
   project_id        BigInt
   operation         String   @db.VarChar(64)
@@ -407,13 +381,10 @@ model command_idempotency {
   version           Int      @default(0)
   is_delete         Int      @default(0) @db.TinyInt
 
-  @@unique([project_id, operation, idempotency_key], map: "uk_command_idempotency")
+  @@unique([project_id, operation, idempotency_key], map: "uk_project_command_receipts__key")
 }
 
 /// IKJJQU（IKIXK9-SPEC-20261002 B.2）：生成任务恢复契约 v1 —— 提交意图关联表。
-/// 一次用户提交或失败卡重试是一行；同次网络重放复用身份（uk uk_...__submission 幂等回读），
-/// 用户再次发起重试用新身份。当前承接以 generation_canvas_node_owners 为准，
-/// 历史提交不可用较晚时间戳夺回归属。
 model generation_canvas_submissions {
   id                       BigInt   @id @default(autoincrement())
   project_id               BigInt
@@ -466,74 +437,37 @@ model generation_canvas_outputs {
   @@unique([generation_canvas_submission_id, node_id], map: "uk_generation_canvas_outputs__node")
 }
 
-/// IKJJQU（B.2）：节点唯一归属表。同项目同节点唯一有效承接者，独立于原始占位卡是哪一张。
-/// 新提交接管节点时在受理事务中核对并推进版本；删除保留归属行和版本。
-model generation_canvas_node_owners {
-  id                             BigInt   @id @default(autoincrement())
-  project_id                     BigInt
-  node_id                        String   @db.VarChar(128)
-  generation_canvas_submission_id BigInt
-  output_key                     String   @db.VarChar(128)
-  binding_revision               Int
-  gmt_create                     DateTime @default(now()) @db.DateTime(0)
-  gmt_modified                   DateTime @default(now()) @db.DateTime(0)
-
-  @@unique([project_id, node_id], map: "uk_generation_canvas_node_owners__node")
-}
-
-model project_event_stream {
-  project_id     BigInt @id
-  high_watermark BigInt @default(0)
-}
-
-model project_events {
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model catalog_skills {
   id                BigInt   @id @default(autoincrement())
-  project_id        BigInt
-  cursor            BigInt
-  event_id          String   @unique(map: "uk_event_id") @db.VarChar(64)
-  event_type        String   @db.VarChar(64)
-  aggregate_type    String   @db.VarChar(32)
-  aggregate_id      String   @db.VarChar(64)
-  aggregate_version Int      @default(0)
-  correlation_id    String?  @db.VarChar(128)
-  causation_id      String?  @db.VarChar(128)
-  occurred_at       DateTime @db.DateTime(0)
-  payload           Json?
+  creative_skill_id String?  @unique(map: "uk_catalog_skills__creative_skill_id") @db.VarChar(80)
+  owner_user_id     BigInt   @default(0)
+  name              String   @db.VarChar(255)
+  skill_code        String?  @unique(map: "uk_skill_code") @db.VarChar(32)
+  description       String?  @db.Text
+  content           String?  @db.LongText
+  source            String   @default("official") @db.VarChar(32)
+  sort_order        Int      @default(0)
+  cover_url         String?  @db.VarChar(512)
+  category          String   @default("other") @db.VarChar(32)
+  search_keywords   String?  @db.Text
+  name_en           String?  @db.VarChar(255)
+  name_zh           String?  @db.VarChar(255)
+  description_en    String?  @db.Text
+  description_zh    String?  @db.Text
+  name_key          String?  @db.VarChar(255)
   gmt_create        DateTime @default(now()) @db.DateTime(0)
   gmt_modified      DateTime @default(now()) @db.DateTime(0)
   version           Int      @default(0)
   is_delete         Int      @default(0) @db.TinyInt
 
-  @@unique([project_id, cursor], map: "uk_project_cursor")
-  @@index([project_id, occurred_at], map: "idx_project_occurred")
-}
-
-/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
-model skill {
-  id              BigInt   @id @default(autoincrement())
-  name            String   @unique(map: "uk_name") @db.VarChar(255)
-  skill_code      String?  @unique(map: "uk_skill_code") @db.VarChar(32)
-  description     String?  @db.Text
-  content         String?  @db.LongText
-  source          String   @default("official") @db.VarChar(32)
-  sort_order      Int      @default(0)
-  cover_url       String?  @db.VarChar(512)
-  category        String   @default("other") @db.VarChar(32)
-  search_keywords String?  @db.Text
-  name_en         String?  @db.VarChar(255)
-  name_zh         String?  @db.VarChar(255)
-  description_en  String?  @db.Text
-  description_zh  String?  @db.Text
-  gmt_create      DateTime @default(now()) @db.DateTime(0)
-  gmt_modified    DateTime @default(now()) @db.DateTime(0)
-  version         Int      @default(0)
-  is_delete       Int      @default(0) @db.TinyInt
-
+  @@unique([owner_user_id, name_key], map: "uk_catalog_skills__owner_name")
+  @@index([owner_user_id, is_delete, sort_order], map: "idx_catalog_skills__owner_active_sort")
   @@index([sort_order], map: "idx_sort")
 }
 
 /// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
-model template_card {
+model catalog_templates {
   id           BigInt   @id @default(autoincrement())
   tag_code     String   @db.VarChar(64)
   title        String   @db.VarChar(255)
@@ -541,6 +475,7 @@ model template_card {
   content      String?  @db.LongText
   layout       String   @db.VarChar(32)
   sort_order   Int      @default(0)
+  is_featured  Int      @default(0) @db.TinyInt
   is_delete    Int      @default(0) @db.TinyInt
   gmt_create   DateTime @default(now()) @db.DateTime(0)
   gmt_modified DateTime @default(now()) @db.DateTime(0)
@@ -551,7 +486,7 @@ model template_card {
 }
 
 /// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
-model template_card_image {
+model catalog_template_images {
   id           BigInt   @id @default(autoincrement())
   card_id      BigInt
   image_url    String   @db.VarChar(512)
@@ -566,7 +501,7 @@ model template_card_image {
 }
 
 /// IK764F：首页模板标签（原硬编码枚举落库）。tag_code 与顺序固定，仅 label 可由管理后台改名。
-model template_tag {
+model catalog_template_tags {
   id           BigInt   @id @default(autoincrement())
   tag_code     String   @db.VarChar(64)
   label        String   @db.VarChar(128)
@@ -580,7 +515,7 @@ model template_tag {
 }
 
 /// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
-model user_skill {
+model user_skills {
   id           BigInt   @id @default(autoincrement())
   user_id      BigInt
   skill_id     BigInt
@@ -590,14 +525,14 @@ model user_skill {
   version      Int      @default(0)
   is_delete    Int      @default(0) @db.TinyInt
 
-  @@unique([user_id, skill_id], map: "uk_user_skill")
+  @@unique([user_id, skill_id], map: "uk_user_skills__user_skill")
   @@index([skill_id], map: "idx_skill")
   @@index([user_id], map: "idx_user")
 }
 
 /// IKCH05：首页背景图/视频后台动态配置条目。media_type=video 时 poster_url 必填；
 /// enabled=1 进首页轮播（按 sort_order 升序）；上限 8 条（应用层校验，不设 DB 唯一约束）。
-model homepage_hero {
+model content_homepage_heroes {
   id           BigInt   @id @default(autoincrement())
   scene        String   @default("homepage") @db.VarChar(20)
   media_type   String   @default("video") @db.VarChar(16)
@@ -613,43 +548,6 @@ model homepage_hero {
   @@index([enabled, is_delete, sort_order], map: "idx_hero_enabled_sort")
   @@index([sort_order, is_delete], map: "idx_hero_sort")
   @@index([scene, enabled, is_delete, sort_order], map: "idx_hero_scene_enabled_sort")
-}
-
-/// Creative Skill 稳定身份（IK60WS，资产契约 §1）：官方与个人共用一表；
-/// owner_user_id=0 表示平台官方资产，asset_domain 区分 official/personal。
-model creative_skill {
-  id                BigInt   @id @default(autoincrement())
-  creative_skill_id String   @unique(map: "uk_creative_skill_id") @db.VarChar(80)
-  name              String   @db.VarChar(255)
-  description       String?  @db.VarChar(1000)
-  source_skill_id   BigInt?
-  active_version_id String?  @db.VarChar(80)
-  owner_user_id     BigInt   @default(0)
-  asset_domain      String   @default("official") @db.VarChar(16)
-  name_key          String?  @db.VarChar(255)
-  auto_match        Int      @default(0)
-  gmt_create        DateTime @default(now()) @db.DateTime(0)
-  gmt_modified      DateTime @default(now()) @db.DateTime(0)
-
-  @@index([owner_user_id, asset_domain], map: "idx_owner_domain")
-  @@index([owner_user_id, name_key], map: "idx_owner_name_key")
-}
-
-/// Creative Skill 不可变版本快照（IK60WS，资产契约 §1）：
-/// body 为剥掉 frontmatter 的纯正文，digest=sha256(body)，仅受信任运行时按 pin 读取。
-model creative_skill_version {
-  id                        BigInt   @id @default(autoincrement())
-  creative_skill_version_id String   @unique(map: "uk_creative_skill_version_id") @db.VarChar(80)
-  creative_skill_id         String   @db.VarChar(80)
-  display_version           String   @db.VarChar(64)
-  body                      String   @db.LongText
-  content_digest            String   @db.VarChar(71)
-  resource_digest           String   @db.VarChar(71)
-  media_type                String   @default("text/markdown") @db.VarChar(128)
-  gmt_create                DateTime @default(now()) @db.DateTime(0)
-  gmt_modified              DateTime @default(now()) @db.DateTime(0)
-
-  @@unique([creative_skill_id, display_version], map: "uk_creative_skill_version_semver")
 }
 
 /// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
@@ -700,7 +598,7 @@ model bw_verification_codes {
 }
 
 
-model topup_tiers {
+model billing_products {
   id             BigInt    @id @default(autoincrement())
   name           String    @default("") @db.VarChar(100)
   amount         BigInt
@@ -743,10 +641,10 @@ model topup_tiers {
   @@index([status, sort_order], map: "idx_tier_status_sort")
 }
 
-model recharge_orders {
+model billing_recharge_orders {
   id               BigInt    @id @default(autoincrement())
-  trade_no         String    @unique(map: "uk_recharge_orders__trade_no") @db.VarChar(64)
-  pay_order_id     String?   @unique(map: "uk_recharge_orders__pay_order_id") @db.VarChar(64)
+  trade_no         String    @unique(map: "uk_billing_recharge_orders__trade_no") @db.VarChar(64)
+  pay_order_id     String?   @unique(map: "uk_billing_recharge_orders__pay_order_id") @db.VarChar(64)
   /// 银行统一收银台链接（下单应答的 payData，内嵌银行令牌）。落库是为了**复用未支付订单**：
   /// 网关按 (mch_no, mch_order_no) 唯一，同一单号重下会被拒，链接事后要不回来。
   /// ⚠️ 判「有没有拿到过链接」看 pay_order_id（两者同一次更新写入，同真同假）
@@ -799,13 +697,13 @@ model recharge_orders {
   /// 管理端「充值记录」全站列表：WHERE is_delete = 0 ORDER BY gmt_create DESC, id DESC。
   /// `is_delete` 做等值前缀、`gmt_create` 提供顺序；id 不必显式写进索引
   /// （InnoDB 二级索引自带主键，MySQL 8.0 判顺序时算上它，故无 filesort）。
-  @@index([is_delete, gmt_create], map: "idx_recharge_orders__is_delete_gmt_create")
+  @@index([is_delete, gmt_create], map: "idx_billing_recharge_orders__is_delete_gmt_create")
   /// 同一页「按用户筛选」：WHERE is_delete = 0 AND user_id = ? ORDER BY gmt_create DESC, id DESC。
   /// user_id 必须排在 gmt_create **之前**才收窄得到一个人；全站那条索引代替不了它。
-  @@index([is_delete, user_id, gmt_create], map: "idx_recharge_orders__is_delete_user_gmt_create")
+  @@index([is_delete, user_id, gmt_create], map: "idx_billing_recharge_orders__is_delete_user_gmt_create")
 }
 
-model system_settings {
+model bw_platform_settings {
   setting_key   String   @id @db.VarChar(64)
   setting_value String   @db.Text
   is_secret     Boolean  @default(false)
@@ -815,7 +713,7 @@ model system_settings {
 }
 
 
-model admin_operation_logs {
+model bw_operation_logs {
   id             BigInt   @id @default(autoincrement())
   category       String   @default("") @db.VarChar(32)
   action         String   @db.VarChar(64)
@@ -825,16 +723,19 @@ model admin_operation_logs {
   operator       String   @default("") @db.VarChar(64)
   operator_id    BigInt?
   ip_address     String?  @db.VarChar(64)
+  status         Int      @default(0) @db.TinyInt
+  ref            String?  @db.VarChar(64)
   gmt_create     DateTime @default(now()) @db.DateTime(0)
   gmt_modified   DateTime @default(now()) @db.DateTime(0)
   version        Int      @default(0)
   is_delete      Int      @default(0) @db.TinyInt
 
   @@index([category, gmt_create], map: "idx_oplog_category_created")
+  @@index([ref], map: "idx_bw_operation_logs__ref")
 }
 
 
-model cost_reservations {
+model billing_cost_reservations {
   id                    BigInt   @id @default(autoincrement())
   generation_job_id     BigInt
   user_id               BigInt
@@ -855,13 +756,13 @@ model cost_reservations {
   version               Int      @default(0)
   is_delete             Int      @default(0) @db.TinyInt
 
-  @@unique([generation_job_id], map: "uk_cost_reservation_job")
+  @@unique([generation_job_id], map: "uk_billing_cost_reservations__job")
 }
 
 /// IK9VZ0：多退少补结算审计（蓝鲸端只记账，执行在 new-api）：new-api 结算结果的接收记录。
 /// 幂等：batch_no 整批唯一（uk_adj_batch）；(generation_job_id, action_type) 单项唯一（uk_adj_job_action，
 /// 仅对有 job 归属的调整生效；MySQL 唯一索引对 NULL 不生效，无 job 的调整靠整批幂等兜底）。
-model cost_adjustments {
+model billing_cost_adjustments {
   id                BigInt   @id @default(autoincrement())
   batch_no          String   @db.VarChar(64)
   generation_job_id BigInt?
@@ -894,55 +795,10 @@ model generation_job_logs {
   @@index([generation_job_id, occurred_at], map: "idx_gen_job_log_job_time")
 }
 
-/// 场景卡生成预设（IK67H9，CONTEXT L49-58）：SceneCard 1:1 持久拥有的视频生成参数，
-/// 首次应用从 PlanMessage 冻结参数创建。必有时长与视频参考模式；首/尾帧角色存 reference_assets。
-model scene_card_generation_presets {
-  id                          BigInt   @id @default(autoincrement())
-  scene_card_id               BigInt   @unique(map: "uk_preset_scene")
-  project_id                  BigInt
-  parameters                  Json
-  reference_mode              String   @db.VarChar(32)
-  reference_assets            Json
-  capability_snapshot_version Json
-  gmt_create                  DateTime @default(now()) @db.DateTime(0)
-  gmt_modified                DateTime @default(now()) @db.DateTime(0)
-  version                     Int      @default(1)
-  is_delete                   Int      @default(0) @db.TinyInt
-
-  @@index([project_id], map: "idx_preset_project")
-}
-
-/// 场景卡生成记录（IK67H9，CONTEXT L82-86）：User 从 SceneCard 发起的一次新生成及重试的聚合。
-/// summary_status 四态：generating/partial/success/failed。
-/// plan_message_id / application_receipt_id 两列随计划通道退役（写入方在 IKCKOW/IKD806 已删）；
-/// 列保留以留住历史行的溯源，但放宽为 NULL-able，新行不再写入。
-model scene_card_generation_records {
-  id                      BigInt   @id @default(autoincrement())
-  scene_card_id           BigInt
-  project_id              BigInt
-  summary_status          String   @db.VarChar(16)
-  plan_message_id         BigInt?
-  application_receipt_id  BigInt?
-  first_generation_job_id BigInt
-  gmt_create              DateTime @default(now()) @db.DateTime(0)
-  gmt_modified            DateTime @default(now()) @db.DateTime(0)
-  version                 Int      @default(1)
-  is_delete               Int      @default(0) @db.TinyInt
-
-  @@index([scene_card_id], map: "idx_record_scene")
-  @@index([project_id], map: "idx_record_project")
-  @@index([summary_status], map: "idx_record_status")
-}
-
-/// 生成输出槽位（IK67HE/T14，spec §4.4 / ADR-0026）：每次生成在提交时固定数量的槽，
-/// 身份与顺序稳定（slot_index）。成功 Asset 永久占据原槽；重试只补 failed/missing 槽，
-/// 不覆盖成功输出。scene_card_generation_record_id 关联 SceneCard 视频聚合（视频路径）；
-/// 图片路径留空。retry_of_slot_id 指向被重试的原始槽，形成同槽位重试链。
 model generation_output_slots {
   id                              BigInt   @id @default(autoincrement())
   project_id                      BigInt
   generation_job_id               BigInt
-  scene_card_generation_record_id BigInt?
   slot_index                      Int
   status                          String   @db.VarChar(24)
   asset_id                        BigInt?
@@ -952,36 +808,12 @@ model generation_output_slots {
   gmt_modified                    DateTime @default(now()) @db.DateTime(0)
 
   @@index([generation_job_id], map: "idx_slot_job")
-  @@index([scene_card_generation_record_id], map: "idx_slot_record")
   @@index([project_id, initial_placement_status], map: "idx_slot_placement")
   @@unique([generation_job_id, slot_index], map: "uk_slot_job_index")
 }
 
-/// StoryboardPreview（IK67HF/T15，CONTEXT L43-47）：User 从 SceneCard 显式触发的分镜预览会话聚合根 +
-/// SceneCard 绑定 + 幂等键。一次预览 = 一个 type=image 的 GenerationJob（first_generation_job_id），
-/// 其 N 个 output_slot（按 slot_index 升序）即有序画格。可选旁路：不自动创建视频 job、不改 Preset、
-/// 不切媒体类型（CONTEXT _Avoid_ L47）。画格本身复用 generation_output_slots + assets，本表只聚合会话。
-/// command_id 兜底幂等（uk_storyboard_command，operation=scene_card.storyboard_preview）。
-model storyboard_previews {
-  id                          BigInt   @id @default(autoincrement())
-  scene_card_id               BigInt
-  project_id                  BigInt
-  first_generation_job_id     BigInt
-  command_id                  String   @db.VarChar(128)
-  summary_status              String   @db.VarChar(16)
-  capability_snapshot_version Json
-  gmt_create                  DateTime @default(now()) @db.DateTime(0)
-  gmt_modified                DateTime @default(now()) @db.DateTime(0)
-  version                     Int      @default(1)
-  is_delete                   Int      @default(0) @db.TinyInt
-
-  @@unique([project_id, command_id], map: "uk_storyboard_command")
-  @@index([scene_card_id], map: "idx_storyboard_scene")
-  @@index([project_id], map: "idx_storyboard_project")
-}
-
 /// Immutable first-applied preview content, retained when its Canvas node is deleted.
-model prompt_preview_snapshots {
+model project_prompt_preview_snapshots {
   id          BigInt   @id @default(autoincrement())
   project_id  BigInt
   source_key  String   @db.VarChar(64)
@@ -991,7 +823,7 @@ model prompt_preview_snapshots {
   content_json Json?
   gmt_create  DateTime @default(now()) @db.DateTime(0)
 
-  @@unique([project_id, source_key], map: "uk_prompt_preview_source")
+  @@unique([project_id, source_key], map: "uk_project_prompt_preview_snapshots__source")
 }
 
 /// Immutable conversation quote snapshot: node text captured when added to the conversation (IKDLQJ); retained after the source node is edited or deleted.
@@ -1006,21 +838,6 @@ model conversation_quote_snapshots {
   gmt_create  DateTime @default(now()) @db.DateTime(0)
 
   @@unique([project_id, quote_key], map: "uk_conversation_quote")
-}
-
-/// Immutable legacy generation-card migration history (IKDLQK): card content captured before conversion to an ordinary text node; read-only, never rewritten by later edits.
-model legacy_card_history {
-  id          BigInt   @id @default(autoincrement())
-  project_id  BigInt
-  node_id     String   @db.VarChar(128)
-  title       String   @db.VarChar(200)
-  prompt_text String   @db.MediumText
-  visual_text String?  @db.MediumText
-  source_json Json?
-  card_json   Json
-  gmt_create  DateTime @default(now()) @db.DateTime(0)
-
-  @@unique([project_id, node_id], map: "uk_legacy_card_history")
 }
 
 /// 会员周期（bw_memberships）。自建用户体系第一刀，建表理由见 migration 20260924120000。

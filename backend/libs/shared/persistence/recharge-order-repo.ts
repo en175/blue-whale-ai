@@ -172,7 +172,7 @@ function toView(row: any): RechargeOrderView {
 export function createRechargeOrderRepo(prisma: PrismaClient): RechargeOrderRepo {
   return {
     async create(input) {
-      const row = await prisma.recharge_orders.create({
+      const row = await prisma.billing_recharge_orders.create({
         data: {
           trade_no: input.tradeNo,
           user_id: BigInt(input.userId),
@@ -206,7 +206,7 @@ export function createRechargeOrderRepo(prisma: PrismaClient): RechargeOrderRepo
     },
 
     async getByTradeNo(tradeNo) {
-      const row = await prisma.recharge_orders.findFirst({
+      const row = await prisma.billing_recharge_orders.findFirst({
         where: { trade_no: tradeNo, is_delete: 0 },
       });
       return row ? toView(row) : null;
@@ -229,8 +229,8 @@ export function createRechargeOrderRepo(prisma: PrismaClient): RechargeOrderRepo
           : {}),
       };
       const [total, rows] = await Promise.all([
-        prisma.recharge_orders.count({ where }),
-        prisma.recharge_orders.findMany({
+        prisma.billing_recharge_orders.count({ where }),
+        prisma.billing_recharge_orders.findMany({
           where,
           orderBy: [{ gmt_create: "desc" }, { id: "desc" }],
           skip: (filter.page - 1) * filter.pageSize,
@@ -243,14 +243,14 @@ export function createRechargeOrderRepo(prisma: PrismaClient): RechargeOrderRepo
     async listByTradeNos(tradeNos) {
       const unique = [...new Set(tradeNos)].filter((tradeNo) => tradeNo !== "");
       if (unique.length === 0) return [];
-      const rows = await prisma.recharge_orders.findMany({
+      const rows = await prisma.billing_recharge_orders.findMany({
         where: { is_delete: 0, trade_no: { in: unique } },
       });
       return rows.map(toView);
     },
 
     async findActiveOrder(identity) {
-      const row = await prisma.recharge_orders.findFirst({
+      const row = await prisma.billing_recharge_orders.findFirst({
         where: {
           user_id: BigInt(identity.userId),
           status: RECHARGE_ORDER_STATUS.pending,
@@ -266,7 +266,7 @@ export function createRechargeOrderRepo(prisma: PrismaClient): RechargeOrderRepo
     },
 
     async findUnsettledPaidOrder(userId) {
-      const row = await prisma.recharge_orders.findFirst({
+      const row = await prisma.billing_recharge_orders.findFirst({
         where: {
           user_id: BigInt(userId),
           status: {
@@ -283,7 +283,7 @@ export function createRechargeOrderRepo(prisma: PrismaClient): RechargeOrderRepo
     },
 
     async listGrantsToRetry({ staleBefore, windowStart }, limit) {
-      const rows = await prisma.recharge_orders.findMany({
+      const rows = await prisma.billing_recharge_orders.findMany({
         where: {
           is_delete: 0,
           status: {
@@ -312,8 +312,8 @@ export function createRechargeOrderRepo(prisma: PrismaClient): RechargeOrderRepo
         ],
       };
       const [total, rows] = await Promise.all([
-        prisma.recharge_orders.count({ where }),
-        prisma.recharge_orders.findMany({
+        prisma.billing_recharge_orders.count({ where }),
+        prisma.billing_recharge_orders.findMany({
           where,
           orderBy: [{ gmt_create: "asc" }, { id: "asc" }],
           take: sampleLimit,
@@ -324,7 +324,7 @@ export function createRechargeOrderRepo(prisma: PrismaClient): RechargeOrderRepo
 
     async bindGatewayOrder(tradeNo, gateway) {
       try {
-        const r = await prisma.recharge_orders.updateMany({
+        const r = await prisma.billing_recharge_orders.updateMany({
           where: { trade_no: tradeNo, pay_order_id: null },
           data: {
             pay_order_id: gateway.payOrderId,
@@ -339,7 +339,7 @@ export function createRechargeOrderRepo(prisma: PrismaClient): RechargeOrderRepo
     },
 
     async markPaidPending(tradeNo) {
-      const r = await prisma.recharge_orders.updateMany({
+      const r = await prisma.billing_recharge_orders.updateMany({
         where: { trade_no: tradeNo, status: { notIn: [...PAID_REACHED_STATUSES] } },
         data: {
           status: RECHARGE_ORDER_STATUS.paidPending,
@@ -351,7 +351,7 @@ export function createRechargeOrderRepo(prisma: PrismaClient): RechargeOrderRepo
     },
 
     async markPaid({ tradeNo, creditsExpireAt, firstPurchaseState }) {
-      const r = await prisma.recharge_orders.updateMany({
+      const r = await prisma.billing_recharge_orders.updateMany({
         where: { trade_no: tradeNo, status: { not: RECHARGE_ORDER_STATUS.paid } },
         data: {
           status: RECHARGE_ORDER_STATUS.paid,
@@ -365,14 +365,14 @@ export function createRechargeOrderRepo(prisma: PrismaClient): RechargeOrderRepo
     },
 
     async recordNotify(tradeNo) {
-      await prisma.recharge_orders.updateMany({
+      await prisma.billing_recharge_orders.updateMany({
         where: { trade_no: tradeNo },
         data: { notify_count: { increment: 1 }, gmt_modified: new Date() },
       });
     },
 
     async markGrantFailed(tradeNo) {
-      const r = await prisma.recharge_orders.updateMany({
+      const r = await prisma.billing_recharge_orders.updateMany({
         where: { trade_no: tradeNo, status: RECHARGE_ORDER_STATUS.paidPending },
         data: { status: RECHARGE_ORDER_STATUS.grantFailed, gmt_modified: new Date() },
       });
@@ -381,7 +381,7 @@ export function createRechargeOrderRepo(prisma: PrismaClient): RechargeOrderRepo
 
     async claimQuerySlot(tradeNo, intervalMs) {
       const cutoff = new Date(Date.now() - intervalMs);
-      const r = await prisma.recharge_orders.updateMany({
+      const r = await prisma.billing_recharge_orders.updateMany({
         where: {
           trade_no: tradeNo,
           OR: [{ last_query_at: null }, { last_query_at: { lt: cutoff } }],
@@ -392,14 +392,14 @@ export function createRechargeOrderRepo(prisma: PrismaClient): RechargeOrderRepo
     },
 
     async markFailed(tradeNo) {
-      await prisma.recharge_orders.updateMany({
+      await prisma.billing_recharge_orders.updateMany({
         where: { trade_no: tradeNo, status: RECHARGE_ORDER_STATUS.pending },
         data: { status: RECHARGE_ORDER_STATUS.failed, gmt_modified: new Date() },
       });
     },
 
     async markExpired(tradeNo) {
-      await prisma.recharge_orders.updateMany({
+      await prisma.billing_recharge_orders.updateMany({
         where: { trade_no: tradeNo, status: RECHARGE_ORDER_STATUS.pending },
         data: { status: RECHARGE_ORDER_STATUS.expired, gmt_modified: new Date() },
       });

@@ -1,14 +1,7 @@
 import { type GalleryMediaKind } from '@/custom/enums';
-import { useEffect, useState } from 'react';
-import {
-  Megaphone,
-  Clapperboard,
-  Copy,
-  Share2,
-  Palette,
-  Sparkles,
-  type LucideIcon,
-} from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { Image as ImageIcon, Video } from 'lucide-react';
+
 import styles from './index.module.css';
 import {
   fetchTemplateTags,
@@ -17,42 +10,20 @@ import {
   type TemplateRecord,
 } from '@/custom/api/agent';
 import { remoteImageCrossOrigin, resolveMediaSrc } from '@/shared/utils/remoteImageCors';
-import { galleryCoverSrc, mediaKindFromTagCode, shouldShowVideoChrome } from './galleryCardModel';
-
-const TAG_ICON_BY_CODE: Record<string, LucideIcon> = {
-  marketing: Megaphone,
-  short: Clapperboard,
-  replicate: Copy,
-  clone: Copy,
-  social: Share2,
-  image: Palette,
-  design: Palette,
-  video: Clapperboard,
-  picture: Palette,
-};
-
-const TAG_ICON_BY_LABEL: Record<string, LucideIcon> = {
-  营销视频: Megaphone,
-  微短片: Clapperboard,
-  视频复刻: Copy,
-  社媒视频: Share2,
-  图片设计: Palette,
-};
-
-const DEFAULT_TAG_ICON = Sparkles;
-
-const iconForTag = (tag: TemplateTag): LucideIcon =>
-  TAG_ICON_BY_CODE[tag.tag_code] ?? TAG_ICON_BY_LABEL[tag.label] ?? DEFAULT_TAG_ICON;
+import { galleryCoverSrc, galleryPreloadMode, shouldShowVideoChrome } from './galleryCardModel';
 
 const FALLBACK_TAGS: TemplateTag[] = [
   { tag_code: 'video', label: '视频' },
   { tag_code: 'picture', label: '图片' },
 ];
 
-const LAYOUT_CLASS: Record<string, string> = {
-  wide: '',
-  social: styles.cardSocial,
-};
+const FEATURED_TAG: TemplateTag = { tag_code: '__featured', label: '精选' };
+
+const HIDDEN_CASE_TITLES = new Set(['测试20260828144946']);
+
+function mediaKindOf(record: TemplateRecord): GalleryMediaKind {
+  return record.video ? 'video' : 'image';
+}
 
 function truncate(text: string, max = 30) {
   return text.length > max ? text.slice(0, max) + '...' : text;
@@ -61,132 +32,141 @@ function truncate(text: string, max = 30) {
 function GalleryCard({
   record,
   mediaKind,
+  purposeLabel,
+  preload,
   onClick,
 }: {
   record: TemplateRecord;
   mediaKind: GalleryMediaKind;
+  purposeLabel: string;
+  preload: 'eager' | 'lazy';
   onClick?: () => void;
 }) {
-  const [hovered, setHovered] = useState(false);
-  const [first, , third] = record.images ?? [];
   const cover = galleryCoverSrc(record.images);
-  const layoutCls = LAYOUT_CLASS[record.layout] ?? LAYOUT_CLASS.wide;
   const videoChrome = shouldShowVideoChrome(mediaKind);
-  const playingHoverVideo = Boolean(hovered && videoChrome && record.video);
+  const TypeIcon = videoChrome ? Video : ImageIcon;
+  const video = videoChrome ? record.video : '';
 
   return (
-    <div
-      className={`${styles.card} ${layoutCls}`}
+    <button
+      type="button"
+      className={styles.card}
       data-testid="gallery-card"
       data-media-kind={mediaKind}
       onClick={onClick}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
     >
-      <p className={styles.cardTitle}>{truncate(record.title)}</p>
-      <div className={styles.imageArea}>
-        {cover ? (
-          <>
-            {first && (
-              <img className={`${styles.stackImg} ${styles.stackLeft}`} src={resolveMediaSrc(first)} crossOrigin={remoteImageCrossOrigin(first)} alt="" loading="lazy" />
-            )}
-            {third && (
-              <img className={`${styles.stackImg} ${styles.stackRight}`} src={resolveMediaSrc(third)} crossOrigin={remoteImageCrossOrigin(third)} alt="" loading="lazy" />
-            )}
-            <img className={`${styles.stackImg} ${styles.stackTop}`} src={resolveMediaSrc(cover)} crossOrigin={remoteImageCrossOrigin(cover)} alt={record.title} loading="lazy" />
-          </>
-        ) : mediaKind === 'image' ? (
-          <div className={styles.imagePlaceholder} data-testid="gallery-image-placeholder" />
-        ) : null}
-        {videoChrome && !playingHoverVideo && (
-          <div className={styles.hoverOverlay} data-testid="gallery-play-overlay">
-            <span className={styles.playIcon}>▶</span>
-          </div>
+      <div className={styles.cover}>
+        {video ? (
+          <video
+            className={styles.coverVideo}
+            data-testid="gallery-video"
+            data-preload={preload}
+            src={resolveMediaSrc(video)}
+            poster={cover ? resolveMediaSrc(cover) : undefined}
+            autoPlay
+            muted
+            loop
+            playsInline
+            disablePictureInPicture
+            preload={preload === 'eager' ? 'auto' : 'metadata'}
+          />
+        ) : cover ? (
+          <img
+            className={styles.coverImg}
+            src={resolveMediaSrc(cover)}
+            crossOrigin={remoteImageCrossOrigin(cover)}
+            alt={record.title}
+            loading={preload}
+          />
+        ) : (
+          <span className={styles.coverEmpty}>暂无内容预览</span>
         )}
+        <span className={styles.typeIcon} aria-hidden="true">
+          <TypeIcon size={15} strokeWidth={1.8} />
+        </span>
       </div>
-      {playingHoverVideo && (
-        <video
-          className={styles.hoverVideo}
-          data-testid="gallery-hover-video"
-          src={resolveMediaSrc(record.video)}
-          autoPlay
-          muted
-          loop
-          playsInline
-          disablePictureInPicture
-        />
-      )}
-    </div>
+      <span className={styles.cardTitle}>{truncate(record.title)}</span>
+      <span className={styles.cardTags}>{purposeLabel}</span>
+    </button>
   );
 }
 
 export default function CardGallery({ onCardClick }: { onCardClick?: (text: string, mediaType: 'video' | 'image') => void }) {
-  const [tags, setTags] = useState<TemplateTag[]>(FALLBACK_TAGS);
+  const [records, setRecords] = useState<{ tag: TemplateTag; records: TemplateRecord[] }[]>([]);
   const [activeTag, setActiveTag] = useState('');
-  const [records, setRecords] = useState<TemplateRecord[]>([]);
 
   useEffect(() => {
-    fetchTemplateTags()
-      .then((list) => {
-        if (!list.length) return;
-        setTags(list);
-        setActiveTag((prev) =>
-          list.some((t) => t.tag_code === prev) ? prev : list[0].tag_code
-        );
-      })
-      .catch(() => setActiveTag((prev) => prev || FALLBACK_TAGS[0].tag_code));
-  }, []);
-
-  useEffect(() => {
-    if (!activeTag) return;
     let alive = true;
-    fetchTemplatePage(activeTag)
-      .then((page) => {
-        if (alive) setRecords(page.records ?? []);
-      })
-      .catch(() => {
-        if (alive) setRecords([]);
-      });
+    const load = async () => {
+      const tags = await fetchTemplateTags().catch(() => FALLBACK_TAGS);
+      const list = [FEATURED_TAG, ...(tags.length ? tags : FALLBACK_TAGS)];
+      const loaded = await Promise.all(
+        list.map(async (tag) => ({
+          tag,
+          records: await fetchTemplatePage(tag.tag_code === FEATURED_TAG.tag_code ? undefined : tag.tag_code, 1, 50, {
+            isFeatured: true,
+          })
+            .then((page) => page.records ?? [])
+            .catch(() => []),
+        })),
+      );
+      if (!alive) return;
+      setRecords(loaded);
+      setActiveTag(list[0].tag_code);
+    };
+    void load();
     return () => {
       alive = false;
     };
-  }, [activeTag]);
+  }, []);
+
+  const tags = records.map((group) => group.tag);
+
+  const cards = useMemo(() => {
+    const groups = records
+      .filter((group) => !activeTag || group.tag.tag_code === activeTag)
+      .map(({ tag, records: list }) => ({
+        tag,
+        list: list.filter((record) => !HIDDEN_CASE_TITLES.has(record.title)),
+      }))
+      .filter((group) => group.list.length > 0);
+    return groups.flatMap((group) =>
+      group.list.map((record) => ({ record, tag: group.tag, mediaKind: mediaKindOf(record) })),
+    );
+  }, [records, activeTag]);
 
   return (
     <div className={styles.gallery}>
-      {}
-      <div className={styles.tabBar}>
-        {tags.map((tag) => {
-          const Icon = iconForTag(tag);
-          return (
+      {tags.length > 1 && (
+        <div className={styles.filters} role="group" aria-label="案例分类">
+          {tags.map((tag) => (
             <button
               key={tag.tag_code}
-              className={`${styles.tabBtn} ${activeTag === tag.tag_code ? styles.tabBtnActive : ''}`}
+              type="button"
+              className={styles.filter}
+              aria-pressed={activeTag === tag.tag_code}
               onClick={() => setActiveTag(tag.tag_code)}
             >
-              <Icon size={16} strokeWidth={2} />
-              <span>{tag.label}</span>
+              {tag.label}
             </button>
-          );
-        })}
-      </div>
+          ))}
+        </div>
+      )}
 
-      {}
       <div className={styles.cardGrid} data-testid="gallery-card-grid">
-        {records.map((record, idx) => {
-          const mediaKind = mediaKindFromTagCode(activeTag);
-          return (
-            <GalleryCard
-              key={`${record.title}-${idx}`}
-              record={record}
-              mediaKind={mediaKind}
-              onClick={() => {
-                const text = record.content?.trim() || record.title;
-                onCardClick?.(text, mediaKind);
-              }}
-            />
-          );
-        })}
+        {cards.map(({ record, tag, mediaKind }, idx) => (
+          <GalleryCard
+            key={`${record.title}-${idx}`}
+            record={record}
+            mediaKind={mediaKind}
+            purposeLabel={tag.label}
+            preload={galleryPreloadMode(activeTag, tag.tag_code)}
+            onClick={() => {
+              const text = record.content?.trim() || record.title;
+              onCardClick?.(text, mediaKind);
+            }}
+          />
+        ))}
       </div>
     </div>
   );

@@ -72,7 +72,7 @@ function makeService(overrides: {
       findOwnedSource: vi.fn().mockResolvedValue(makeVideoAsset()),
     };
   const tx = {
-    command_idempotency: {
+    project_command_receipts: {
       findUnique:
         overrides.idemFindUnique ?? vi.fn().mockResolvedValue(null),
       create: vi.fn(),
@@ -81,13 +81,13 @@ function makeService(overrides: {
       create: overrides.jobCreate ?? vi.fn().mockResolvedValue({ id: 400n }),
       findUnique: overrides.replayedJob ?? vi.fn(),
     },
-    cost_reservations: { create: vi.fn() },
+    billing_cost_reservations: { create: vi.fn() },
   };
   const client = {
     assets: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
-    command_idempotency: tx.command_idempotency,
+    project_command_receipts: tx.project_command_receipts,
     generation_jobs: tx.generation_jobs,
-    cost_reservations: tx.cost_reservations,
+    billing_cost_reservations: tx.billing_cost_reservations,
     $transaction: vi.fn(async (operation: (t: unknown) => Promise<unknown>) => operation(tx)),
   };
   const prisma = { client };
@@ -229,7 +229,7 @@ describe("VideoMattingsService.create：client_token 幂等键校验（≤64 可
   it("looks the token up byte-exact (case-sensitive, no normalization)", async () => {
     const { service, tx } = makeService();
     await service.create("9", "55", { ...VALID_BODY, client_token: "Tok-001" });
-    expect(tx.command_idempotency.findUnique).toHaveBeenCalledWith(
+    expect(tx.project_command_receipts.findUnique).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
           project_id_operation_idempotency_key: expect.objectContaining({
@@ -334,7 +334,7 @@ describe("VideoMattingsService.create：client_token 幂等三态", () => {
     expect(result.code).toBe(200);
     expect(result.data).toEqual({ job_id: "400", status: "queued" });
     expect(tx.generation_jobs.create).not.toHaveBeenCalled();
-    expect(tx.command_idempotency.create).not.toHaveBeenCalled();
+    expect(tx.project_command_receipts.create).not.toHaveBeenCalled();
   });
 
   it("returns the job's current status on replay", async () => {
@@ -387,8 +387,8 @@ describe("VideoMattingsService.create：任务与占位数据同事务落库", (
     expect(result.data).toEqual({ job_id: "400", status: "queued" });
     expect(client.$transaction).toHaveBeenCalledTimes(1);
     expect(tx.generation_jobs.create).toHaveBeenCalledTimes(1);
-    expect(tx.command_idempotency.create).toHaveBeenCalledTimes(1);
-    expect(tx.command_idempotency.create).toHaveBeenCalledWith({
+    expect(tx.project_command_receipts.create).toHaveBeenCalledTimes(1);
+    expect(tx.project_command_receipts.create).toHaveBeenCalledWith({
       data: {
         project_id: 55n,
         operation: "video_matting.create",
@@ -436,7 +436,7 @@ describe("VideoMattingsService.create：任务与占位数据同事务落库", (
     const { service, tx } = makeService();
     const result = await service.create("9", "55", VALID_BODY);
     expect(result.code).toBe(200);
-    expect(tx.cost_reservations.create).not.toHaveBeenCalled();
+    expect(tx.billing_cost_reservations.create).not.toHaveBeenCalled();
   });
 });
 describe("VideoMattingsService.create：恢复协议 v1 接入（IKJJQW）", () => {
@@ -535,5 +535,22 @@ describe("VideoMattingsService.create：计费输入", () => {
       expect.objectContaining({ source_asset_id: "88", duration: 300 }),
     );
     expect(enqueueVideoMattingJob).toHaveBeenCalledWith("400");
+  });
+
+  it("4.9 秒源按 4 秒进档，不越到 10 秒档", async () => {
+    const jobBilling = vi.fn().mockResolvedValue(undefined);
+    const { service } = makeService({
+      assets: {
+        findOwnedSource: vi.fn().mockResolvedValue(makeVideoAsset({ duration_ms: 4_900 })),
+      },
+      billing: { jobBilling, release: vi.fn() },
+    });
+    const result = await service.create("9", "55", VALID_BODY);
+    expect(result.code).toBe(200);
+    expect(jobBilling).toHaveBeenCalledWith(
+      "video_matting",
+      "9",
+      expect.objectContaining({ source_asset_id: "88", duration: 4 }),
+    );
   });
 });

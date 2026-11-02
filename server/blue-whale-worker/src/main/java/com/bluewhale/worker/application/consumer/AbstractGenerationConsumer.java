@@ -1,5 +1,6 @@
 package com.bluewhale.worker.application.consumer;
 
+import com.bluewhale.common.mq.MqEnvSuffix;
 import com.bluewhale.worker.infrastructure.mq.GenerationMessage;
 
 import com.bluewhale.worker.application.processor.JobProcessor;
@@ -56,7 +57,7 @@ public abstract class AbstractGenerationConsumer implements Closeable {
         this.semaphore = new Semaphore(concurrency);
         this.topic = topic;
         this.clientConfig = clientConfig;
-        this.consumerGroup = consumerGroup;
+        this.consumerGroup = MqEnvSuffix.apply(consumerGroup);
     }
 
     public void start() {

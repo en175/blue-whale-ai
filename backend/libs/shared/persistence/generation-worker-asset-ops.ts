@@ -1,6 +1,5 @@
 import type {PrismaClient} from "@prisma/client";
 
-import {appendProjectEvent} from "./product-event-repo.js";
 import {DEFAULT_IMAGE_REFERENCE_MAX} from "./model-capability-repo.js";
 import {parseStoredChannel} from "../generation/image-channel-parser.js";
 import type {WorkerRepo} from "./generation-worker-types.js";
@@ -26,7 +25,7 @@ export function createWorkerAssetOps(prisma: PrismaClient): Pick<WorkerRepo, "re
     async resolveInputAssets(assetIds, userId, projectId) {
       if (assetIds.length === 0) return [];
       const linkedAssetIds = await findLinkedAssetIds(prisma, userId, projectId);
-      const rows = await prisma.assets.findMany({
+      const rows = await prisma.user_assets.findMany({
         where: {
           id: { in: assetIds.map((id) => BigInt(id)) },
           user_id: BigInt(userId),
@@ -74,7 +73,7 @@ export function createWorkerAssetOps(prisma: PrismaClient): Pick<WorkerRepo, "re
 
     async resolveMediaExtractSource(assetId, userId, projectId) {
       const linkedAssetIds = await findLinkedAssetIds(prisma, userId, projectId);
-      const row = await prisma.assets.findFirst({
+      const row = await prisma.user_assets.findFirst({
         where: {
           id: BigInt(assetId),
           user_id: BigInt(userId),
@@ -93,7 +92,7 @@ export function createWorkerAssetOps(prisma: PrismaClient): Pick<WorkerRepo, "re
     },
 
     async findImageCapability(modelId, sizeId) {
-      const cap = await prisma.generation_model_capability.findFirst({
+      const cap = await prisma.catalog_models.findFirst({
         where: { model_id: modelId, enabled: true, is_delete: false },
       });
       if (!cap) return null;
@@ -142,7 +141,7 @@ export function createWorkerAssetOps(prisma: PrismaClient): Pick<WorkerRepo, "re
           data: { version: { increment: 1 } },
         });
         if (owned.count !== 1) return null;
-        const asset = await tx.assets.create({
+        const asset = await tx.user_assets.create({
           data: {
             user_id: BigInt(input.user_id),
             project_id: BigInt(input.project_id),
@@ -160,20 +159,6 @@ export function createWorkerAssetOps(prisma: PrismaClient): Pick<WorkerRepo, "re
             height: input.height,
             source: "generated",
             status: "normal",
-          },
-        });
-        await appendProjectEvent(tx, {
-          projectId: input.project_id,
-          eventType: "asset.created",
-          aggregateType: "asset",
-          aggregateId: asset.id.toString(),
-          aggregateVersion: asset.version,
-          correlationId: `job_${input.generation_job_id}`,
-          payload: {
-            asset_id: asset.id.toString(),
-            generation_job_id: input.generation_job_id,
-            type: asset.type,
-            access_url: asset.url,
           },
         });
         return asset.id.toString();

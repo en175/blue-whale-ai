@@ -1,13 +1,16 @@
 import { useCallback, useRef, useState } from 'react';
 import { persistSnapAlignmentEnabled, readSnapAlignmentEnabled } from '../../graph/snapPreference';
 
-import { type ToolMode, type CardFilter } from '@/custom/enums';
+import { type ToolMode } from '@/custom/enums';
+import type { ConnectDirection } from './useCanvasConnectHandlers';
+
+export type ConnectMenuState = { sourceIds: string[]; x: number; y: number; direction?: ConnectDirection } | null;
 
 export function useCanvasWorkbenchChrome() {
   const [showMiniMap, setShowMiniMap] = useState(false);
   const [toolMode, setToolMode] = useState<ToolMode>('select');
   const [paneMenu, setPaneMenu] = useState<{ x: number; y: number } | null>(null);
-  const [connectMenu, setConnectMenu] = useState<{ sourceIds: string[]; x: number; y: number } | null>(null);
+  const [connectMenu, setConnectMenu] = useState<ConnectMenuState>(null);
   const closeConnectMenu = useCallback(() => setConnectMenu(null), []);
   const connectingSourceRef = useRef<string | null>(null);
   const paneUploadRef = useRef<HTMLInputElement>(null);
@@ -18,9 +21,6 @@ export function useCanvasWorkbenchChrome() {
   const [soloSelectedNodeId, setSoloSelectedNodeId] = useState<string | null>(null);
   const [showCharacterLibrary, setShowCharacterLibrary] = useState(false);
   const [characterLibraryTarget, setCharacterLibraryTarget] = useState<'image' | 'asset' | null>(null);
-  const [showAssetsModal, setShowAssetsModal] = useState(false);
-  const [assetsModalDefaultTab, setAssetsModalDefaultTab] = useState<string | undefined>(undefined);
-  const [assetsModalDefaultFilter, setAssetsModalDefaultFilter] = useState<CardFilter | undefined>(undefined);
   const [showEdges, setShowEdges] = useState(true);
   const [snapAlignmentOn, setSnapAlignmentOn] = useState(readSnapAlignmentEnabled);
   const [pendingDeleteGroup, setPendingDeleteGroup] = useState<{ id: string; count: number } | null>(null);
@@ -28,7 +28,6 @@ export function useCanvasWorkbenchChrome() {
   const editingTargetRef = useRef<string | null>(null);
   const [selectRequest, setSelectRequest] = useState<{ id: string; ts: number } | null>(null);
   const [selectManyRequest, setSelectManyRequest] = useState<{ ids: string[]; ts: number } | null>(null);
-  const [showLegacyHistory, setShowLegacyHistory] = useState(false);
   const persistSnap = (enabled: boolean) => persistSnapAlignmentEnabled(enabled);
   return {
     showMiniMap, setShowMiniMap,
@@ -39,12 +38,9 @@ export function useCanvasWorkbenchChrome() {
     anchoredOverlayHiddenIds, setAnchoredOverlayHiddenIds, isAnchoredOverlayDragHidden,
     soloSelectedNodeId, setSoloSelectedNodeId,
     showCharacterLibrary, setShowCharacterLibrary, characterLibraryTarget, setCharacterLibraryTarget,
-    showAssetsModal, setShowAssetsModal, assetsModalDefaultTab, setAssetsModalDefaultTab,
-    assetsModalDefaultFilter, setAssetsModalDefaultFilter,
     showEdges, setShowEdges, snapAlignmentOn, setSnapAlignmentOn, persistSnap,
     pendingDeleteGroup, setPendingDeleteGroup,
     submittingNodeId, setSubmittingNodeId,
     editingTargetRef, selectRequest, setSelectRequest, selectManyRequest, setSelectManyRequest,
-    showLegacyHistory, setShowLegacyHistory,
   };
 }

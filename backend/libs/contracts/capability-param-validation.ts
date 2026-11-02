@@ -319,6 +319,20 @@ function matchesSize(
   return supported.some((s) => s.id === size || s.api_value === size);
 }
 
+export function canonicalSizeValue(
+  size: string,
+  supported: CapabilityLimitInput["supported_sizes"],
+): string {
+  if (size === "" || supported.length === 0) return size;
+  if (matchesSize(size, supported)) return size;
+  const folded = size.toLowerCase();
+  const match = supported.find(
+    (s) => (s.api_value ?? "").toLowerCase() === folded || (s.id ?? "").toLowerCase() === folded,
+  );
+  const canonical = match ? match.api_value || match.id : undefined;
+  return canonical !== undefined && canonical.length > 0 ? canonical : size;
+}
+
 
 function durationInRange(
   duration: number,

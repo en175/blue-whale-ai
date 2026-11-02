@@ -18,7 +18,7 @@ Blue-Whale 生成执行服务（Java）。**Java 直连 DB 全自主执行**：c
 **服务启动即消费全部 6 个 tag**：`video` / `image` / `audio` / `media_extract` / `image_enhance` / `image_erase`（契约 §1 / §16）。不存在按 tag 的启停开关，也不存在「空配置只探活」形态：
 
 - `WORKER_ENABLED_TAGS` 与 `WORKER_GROUP_SUFFIX` **已整体删除**（6 个 `*EnabledCondition`、`TagsEnabledConditions`、`StubDataSourceConfig`、`ReadyController.enabledTags` 一并退役）。
-- **缺配置即启动失败**：`ROCKETMQ_ENDPOINTS`（MQ）+ `DATABASE_URL`（DB）+ `NEW_API_BASE_URL` / `SYSTEM_SETTINGS_SECRET`（上游网关地址与读凭证的主密钥）+ `VOLC_*`（TOS）**四套配置**必须齐备，缺任一项在 bean 装配期抛错终止启动——不再退化为「不连 MQ、不连 DB，只起 `/ready`」。上游网关地址与凭证两项都由 `NewApiUpstreamConfig` 在装配期守卫（**地址的唯一读取点**）：`NEW_API_BASE_URL` 由 18 个客户端（17 个 `@Component` 构造器注入 + `RocketMqConfig` 手工 `@Bean` 的视频客户端）从同一个 `UpstreamBaseUrl` bean 取，缺/空白即抛 `IllegalStateException`（「NEW_API_BASE_URL 未配置」；非空是载体自身的不变式）——收敛前它被 18 处各读各的（ADR-0114 决策 7，TS 侧同一收敛在 `new-api-egress.ts`）；上游调用凭证（项目级统一 key，ADR-0114）**已不在 env 里**——它是 `system_settings` 表 `upstream` 模块的一行，管理端「系统设置 → 上游凭证」维护，worker 直连该表读取并用 `SYSTEM_SETTINGS_SECRET` 解开信封（见 `SystemSettingMapper` 对 ADR-0113 例外口径的说明）。装配期只守主密钥（部署配置，缺了没有任何界面能补）；**key 本身是数据**，未配时 `MaterialStatusPoller` 一轮一次记 error 跳过，不 crash-loop——那个窗口的生产者是管理端，不是这里。job 之内的上游调用与素材状态定时跟进**同取这一把 key**：18 个 job 处理器与 `MaterialStatusPoller` 都注入 `NewApiUpstreamConfig.UpstreamCredential` 并调 `requireKey()` 现查库（未配即 `provider_credential_missing`，不臆造兜底 token）。创建侧**不再**把 sk- 冻结进 `job.input.provider_credential`（存量行里的明文由迁移清洗），读路径（API 投影与重新生成派生）继续剥离这个遗留键——上游凭证只有这一个来源（ADR-0114）。
+- **缺配置即启动失败**：`ROCKETMQ_ENDPOINTS`（MQ）+ `DATABASE_URL`（DB）+ `NEW_API_BASE_URL` / `SYSTEM_SETTINGS_SECRET`（上游网关地址与读凭证的主密钥）+ `VOLC_*`（TOS）**四套配置**必须齐备，缺任一项在 bean 装配期抛错终止启动——不再退化为「不连 MQ、不连 DB，只起 `/ready`」。上游网关地址与凭证两项都由 `NewApiUpstreamConfig` 在装配期守卫（**地址的唯一读取点**）：`NEW_API_BASE_URL` 由 18 个客户端（17 个 `@Component` 构造器注入 + `RocketMqConfig` 手工 `@Bean` 的视频客户端）从同一个 `UpstreamBaseUrl` bean 取，缺/空白即抛 `IllegalStateException`（「NEW_API_BASE_URL 未配置」；非空是载体自身的不变式）——收敛前它被 18 处各读各的（ADR-0114 决策 7，TS 侧同一收敛在 `new-api-egress.ts`）；上游调用凭证（项目级统一 key，ADR-0114）**已不在 env 里**——它是 `bw_platform_settings` 表 `upstream` 模块的一行，管理端「系统设置 → 上游凭证」维护，worker 直连该表读取并用 `SYSTEM_SETTINGS_SECRET` 解开信封（见 `SystemSettingMapper` 对 ADR-0113 例外口径的说明）。装配期只守主密钥（部署配置，缺了没有任何界面能补）；**key 本身是数据**，未配时 `MaterialStatusPoller` 一轮一次记 error 跳过，不 crash-loop——那个窗口的生产者是管理端，不是这里。job 之内的上游调用与素材状态定时跟进**同取这一把 key**：18 个 job 处理器与 `MaterialStatusPoller` 都注入 `NewApiUpstreamConfig.UpstreamCredential` 并调 `requireKey()` 现查库（未配即 `provider_credential_missing`，不臆造兜底 token）。创建侧**不再**把 sk- 冻结进 `job.input.provider_credential`（存量行里的明文由迁移清洗），读路径（API 投影与重新生成派生）继续剥离这个遗留键——上游凭证只有这一个来源（ADR-0114）。
 - consumer group 全为**字面量**、无 `-java` 后缀：`generation-video-worker` / `generation-image-worker` / `generation-audio-worker` / `generation-extract-worker` / `generation-image-enhance-worker` / `generation-image-erase-worker`。
 - **topic / tag 不再是配置项，两侧都没有 env 覆盖**：`ROCKETMQ_TOPIC` 与 `ROCKETMQ_TAG` 已删除，六条路由由 `GenerationMqRoute` 枚举单处定义（tag 分别为 `video` / `image` / `audio` / `media_extract` / `image_enhance` / `image_erase`，恒等于 `generation_jobs.type`）。生产侧（`backend/libs/shared/generation/generation-queue.ts`）同样是编译期常量——topic 读 `queue.constants.ts` 的 `GENERATION_TASK_QUEUE`，tag 由各入队函数直接传各自常量，`loadRocketMqConfig` 只绑连接参数。这两个键在**两侧都无绑定目标**，部署环境里的残留值在两侧都被静默忽略：不存在任何运行时途径把消息投到旧名。
 - `GET /ready` 只返回 `{"status":"ready"}`。
@@ -55,6 +55,7 @@ curl localhost:4002/ready
 | `ROCKETMQ_ACCESS_KEY` | 否 | RocketMQ 认证 | — |
 | `ROCKETMQ_SECRET_KEY` | 否 | RocketMQ 认证 | — |
 | `ROCKETMQ_SSL_ENABLED` | 否 | 启用 SSL | `false` |
+| `MQ_ENV_SUFFIX` | 否 | 给全部 topic 与消费组追加 `-<后缀>`，用于同一 broker 上并行多套环境（如 dev 与测试站）。只允许字母、数字、下划线和连字符；留空时名称逐字不变。**backend、worker、billing 三处必须设同一个值**，且后缀只作用于基线名，不要把已带后缀的 topic 再通过 `worker.billing.topic-terminal` 覆盖一次 | 空 |
 | `VOLC_ACCESS_KEY_ID` | 是 | TOS 认证 | — |
 | `VOLC_SECRET_ACCESS_KEY` | 是 | TOS 认证 | — |
 | `VOLC_TOS_ENDPOINT` | 是 | TOS 端点 | — |
@@ -67,7 +68,7 @@ curl localhost:4002/ready
 | `MEDIA_EXTRACT_CONCURRENCY` | 否 | 提取并发度（1-16） | `2` |
 | `GENERATION_WORKER_PORT` | 否 | HTTP 端口 | `4002` |
 | `NEW_API_BASE_URL` | 是 | new-api 网关地址 | — |
-| `SYSTEM_SETTINGS_SECRET` | 是 | 解 `system_settings` 密文信封的主密钥（32 字节：64 位十六进制或 base64）。必须与库分开存放；缺它读不出上游凭证，装配期即失败 | — |
+| `SYSTEM_SETTINGS_SECRET` | 是 | 解 `bw_platform_settings` 密文信封的主密钥（32 字节：64 位十六进制或 base64）。必须与库分开存放；缺它读不出上游凭证，装配期即失败 | — |
 | `NEW_API_AUDIO_TIMEOUT_MS` | 否 | 音频 TTS 超时（毫秒） | `30000` |
 | `AUDIO_CONCURRENCY` | 否 | 音频并发度（1-64） | `5` |
 | `IMAGE_CONCURRENCY` | 否 | 图片并发度（1-64） | `20` |
@@ -81,7 +82,7 @@ curl localhost:4002/ready
 
 - **无条件启动全部 6 个 tag 的消费者**（修正六：无按 tag 开关；`WORKER_ENABLED_TAGS` 已删除）。
 - 必须配齐 `DATABASE_URL` + `ROCKETMQ_ENDPOINTS` + `NEW_API_BASE_URL` + `SYSTEM_SETTINGS_SECRET` + `VOLC_*` 5 个 TOS env（共四套配置），缺一在 bean 装配期抛错终止启动（不再有「空 tags → 不连 MQ、不连 DB，只起 `/ready`」形态）。
-- 上游统一 key **不在 env 里**：管理端「系统设置 → 上游凭证」配一次，全项目共用（backend 与 worker 都读 `system_settings` 的 `upstream` 行）。改动在一轮素材跟进（默认 5s）内生效。
+- 上游统一 key **不在 env 里**：管理端「系统设置 → 上游凭证」配一次，全项目共用（backend 与 worker 都读 `bw_platform_settings` 的 `upstream` 行）。改动在一轮素材跟进（默认 5s）内生效。
 - ffmpeg 运行时依赖：`FFMPEG_PATH` 指向的二进制必须存在（Dockerfile 已 apt install）。
 - **容器时区**：镜像带 `ENV TZ=Asia/Shanghai`（ADR-0111 修正一）。Java 侧不再持有任何时区字面量，写库时刻取 JVM 默认时区；覆盖 `TZ` 或漏掉 `DATABASE_URL` 的时区参数都会让两边的钟错开——装配期守卫会拦，不要绕过它。
 
@@ -119,7 +120,7 @@ worker/
 - [x] 工程骨架 / 配置绑定 / `/ready` / 消息契约测试（IKEL4L）
 - [x] **Job 状态机 extract 子集**（IKENZZZ）：
   - [x] `DataSourceConfig`：DATABASE_URL 解析（mysql:// → jdbc:mysql://，含特殊字符）+ HikariCP 保守池（max 20）
-  - [x] persistence 包：`GenerationJob` / `Asset` / `GenerationJobLog` / `ProjectEvent` + 对应 Mapper
+  - [x] persistence 包：`GenerationJob` / `Asset` / `GenerationJobLog` + 对应 Mapper
     - SQL 逐字移植自 TS Prisma 调用，注释标注 TS 源码行号
     - CAS updates 返回 int，service 层映射 0→false
   - [x] service `JobStateMachineService`（@Service，单例权威）：
@@ -144,7 +145,7 @@ worker/
   - [x] entity `GenerationOutputSlotEntity` + mapper：槽位聚合（settle-ops.ts:79-121）
   - [x] ~~credential `GenerationCredentialService`：AES-256-GCM 解封（generation-credential.ts:52-70）~~
     已删除（上游凭证单一化）：processor 改注入 `NewApiUpstreamConfig.UpstreamCredential`，项目级统一 key 现查
-    `system_settings`（ADR-0114），冻结在 `job.input.provider_credential` 的 per-job 凭证链整体退役
+    `bw_platform_settings`（ADR-0114），冻结在 `job.input.provider_credential` 的 per-job 凭证链整体退役
   - [x] audio `NewApiAudioClient`：OkHttp TTS 客户端（new-api-audio-provider.ts:55-190）
     - POST /v1/audio/speech + Bearer + X-Trace-Id + X-Client-System: bluewhale（ADR-0080）
     - 错误分类优先级：content > quota > provider_failed（§5 Chinese regexes）
@@ -191,12 +192,7 @@ worker/
   - [x] service `JobStateMachineService` 扩展：
     - `claimImageJobById` → Optional<ClaimedJobDto>（**套 source 白名单**：bottom_dock/plan_apply/storyboard_preview）
     - `requeueImageJobForRetry` → boolean（WHERE status='processing'，无 fence；.catch→false）
-    - `syncRecordSummary`：completeJob/failJob 事务内回写 scene_card_generation_records.summary_status
-      （internals.ts:21-62 逐字移植；resolveLogicalSlots + aggregateSlotStatus 纯函数）
-    - `syncStoryboardPreviewSummary`：completeJob/failJob 事务内回写 storyboard_previews.summary_status
-      （internals.ts:67-113 逐字移植；按 first_generation_job_id 反查）
-  - [x] entity `SceneCardGenerationRecordEntity` + mapper（syncRecordSummary 用）
-  - [x] entity `StoryboardPreviewEntity` + mapper（syncStoryboardPreviewSummary 用）
+    - 场景卡与分镜预览的摘要回写已随 IKRDNK 退役删除
   - [x] consumer `ImageConsumer`：tag=image, digitGuard=true, group=generation-image-worker+suffix
   - [x] config `ImageEnabledCondition`：@Conditional 按 tag 启停
   - [x] config `RocketMqConfig` 扩展：image consumer bean（Semaphore IMAGE_CONCURRENCY default 20，1-64）

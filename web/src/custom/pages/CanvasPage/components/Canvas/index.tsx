@@ -107,6 +107,7 @@ interface FlowCanvasProps {
   onConnectGroupDrop?: (memberIds: string[], targetId: string | null, client: { x: number; y: number }) => void;
   onConnectSourceToGroup?: (sourceId: string, memberIds: string[]) => void;
   onPaneContextMenu?: (pt: { clientX: number; clientY: number }) => void;
+  onDropFiles?: (files: File[], flowPoint: { x: number; y: number }) => void;
   refPickActive?: boolean;
   outpaintFrame?: {
     rect: SourceRect;
@@ -123,7 +124,9 @@ interface FlowCanvasProps {
   onUpdateGenerate?: (nodeId: string) => void;
 }
 
-function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNodes, productNodes, assetNodes, showEdges, edges, onEdgesChange, onConnect, onConnectStart, onConnectEnd, isValidConnection, viewport, onViewportChange, onViewportLive, onNodeDragStop, onDeleteNode, onNodeClick, onPaneClick, onSelectionChange, registerSpawnPosition, hideZoomControl, productPickResult, assetPickResult, selectRequest, selectManyRequest, onDuplicateSelected, onCopySelected, onPasteClipboard, groups, onCreateGroup, onNodesMeasured, onUngroupGroup, onDeleteGroup, onDownloadGroup, onGroupFrameDragStop, onBringGroupToFront, onConnectGroupToTarget, onConnectGroupDrop, onConnectSourceToGroup, onPaneContextMenu, refPickActive, outpaintFrame, refPickMarkedIds, refPickBlockedIds, snapAlignmentEnabled, cropFrame, followToolbarLayer, onAnchoredOverlayDragHideChange, onUpdateGenerate }: FlowCanvasProps) {
+function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNodes, productNodes, assetNodes, showEdges, edges, onEdgesChange, onConnect, onConnectStart, onConnectEnd, isValidConnection, viewport, onViewportChange, onViewportLive, onNodeDragStop, onDeleteNode, onNodeClick, onPaneClick, onSelectionChange, registerSpawnPosition, hideZoomControl, productPickResult, assetPickResult, selectRequest, selectManyRequest, onDuplicateSelected, onCopySelected, onPasteClipboard, groups, onCreateGroup, onNodesMeasured, onUngroupGroup, onDeleteGroup, onDownloadGroup, onGroupFrameDragStop, onBringGroupToFront, onConnectGroupToTarget, onConnectGroupDrop, onConnectSourceToGroup, onPaneContextMenu, onDropFiles, refPickActive, outpaintFrame, refPickMarkedIds, refPickBlockedIds, snapAlignmentEnabled, cropFrame, followToolbarLayer, onAnchoredOverlayDragHideChange, onUpdateGenerate }: FlowCanvasProps) {
+  const onDropFilesRef = useRef(onDropFiles);
+  onDropFilesRef.current = onDropFiles;
   const { isPanning: isDrag, onMouseDownCapture, onClickCapture } = useCanvasPan(toolMode);
   const nodesRef = useRef<Node[]>([]);
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
@@ -154,7 +157,11 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
       const onChrome = trackChromePointer(clientX, clientY)
         || (target instanceof Element && Boolean(target.closest('[data-canvas-chrome], .react-flow__minimap')));
       if (onChrome) {
-        lockChromeSelection(nodesRef.current.filter((node) => node.selected).map((node) => node.id));
+        const fromTerritory = target instanceof Element && Boolean(target.closest('[data-gen-panel-territory]'));
+        lockChromeSelection(
+          nodesRef.current.filter((node) => node.selected).map((node) => node.id),
+          fromTerritory ? 'territory' : 'chrome',
+        );
         document.documentElement.classList.add('canvas-chrome-lock');
         [0, 16, 32, 80, 160, 320, 500].forEach((ms) => window.setTimeout(revertLockedSelection, ms));
       }
@@ -784,6 +791,15 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
       onMouseDownCapture={onMouseDownCapture}
       onClickCapture={onClickCapture}
       onDoubleClickCapture={onClickCapture}
+      onDragOver={(e) => {
+        if (e.dataTransfer.files?.length) e.preventDefault();
+      }}
+      onDrop={(e) => {
+        if (!e.dataTransfer.files?.length) return;
+        if (e.target instanceof Element && e.target.closest('.react-flow__node')) return;
+        e.preventDefault();
+        onDropFilesRef.current?.(Array.from(e.dataTransfer.files), screenToFlowPosition({ x: e.clientX, y: e.clientY }));
+      }}
     >
       <ReactFlow
         nodes={nodesForFlow}
@@ -919,7 +935,7 @@ function FlowCanvasInner({ showMiniMap, toolMode, extraNodes, textNodes, mediaNo
   );
 }
 
-export default function FlowCanvas({ showMiniMap, toolMode, extraNodes, textNodes, mediaNodes, productNodes, assetNodes, showEdges, edges, onEdgesChange, onConnect, onConnectStart, onConnectEnd, isValidConnection, viewport, onViewportChange, onViewportLive, onNodeDragStop, onDeleteNode, onNodeClick, onPaneClick, onSelectionChange, registerSpawnPosition, hideZoomControl, productPickResult, assetPickResult, selectRequest, selectManyRequest, onDuplicateSelected, onCopySelected, onPasteClipboard, groups, onCreateGroup, onNodesMeasured, onUngroupGroup, onDeleteGroup, onDownloadGroup, onGroupFrameDragStop, onBringGroupToFront, onConnectGroupToTarget, onConnectGroupDrop, onConnectSourceToGroup, onPaneContextMenu, refPickActive, outpaintFrame, refPickMarkedIds, refPickBlockedIds, snapAlignmentEnabled, cropFrame, followToolbarLayer, onAnchoredOverlayDragHideChange, onUpdateGenerate }: FlowCanvasProps) {
+export default function FlowCanvas({ showMiniMap, toolMode, extraNodes, textNodes, mediaNodes, productNodes, assetNodes, showEdges, edges, onEdgesChange, onConnect, onConnectStart, onConnectEnd, isValidConnection, viewport, onViewportChange, onViewportLive, onNodeDragStop, onDeleteNode, onNodeClick, onPaneClick, onSelectionChange, registerSpawnPosition, hideZoomControl, productPickResult, assetPickResult, selectRequest, selectManyRequest, onDuplicateSelected, onCopySelected, onPasteClipboard, groups, onCreateGroup, onNodesMeasured, onUngroupGroup, onDeleteGroup, onDownloadGroup, onGroupFrameDragStop, onBringGroupToFront, onConnectGroupToTarget, onConnectGroupDrop, onConnectSourceToGroup, onPaneContextMenu, onDropFiles, refPickActive, outpaintFrame, refPickMarkedIds, refPickBlockedIds, snapAlignmentEnabled, cropFrame, followToolbarLayer, onAnchoredOverlayDragHideChange, onUpdateGenerate }: FlowCanvasProps) {
   return (
     <ReactFlowProvider>
       <FlowCanvasInner
@@ -966,6 +982,7 @@ export default function FlowCanvas({ showMiniMap, toolMode, extraNodes, textNode
         onConnectGroupDrop={onConnectGroupDrop}
         onConnectSourceToGroup={onConnectSourceToGroup}
         onPaneContextMenu={onPaneContextMenu}
+        onDropFiles={onDropFiles}
         refPickActive={refPickActive}
         outpaintFrame={outpaintFrame}
         refPickMarkedIds={refPickMarkedIds}

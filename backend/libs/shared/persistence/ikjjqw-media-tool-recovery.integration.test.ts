@@ -1,3 +1,4 @@
+import { clearEffectiveRecoveryOwners, findEffectiveRecoveryOwner } from "./recovery-owner-test-helpers.js";
 
 
 
@@ -136,14 +137,13 @@ async function submit(
   revision = 0,
 ) {
   const service = tool.make(prisma) as {
-    create: (userId: string, projectId: string, body: Record<string, unknown>, internal?: unknown, key?: string) => Promise<{ code: number; msg?: string; data?: unknown }>;
+    create: (userId: string, projectId: string, body: Record<string, unknown>, key?: string) => Promise<{ code: number; msg?: string; data?: unknown }>;
   };
   const body = tool.body(sid);
   return service.create(
     USER_ID,
     PROJECT_ID,
     { ...body, canvas_binding: bindingOf(sid, node, revision) },
-    {},
     tool.name === "抠像" ? undefined : sid,
   );
 }
@@ -167,11 +167,13 @@ describe.skipIf(!databaseUrl)("单结果媒体工具恢复协议真库验证（I
   });
 
   beforeEach(async () => {
-    await prisma.generation_canvas_node_owners.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
+    await clearEffectiveRecoveryOwners(prisma, BigInt(PROJECT_ID));
     await prisma.generation_canvas_outputs.deleteMany({});
     await prisma.generation_canvas_submissions.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
-    await prisma.command_idempotency.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
-    await prisma.canvas.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
+    await prisma.project_command_receipts.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
+    await prisma.project_canvas.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
+    await prisma.project_edges.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
+    await prisma.project_nodes.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
     await prisma.generation_output_slots.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
     await prisma.generation_job_logs.deleteMany({});
     await prisma.generation_jobs.deleteMany({ where: { project_id: BigInt(PROJECT_ID) } });
@@ -262,9 +264,7 @@ describe.skipIf(!databaseUrl)("单结果媒体工具恢复协议真库验证（I
 
         const page = await listCanvasRecoveryPage(prisma, PROJECT_ID, 50, null);
         expect(page.records.map((r) => r.submission_id)).toContain(retrySid);
-        const owner = await prisma.generation_canvas_node_owners.findUnique({
-          where: { project_id_node_id: { project_id: BigInt(PROJECT_ID), node_id: "node-3" } },
-        });
+        const owner = await findEffectiveRecoveryOwner(prisma, BigInt(PROJECT_ID), "node-3");
         expect(owner?.binding_revision).toBe(2);
 
 

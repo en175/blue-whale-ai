@@ -186,7 +186,7 @@ describe.skipIf(process.env.IKI68X_BROWSER !== "1")(
       const projectId = (await projects.create("9", "IKI68X browser")).id;
       const foreignProjectId = (await projects.create("9", "IKI68X other project")).id;
       const createAsset = async (name: string, assetProjectId = projectId, status = "normal") => {
-        const row = await prisma.client.assets.create({ data: {
+        const row = await prisma.client.user_assets.create({ data: {
           user_id: 9n, project_id: BigInt(assetProjectId), type: "audio", source: "uploaded", status,
           storage_key: `uploads/9/${name}.wav`, url: `${mediaBase}/${name}.wav`,
           duration_ms: 10_000, size: BigInt(wav.length),
@@ -269,7 +269,7 @@ describe.skipIf(process.env.IKI68X_BROWSER !== "1")(
           name: "本地音频.wav", mimeType: "audio/wav", buffer: wav,
         });
         await page.locator('[data-testid="audio-mix-add"]').getByText("音频 4/100").waitFor();
-        const uploaded = await prisma.client.assets.findFirst({ where: {
+        const uploaded = await prisma.client.user_assets.findFirst({ where: {
           user_id: 9n, project_id: BigInt(projectId), type: "audio", status: "normal",
           storage_key: { startsWith: "uploads/9/audio/browser-" },
         } });

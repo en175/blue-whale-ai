@@ -38,6 +38,7 @@ import { useCanvasSessionBootstrap } from './hooks/document/useCanvasSessionBoot
 import { showToast } from '@/custom/components/Toast';
 import { useCanvasViewportSurface } from './hooks/chrome/useCanvasViewportSurface';
 import { useCanvasGenerationModels } from './hooks/generation/useCanvasGenerationModels';
+import { useCanvasFailActions } from './hooks/generation/useCanvasFailActions';
 import { useCanvasProjectRoute } from './hooks/document/useCanvasProjectRoute';
 import { useCanvasWorkbenchChrome } from './hooks/chrome/useCanvasWorkbenchChrome';
 import { useCanvasToolWorkspace } from './hooks/tools/useCanvasToolWorkspace';
@@ -129,13 +130,10 @@ export default function CanvasPage() {
     anchoredOverlayHiddenIds, setAnchoredOverlayHiddenIds, isAnchoredOverlayDragHidden,
     soloSelectedNodeId, setSoloSelectedNodeId,
     showCharacterLibrary, setShowCharacterLibrary, characterLibraryTarget, setCharacterLibraryTarget,
-    showAssetsModal, setShowAssetsModal, assetsModalDefaultTab, setAssetsModalDefaultTab,
-    assetsModalDefaultFilter, setAssetsModalDefaultFilter,
     showEdges, setShowEdges, snapAlignmentOn, setSnapAlignmentOn, persistSnap: persistSnapAlignmentEnabled,
     pendingDeleteGroup, setPendingDeleteGroup,
     submittingNodeId, setSubmittingNodeId,
     editingTargetRef, selectRequest, setSelectRequest, selectManyRequest, setSelectManyRequest,
-    showLegacyHistory, setShowLegacyHistory,
   } = useCanvasWorkbenchChrome();
   const {
     hoveredAssetNodeId,
@@ -282,7 +280,7 @@ export default function CanvasPage() {
     toolDepsRef,
     mediaNodesRef,
   });
-  const { spawnPosRef, registerSpawnPosition, spawnPosition, spawnNearScreen, spawnDraftPosition } = useCanvasSpawn({
+  const { spawnPosRef, registerSpawnPosition, spawnPosition, spawnNearScreen, spawnDraftPosition, spawnBatch } = useCanvasSpawn({
     graph,
   });
   const {
@@ -345,6 +343,8 @@ export default function CanvasPage() {
     projects,
     setProjects,
     setCurrentId,
+    navigate,
+    location,
   });
   useCanvasProjectRoute({
     currentId,
@@ -371,10 +371,9 @@ export default function CanvasPage() {
     canvasLoadFailed,
     refetch,
     acceptDoc,
-    legacyHistory,
     patchAsset,
     upsertAssets,
-  } = useCanvasPageDocument(currentId, showToast);
+  } = useCanvasPageDocument(currentId);
   const {
     hydratedDocRef,
     hydratedProjectRef,
@@ -405,7 +404,6 @@ export default function CanvasPage() {
     findCanvasNode,
     removeCanvasNodes: (ids) => removeCanvasNodes(ids),
     handleDraftError,
-    handleSaveTextToAssets: (id) => handleSaveTextToAssets(id),
     handleMediaIndexChange,
     syncTextIndexEdges,
     showToast,
@@ -578,8 +576,6 @@ export default function CanvasPage() {
     handleMediaIndexChange: (id, mediaMentions, mediaRefs, delta) => handleMediaIndexChange(id, mediaMentions, mediaRefs, delta),
     handleDraftError: (id, error) => handleDraftError(id, error),
     removeCanvasNodes: (ids) => removeCanvasNodes(ids),
-    handleSaveMediaToAssets: (id) => { void handleSaveMediaToAssets(id); },
-    handleSaveTextToAssets: (id) => { void handleSaveTextToAssets(id); },
     generationDock,
     showToast,
     setTextNodes,
@@ -588,11 +584,12 @@ export default function CanvasPage() {
     setAssetNodes,
     setSelectRequest,
   });
-  const { applyConnectType, handleConnectEnd, handleConnectGroupDrop, isValidCanvasConnection } = useCanvasConnectHandlers({
+  const { applyConnectType, handleConnectEnd, handleConnectGroupDrop, isValidCanvasConnection, openSideAddMenu } = useCanvasConnectHandlers({
     connectMenu,
     connectingSourceRef,
     edgesRef,
     findCanvasNode,
+    allNodes: () => graph.allNodes(),
     isConnectableSource,
     availableGenKinds,
     setConnectMenu,
@@ -603,6 +600,7 @@ export default function CanvasPage() {
     imageRefSourceError: (node) => imageRefSourceError(node),
     audioRefSourceError: (node) => audioRefSourceError(node),
     spawnNearScreen,
+    addTextNodeAt: (position) => handleAddTextNode(position),
     withHistoryBatch,
     creators: { createVideoDraftCard, createImageDraftCard, createAudioDraftCard, createTextGenDraft },
     openVideoDraftDialog,
@@ -648,15 +646,9 @@ export default function CanvasPage() {
     handleNodeShowDetails,
     handleNodeDownload,
     handleDownloadGroupNodes,
-    handleSaveMediaToAssets,
-    handleSaveTextToAssets,
-    handleSaveCardToAssets,
-    handleSaveGoodsToAssets,
   } = useCanvasAssetActions({
     mediaNodesRef,
     textNodesRef,
-    productNodesRef,
-    assetNodesRef,
     showToast,
   });
   const canvasHistory = useCanvasHistory({
@@ -775,10 +767,6 @@ export default function CanvasPage() {
     handleMediaIndexChange,
     handleMediaDims,
     handleAssetHoverChange,
-    handleSaveMediaToAssets: (id) => handleSaveMediaToAssets(id),
-    handleSaveTextToAssets: (id) => handleSaveTextToAssets(id),
-    handleSaveCardToAssets: (id) => handleSaveCardToAssets(id),
-    handleSaveGoodsToAssets: (id) => handleSaveGoodsToAssets(id),
     handleProductChange: (id, patch) => handleProductChange(id, patch),
     handleCardChange: (id, patch) => handleCardChange(id, patch),
     generationDock,
@@ -786,6 +774,7 @@ export default function CanvasPage() {
     locateTextSource: (nodeId) => locateTextSource(nodeId),
     showToast,
     pickers: { setPickMode, setPickTarget, setPickProductId, setPickAssetId },
+    openSideAddMenu: (sourceId, direction, client) => openSideAddMenu(sourceId, direction, client),
   });
 
   const { handleAssetsPickerSelect } = useCanvasAssetsPlacement({
@@ -798,9 +787,9 @@ export default function CanvasPage() {
     actionsRef,
     setMediaNodes,
     spawnPosition,
+    spawnBatch,
     dockToolCallbacks,
     handleMediaDims,
-    handleSaveMediaToAssets,
     addCanvasEdge,
     validateVideoRefConnect,
     videoCapsOfDraft,
@@ -824,7 +813,7 @@ export default function CanvasPage() {
   });
   const {
     placeFileOnCanvas,
-    handleUploadFile,
+    handleUploadFiles,
     handleCopyImage,
     handleFillEmptyShell,
     applyClipboardAtFlow,
@@ -832,8 +821,8 @@ export default function CanvasPage() {
     currentId,
     toolMode,
     spawnPosition,
+    spawnBatch,
     handleMediaDims,
-    handleSaveMediaToAssets,
     dockToolCallbacks,
     actionsRef,
     setMediaNodes,
@@ -844,7 +833,7 @@ export default function CanvasPage() {
     handleAddTextNode,
     showToast,
   });
-  useCanvasHomeAgentInject({
+  const { agentHandoffSettled } = useCanvasHomeAgentInject({
     doc,
     placeFileOnCanvas,
     setAgentAssetPicks,
@@ -999,7 +988,6 @@ export default function CanvasPage() {
     spawnPosition,
     textAttachmentsForSend: (targetNodeId) => textAttachmentsForSend(targetNodeId),
     handleMediaDims,
-    handleSaveMediaToAssets: (nodeId) => handleSaveMediaToAssets(nodeId),
     dockCallbacks: dockToolCallbacks,
   });
   const {
@@ -1007,7 +995,6 @@ export default function CanvasPage() {
     handleCreateAssetCard,
     handleProductChange,
     handleCardChange,
-    handleAddSharedAsset,
   } = useCanvasNodeFactories({
     newNodeId,
     spawnPosition,
@@ -1016,19 +1003,9 @@ export default function CanvasPage() {
     productSeq,
     pendingNodeIdsRef,
     actionsRef,
-    setTextNodes,
-    setMediaNodes,
     setProductNodes,
     setAssetNodes,
-    removeCanvasNodes,
-    handleMediaIndexChange,
-    handleMediaDims,
     handleAssetHoverChange,
-    handleSaveMediaToAssets,
-    handleSaveTextToAssets,
-    handleSaveCardToAssets,
-    handleSaveGoodsToAssets,
-    dockToolCallbacks,
     showToast,
     pickers: { setPickMode, setPickTarget, setPickProductId, setPickAssetId },
   });
@@ -1218,7 +1195,6 @@ export default function CanvasPage() {
     setEdges,
     patchMediaNode,
     attachCallbacks,
-    handleSaveMediaToAssets,
     handleMediaDims,
     addCanvasEdge,
     applyJobTerminal,
@@ -1248,9 +1224,6 @@ export default function CanvasPage() {
     showToast,
   });
   const { handleToolMenuSelect, handleCharacterLibrarySelect } = useCanvasChromeActions({
-    setAssetsModalDefaultTab,
-    setAssetsModalDefaultFilter,
-    setShowAssetsModal,
     handleCreateAssetCard,
     handleCreateProduct,
     characterLibraryTarget,
@@ -1443,6 +1416,15 @@ export default function CanvasPage() {
     showToast,
   });
 
+  const { requoteByNode, handleEditFailed, handleRechargeFailed, handleRequoteFailed, handleRequoteConfirm } =
+    useCanvasFailActions({
+      mediaNodesRef,
+      edgesRef,
+      textNodesRef,
+      draftModelOf,
+      openMediaDraftDialog,
+      updateGenerate: onUpdateGenerate,
+    });
   bindActions({
     duplicate: handleDuplicateNode,
     addToChat: handleAddToChatNode,
@@ -1460,6 +1442,10 @@ export default function CanvasPage() {
     fillEmptyShell: handleFillEmptyShell,
     cancelJob: handleCancelJob,
     retryJob: handleRetryJob,
+    editFailed: handleEditFailed,
+    rechargeFailed: handleRechargeFailed,
+    requoteFailed: handleRequoteFailed,
+    requoteConfirm: handleRequoteConfirm,
     removeMediaNode: handleRemoveMediaNode,
     download: handleNodeDownload,
     showDetails: handleNodeShowDetails,
@@ -1480,7 +1466,7 @@ export default function CanvasPage() {
         textNodes, mediaNodes, productNodes, assetNodes,
         showEdges, setShowEdges, snapAlignmentOn, setSnapAlignmentOn, edges,
         guardEdgesChange, onConnect: handleConnect, connectingSourceRef, handleConnectEnd,
-        isValidCanvasConnection, focusViewport, docViewport: doc?.viewport,
+        isValidCanvasConnection, focusViewport, setFocusViewport, docViewport: doc?.viewport,
         setViewport, setLiveViewport, registerSpawnPosition, handleNodeDragStop,
         handleCanvasNodeClick, handleCanvasPaneClick, handleSelectionChangeStable,
         refPickActive: imagePickSessionActive || videoPickSessionActive || audioPickSessionActive || toolSessions.blocksCanvasDrag(),
@@ -1494,7 +1480,8 @@ export default function CanvasPage() {
         connectMenu, closeConnectMenu, applyConnectType, paneMenu, setPaneMenu, canvasHistory,
         findCanvasNode, showToast,
         spawnNearScreen, paneUploadRef, paneUploadPosRef, placeFileOnCanvas,
-        handleToolMenuSelect, handleUploadFile, placeNodeFile: (file) => placeFileOnCanvas(file),
+        handleToolMenuSelect, handleUploadFiles, placeNodeFile: (file) => placeFileOnCanvas(file),
+        allNodes: () => graph.allNodes(),
       }}
       nodeActions={{
         handleAddTextNode, canOpenEditor, openImageDraftDialog, createImageDraftCard,
@@ -1522,10 +1509,11 @@ export default function CanvasPage() {
       agent={{
         showAgent, setShowAgent, agentOpened, agentContext, agentCandidate,
         confirmAgentCandidate, cancelAgentCandidate, appliedCardIds, handleAgentCardApply, agentAssetPicks,
+        agentHandoffSettled,
       }}
       mediaUpdates={{
         submittingNodeId, audioVideoMuxInFlightSourceIds, finalizeCtaByNodeId,
-        regenerateCtaByNodeId, handleFinalizeSample, handleRegenerateSample,
+        regenerateCtaByNodeId, handleFinalizeSample, handleRegenerateSample, requoteByNode,
       }}
       toolbars={{
         soloMediaToolbarNode, showSoloMediaToolbar, enhancePanelToolbarNode,
@@ -1533,13 +1521,12 @@ export default function CanvasPage() {
       }}
       projectHandlers={{
         projects, handleSelect, handleRename, handleDelete, handleToggleProjectPin,
-        handleNewProject, legacyHistory, showLegacyHistory, setShowLegacyHistory,
+        handleNewProject,
       }}
       overlays={{
         assetDetailTarget, assetDetailLoading, handleCloseAssetDetail,
         pendingDeleteGroup, setPendingDeleteGroup, confirmDeleteGroup,
-        showAssetsModal, setShowAssetsModal, handleAddSharedAsset,
-        assetsModalDefaultTab, assetsModalDefaultFilter, showCharacterLibrary,
+        showCharacterLibrary,
         setShowCharacterLibrary, setCharacterLibraryTarget, handleCharacterLibrarySelect,
       }}
     />

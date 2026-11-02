@@ -44,6 +44,7 @@ function diffFields(
   if (before.sort_order !== after.sort_order) changed.push("排序");
   if ((before.video_url ?? "") !== (after.video_url ?? "")) changed.push("视频");
   if ((before.content ?? "") !== (after.content ?? "")) changed.push("提示词");
+  if (before.is_featured !== after.is_featured) changed.push("精选");
   const beforeImgs = before.images.map((i) => i.image_url).join("|");
   const afterImgs = after.images.map((i) => i.image_url).join("|");
   if (beforeImgs !== afterImgs) changed.push("图片");

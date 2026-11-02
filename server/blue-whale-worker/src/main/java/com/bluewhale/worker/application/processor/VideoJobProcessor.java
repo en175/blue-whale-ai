@@ -32,7 +32,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 @Component
@@ -96,10 +95,6 @@ public class VideoJobProcessor implements JobProcessor {
     record MaterialRef(String id, String type) {}
 
     record SingleRef(String role, String type, String assetId, String materialId) {}
-
-    private static final Pattern RESOLUTION_PATTERN = Pattern.compile("^([0-9]+)p$");
-    private static final Pattern RATIO_PATTERN = Pattern.compile("^([1-9][0-9]*):([1-9][0-9]*)$");
-    private static final Pattern SIZE_PATTERN = Pattern.compile("^([0-9]+)x([0-9]+)$", Pattern.CASE_INSENSITIVE);
 
     private final JobStateMachineService stateMachine;
     private final JobFinalizer finalizer;
@@ -404,16 +399,35 @@ public class VideoJobProcessor implements JobProcessor {
             failVideo(claim, GenerationError.ERROR_PROVIDER_FAILED, "视频结果转存不可用，已按失败处理");
             return false;
         } else {
-            log.warn("[video] TOS 未配置，降级直存供应商 URL：assets.md5 将为空（IKGS73 已知边界）");
+            log.warn("[video] TOS 未配置，降级直存供应商 URL：user_assets.md5 将为空（IKGS73 已知边界）");
             stored = new StoredVideo(observation.url(), null, null, null, null);
         }
         log.info("[video] 转存完成 jobId={} storageKey={} size={}", claim.id(), stored.storageKey(), stored.size());
 
+        TosVideoMediaRelay.ProbedMediaInfo mediaInfo = null;
+        if (mediaRelay != null && stored.storageKey() != null) {
+            mediaInfo = mediaRelay.probeMediaInfo(stored.storageKey());
+        } else {
+            log.info("[video] 无 TOS 探测条件，宽高/时长按快照与请求值记录 jobId={}", claim.id());
+        }
+
         int[] dimensions = resolveDimensions(claim.input());
+        if (dimensions == null && mediaInfo != null
+                && mediaInfo.width() != null && mediaInfo.height() != null) {
+            dimensions = new int[]{mediaInfo.width(), mediaInfo.height()};
+            log.info("[video] 快照缺宽高，采用 TOS 探测值 jobId={} size={}x{}",
+                    claim.id(), mediaInfo.width(), mediaInfo.height());
+        }
         Integer width = dimensions != null ? dimensions[0] : null;
         Integer height = dimensions != null ? dimensions[1] : null;
 
         double duration = resolveDuration(claim.input());
+        if (mediaInfo != null && mediaInfo.durationSec() != null) {
+            duration = mediaInfo.durationSec();
+        } else if (!(duration > 0)) {
+            log.warn("[video] 请求时长为自动或无效且探测不到真实时长，资产时长留空 jobId={} requestDuration={}",
+                    claim.id(), duration);
+        }
 
         Long upstreamCreatedAtMs = sample ? observation.upstreamCreatedAtMs() : null;
         Long finalizeDeadlineMs = sample && upstreamCreatedAtMs != null
@@ -832,21 +846,11 @@ public class VideoJobProcessor implements JobProcessor {
 
 
     static int[] resolveDimensions(Map<String, Object> input) {
-        Map<String, Object> params = input.get("parameters") instanceof Map<?, ?> p
-                ? castMap(p) : null;
-
-        Object resolutionObj = input.get("resolution");
-        Object aspectRatioObj = input.get("aspect_ratio");
-        if (resolutionObj instanceof String resolution && aspectRatioObj instanceof String aspectRatio) {
-            int[] dims = videoDimensions(resolution, aspectRatio);
-            if (dims != null) return dims;
-        }
-
-        Object sizeObj = params != null ? params.get("size") : input.get("size");
-        if (sizeObj instanceof String size) {
-            return dimensionsFromSize(size);
-        }
-        return null;
+        if ("adaptive".equals(input.get("aspect_ratio"))) return null;
+        Integer width = positiveIntOrNull(input.get("output_width"));
+        Integer height = positiveIntOrNull(input.get("output_height"));
+        if (width == null || height == null) return null;
+        return new int[]{width, height};
     }
 
     private static final List<String> EDIT_INTENT_KEYWORDS = List.of(
@@ -890,32 +894,6 @@ public class VideoJobProcessor implements JobProcessor {
         if (hasIntentKeyword(p, EDIT_INTENT_KEYWORDS)) return "edit";
         return "default";
     }
-
-    static int[] videoDimensions(String resolution, String aspectRatio) {
-        Matcher resMatcher = RESOLUTION_PATTERN.matcher(resolution);
-        if (!resMatcher.matches()) return null;
-        if ("adaptive".equals(aspectRatio)) return null;
-        Matcher ratioMatcher = RATIO_PATTERN.matcher(aspectRatio);
-        if (!ratioMatcher.matches()) return null;
-
-        int height = Integer.parseInt(resMatcher.group(1));
-        if (height <= 0) return null;
-
-        int rw = Integer.parseInt(ratioMatcher.group(1));
-        int rh = Integer.parseInt(ratioMatcher.group(2));
-        int width = (int) (Math.round((double) height * rw / rh / 2) * 2);
-        return new int[]{width, height};
-    }
-
-    static int[] dimensionsFromSize(String size) {
-        Matcher m = SIZE_PATTERN.matcher(size);
-        if (!m.matches()) return null;
-        int width = Integer.parseInt(m.group(1));
-        int height = Integer.parseInt(m.group(2));
-        if (width <= 0 || height <= 0) return null;
-        return new int[]{width, height};
-    }
-
 
     static double resolveDuration(Map<String, Object> input) {
         Map<String, Object> params = input.get("parameters") instanceof Map<?, ?> p

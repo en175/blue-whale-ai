@@ -25,9 +25,7 @@ function buildDeps(assets: Array<Record<string, unknown>>) {
   return {
     projects: { findOwnedById: vi.fn().mockResolvedValue(PROJECT) },
     canvas: {
-      migrateLegacyCards: vi
-        .fn()
-        .mockResolvedValue({ canvas: CANVAS_VIEW, report: { migrated: [], failed: [] } }),
+      getByProject: vi.fn().mockResolvedValue(CANVAS_VIEW),
     },
     snapshot: {
       loadJobsAndAssets: vi
@@ -35,10 +33,6 @@ function buildDeps(assets: Array<Record<string, unknown>>) {
         .mockResolvedValue({ generation_jobs: [], assets }),
       loadConversationState: vi.fn().mockResolvedValue({
         conversation_messages: [],
-        scene_cards: [],
-        scene_card_generation_records: [],
-        storyboard_previews: [],
-        high_watermark_cursor: "0",
       }),
     },
   } as never;

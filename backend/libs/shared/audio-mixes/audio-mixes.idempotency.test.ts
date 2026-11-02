@@ -15,7 +15,7 @@ describe("audio mix create idempotency", () => {
     const jobs = new Map<bigint, { id: bigint; status: string; version: number; error: null }>();
     const client = {
       project_asset: { findMany: vi.fn().mockResolvedValue([]) },
-      command_idempotency: {
+      project_command_receipts: {
         findUnique: vi.fn(async ({ where }: { where: { project_id_operation_idempotency_key: { idempotency_key: string } } }) =>
           commands.get(where.project_id_operation_idempotency_key.idempotency_key) ?? null),
         create: vi.fn(async ({ data }: { data: { idempotency_key: string; request_hash: string; generation_job_id: bigint } }) => {

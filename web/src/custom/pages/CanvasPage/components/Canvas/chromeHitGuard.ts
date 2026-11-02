@@ -74,8 +74,11 @@ export function isStolenCanvasChromeHit(event: Event): boolean {
   return canvasChromeAtPoint(clientX, clientY) != null;
 }
 
+export type ChromeLockOrigin = 'territory' | 'chrome';
+
 let selectionLockUntil = 0;
 let selectionLockIds: Set<string> | null = null;
+let selectionLockOrigin: ChromeLockOrigin = 'chrome';
 let idleSelectedIds = new Set<string>();
 
 export function rememberIdleSelection(ids: Iterable<string>): void {
@@ -83,14 +86,26 @@ export function rememberIdleSelection(ids: Iterable<string>): void {
   idleSelectedIds = new Set(ids);
 }
 
-export function lockChromeSelection(ids?: Iterable<string>): void {
+export function lockChromeSelection(ids?: Iterable<string>, origin: ChromeLockOrigin = 'chrome'): void {
   selectionLockIds = new Set(ids ?? idleSelectedIds);
   selectionLockUntil = performance.now() + 600;
+  selectionLockOrigin = origin;
 }
 
 export function chromeSelectionLockIds(): Set<string> | null {
   if (!selectionLockIds || performance.now() >= selectionLockUntil) return null;
   return selectionLockIds;
+}
+
+export function chromeSelectionLockOrigin(): ChromeLockOrigin | null {
+  if (!selectionLockIds || performance.now() >= selectionLockUntil) return null;
+  return selectionLockOrigin;
+}
+
+export function hideToolbarForChromeLock(): boolean {
+  const origin = chromeSelectionLockOrigin();
+  if (origin === null) return shouldSuppressCanvasSelection();
+  return origin !== 'territory';
 }
 
 export function releaseChromeSelectionLock(): void {

@@ -4,6 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ReactFlowProvider, useStoreApi } from '@xyflow/react';
 import NodeFollowToolbar from './index';
+import { lockChromeSelection } from '../Canvas/chromeHitGuard';
 import { computeFollowAnchorAbove } from '../../agent/followDialog';
 
 let root: Root;
@@ -261,5 +262,35 @@ describe('IKIXDB NodeFollowToolbar 浮层滚轮直通', () => {
     expect(mountNode.querySelector('[data-gen-panel-territory]')).toBeNull();
     await dispatchWheel(layer, { deltaY: 10 });
     expect(forwarded).toHaveLength(0);
+  });
+});
+
+describe('IKR398 操作栏自身按下不触发自动隐藏', () => {
+  it('在操作栏内按下（锁来源=浮层）后，重渲染仍保留操作栏', async () => {
+    const state = flowState([{ id: 'n1', x: 100, y: 200, width: 400, height: 300, selected: true }]);
+    await renderTree([createElement(StateInjector, { state }), toolbar('n1')]);
+    expect(mountNode.querySelector('[data-gen-panel-territory]')).not.toBeNull();
+
+    await act(async () => { lockChromeSelection(['n1'], 'territory'); });
+    const moved = flowState([{ id: 'n1', x: 120, y: 220, width: 400, height: 300, selected: true }]);
+    await act(async () => {
+      root.render(createElement(ReactFlowProvider, null, [createElement(StateInjector, { state: moved }), toolbar('n1')]));
+    });
+
+    expect(mountNode.querySelector('[data-gen-panel-territory]')).not.toBeNull();
+    expect(mountNode.textContent).toContain(TOOLBAR_TEXT);
+  });
+
+  it('左侧工具条等非浮层来源的锁仍然隐藏操作栏（原有防穿透口径）', async () => {
+    const state = flowState([{ id: 'n1', x: 100, y: 200, width: 400, height: 300, selected: true }]);
+    await renderTree([createElement(StateInjector, { state }), toolbar('n1')]);
+
+    await act(async () => { lockChromeSelection(['n1']); });
+    const moved = flowState([{ id: 'n1', x: 120, y: 220, width: 400, height: 300, selected: true }]);
+    await act(async () => {
+      root.render(createElement(ReactFlowProvider, null, [createElement(StateInjector, { state: moved }), toolbar('n1')]));
+    });
+
+    expect(mountNode.querySelector('[data-gen-panel-territory]')).toBeNull();
   });
 });

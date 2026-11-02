@@ -89,7 +89,7 @@ export class AudioMixesService {
       : null;
     const replay = async () => {
       if (!key) return null;
-      const existing = await this.prisma.client.command_idempotency.findUnique({
+      const existing = await this.prisma.client.project_command_receipts.findUnique({
         where: { project_id_operation_idempotency_key: key },
       });
       if (!existing) return null;
@@ -316,7 +316,7 @@ export class AudioMixesService {
     ).digest("hex");
     const key = { project_id: pid, operation: "audio_mix.retry", idempotency_key: idempotencyKey };
     const replay = async () => {
-      const existing = await this.prisma.client.command_idempotency.findUnique({
+      const existing = await this.prisma.client.project_command_receipts.findUnique({
         where: { project_id_operation_idempotency_key: key },
       });
       if (!existing) return null;
@@ -354,7 +354,7 @@ export class AudioMixesService {
           plan = locked.plan;
         }
         if (!canvasBinding) {
-          const existing = await tx.command_idempotency.findUnique({
+          const existing = await tx.project_command_receipts.findUnique({
             where: { project_id_operation_idempotency_key: key },
           });
           if (existing) {
@@ -387,7 +387,7 @@ export class AudioMixesService {
           },
         });
         await billing?.charge(Number(created.id));
-        await tx.command_idempotency.create({
+        await tx.project_command_receipts.create({
           data: { ...key, request_hash: hash, generation_job_id: created.id, accepted_cursor: 0n },
         });
         if (plan) await writeCanvasRecoveryRows(tx, plan, created.id);

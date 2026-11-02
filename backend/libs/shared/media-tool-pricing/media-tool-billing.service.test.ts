@@ -29,7 +29,7 @@ const PAID_ROW: MediaToolPricingSnapshot & {
 function makeService(row: unknown) {
   const findUnique = vi.fn().mockResolvedValue(row);
   const prisma = {
-    client: { media_tool_pricing: { findUnique } },
+    client: { bw_media_tools: { findUnique } },
   };
   return {
     service: new MediaToolBillingService(prisma as never, {} as never),

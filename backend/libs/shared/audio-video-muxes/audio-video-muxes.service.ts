@@ -91,7 +91,7 @@ export class AudioVideoMuxesService {
       : null;
     const replay = async () => {
       if (!key) return null;
-      const existing = await this.prisma.client.command_idempotency.findUnique({
+      const existing = await this.prisma.client.project_command_receipts.findUnique({
         where: { project_id_operation_idempotency_key: key },
       });
       if (!existing) return null;
@@ -355,7 +355,7 @@ export class AudioVideoMuxesService {
     if (retryResolution === null) {
       const videoAssetId = frozenOwned?.video?.assetId;
       const video = typeof videoAssetId === "string"
-        ? await this.prisma.client.assets.findUnique({
+        ? await this.prisma.client.user_assets.findUnique({
             where: { id: BigInt(videoAssetId) },
             select: { width: true, height: true },
           })
@@ -391,7 +391,7 @@ export class AudioVideoMuxesService {
     ).digest("hex");
     const key = { project_id: pid, operation: "audio_video_mux.retry", idempotency_key: idempotencyKey };
     const replay = async () => {
-      const existing = await this.prisma.client.command_idempotency.findUnique({
+      const existing = await this.prisma.client.project_command_receipts.findUnique({
         where: { project_id_operation_idempotency_key: key },
       });
       if (!existing) return null;
@@ -429,7 +429,7 @@ export class AudioVideoMuxesService {
           plan = locked.plan;
         }
         if (!canvasBinding) {
-          const existing = await tx.command_idempotency.findUnique({
+          const existing = await tx.project_command_receipts.findUnique({
             where: { project_id_operation_idempotency_key: key },
           });
           if (existing) {
@@ -458,7 +458,7 @@ export class AudioVideoMuxesService {
           && typeof videoAssetId === "string" && /^[1-9][0-9]*$/.test(videoAssetId)
           && typeof attempt === "number" && Number.isInteger(attempt) && attempt >= 1;
         if (!frozen || !snapshotUsable) throw new DomainError(409, "冻结快照缺失，无法重试音视频合成");
-        const living = await tx.assets.findMany({
+        const living = await tx.user_assets.findMany({
           where: { id: { in: [BigInt(audioAssetId), BigInt(videoAssetId)] }, is_delete: false },
           select: { id: true },
         });
@@ -479,7 +479,7 @@ export class AudioVideoMuxesService {
           },
         });
         await billing?.charge(Number(created.id));
-        await tx.command_idempotency.create({
+        await tx.project_command_receipts.create({
           data: { ...key, request_hash: hash, generation_job_id: created.id, accepted_cursor: 0n },
         });
         if (plan) await writeCanvasRecoveryRows(tx, plan, created.id);

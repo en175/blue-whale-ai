@@ -1,6 +1,7 @@
 export {
   checkGenerationParamLimit,
   toGenerationParamCheckInput,
+  canonicalSizeValue,
   resolveVideoMode,
   VIDEO_MODES,
   EDIT_MODE_VIDEO_REFERENCE_MAX,
@@ -26,14 +27,6 @@ export {
 export { previewSourceSchema, applyPreviewSchema, promptMentionSchema, validPromptMentions, type PromptPreviewSource, type PromptPreviewContent, type PromptMention, type PromptMaterial } from "./prompt-preview.js";
 export { mediaMentionSchema, mediaRefSchema, validMediaMentions, mediaRefsCoverMentions, mediaAndPromptMentionsDisjoint, deriveMediaMentionLabels, deriveMediaMentionLabelsInOrder, invalidMediaMentionLabel, imageMentionSendToken, replaceImageMentionsWithAssetTokens, MEDIA_TYPE_LABEL, MEDIA_MENTION_LIMITS, TEXT_INDEX_EDGE_MARKER, type MediaMention, type MediaRef, type MediaMentionType } from "./text-node-media.js";
 export { AUDIO_TEXT_INDEX_ACCEPTED_MEDIA_TYPES, IMAGE_TEXT_INDEX_ACCEPTED_MEDIA_TYPES, TEXT_INDEX_INVALID_MESSAGE, TEXT_INDEX_UNSUPPORTED_MEDIA_MESSAGE, VIDEO_TEXT_INDEX_FRAME_CONFLICT_MESSAGE, textIndexOverflowMessage, checkAudioTextIndexSyncInput, checkTextIndexSyncInput, checkVideoTextIndexSyncInput, mergeTextProvidedReferences, textProvidedAudioReferences, textProvidedVideoReferences, textIndexOfTarget, textInputSignatureOf, type AudioTextIndexSyncError, type TargetTextIndex, type TargetTextInputEntry, type TextIndexCanvasNode, type TextIndexSyncError, type TextProvidedAudioReference, type TextProvidedRef, type TextProvidedVideoReference, type VideoReferenceLikeItem, type VideoTextIndexSyncError } from "./text-index-sync.js";
-export {
-  legacyCardHistoryItemSchema,
-  legacyMigrationFailureSchema,
-  legacyMigrationReportSchema,
-  type LegacyCardHistoryItem,
-  type LegacyMigrationFailure,
-  type LegacyMigrationReport,
-} from "./legacy-card-migration.js";
 export {
   conversationQuoteCreateSchema,
   CONVERSATION_QUOTE_LIST_LIMIT,
@@ -142,6 +135,7 @@ export {
   ERROR_JOB_ALREADY_RETRIED,
   ERROR_JOB_NOT_CANCELABLE,
   ERROR_QUOTE_STALE,
+  ERROR_QUOTE_UNAVAILABLE,
   ERROR_FINALIZE_ALREADY_ATTEMPTED,
   ERROR_FINALIZE_DEADLINE_EXCEEDED,
   GENERATION_ERROR_DETAIL_HTTP_STATUS,
@@ -150,6 +144,9 @@ export {
   GENERATION_ERROR_UNKNOWN_NUMERIC_CODE,
   GENERATION_ERROR_NUMERIC_CODES,
   errorCodeToNumeric,
+  errorRecoveryOf,
+  ERROR_CATEGORY_CODES,
+  type ErrorCategory,
   type PublicGenerationError,
   CONTENT_POLICY_SIGNAL,
   isContentPolicySignal,
@@ -181,6 +178,9 @@ export {
   ACCOUNT_ERROR_CAPTCHA_REQUIRED,
   ACCOUNT_ERROR_CAPTCHA_INVALID,
   ACCOUNT_ERROR_CAPTCHA_EXPIRED,
+  ACCOUNT_ERROR_OPERATION_NOT_FOUND,
+  ACCOUNT_ERROR_OPERATION_FORBIDDEN,
+  ACCOUNT_ERROR_SMS_SEND_FAILED,
   ACCOUNT_ERROR_NUMERIC_CODES,
   accountErrorToNumeric,
   accountMessageFor,
@@ -504,9 +504,7 @@ export {
 } from "./agent-runtime.js";
 export {
   assetContextProjectionSchema,
-  sceneCardContextProjectionSchema,
   type AssetContextProjection,
-  type SceneCardContextProjection,
 } from "./context-projection.js";
 export type {
   MentionAvailability,
@@ -524,68 +522,8 @@ export {
 } from "./plan-message.js";
 export {
   videoReferenceModeSchema,
-  sceneCardGenerationRecordStatusSchema,
   type VideoReferenceMode,
-  type SceneCardGenerationRecordStatus,
 } from "./plan-application.js";
-export {
-  sceneCardRegenerationRequestSchema,
-  sceneCardGenerationRecordViewSchema,
-  deriveVideoReferenceMode,
-  referenceModeToRequiredFeature,
-  validateVideoReferenceConfiguration,
-  type SceneCardRegenerationRequest,
-  type SceneCardGenerationRecordView,
-} from "./scene-card-generation.js";
-export {
-  storyboardPreviewParametersSchema,
-  storyboardPreviewCreateRequestSchema,
-  storyboardPreviewSchema,
-  storyboardPreviewViewSchema,
-  storyboardFrameViewSchema,
-  type StoryboardPreviewParameters,
-  type StoryboardPreviewCreateRequest,
-  type StoryboardPreview,
-  type StoryboardPreviewView,
-  type StoryboardFrameView,
-} from "./storyboard-preview.js";
-export {
-  SHARED_ASSET_TYPES,
-  SHARED_ASSET_KINDS,
-  CARD_KINDS,
-  MEDIA_KINDS,
-  sharedAssetTypeSchema,
-  sharedAssetKindSchema,
-  sharedAssetCardSnapshotSchema,
-  sharedAssetGoodsSnapshotSchema,
-  sharedAssetTextSnapshotSchema,
-  sharedAssetMediaSnapshotSchema,
-  sharedAssetSceneSnapshotSchema,
-  sharedAssetSnapshotSchema,
-  saveSharedAssetRequestSchema,
-  sharedAssetViewSchema,
-  saveSharedAssetResultSchema,
-  sharedAssetListQuerySchema,
-  sharedAssetPageViewSchema,
-  addSharedAssetToProjectRequestSchema,
-  addSharedAssetToProjectResultSchema,
-  type SharedAssetType,
-  type SharedAssetKind,
-  type SharedAssetCardSnapshot,
-  type SharedAssetGoodsSnapshot,
-  type SharedAssetTextSnapshot,
-  type SharedAssetMediaSnapshot,
-  type SharedAssetSceneSnapshot,
-  type SharedAssetSnapshot,
-  type SaveSharedAssetRequest,
-  type SharedAssetView,
-  type SaveSharedAssetResult,
-  type SharedAssetListQuery,
-  type SharedAssetPageView,
-  type AddSharedAssetToProjectRequest,
-  type AddSharedAssetToProjectResult,
-} from "./shared-asset.js";
-
 export { releaseRemovedPromptSources, promptBindingList, promptBindingsSchema, promptPlanSnapshotSchema, type PromptBinding, type PromptInputSources, type PromptPlanSnapshot } from "./prompt-target.js";
 export {
   VIDEO_STAGES,
@@ -625,3 +563,11 @@ export {
   isVerificationPurpose,
   type VerificationPurpose,
 } from "./verification-purpose.js";
+export {
+  generationEstimateReferenceSchema,
+  generationEstimateRequestSchema,
+  generationEstimateViewSchema,
+  type GenerationEstimateReference,
+  type GenerationEstimateRequest,
+  type GenerationEstimateView,
+} from "./generation-estimate.js";

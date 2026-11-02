@@ -106,6 +106,33 @@ export function canConnectSourcesToGen(sourceNodes: Node[], targetKind: ConnectG
   return availableGenKinds(sourceNodes).has(targetKind);
 }
 
+const SOURCE_KIND_OF_GEN: Record<ConnectGenKind, ConnectSourceKind> = {
+  image: 'image',
+  video: 'video',
+  audio: 'audio',
+  text: 'text',
+};
+
+export function availableGenKindsAsTarget(target: Node | undefined): Set<ConnectGenKind> {
+  if (!target) return new Set();
+  const data = dataOf(target);
+  if (data.emptyShell === true || data.genStatus === 'generating') return new Set();
+  const targetKind = genKindOf(target);
+  if (!targetKind) {
+    if (target.type === 'textNode' || target.type === 'assetCardNode' || target.type === 'productNode') {
+      return new Set<ConnectGenKind>(['image', 'video', 'text']);
+    }
+    return new Set();
+  }
+  const kinds: ConnectGenKind[] = ['image', 'video', 'audio', 'text'];
+  return new Set(
+    kinds.filter((kind) => {
+      if (ABILITY[SOURCE_KIND_OF_GEN[kind]].has(targetKind as AbilityGenKind)) return true;
+      return kind === 'audio' && targetKind === 'video' && isAudioGenEnabled([SOURCE_KIND_OF_GEN.audio]);
+    }),
+  );
+}
+
 export function wouldCreateCycle(sourceId: string, targetId: string, edges: Edge[]): boolean {
   const outgoing = new Map<string, string[]>();
   for (const edge of edges) {

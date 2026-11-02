@@ -23,16 +23,36 @@ export class ProjectService {
     return this.repo.findOwnerId(id);
   }
 
-  listByOwner(ownerId: string) {
-    return this.repo.listByOwner(ownerId);
+  listByOwner(
+    ownerId: string,
+    options?: Parameters<ReturnType<typeof createProjectRepo>["listByOwner"]>[1],
+  ) {
+    return this.repo.listByOwner(ownerId, options);
   }
 
-  listByOwnerPaged(ownerId: string, page: number, size: number) {
-    return this.repo.listByOwnerPaged(ownerId, page, size);
+  listByOwnerPaged(
+    ownerId: string,
+    page: number,
+    size: number,
+    options?: Parameters<ReturnType<typeof createProjectRepo>["listByOwnerPaged"]>[3],
+  ) {
+    return this.repo.listByOwnerPaged(ownerId, page, size, options);
   }
 
-  create(ownerId: string, name: string) {
-    return this.repo.create(ownerId, name);
+  listByOwnerRecent(
+    ownerId: string,
+    limit: number,
+    options?: Parameters<ReturnType<typeof createProjectRepo>["listByOwnerRecent"]>[2],
+  ) {
+    return this.repo.listByOwnerRecent(ownerId, limit, options);
+  }
+
+  create(
+    ownerId: string,
+    name: string,
+    source?: Parameters<ReturnType<typeof createProjectRepo>["create"]>[2],
+  ) {
+    return this.repo.create(ownerId, name, source);
   }
 
   rename(id: string, ownerId: string, name: string) {

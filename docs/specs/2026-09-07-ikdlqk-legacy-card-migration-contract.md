@@ -4,6 +4,9 @@
 
 2026-09-07
 
+
+> **保留期更新（2026-10-27，IKQY3O）**：`legacy_card_history` 已改名为 `project_card_migration_history`，并引入 180 天保留期。本文「历史只增不改 / 只读事实」的表述按「180 天内只读、超期由 `backend/scripts/cleanup-project-card-migration-history.mjs` 清理」理解；超过保留期的节点不再保证能按历史回放。
+
 ## 目标与边界
 
 落实 IKDL9U 的迁移切片：已有项目重新打开后，画布 JSON 中的旧生成卡（`assetNode` 且 `data.kind === "generation"`，正文在 `data.generationCard`）转换为普通文本节点，旧画面描述及用户编辑保存在只读历史中可查阅。复用现行 NestJS Canvas API、Prisma 的 canvas JSON 与版本锁、IKDLQE 的普通文本节点与限长契约；不引入新的卡片资源类型，不改变生成任务接纳与快照行为，不做整图执行或批量应用。

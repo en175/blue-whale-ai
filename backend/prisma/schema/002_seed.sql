@@ -76,7 +76,7 @@ INSERT INTO generation_model_capability (
       'last_frame', TRUE,
       'first_last_frame', TRUE,
       'audio', TRUE,
-      'video_reference', FALSE,
+      'video_reference', TRUE,
       'video_reference_max', 3,
       'audio_reference', FALSE,
       'audio_reference_max', 3,

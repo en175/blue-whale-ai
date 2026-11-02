@@ -28,10 +28,6 @@ export interface CanvasNodeAttachCallbacksHost {
   ) => void;
   handleMediaDims: (id: string, dims: MediaDims) => void;
   handleAssetHoverChange: (id: string, hovered: boolean) => void;
-  handleSaveMediaToAssets: (id: string) => void;
-  handleSaveTextToAssets: (id: string) => void;
-  handleSaveCardToAssets: (id: string) => void;
-  handleSaveGoodsToAssets: (id: string) => void;
   handleProductChange: (id: string, patch: ProductChangePatch) => void;
   handleCardChange: (id: string, patch: CardChangePatch) => void;
   generationDock: { writeSelf: (kind: 'text') => void };
@@ -44,6 +40,7 @@ export interface CanvasNodeAttachCallbacksHost {
     setPickProductId: (id: string) => void;
     setPickAssetId: (id: string) => void;
   };
+  openSideAddMenu: (sourceId: string, direction: 'left' | 'right', client: { x: number; y: number }) => void;
 }
 
 export interface CanvasNodeAttachCallbacksHandles {
@@ -63,10 +60,6 @@ export function useCanvasNodeAttachCallbacks(host: CanvasNodeAttachCallbacksHost
     handleMediaIndexChange,
     handleMediaDims,
     handleAssetHoverChange,
-    handleSaveMediaToAssets,
-    handleSaveTextToAssets,
-    handleSaveCardToAssets,
-    handleSaveGoodsToAssets,
     handleProductChange,
     handleCardChange,
     generationDock,
@@ -74,10 +67,18 @@ export function useCanvasNodeAttachCallbacks(host: CanvasNodeAttachCallbacksHost
     locateTextSource,
     showToast,
     pickers,
+    openSideAddMenu,
   } = host;
 
   const attachCallbacks = (node: Node): Node => {
     const base: Node = { ...node, position: node.position ?? { x: 0, y: 0 }, data: { ...node.data, toolMode } };
+    if (node.type === 'textNode' || node.type === 'mediaNode' || node.type === 'assetCardNode' || node.type === 'productNode') {
+      base.data = {
+        ...base.data,
+        onAddLeft: (client: { x: number; y: number }) => openSideAddMenu(node.id, 'left', client),
+        onAddRight: (client: { x: number; y: number }) => openSideAddMenu(node.id, 'right', client),
+      };
+    }
     switch (node.type) {
       case 'textNode': {
         if (typeof base.data.html === 'string') {
@@ -102,7 +103,6 @@ export function useCanvasNodeAttachCallbacks(host: CanvasNodeAttachCallbacksHost
           onCopyImage: (id: string) => actionsRef.current.copyImage(id),
           onComplianceCheck: (id: string) => actionsRef.current.complianceCheck(id),
           onFillEmptyShell: (id: string, file: File) => actionsRef.current.fillEmptyShell(id, file),
-          onSaveToAssets: (id: string) => handleSaveTextToAssets(id),
           onWriteSelf: () => {
             generationDock.writeSelf('text');
           },
@@ -122,11 +122,14 @@ export function useCanvasNodeAttachCallbacks(host: CanvasNodeAttachCallbacksHost
           onFillEmptyShell: (id: string, file: File) => actionsRef.current.fillEmptyShell(id, file),
           onCancelJob: (id: string) => actionsRef.current.cancelJob(id),
           onRetryJob: (id: string) => actionsRef.current.retryJob(id),
+          onEditFailed: (id: string) => actionsRef.current.editFailed(id),
+          onRechargeFailed: (id: string) => actionsRef.current.rechargeFailed(id),
+          onRequoteFailed: (id: string) => actionsRef.current.requoteFailed(id),
+          onRequoteConfirm: (id: string) => actionsRef.current.requoteConfirm(id),
           onFixFollowVideo: (id: string) => actionsRef.current.fixFollowVideo(id),
           onDownload: (id: string) => actionsRef.current.download(id),
           ...dockToolCallbacks,
           onShowDetails: (id: string) => actionsRef.current.showDetails(id),
-          onSaveToAssets: (id: string) => handleSaveMediaToAssets(id),
           onMediaDims: handleMediaDims,
           onLocateInputSource: (sourceNodeId: string) => locateTextSource(sourceNodeId),
         };
@@ -143,7 +146,6 @@ export function useCanvasNodeAttachCallbacks(host: CanvasNodeAttachCallbacksHost
           onCopyImage: (id: string) => actionsRef.current.copyImage(id),
           onComplianceCheck: (id: string) => actionsRef.current.complianceCheck(id),
           onFillEmptyShell: (id: string, file: File) => actionsRef.current.fillEmptyShell(id, file),
-          onSaveToAssets: (id: string) => handleSaveGoodsToAssets(id),
           onProductChange: (id: string, patch: ProductChangePatch) => handleProductChange(id, patch),
           onPickFromCanvas: (id: string) => {
             pickers.setPickMode('product');
@@ -166,7 +168,6 @@ export function useCanvasNodeAttachCallbacks(host: CanvasNodeAttachCallbacksHost
           onComplianceCheck: (id: string) => actionsRef.current.complianceCheck(id),
           onFillEmptyShell: (id: string, file: File) => actionsRef.current.fillEmptyShell(id, file),
           onGenerateImage: () => actionsRef.current.openImageDialog(),
-          onSaveToAssets: (id: string) => handleSaveCardToAssets(id),
           onCardChange: (id: string, patch: CardChangePatch) => handleCardChange(id, patch),
           onPickFromCanvas: (id: string) => {
             pickers.setPickMode('asset');

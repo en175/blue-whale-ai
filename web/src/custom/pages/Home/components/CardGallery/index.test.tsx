@@ -38,35 +38,32 @@ async function mountGallery(onCardClick?: (text: string, mediaType: 'video' | 'i
   await act(async () => {
     await Promise.resolve();
     await Promise.resolve();
+    await Promise.resolve();
   });
+}
+
+function cards(): HTMLElement[] {
+  return [...mountNode.querySelectorAll<HTMLElement>('[data-testid="gallery-card"]')];
 }
 
 beforeEach(() => {
   api.fetchTemplateTags.mockResolvedValue([
-    { tag_code: 'picture', label: '图片' },
-    { tag_code: 'video', label: '视频' },
+    { tag_code: 'marketing', label: '商品展示' },
+    { tag_code: 'video', label: '人物种草' },
   ]);
-  api.fetchTemplatePage.mockImplementation(async (tagCode: string) => {
-    if (tagCode === 'picture') {
+  api.fetchTemplatePage.mockImplementation(async (tagCode?: string) => {
+    if (tagCode === undefined) {
       return pageOf([
-        {
-          title: '空图模板',
-          video: 'https://example.com/should-not-play.mp4',
-          images: [],
-          layout: 'wide',
-          content: null,
-        },
+        { title: '精选短片', video: 'https://example.com/featured.mp4', images: [], layout: 'wide', content: '精选正文' },
       ]);
     }
-    return pageOf([
-      {
-        title: '视频模板',
-        video: 'https://example.com/clip.mp4',
-        images: [],
-        layout: 'wide',
-        content: null,
-      },
-    ]);
+    if (tagCode === 'marketing') {
+      return pageOf([
+        { title: '商品图一', video: '', images: [], layout: 'wide', content: '填写商品正文' },
+        { title: '测试20260828144946', video: '', images: [], layout: 'wide', content: '测试正文' },
+      ]);
+    }
+    return pageOf([{ title: '种草短片', video: 'https://example.com/clip.mp4', images: [], layout: 'wide', content: null }]);
   });
 });
 
@@ -76,60 +73,122 @@ afterEach(async () => {
   vi.clearAllMocks();
 });
 
+function filterButton(label: string): HTMLButtonElement | undefined {
+  return [...mountNode.querySelectorAll<HTMLButtonElement>('[aria-label="案例分类"] button')].find(
+    (b) => b.textContent === label,
+  );
+}
+
 describe('CardGallery', () => {
-  it('图片 tab 空 images 不展示视频播放 UI，点击仍切到 image', async () => {
+  it('精选默认排在最前并默认选中，精选请求不带 tagCode', async () => {
+    await mountGallery();
+
+    const filters = [...mountNode.querySelectorAll('[aria-label="案例分类"] button')];
+    expect(filters.map((b) => b.textContent)).toEqual(['精选', '商品展示', '人物种草']);
+    expect(filters[0].getAttribute('aria-pressed')).toBe('true');
+    expect(api.fetchTemplatePage).toHaveBeenCalledWith(undefined, 1, 50, { isFeatured: true });
+    expect(cards().map((card) => card.getAttribute('data-media-kind'))).toEqual(['video']);
+    expect(cards()[0].textContent).toContain('精选短片');
+  });
+
+  it('切换场景后只展示该场景案例', async () => {
+    await mountGallery();
+
+    await act(async () => {
+      filterButton('人物种草')?.click();
+    });
+    expect(cards().map((card) => card.getAttribute('data-media-kind'))).toEqual(['video']);
+  });
+
+  it('两类卡都带用途标签', async () => {
+    await mountGallery();
+
+    await act(async () => {
+      filterButton('商品展示')?.click();
+    });
+    expect(cards()[0].textContent).toContain('商品展示');
+
+    await act(async () => {
+      filterButton('人物种草')?.click();
+    });
+    expect(cards()[0].textContent).toContain('人物种草');
+  });
+
+  it('过滤「测试20260828144946」', async () => {
+    await mountGallery();
+
+    await act(async () => {
+      filterButton('商品展示')?.click();
+    });
+    expect(mountNode.textContent).not.toContain('测试20260828144946');
+    expect(cards()).toHaveLength(1);
+  });
+
+  it('点击只把正文与模式回填，不提交', async () => {
     const onCardClick = vi.fn();
     await mountGallery(onCardClick);
 
-    const card = mountNode.querySelector('[data-testid="gallery-card"]') as HTMLElement;
-    expect(card).toBeTruthy();
-    expect(card.getAttribute('data-media-kind')).toBe('image');
-    expect(card.textContent).toContain('空图模板');
-    expect(mountNode.querySelector('[data-testid="gallery-play-overlay"]')).toBeNull();
+    await act(async () => {
+      filterButton('商品展示')?.click();
+    });
+    await act(async () => {
+      cards()[0].click();
+    });
+    expect(onCardClick).toHaveBeenCalledTimes(1);
+    expect(onCardClick).toHaveBeenCalledWith('填写商品正文', 'image');
+  });
+
+  it('视频场景卡片带类型角标', async () => {
+    await mountGallery();
+
+    await act(async () => {
+      filterButton('人物种草')?.click();
+    });
+    expect(cards()[0].querySelector('svg')).not.toBeNull();
+    expect(cards()[0].getAttribute('data-media-kind')).toBe('video');
+  });
+
+  it('视频卡直接自动播放，不依赖鼠标悬停', async () => {
+    await mountGallery();
+
+    await act(async () => {
+      filterButton('人物种草')?.click();
+    });
+    const video = cards()[0].querySelector<HTMLVideoElement>('[data-testid="gallery-video"]')!;
+    expect(video).not.toBeNull();
+    expect(video.autoplay).toBe(true);
+    expect(video.muted).toBe(true);
+    expect(video.loop).toBe(true);
     expect(mountNode.querySelector('[data-testid="gallery-hover-video"]')).toBeNull();
-    expect(mountNode.querySelector('[data-testid="gallery-image-placeholder"]')).toBeTruthy();
-
-    await act(async () => {
-      card.click();
-    });
-    expect(onCardClick).toHaveBeenCalledWith('空图模板', 'image');
   });
 
-  it('图片 tab 与视频 tab 共用同一行 4 卡网格', async () => {
+  it('当前 tab 的封面与视频走预加载', async () => {
+    api.fetchTemplateTags.mockResolvedValue([
+      { tag_code: 'a', label: '场景A' },
+      { tag_code: 'b', label: '场景B' },
+    ]);
+    api.fetchTemplatePage.mockImplementation(async (tagCode: string) =>
+      pageOf([
+        {
+          title: `${tagCode}-案例`,
+          video: tagCode === 'b' ? 'https://example.com/b.mp4' : '',
+          images: [`https://example.com/${tagCode}.jpg`],
+          layout: 'wide',
+          content: null,
+        },
+      ]),
+    );
+
     await mountGallery();
 
-    const pictureGrid = mountNode.querySelector('[data-testid="gallery-card-grid"]');
-    expect(pictureGrid).toBeTruthy();
-    expect(pictureGrid?.className.split(/\s+/).filter(Boolean)).toHaveLength(1);
+    const eagerImg = cards()[0].querySelector<HTMLImageElement>('img')!;
+    expect(eagerImg.getAttribute('loading')).toBe('eager');
 
-    const videoTab = [...mountNode.querySelectorAll('button')].find((btn) =>
-      btn.textContent?.includes('视频'),
-    );
     await act(async () => {
-      videoTab?.click();
-      await Promise.resolve();
+      filterButton('场景B')?.click();
     });
-
-    const videoGrid = mountNode.querySelector('[data-testid="gallery-card-grid"]');
-    expect(videoGrid?.className).toBe(pictureGrid?.className);
-  });
-
-  it('视频 tab 才展示播放按钮，形态不由 images 是否为空决定', async () => {
-    await mountGallery();
-
-    const videoTab = [...mountNode.querySelectorAll('button')].find((btn) =>
-      btn.textContent?.includes('视频'),
-    );
-    expect(videoTab).toBeTruthy();
-    await act(async () => {
-      videoTab?.click();
-      await Promise.resolve();
-    });
-
-    const card = mountNode.querySelector('[data-testid="gallery-card"]') as HTMLElement;
-    expect(card.getAttribute('data-media-kind')).toBe('video');
-    expect(card.textContent).toContain('视频模板');
-    expect(mountNode.querySelector('[data-testid="gallery-play-overlay"]')).toBeTruthy();
-    expect(api.fetchTemplatePage).toHaveBeenCalledWith('video');
+    const video = cards()[0].querySelector<HTMLVideoElement>('[data-testid="gallery-video"]')!;
+    expect(video.getAttribute('data-preload')).toBe('eager');
+    expect(video.preload).toBe('auto');
   });
 });

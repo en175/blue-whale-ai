@@ -1,4 +1,5 @@
 import { createGenerationJob, retryGenerationJob, cancelGenerationJob, type CreateJobPayload } from '@/custom/api/jobs';
+import { readJobRecoveryFacts } from '@/custom/api/jobRecovery';
 import type { GenerationRecoveryRecord } from '@/custom/api/canvasRecovery';
 import { isTaskTypeParamConstraintCode } from '@/custom/utils/video-reference-hints';
 import { isAudioMixNodeId } from '../tools/audio/audioMix';
@@ -113,9 +114,12 @@ export const normalGenerationTask: GenerationTaskDefinition<NormalGenerationPayl
         return { kind: 'none' };
       }
       if (!hasSavedParamConstraint && isRecoveryTargetSettled(target, record)) return { kind: 'none' };
+      const facts = readJobRecoveryFacts(record.job?.stored_error as Record<string, unknown> | null);
       host.patchNode(record.target_node_id, {
         jobId: record.job_id,
         generationRecovery: { protocolVersion: 1, submissionId: record.submission_id, outputKey: TARGET_OUTPUT_KEY },
+        ...(facts.category ? { errorCategory: facts.category } : {}),
+        ...(facts.retryable != null ? { errorRetryable: facts.retryable } : {}),
       });
       return { kind: 'resume-polling' };
     }
@@ -146,6 +150,7 @@ export function buildRecoveryTargetNode(record: GenerationRecoveryRecord): {
     ?? (seed && seed.width > 0 && seed.height > 0 ? { width: seed.width, height: seed.height } : null);
   const failed = record.job?.status === 'failed';
   const storedError = record.job?.stored_error;
+  const failFacts = failed ? readJobRecoveryFacts(storedError as Record<string, unknown> | null) : {};
   const failText = typeof storedError === 'object' && storedError != null
     ? String((storedError as Record<string, unknown>).msg ?? (storedError as Record<string, unknown>).message ?? '')
     : '';
@@ -161,6 +166,8 @@ export function buildRecoveryTargetNode(record: GenerationRecoveryRecord): {
       jobId: record.job_id,
       ...(failed ? { generationRecovery: { protocolVersion: 1, submissionId: record.submission_id, outputKey: TARGET_OUTPUT_KEY } } : {}),
       ...(failed && failText ? { errorText: failText } : {}),
+      ...(failFacts.category ? { errorCategory: failFacts.category } : {}),
+      ...(failFacts.retryable != null ? { errorRetryable: failFacts.retryable } : {}),
       ...(size ? size : {}),
     },
   };

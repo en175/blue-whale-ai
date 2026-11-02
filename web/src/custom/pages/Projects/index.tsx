@@ -13,12 +13,14 @@ import {
   pinProject,
   projectKeys,
   projectPageQueryOptions,
+  projectPreviews,
   renameProject,
   type ProjectPageData,
   type ProjectRecord,
 } from '@/custom/api/projects';
 import { isApiError } from '@/shared/api/http';
 import { defaultProjectName } from '@/custom/utils/projectName';
+import { openCanvasTab } from '@/custom/utils/open-canvas-tab';
 import { remoteImageCrossOrigin, resolveMediaSrc } from '@/shared/utils/remoteImageCors';
 import styles from './index.module.css';
 
@@ -68,15 +70,15 @@ function updateCachedProjectPages(
 }
 
 function PreviewGallery({ project }: { project: ProjectRecord }) {
-  const previews = project.previews?.slice(0, 3) ?? [];
+  const previews = projectPreviews(project).slice(0, 3);
 
   if (previews.length === 0) {
     return (
       <Empty
         className={styles.previewEmpty}
-        aria-label="暂无图片预览"
+        aria-label="暂无内容预览"
         icon={<ImageOff size={28} strokeWidth={1.5} aria-hidden="true" />}
-        title="暂无图片预览"
+        title="暂无内容预览"
       />
     );
   }
@@ -85,18 +87,30 @@ function PreviewGallery({ project }: { project: ProjectRecord }) {
     <div
       className={styles.previewGallery}
       data-preview-count={previews.length}
-      aria-label={`${project.name} 的图片预览`}
+      aria-label={`${project.name} 的内容预览`}
     >
-      {previews.map((url, index) => (
-        <img
-          key={`${url}-${index}`}
-          className={styles.previewImage}
-          src={resolveMediaSrc(url)}
-          crossOrigin={remoteImageCrossOrigin(url)}
-          alt={`${project.name} 图片预览 ${index + 1}`}
-          loading="lazy"
-        />
-      ))}
+      {previews.map((preview, index) =>
+        preview.type === 'video' ? (
+          <video
+            key={`${preview.url}-${index}`}
+            className={styles.previewImage}
+            src={resolveMediaSrc(preview.url)}
+            muted
+            playsInline
+            preload="metadata"
+            aria-label={`${project.name} 视频预览 ${index + 1}`}
+          />
+        ) : (
+          <img
+            key={`${preview.url}-${index}`}
+            className={styles.previewImage}
+            src={resolveMediaSrc(preview.url)}
+            crossOrigin={remoteImageCrossOrigin(preview.url)}
+            alt={`${project.name} 图片预览 ${index + 1}`}
+            loading="lazy"
+          />
+        ),
+      )}
     </div>
   );
 }
@@ -231,7 +245,7 @@ export default function Projects() {
       toggleProjectSelection(project.id);
       return;
     }
-    navigate(`/canvas?project=${encodeURIComponent(String(project.id))}`);
+    openCanvasTab(project.id);
   };
 
   const onCardKeyDown = (event: KeyboardEvent<HTMLElement>, project: ProjectRecord) => {

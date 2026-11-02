@@ -587,6 +587,10 @@ describe('IKIN8A 待复核期间同页 Project 导航门禁', () => {
     await act(async () => {});
   }
 
+  beforeEach(() => {
+    apiMocks.fetchProjects.mockImplementation(async () => [{ id: 'p1', name: '项目一' }, { id: 'p2', name: '项目二' }]);
+  });
+
   it('a. 412 清空冲突待复核期间：同页路由切到另一 Project 被中止，地址恢复当前项目，本地编辑保留，无旧整文档 PUT', async () => {
     seedDoc([T1]);
     await renderPage();
@@ -643,7 +647,7 @@ describe('IKIN8A 待复核期间同页 Project 导航门禁', () => {
     await renderPage();
 
     await navigateSamePage('/canvas?project=p2');
-    expect(locationRef!.search).toContain('project=p2');
+    await vi.waitFor(() => expect(locationRef!.search).toContain('project=p2'));
 
     const P2T1 = { id: 'p2-t1', type: 'textNode', position: { x: 20, y: 20 }, data: { title: 'B卡', text: '项目二内容' } };
     canvasDocMock.current = {

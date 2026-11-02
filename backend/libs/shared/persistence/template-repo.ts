@@ -13,11 +13,13 @@ export interface TemplateTagAdminView {
 }
 
 export interface TemplateCardView {
+  tag_code: string;
   title: string;
   video: string | null;
   images: string[];
   layout: string;
   content: string | null;
+  is_featured: number;
 }
 
 export interface TemplateCardPage {
@@ -28,8 +30,15 @@ export interface TemplateCardPage {
   pages: number;
 }
 
+export interface TemplateCardQuery {
+  tagCode?: string;
+  isFeatured?: boolean;
+  current: number;
+  size: number;
+}
+
 export interface TemplateRepo {
-  pageByTagCode(tagCode: string, current: number, size: number): Promise<TemplateCardPage>;
+  pageCards(query: TemplateCardQuery): Promise<TemplateCardPage>;
   listTags(): Promise<TemplateTagView[]>;
   listAllTags(): Promise<TemplateTagAdminView[]>;
 }
@@ -37,7 +46,7 @@ export interface TemplateRepo {
 export function createTemplateRepo(prisma: PrismaClient): TemplateRepo {
   return {
     async listTags() {
-      const tags = await prisma.template_tag.findMany({
+      const tags = await prisma.catalog_template_tags.findMany({
         where: { is_delete: 0, visible: 1 },
         orderBy: { sort_order: "asc" },
       });
@@ -45,7 +54,7 @@ export function createTemplateRepo(prisma: PrismaClient): TemplateRepo {
     },
 
     async listAllTags() {
-      const tags = await prisma.template_tag.findMany({
+      const tags = await prisma.catalog_template_tags.findMany({
         where: { is_delete: 0 },
         orderBy: { sort_order: "asc" },
       });
@@ -56,15 +65,19 @@ export function createTemplateRepo(prisma: PrismaClient): TemplateRepo {
       }));
     },
 
-    async pageByTagCode(tagCode, current, size) {
-      const where = { tag_code: tagCode, is_delete: 0 };
+    async pageCards(query) {
+      const where = {
+        is_delete: 0,
+        ...(query.tagCode ? { tag_code: query.tagCode } : {}),
+        ...(query.isFeatured ? { is_featured: 1 } : {}),
+      };
       const [total, cards] = await Promise.all([
-        prisma.template_card.count({ where }),
-        prisma.template_card.findMany({
+        prisma.catalog_templates.count({ where }),
+        prisma.catalog_templates.findMany({
           where,
-          orderBy: { sort_order: "asc" },
-          skip: (current - 1) * size,
-          take: size,
+          orderBy: [{ sort_order: "asc" }, { id: "asc" }],
+          skip: (query.current - 1) * query.size,
+          take: query.size,
         }),
       ]);
 
@@ -72,7 +85,7 @@ export function createTemplateRepo(prisma: PrismaClient): TemplateRepo {
       const images =
         cardIds.length === 0
           ? []
-          : await prisma.template_card_image.findMany({
+          : await prisma.catalog_template_images.findMany({
               where: { card_id: { in: cardIds }, is_delete: 0 },
               orderBy: { sort_order: "asc" },
             });
@@ -86,16 +99,18 @@ export function createTemplateRepo(prisma: PrismaClient): TemplateRepo {
 
       return {
         records: cards.map((c) => ({
+          tag_code: c.tag_code,
           title: c.title,
           video: c.video_url,
           images: imagesByCard.get(c.id.toString()) ?? [],
           layout: c.layout,
           content: c.content,
+          is_featured: c.is_featured,
         })),
         total,
-        current,
-        size,
-        pages: Math.ceil(total / size),
+        current: query.current,
+        size: query.size,
+        pages: Math.ceil(total / query.size),
       };
     },
   };

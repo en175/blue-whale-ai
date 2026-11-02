@@ -1,14 +1,14 @@
 
 
 import { PANEL_REF_MEDIA_TYPES, VIDEO_MODE_LABEL } from '@/custom/enums';
-import { useState, useRef, useEffect, useCallback, useLayoutEffect, useMemo, useSyncExternalStore } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState, useRef, useEffect, useLayoutEffect, useMemo, useSyncExternalStore } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useDismissOnOutside } from '@/custom/pages/CanvasPage/hooks/shared/useDismissOnOutside';
 import { createPortal } from 'react-dom';
-import { Plus, ChevronUp, ChevronDown, Music, BookOpen, BookText, X, Upload, FolderOpen } from 'lucide-react';
+import { Plus, ChevronUp, Loader2, Music, BookOpen, BookText, X, Upload, FolderOpen } from 'lucide-react';
 import SkillModal from '../SkillModal';
 import LoginModal from '@/custom/components/LoginModal';
-import RatioIcon from '@/custom/components/RatioIcon';
+import { useLoginDialogStore } from '@/shared/stores/loginDialog';
 import Select from '@/custom/components/Select';
 import AssetsPickerModal from '@/custom/pages/CanvasPage/components/AssetsPickerModal';
 
@@ -22,6 +22,9 @@ import {
 import type { VideoMediaRef, VideoMediaRefs } from '@/custom/pages/CanvasPage/tools/video/videoMediaRefs';
 import { allowsAutoDurationOf, configuredVideoModes, effectiveVideoParams, frameSlotCountOf, isFrameMode, lockedDurationOf, lockedRatioOf, type VideoMode } from '@/custom/utils/video-modes';
 import { type AssetRecord } from '@/custom/api/assets';
+import type { HomeQuoteRef } from '@/custom/api/homeQuote';
+import { buildImageQuotePayload, buildVideoQuotePayload } from './homeQuoteParams';
+import { useHomeQuote } from './useHomeQuote';
 import { getCurrentUser, subscribe } from '@/shared/utils/auth';
 import { remoteImageCrossOrigin, resolveMediaSrc } from '@/shared/utils/remoteImageCors';
 import styles from './index.module.css';
@@ -30,23 +33,36 @@ import { aspectRatioOptions, hasAspectRatio, pickRatioForSize, ratiosForSelected
 import { pickDefaultVideoRatio, videoRatioLabel } from '@/custom/utils/video-aspect-ratio';
 import { type SkillRecord } from '@/custom/api/skills';
 import { createProject } from '@/custom/api/projects';
-import { setGenHandoff } from '@/custom/utils/gen-handoff';
+import { setGenHandoff, type GenHandoff } from '@/custom/utils/gen-handoff';
 import { setAgentHandoff } from '@/custom/utils/agent-handoff';
 import { classifyRefOverflow } from '@/custom/utils/ref-overflow';
 import { videoReferenceMaxOf, audioReferenceMaxOf, imageReferenceMaxOf, supportsVideoReferenceOf, UNRESOLVED_IMAGE_REFERENCE_LIMIT } from '@/custom/utils/model-reference-limits';
 import { promptCharCountLabel, promptMaxLengthOf } from '@/custom/utils/prompt-max-length';
 import { VIDEO_REFERENCE_NOT_APPROVED_MESSAGE, isUnapprovedVideoMaterialStatus } from '@/custom/utils/video-reference-compliance';
 import { OMNI_REFERENCE_FOLLOW_HINT } from '@/custom/utils/video-reference-hints';
-import { showToast as pushToast } from '@/custom/components/Toast';
-import DurationSlider from './DurationSlider';
+import { showToast as pushToast, toast } from '@/custom/components/Toast';
+import { isApiError, silentInit } from '@/shared/api/http';
 import { resolveHomeLoginResume, type HomePendingAction } from './homeLoginResume';
 import { limitPromptInput } from './promptInput';
+import { imageParamsRejected, videoParamsRejected } from './sendParamGuard';
+import GenerationPreference, { type PreferenceField, type PreferenceToggle } from './GenerationPreference';
+import ModeMenu from './ModeMenu';
+import QuoteBadge from './QuoteBadge';
 
-const tabItems = [
-  { key: 'agent', label: '视频智能体' },
-  { key: 'video', label: 'AI 视频' },
-  { key: 'image', label: 'AI 图片' },
-];
+const modeItems = [
+  { key: 'agent', label: 'Agent' },
+  { key: 'image', label: '图片' },
+  { key: 'video', label: '视频' },
+] as const;
+
+const MODE_LABEL: Record<'agent' | 'image' | 'video', string> = {
+  agent: 'Agent 模式',
+  image: '图片生成',
+  video: '视频生成',
+};
+
+type ChatMode = (typeof modeItems)[number]['key'];
+type Workspace = 'create' | 'canvas';
 
 type KeyframeRefItem = { file?: File; preview: string; type: 'image'; assetId?: string | number };
 
@@ -56,24 +72,124 @@ function makeProjectName(): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-async function navigateToNewProject(navigate: ReturnType<typeof useNavigate>, state: unknown) {
+function slashTriggerIndex(text: string, caret: number): number | null {
+  const before = text.slice(0, caret);
+  if (!before.endsWith('/')) return null;
+  const idx = before.length - 1;
+  if (idx > 0 && !/\s/.test(text[idx - 1])) return null;
+  return idx;
+}
+
+function probeVideoDuration(src: string): Promise<number | null> {
+  return new Promise((resolve) => {
+    const video = document.createElement('video');
+    let settled = false;
+    const done = (seconds: number | null) => {
+      if (settled) return;
+      settled = true;
+      video.onloadedmetadata = null;
+      video.onerror = null;
+      video.removeAttribute('src');
+      resolve(seconds);
+    };
+    video.preload = 'metadata';
+    video.onloadedmetadata = () => {
+      done(Number.isFinite(video.duration) && video.duration > 0 ? Math.round(video.duration) : null);
+    };
+    video.onerror = () => done(null);
+    const cors = remoteImageCrossOrigin(src);
+    if (cors) video.crossOrigin = cors;
+    video.src = resolveMediaSrc(src);
+  });
+}
+
+async function navigateToNewProject(
+  navigate: ReturnType<typeof useNavigate>,
+  state: unknown,
+  prepare?: () => void,
+): Promise<boolean> {
   try {
-    const created = await createProject(makeProjectName());
+    const created = await createProject(makeProjectName(), silentInit({ silent: true }), 'dialog');
+    prepare?.();
     navigate(`/canvas?project=${created.id}`, { state });
-  } catch {
-    navigate('/canvas', { state });
+    return true;
+  } catch (error) {
+    const message =
+      isApiError(error) && error.status >= 400 && error.status < 500
+        ? '项目创建失败，请稍后再试'
+        : '创建结果未知，请刷新查看后再试';
+    toast.error(message);
+    return false;
   }
 }
 
-export default function ChatBox({ draft }: { draft?: { text: string; ts: number; mediaType: 'video' | 'image' } | null }) {
+export default function ChatBox({
+  draft,
+  workspace = 'create',
+}: {
+  draft?: { text: string; ts: number; mediaType: 'video' | 'image' } | null;
+  workspace?: Workspace;
+}) {
   const showToast = (msg: string) => pushToast('warn', msg);
-  const [activeTab, setActiveTab] = useState('agent');
+  const [activeTab, setActiveTab] = useState<ChatMode>('agent');
   const [inputValue, setInputValue] = useState('');
+  const [sending, setSending] = useState(false);
+  const sendingRef = useRef(false);
+  const [expanded, setExpanded] = useState(false);
+  const justExpanded = useRef(false);
+  const composerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const navigate = useNavigate();
+  const location = useLocation();
   const user = useSyncExternalStore(subscribe, getCurrentUser);
 
+  const collapsed = workspace === 'canvas' && !expanded;
+
+  useEffect(() => {
+    setExpanded(false);
+  }, [workspace]);
+
+  useEffect(() => {
+    if (!justExpanded.current) return;
+    justExpanded.current = false;
+    const el = textareaRef.current;
+    el?.focus();
+    el?.setSelectionRange(el.value.length, el.value.length);
+  });
+
+  useEffect(() => {
+    if (!expanded || workspace !== 'canvas') return;
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as Element | null;
+      if (!target || composerRef.current?.contains(target)) return;
+      if (target.closest('[role="dialog"], [role="menu"], [role="listbox"], [role="tooltip"], [data-radix-popper-content-wrapper]')) return;
+      setExpanded(false);
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    return () => document.removeEventListener('pointerdown', onPointerDown);
+  }, [expanded, workspace]);
+
+  const activateComposer = () => {
+    if (!collapsed) return;
+    justExpanded.current = true;
+    setExpanded(true);
+  };
+
+  const visibleModes = modeItems.filter((item) => workspace === 'create' || item.key !== 'agent');
+
+  useEffect(() => {
+    if (workspace === 'canvas' && activeTab === 'agent') setActiveTab('video');
+  }, [workspace, activeTab]);
+
+
   const [showLogin, setShowLogin] = useState(false);
+
+  useEffect(() => {
+    const returnTo = (location.state as { returnTo?: string } | null)?.returnTo;
+    if (!returnTo || !getCurrentUser()) return;
+    navigate(returnTo, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const [assetsPickerTarget, setAssetsPickerTarget] = useState<'agent' | 'video' | 'image' | null>(null);
 
@@ -87,6 +203,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
   const pendingAction = useRef<HomePendingAction | null>(null);
 
   const [armedSkill, setArmedSkill] = useState<{ id: string; name: string } | null>(null);
+  const [slashPos, setSlashPos] = useState<number | null>(null);
 
   useEffect(() => {
     if (draft?.ts) {
@@ -99,20 +216,31 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
   useLayoutEffect(() => {
     const textarea = textareaRef.current;
     if (!textarea) return;
+    if (collapsed) {
+      textarea.style.height = '';
+      return;
+    }
     textarea.style.height = 'auto';
     textarea.style.height = `${textarea.scrollHeight}px`;
-  }, [activeTab, inputValue]);
+  }, [activeTab, inputValue, collapsed]);
 
   const [agentFiles, setAgentFiles] = useState<
     { id: string; url: string; kind: 'image' | 'video' | 'audio'; name: string; file?: File; assetId?: string | number }[]
   >([]);
   const agentFileInputRef = useRef<HTMLInputElement>(null);
   const [showSkillModal, setShowSkillModal] = useState(false);
+  const [previewSrc, setPreviewSrc] = useState<string | null>(null);
 
-  const [openDropdown, setOpenDropdown] = useState<string | null>(null);
-  const toggleDropdown = (key: string) => setOpenDropdown((cur) => (cur === key ? null : key));
+  useEffect(() => {
+    if (!previewSrc) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setPreviewSrc(null);
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [previewSrc]);
+
   const [creationModel, setCreationModel] = useState('');
-  const [underlineStyle, setUnderlineStyle] = useState<React.CSSProperties>({});
 
   const [videoModel, setVideoModel] = useState('');
   const [videoMode, setVideoMode] = useState<VideoMode>('text2video');
@@ -123,7 +251,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
   const [generateAudio, setGenerateAudio] = useState(true);
 
   const [refFiles, setRefFiles] = useState<
-    { file?: File; preview: string; type: 'image' | 'video'; assetId?: string | number }[]
+    { file?: File; preview: string; type: 'image' | 'video'; assetId?: string | number; duration?: number }[]
   >([]);
 
   const isKeyframe = isFrameMode(videoMode);
@@ -143,9 +271,6 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
     { file?: File; preview: string; name?: string; assetId?: string | number }[]
   >([]);
 
-  const tabBarRef = useRef<HTMLDivElement>(null);
-  const tabRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
-  const durationRef = useRef<HTMLDivElement>(null);
   const imageFileInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const firstSlotRef = useRef<HTMLButtonElement>(null);
@@ -238,53 +363,43 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
       .catch(() => undefined);
   }, []);
 
-  const updateUnderline = useCallback(() => {
-    const activeEl = tabRefs.current.get(activeTab);
-    const barEl = tabBarRef.current;
-    if (activeEl && barEl) {
-      const barRect = barEl.getBoundingClientRect();
-      const tabRect = activeEl.getBoundingClientRect();
-      setUnderlineStyle({
-        left: tabRect.left - barRect.left,
-        width: tabRect.width,
-      });
-    }
-  }, [activeTab]);
-
-  useEffect(() => {
-    updateUnderline();
-  }, [updateUnderline]);
-
   useDismissOnOutside([
-    { open: openDropdown === 'duration', ref: durationRef, dismiss: () => setOpenDropdown(null) },
     { open: refMenu !== null, ref: [refMenuRef, refCardRef], dismiss: () => setRefMenu(null) },
   ]);
 
-  const goCanvasWithText = (text: string, skillId?: string, skillName?: string) => {
-    setInputValue('');
-    if (skillId) setArmedSkill(null);
+  const goCanvasWithText = async (text: string, skillId?: string, skillName?: string, allowCreate = true) => {
+    const media = agentFiles.filter((f) => f.kind !== 'audio');
+    const audioCount = agentFiles.length - media.length;
+    if (audioCount > 0) showToast('音频附件暂不支持带入画布，已忽略');
 
-    if (agentFiles.length > 0) {
-      const media = agentFiles.filter((f) => f.kind !== 'audio');
-      const audioCount = agentFiles.length - media.length;
-      if (audioCount > 0) showToast('音频附件暂不支持带入画布，已忽略');
-      if (media.length > 0) {
-        setAgentHandoff(
-          media.map((f) => ({
-            file: f.file,
-            preview: f.url,
-            name: f.name,
-            kind: f.kind as 'image' | 'video',
-            assetId: f.assetId,
-          })),
-        );
+    const applied = () => {
+      setInputValue('');
+      if (skillId) setArmedSkill(null);
+      if (agentFiles.length > 0) {
+        if (media.length > 0) {
+          setAgentHandoff(
+            media.map((f) => ({
+              file: f.file,
+              preview: f.url,
+              name: f.name,
+              kind: f.kind as 'image' | 'video',
+              assetId: f.assetId,
+            })),
+          );
+        }
+        setAgentFiles([]);
       }
-      setAgentFiles([]);
+    };
+    const state = { agentText: text, skillId: skillId ?? '', skillName: skillName ?? '', agentAutoSend: true };
+    if (!allowCreate) {
+      applied();
+      navigate('/canvas', { state });
+      return;
     }
-    navigateToNewProject(navigate, { agentText: text, skillId: skillId ?? '', skillName: skillName ?? '' });
+    await navigateToNewProject(navigate, state, applied);
   };
 
-  const dispatchByTab = (text: string) => {
+  const dispatchByTab = async (text: string, allowCreate = true) => {
     if (activeTab === 'video') {
       if (!selectedVideoModel) {
         showToast('视频模型能力加载中，请稍后重试');
@@ -294,13 +409,38 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
         showToast('当前模型未配置视频模式，请更换模型');
         return;
       }
+      const refImages = refFiles.filter((f) => f.type === 'image').length;
+      const refVideos = refFiles.filter((f) => f.type === 'video').length;
+      const paramInvalid =
+        videoParamsRejected(selectedVideoModel, { aspectRatio, resolution, duration, mode: videoMode })
+        || refImages > videoMaxImages
+        || refVideos > videoMaxVideos;
+      if (paramInvalid) {
+        showToast('当前参数不受支持，请调整后再发送。');
+        return;
+      }
 
       const sizeEntry = selectedVideoModel.supported_sizes.find((s) => s.id === resolution);
       const handoffParams = effectiveVideoParams(selectedVideoModel.features, videoMode, {
         aspectRatio,
         duration,
       });
-      setGenHandoff({
+      const refs = isKeyframe
+        ? ([keyframeRefs.first, keyframeRefs.last].filter(Boolean) as (
+            { file?: File; preview: string; type: 'image'; assetId?: string | number }
+          )[]).map((r) => ({
+            preview: r.preview,
+            type: r.type,
+            file: r.file,
+            assetId: r.assetId,
+          }))
+        : refFiles.map((r) => ({
+            preview: r.preview,
+            type: r.type,
+            file: r.file,
+            assetId: r.assetId,
+          }));
+      const videoGenHandoff: GenHandoff = {
         kind: 'video',
         text,
         modelId: videoModel,
@@ -310,26 +450,20 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
         mode: videoMode,
 
         generateAudio,
-        refs: isKeyframe
-          ? ([keyframeRefs.first, keyframeRefs.last].filter(Boolean) as (
-              { file?: File; preview: string; type: 'image'; assetId?: string | number }
-            )[]).map((r) => ({
-              preview: r.preview,
-              type: r.type,
-              file: r.file,
-              assetId: r.assetId,
-            }))
-          : refFiles.map((r) => ({
-              preview: r.preview,
-              type: r.type,
-              file: r.file,
-              assetId: r.assetId,
-            })),
-      });
-      setInputValue('');
-      if (isKeyframe) setKeyframeRefs({});
-      else setRefFiles([]);
-      navigateToNewProject(navigate, { genKind: 'video' });
+        refs,
+      };
+      const applied = () => {
+        setGenHandoff(videoGenHandoff);
+        setInputValue('');
+        if (isKeyframe) setKeyframeRefs({});
+        else setRefFiles([]);
+      };
+      if (!allowCreate) {
+        applied();
+        navigate('/canvas', { state: { genKind: 'video' } });
+        return;
+      }
+      await navigateToNewProject(navigate, { genKind: 'video' }, applied);
       return;
     }
     if (activeTab === 'image') {
@@ -337,27 +471,40 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
         showToast('图片模型能力加载中，请稍后重试');
         return;
       }
-      setGenHandoff({
+      if (imageParamsRejected(selectedImageModel, { ratio: imageAspectRatio, size: imageResolution })) {
+        showToast('当前参数不受支持，请调整后再发送。');
+        return;
+      }
+      const files = imageRefFiles.map((r) => ({
+        id: `home-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        url: r.preview,
+        type: 'image' as const,
+        name: r.name ?? '参考图',
+        file: r.file,
+        assetId: r.assetId,
+      }));
+      const imageGenHandoff: GenHandoff = {
         kind: 'image',
         text,
         modelId: imageModel,
         size: imageResolution,
         ratio: imageAspectRatio,
-        files: imageRefFiles.map((r) => ({
-          id: `home-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-          url: r.preview,
-          type: 'image' as const,
-          name: r.name ?? '参考图',
-          file: r.file,
-          assetId: r.assetId,
-        })),
-      });
-      setInputValue('');
-      setImageRefFiles([]);
-      navigateToNewProject(navigate, { genKind: 'image' });
+        files,
+      };
+      const applied = () => {
+        setGenHandoff(imageGenHandoff);
+        setInputValue('');
+        setImageRefFiles([]);
+      };
+      if (!allowCreate) {
+        applied();
+        navigate('/canvas', { state: { genKind: 'image' } });
+        return;
+      }
+      await navigateToNewProject(navigate, { genKind: 'image' }, applied);
       return;
     }
-    goCanvasWithText(text, armedSkill?.id, armedSkill?.name);
+    await goCanvasWithText(text, armedSkill?.id, armedSkill?.name, allowCreate);
   };
 
   const handleUseSkill = (skill: SkillRecord) => {
@@ -369,12 +516,17 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
       return;
     }
     if (!skill.creative_skill_id) return;
+    if (slashPos != null) {
+      setInputValue((prev) => prev.slice(0, slashPos) + prev.slice(slashPos + 1));
+      setSlashPos(null);
+    }
     setArmedSkill({ id: skill.creative_skill_id, name: skill.name ?? '' });
   };
 
-  const handleSend = () => {
+  const handleSend = async () => {
     const text = inputValue.trim();
     if (!text) return;
+    if (sendingRef.current) return;
 
     if (keyframeSendHint) {
       showToast(keyframeSendHint);
@@ -386,13 +538,22 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
       setShowLogin(true);
       return;
     }
-    dispatchByTab(text);
+    sendingRef.current = true;
+    setSending(true);
+    try {
+      await dispatchByTab(text);
+    } finally {
+      sendingRef.current = false;
+      setSending(false);
+    }
   };
 
   const handleLoginClose = () => {
-    setShowLogin(false);
     const pending = pendingAction.current;
     pendingAction.current = null;
+    setShowLogin(false);
+    useLoginDialogStore.getState().closeLogin();
+    if (!pending) return;
     const resume = resolveHomeLoginResume(pending, !!getCurrentUser());
     switch (resume.action) {
       case 'open-skill':
@@ -402,7 +563,10 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
         handleUseSkill(resume.skill);
         return;
       case 'send':
-        dispatchByTab(resume.text);
+        void dispatchByTab(resume.text, false);
+        return;
+      case 'launch':
+        navigate('/canvas', { state: resume.state });
         return;
       case 'restore-text':
         setInputValue(resume.text);
@@ -477,9 +641,19 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
     }
   };
 
-  const handleInputChange = (value: string) => {
+  const handleInputChange = (value: string, slashAt: number | null = null) => {
     const next = limitPromptInput(value, inputValue, activePromptCap);
     setInputValue(next.value);
+    if (slashAt != null && activeTab === 'agent') {
+      setSlashPos(slashAt);
+      if (!user) {
+        pendingAction.current = { kind: 'open-skill' };
+        setShowLogin(true);
+        return;
+      }
+      setShowSkillModal(true);
+      return;
+    }
     if (next.reachedLimit && activePromptCap != null) showToast(`输入内容最多 ${activePromptCap} 个字符`);
   };
 
@@ -523,6 +697,16 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
       ...(keyframeRefs.last ? { last: asRef(keyframeRefs.last, 1, 'home-last') } : {}),
     };
   }, [refFiles, keyframeRefs]);
+  const videoQuoteReferences = useMemo<HomeQuoteRef[]>(() => {
+    const source = isKeyframe ? [keyframeRefs.first, keyframeRefs.last] : refFiles;
+    return source
+      .filter((item): item is NonNullable<typeof item> => Boolean(item))
+      .map((item) => (item.type === 'image' ? { type: 'image' as const } : { type: 'video' as const, duration: item.duration }));
+  }, [refFiles, keyframeRefs, isKeyframe]);
+  const imageQuoteReferences = useMemo<HomeQuoteRef[]>(
+    () => imageRefFiles.map(() => ({ type: 'image' as const })),
+    [imageRefFiles],
+  );
   const videoConfiguredModes = configuredVideoModes(selectedVideoModel?.features);
   const videoEnabledModes = enabledVideoModes(videoRefsProjection, videoConfiguredModes);
   const videoModeOptions = videoConfiguredModes.map((key) => ({ key, label: VIDEO_MODE_LABEL[key] }));
@@ -548,6 +732,127 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
 
   const supportsVideoAudio = selectedVideoModel?.features?.audio === true;
 
+  const videoPreferenceSummary = [
+    selectedVideoModel?.model_label ?? '视频模型',
+    videoRatioLocked ? null : videoRatioText(aspectRatio),
+    resolution || null,
+    videoDurationLocked != null ? null : duration === -1 ? '自动' : `${duration}s`,
+    supportsVideoAudio ? (generateAudio ? '带音频' : '无声') : null,
+  ]
+    .filter(Boolean)
+    .join(' | ');
+
+  const durationOptions = [
+    ...(allowsAutoDurationOf(selectedVideoModel?.features, videoMode) ? [{ value: '-1', label: '自动' }] : []),
+    ...(videoDurationRange
+      ? Array.from(
+          { length: Math.max(0, Math.floor((videoDurationRange.max - videoDurationRange.min) / (videoDurationRange.step || 1)) + 1) },
+          (_, index) => {
+            const value = videoDurationRange.min + index * (videoDurationRange.step || 1);
+            return { value: String(value), label: `${value}s` };
+          },
+        )
+      : []),
+  ];
+
+  const videoPreferenceFields: PreferenceField[] = [
+    {
+      key: 'model',
+      label: '模型',
+      value: videoModel,
+      onChange: (key) => {
+        setVideoModel(key);
+        const full = videoModelList.find((x) => x.model_id === key);
+        if (full) setAspectRatio(pickDefaultVideoRatio(full.supported_aspect_ratios, full.default_aspect_ratio));
+      },
+      options: videoModelOptions.map((m) => ({ value: m.key, label: m.label })),
+    },
+    {
+      key: 'mode',
+      label: '生成模式',
+      value: videoMode,
+      onChange: (key) => handleVideoModeChange(key as VideoMode),
+      options: videoModeOptions.map((m) => ({
+        value: m.key,
+        label: m.label,
+        disabled: !videoEnabledModes.includes(m.key),
+      })),
+    },
+    ...(videoRatioLocked
+      ? []
+      : [
+          {
+            key: 'ratio',
+            label: '画面比例',
+            value: aspectRatio,
+            onChange: setAspectRatio,
+            options: videoRatioOptions.map((ratio) => ({ value: ratio.id, label: videoRatioLabel(ratio.label) })),
+          },
+        ]),
+    {
+      key: 'resolution',
+      label: '清晰度',
+      value: resolution,
+      onChange: setResolution,
+      options: videoSizeItems.map((r) => ({ value: r.key, label: r.label })),
+    },
+    ...(videoDurationLocked != null
+      ? []
+      : [
+          {
+            key: 'duration',
+            label: '时长',
+            numeric: true,
+            value: String(duration),
+            onChange: (value: string) => setDuration(Number(value)),
+            options: durationOptions,
+          },
+        ]),
+  ];
+
+  const videoPreferenceToggles: PreferenceToggle[] = supportsVideoAudio
+    ? [{ key: 'audio', label: '音频', hint: '生成的视频是否带声音', value: generateAudio, onChange: setGenerateAudio }]
+    : [];
+
+  const imagePreferenceSummary = [
+    selectedImageModel?.model_label ?? '图片模型',
+    imageRatioLabel || null,
+    imageResolution || null,
+  ]
+    .filter(Boolean)
+    .join(' | ');
+
+  const imagePreferenceFields: PreferenceField[] = [
+    {
+      key: 'model',
+      label: '模型',
+      value: imageModel,
+      onChange: (key) => {
+        const full = imageModelList.find((x) => x.model_id === key);
+        if (full) applyImageModel(full);
+        else setImageModel(key);
+      },
+      options: imageModelOptions.map((m) => ({ value: m.key, label: m.label })),
+    },
+    {
+      key: 'resolution',
+      label: '清晰度',
+      value: imageResolution,
+      onChange: (key) => {
+        setImageResolution(key);
+        if (selectedImageModel) setImageAspectRatio(pickRatioForSize(selectedImageModel, key, imageAspectRatio));
+      },
+      options: imageSizeItems.map((r) => ({ value: r.key, label: r.label })),
+    },
+    {
+      key: 'ratio',
+      label: '画面比例',
+      value: imageAspectRatio,
+      onChange: setImageAspectRatio,
+      options: imageRatioOptions.map((ratio) => ({ value: ratio.id, label: ratio.label })),
+    },
+  ];
+
   const selectedCreationModel = videoModelList.find((m) => m.model_id === creationModel);
   const selectedPromptModel = isImageTab
     ? selectedImageModel
@@ -556,6 +861,32 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
       : selectedCreationModel;
   const activePromptCap = promptMaxLengthOf(selectedPromptModel?.features?.max_prompt_length);
   const imagePromptCap = promptMaxLengthOf(selectedImageModel?.features?.max_prompt_length);
+
+  const videoQuoteCredits = useHomeQuote(
+    isVideoTab && user
+      ? buildVideoQuotePayload({
+          model: selectedVideoModel,
+          mode: videoMode,
+          aspectRatio,
+          resolution,
+          duration,
+          generateAudio,
+          prompt: inputValue,
+          references: videoQuoteReferences,
+        })
+      : null,
+  );
+  const imageQuoteCredits = useHomeQuote(
+    isImageTab && user
+      ? buildImageQuotePayload({
+          model: selectedImageModel,
+          size: imageResolution,
+          aspectRatio: imageAspectRatio,
+          prompt: inputValue,
+          references: imageQuoteReferences,
+        })
+      : null,
+  );
   const agentMaxImages = selectedCreationModel?.features?.image_reference_max ?? 0;
   const agentMaxVideos = videoReferenceMaxOf(selectedCreationModel?.features);
   const agentMaxAudios = audioReferenceMaxOf(selectedCreationModel?.features);
@@ -594,7 +925,6 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
     && videoRefVideoCount > 0;
 
   const handleVideoModeChange = (key: VideoMode) => {
-    setOpenDropdown(null);
     if (key === videoMode) return;
     const slots = frameSlotCountOf(key);
     if (slots > 0) {
@@ -680,6 +1010,16 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
     else if (overflow === 'image') showToast(`参考图最多 ${videoMaxImages} 张，请减少图片`);
     else if (overflow === 'video') showToast(`参考视频最多 ${videoMaxVideos} 个`);
     setRefFiles((prev) => [...prev, ...newFiles]);
+    newFiles
+      .filter((item) => item.type === 'video')
+      .forEach((item) => {
+        void probeVideoDuration(item.preview).then((seconds) => {
+          if (seconds == null) return;
+          setRefFiles((prev) =>
+            prev.map((ref) => (ref.preview === item.preview && ref.duration == null ? { ...ref, duration: seconds } : ref)),
+          );
+        });
+      });
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
@@ -847,6 +1187,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
           preview: a.url,
           type: (a.type === 'video' ? 'video' : 'image') as 'image' | 'video',
           assetId: a.id,
+          ...(a.type === 'video' && typeof a.duration === 'number' ? { duration: Math.round(a.duration) } : {}),
         }));
       if (videoRefUnsupported && assets.some((a) => a.type === 'video')) {
         showToast('当前模型不支持视频素材参考，已跳过视频素材');
@@ -876,24 +1217,48 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
   };
 
   return (
-    <>
+    <div
+      ref={composerRef}
+      className={`${styles.composer} ${collapsed ? styles.collapsed : ''}`}
+      data-workspace={workspace}
+      data-testid="home-composer"
+    >
+      {collapsed ? (
+        <>
+          <div className={styles.inputArea}>
+            <textarea
+              ref={textareaRef}
+              className={styles.textarea}
+              placeholder="描述主体、场景、动作和镜头，或添加一张参考图片…"
+              value={inputValue}
+              onChange={(e) => handleInputChange(e.target.value, slashTriggerIndex(e.target.value, e.target.selectionStart ?? 0))}
+              onKeyDown={handleKeyDown}
+              onFocus={activateComposer}
+              onClick={activateComposer}
+              onCompositionStart={handleCompositionStart}
+              onCompositionEnd={handleCompositionEnd}
+              rows={3}
+            />
+          </div>
+          <div className={`${styles.paramBar} ${styles.paramBarEmpty}`}>
+            <div className={styles.paramBarRight}>
+              <QuoteBadge credits={videoQuoteCredits} />
+              <button
+                type="button"
+                className={`${styles.sendBtn} ${inputValue.trim() ? styles.sendBtnActive : ''}`}
+                onClick={handleSend}
+                disabled={!inputValue.trim() || sending}
+                title="发送"
+              >
+                {sending ? <Loader2 size={18} strokeWidth={2.5} className={styles.sendSpin} /> : <ChevronUp size={18} strokeWidth={2.5} />}
+              </button>
+            </div>
+          </div>
+        </>
+      ) : (
+        <>
       <div className={styles.chatBox}>
         { }
-        <div className={styles.tabBar} ref={tabBarRef}>
-          {tabItems.map((tab) => (
-            <button
-              key={tab.key}
-              ref={(el) => {
-                if (el) tabRefs.current.set(tab.key, el);
-              }}
-              className={`${styles.tabItem} ${activeTab === tab.key ? styles.tabItemActive : ''}`}
-              onClick={() => setActiveTab(tab.key)}
-            >
-              {tab.label}
-            </button>
-          ))}
-          <span className={styles.tabUnderline} style={underlineStyle} />
-        </div>
 
         {isVideoTab ? (
 
@@ -908,11 +1273,14 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                     {keyframeRefs.first ? (
                       <div className={styles.refSlot}>
                         <div className={styles.refThumb}>
-                          <img src={resolveMediaSrc(keyframeRefs.first.preview)} crossOrigin={remoteImageCrossOrigin(keyframeRefs.first.preview)} alt="" className={styles.refThumbMedia} />
+                          <img src={resolveMediaSrc(keyframeRefs.first.preview)} crossOrigin={remoteImageCrossOrigin(keyframeRefs.first.preview)} alt="" className={styles.refThumbMedia} onClick={() => setPreviewSrc(keyframeRefs.first?.preview ?? null)} />
                           <span className={styles.refSlotBadge}>首帧</span>
                           <button
                             className={styles.refThumbRemove}
-                            onClick={() => removeKeyframeSlot('first')}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              removeKeyframeSlot('first');
+                            }}
                           >
                             <X size={12} strokeWidth={2} />
                           </button>
@@ -931,11 +1299,14 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                     {keyframeRefs.last ? (
                       <div className={styles.refSlot}>
                         <div className={styles.refThumb}>
-                          <img src={resolveMediaSrc(keyframeRefs.last.preview)} crossOrigin={remoteImageCrossOrigin(keyframeRefs.last.preview)} alt="" className={styles.refThumbMedia} />
+                          <img src={resolveMediaSrc(keyframeRefs.last.preview)} crossOrigin={remoteImageCrossOrigin(keyframeRefs.last.preview)} alt="" className={styles.refThumbMedia} onClick={() => setPreviewSrc(keyframeRefs.last?.preview ?? null)} />
                           <span className={styles.refSlotBadge}>尾帧</span>
                           <button
                             className={styles.refThumbRemove}
-                            onClick={() => removeKeyframeSlot('last')}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              removeKeyframeSlot('last');
+                            }}
                           >
                             <X size={12} strokeWidth={2} />
                           </button>
@@ -954,26 +1325,6 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                   </div>
                 ) : (
                   <>
-                {refFiles.map((item, idx) => (
-                  <div key={idx} className={styles.refThumbWrap}>
-                    <div className={styles.refThumb}>
-                      {item.type === 'video' ? (
-                        <video src={resolveMediaSrc(item.preview)} className={styles.refThumbMedia} />
-                      ) : (
-                        <img src={resolveMediaSrc(item.preview)} crossOrigin={remoteImageCrossOrigin(item.preview)} alt="" className={styles.refThumbMedia} />
-                      )}
-                      <button
-                        className={styles.refThumbRemove}
-                        onClick={() => removeRefFile(idx)}
-                      >
-                        <X size={12} strokeWidth={2} />
-                      </button>
-                    </div>
-                    <span className={styles.refThumbLabel}>
-                      {item.type === 'video' ? `Video ${idx + 1}` : `Image ${idx + 1}`}
-                    </span>
-                  </div>
-                ))}
                 <div
                   ref={refCardRef}
                   className={styles.refCard}
@@ -989,6 +1340,35 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                   <Plus size={16} strokeWidth={2} />
                   <span>参考</span>
                 </div>
+                {refFiles.map((item, idx) => (
+                  <div key={idx} className={styles.refThumbWrap}>
+                    <div className={styles.refThumb}>
+                      {item.type === 'video' ? (
+                        <video src={resolveMediaSrc(item.preview)} className={styles.refThumbMedia} />
+                      ) : (
+                        <img
+                          src={resolveMediaSrc(item.preview)}
+                          crossOrigin={remoteImageCrossOrigin(item.preview)}
+                          alt=""
+                          className={styles.refThumbMedia}
+                          onClick={() => setPreviewSrc(item.preview)}
+                        />
+                      )}
+                      <button
+                        className={styles.refThumbRemove}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          removeRefFile(idx);
+                        }}
+                      >
+                        <X size={12} strokeWidth={2} />
+                      </button>
+                    </div>
+                    <span className={styles.refThumbLabel}>
+                      {item.type === 'video' ? `Video ${idx + 1}` : `Image ${idx + 1}`}
+                    </span>
+                  </div>
+                ))}
                   </>
                 )}
               </div>
@@ -999,7 +1379,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                   className={styles.textarea}
                   placeholder={`通过直接控制提示词快速生成单段片段。\n上传参考：图片最多 ${videoMaxImages} 张 / 视频最多 ${videoMaxVideos} 个；首尾帧模式可上传首帧与尾帧参考。`}
                   value={inputValue}
-                  onChange={(e) => handleInputChange(e.target.value)}
+                  onChange={(e) => handleInputChange(e.target.value, slashTriggerIndex(e.target.value, e.target.selectionStart ?? 0))}
                   onKeyDown={handleKeyDown}
                   onCompositionStart={handleCompositionStart}
                   onCompositionEnd={handleCompositionEnd}
@@ -1025,132 +1405,24 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
             )}
 
             { }
-            <div className={styles.videoParamBar}>
-              <div className={styles.videoParamsLeft}>
-                { }
-                <Select
-                  value={videoModel}
-                  onChange={(key) => {
-                    setVideoModel(key);
-                    const full = videoModelList.find((x) => x.model_id === key);
-                    if (full) setAspectRatio(pickDefaultVideoRatio(full.supported_aspect_ratios, full.default_aspect_ratio));
-                  }}
-                  size="sm"
-                  side="bottom"
-                  ariaLabel="选择视频模型"
-                  triggerClassName={styles.paramBtn}
-                  options={videoModelOptions.map((m) => ({ value: m.key, label: m.label }))}
+            <div className={styles.paramBar}>
+              <div className={styles.paramBarLeft}>
+                <ModeMenu
+                  value={activeTab}
+                  items={visibleModes.map((tab) => ({ key: tab.key, label: MODE_LABEL[tab.key] }))}
+                  onChange={setActiveTab}
                 />
-
-                { }
-                <Select
-                  value={videoMode}
-                  onChange={handleVideoModeChange}
-                  size="sm"
-                  side="bottom"
-                  ariaLabel="选择生成模式"
-                  triggerClassName={styles.paramBtn}
-                  options={videoModeOptions.map((m) => ({
-                    value: m.key,
-                    label: m.label,
-                    disabled: !videoEnabledModes.includes(m.key),
-                  }))}
-                />
-
-                { }
-                {!videoRatioLocked && (
-                  <Select
-                    value={aspectRatio}
-                    onChange={setAspectRatio}
-                    size="sm"
-                    side="bottom"
-                    ariaLabel="选择画面比例"
-                    triggerClassName={styles.paramBtn}
-                    triggerRender={
-                      <>
-                        <RatioIcon ratio={aspectRatio} size={22} />
-                        <span>{videoRatioText(aspectRatio)}</span>
-                      </>
-                    }
-                    options={videoRatioOptions.map((ratio) => ({
-                      value: ratio.id,
-                      label: (
-                        <>
-                          <RatioIcon ratio={ratio.id} size={22} />
-                          <span>{videoRatioLabel(ratio.label)}</span>
-                        </>
-                      ),
-                    }))}
-                  />
-                )}
-
-                { }
-                <Select
-                  value={resolution}
-                  onChange={setResolution}
-                  size="sm"
-                  side="bottom"
-                  ariaLabel="选择清晰度"
-                  triggerClassName={styles.paramBtn}
-                  options={videoSizeItems.map((r) => ({ value: r.key, label: r.label }))}
-                />
-
-                { }
-                <div className={styles.dropdownWrap} ref={durationRef}>
-                  <button
-                    className={styles.paramBtn}
-                    disabled={videoDurationLocked != null}
-                    onClick={() => toggleDropdown('duration')}
-                  >
-                    <span>{duration === -1 ? (videoMode === 'edit' && videoDurationLocked != null ? '⏱ 跟随原视频' : '⏱ 自动') : `⏱ ${duration}s`}</span>
-                    <ChevronDown size={12} strokeWidth={2} />
-                  </button>
-                  {openDropdown === 'duration' && videoDurationLocked == null && videoDurationRange && (
-                    <div className={`${styles.dropdownMenuDown} ${styles.durationDropdown}`}>
-                      {allowsAutoDurationOf(selectedVideoModel?.features, videoMode) && (
-                        <label>
-                          <input
-                            type="checkbox"
-                            aria-label="自动时长，由模型选择"
-                            checked={duration === -1}
-                            onChange={(e) => setDuration(e.target.checked ? -1 : videoDurationRange.min)}
-                          />
-                          自动，由模型选择时长
-                        </label>
-                      )}
-                      {duration !== -1 && <DurationSlider
-                        value={duration}
-                        onChange={setDuration}
-                        min={videoDurationRange.min}
-                        max={videoDurationRange.max}
-                        step={videoDurationRange.step}
-                      />}
-                    </div>
-                  )}
-                </div>
-
-                { }
-                {supportsVideoAudio && (
-                  <button
-                    className={styles.paramBtn}
-                    onClick={() => setGenerateAudio((v) => !v)}
-                    title="生成的视频是否带声音"
-                    aria-label="生成的视频带音频"
-                    aria-pressed={generateAudio}
-                  >
-                    <span>{generateAudio ? '🔊 带音频' : '🔇 无声'}</span>
-                  </button>
-                )}
+                <GenerationPreference summary={videoPreferenceSummary} fields={videoPreferenceFields} toggles={videoPreferenceToggles} />
               </div>
-
-              <div className={styles.videoParamsRight}>
+              <div className={styles.paramBarRight}>
+                <QuoteBadge credits={videoQuoteCredits} />
                 <button
                   className={`${styles.sendBtn} ${inputValue.trim() ? styles.sendBtnActive : ''}`}
                   onClick={handleSend}
-                  disabled={!inputValue.trim()}
+                  disabled={!inputValue.trim() || sending}
                   title={keyframeSendHint || '发送'}
                 >
-                  <ChevronUp size={18} strokeWidth={2.5} />
+                  {sending ? <Loader2 size={18} strokeWidth={2.5} className={styles.sendSpin} /> : <ChevronUp size={18} strokeWidth={2.5} />}
                 </button>
               </div>
             </div>
@@ -1162,22 +1434,6 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
             <div className={styles.videoContent}>
               { }
               <div className={styles.refArea}>
-                {imageRefFiles.map((item, idx) => (
-                  <div key={idx} className={styles.refThumbWrap}>
-                    <div className={styles.refThumb}>
-                      <img src={resolveMediaSrc(item.preview)} crossOrigin={remoteImageCrossOrigin(item.preview)} alt="" className={styles.refThumbMedia} />
-                      <button
-                        className={styles.refThumbRemove}
-                        onClick={() => removeImageRefFile(idx)}
-                      >
-                        <X size={12} strokeWidth={2} />
-                      </button>
-                    </div>
-                    <span className={styles.refThumbLabel}>
-                      图片 {idx + 1}
-                    </span>
-                  </div>
-                ))}
                 <div
                   ref={refCardRef}
                   className={styles.refCard}
@@ -1192,6 +1448,31 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                   <Plus size={16} strokeWidth={2} />
                   <span>参考</span>
                 </div>
+                {imageRefFiles.map((item, idx) => (
+                  <div key={idx} className={styles.refThumbWrap}>
+                    <div className={styles.refThumb}>
+                      <img
+                        src={resolveMediaSrc(item.preview)}
+                        crossOrigin={remoteImageCrossOrigin(item.preview)}
+                        alt=""
+                        className={styles.refThumbMedia}
+                        onClick={() => setPreviewSrc(item.preview)}
+                      />
+                      <button
+                        className={styles.refThumbRemove}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          removeImageRefFile(idx);
+                        }}
+                      >
+                        <X size={12} strokeWidth={2} />
+                      </button>
+                    </div>
+                    <span className={styles.refThumbLabel}>
+                      图片 {idx + 1}
+                    </span>
+                  </div>
+                ))}
               </div>
               { }
               <div className={styles.textareaWrap}>
@@ -1200,7 +1481,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                   className={styles.textarea}
                   placeholder={`从文字与参考图生成 AI 图片。\n上传参考图片最多 ${imageMaxImages} 张；描述你想生成的图片，已上传的参考将引导风格与细节。`}
                   value={inputValue}
-                  onChange={(e) => handleInputChange(e.target.value)}
+                  onChange={(e) => handleInputChange(e.target.value, slashTriggerIndex(e.target.value, e.target.selectionStart ?? 0))}
                   onKeyDown={handleKeyDown}
                   onCompositionStart={handleCompositionStart}
                   onCompositionEnd={handleCompositionEnd}
@@ -1222,72 +1503,23 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
             />
 
             { }
-            <div className={styles.videoParamBar}>
-              <div className={styles.videoParamsLeft}>
-                { }
-                <Select
-                  value={imageModel}
-                  onChange={(key) => {
-                    const full = imageModelList.find((x) => x.model_id === key);
-                    if (full) applyImageModel(full);
-                    else setImageModel(key);
-                  }}
-                  size="sm"
-                  side="bottom"
-                  ariaLabel="选择图片模型"
-                  triggerClassName={styles.paramBtn}
-                  options={imageModelOptions.map((m) => ({ value: m.key, label: m.label }))}
+            <div className={styles.paramBar}>
+              <div className={styles.paramBarLeft}>
+                <ModeMenu
+                  value={activeTab}
+                  items={visibleModes.map((tab) => ({ key: tab.key, label: MODE_LABEL[tab.key] }))}
+                  onChange={setActiveTab}
                 />
-
-                { }
-                <Select
-                  value={imageAspectRatio}
-                  onChange={setImageAspectRatio}
-                  size="sm"
-                  side="bottom"
-                  ariaLabel="选择画面比例"
-                  triggerClassName={styles.paramBtn}
-                  triggerRender={
-                    <>
-                      <RatioIcon ratio={imageAspectRatio} size={22} />
-                      <span>{imageRatioLabel}</span>
-                    </>
-                  }
-                  options={imageRatioOptions.map((ratio) => ({
-                    value: ratio.id,
-                    label: (
-                      <>
-                        <RatioIcon ratio={ratio.id} size={22} />
-                        <span>{ratio.label}</span>
-                      </>
-                    ),
-                  }))}
-                />
-
-                { }
-                <Select
-                  value={imageResolution}
-                  onChange={(key) => {
-                    setImageResolution(key);
-                    if (selectedImageModel) {
-                      setImageAspectRatio(pickRatioForSize(selectedImageModel, key, imageAspectRatio));
-                    }
-                  }}
-                  size="sm"
-                  side="bottom"
-                  ariaLabel="选择清晰度"
-                  triggerClassName={styles.paramBtn}
-                  options={imageSizeItems.map((r) => ({ value: r.key, label: r.label }))}
-                />
+                <GenerationPreference summary={imagePreferenceSummary} fields={imagePreferenceFields} />
               </div>
-
-              <div className={styles.videoParamsRight}>
+              <div className={styles.paramBarRight}>
+                <QuoteBadge credits={imageQuoteCredits} />
                 <button
                   className={`${styles.sendBtn} ${inputValue.trim() ? styles.sendBtnActive : ''}`}
                   onClick={handleSend}
-                  disabled={!inputValue.trim()}
+                  disabled={!inputValue.trim() || sending}
                 >
-                  <ChevronUp size={18} strokeWidth={2.5} />
+                  {sending ? <Loader2 size={18} strokeWidth={2.5} className={styles.sendSpin} /> : <ChevronUp size={18} strokeWidth={2.5} />}
                 </button>
               </div>
             </div>
@@ -1315,32 +1547,6 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
             <div className={styles.videoContent}>
               { }
               <div className={styles.refArea}>
-                {agentFiles.map((f, idx) => (
-                  <div key={f.id} className={styles.refThumbWrap}>
-                    <div className={styles.refThumb}>
-                      {f.kind === 'image' && (
-                        <img className={styles.refThumbMedia} src={resolveMediaSrc(f.url)} crossOrigin={remoteImageCrossOrigin(f.url)} alt={f.name} />
-                      )}
-                      {f.kind === 'video' && (
-                        <video className={styles.refThumbMedia} src={resolveMediaSrc(f.url)} muted />
-                      )}
-                      {f.kind === 'audio' && (
-                        <div className={styles.refThumbAudio}>
-                          <Music size={20} strokeWidth={2} />
-                        </div>
-                      )}
-                      <button
-                        className={styles.refThumbRemove}
-                        onClick={() => removeAgentFile(f.id)}
-                      >
-                        <X size={12} strokeWidth={2} />
-                      </button>
-                    </div>
-                    <span className={styles.refThumbLabel}>
-                      {f.kind === 'image' ? '图片' : f.kind === 'video' ? '视频' : '音频'} {idx + 1}
-                    </span>
-                  </div>
-                ))}
                 <div
                   ref={refCardRef}
                   className={styles.refCard}
@@ -1355,6 +1561,41 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                   <Plus size={16} strokeWidth={2} />
                   <span>参考</span>
                 </div>
+                {agentFiles.map((f, idx) => (
+                  <div key={f.id} className={styles.refThumbWrap}>
+                    <div className={styles.refThumb}>
+                      {f.kind === 'image' && (
+                        <img
+                          className={styles.refThumbMedia}
+                          src={resolveMediaSrc(f.url)}
+                          crossOrigin={remoteImageCrossOrigin(f.url)}
+                          alt={f.name}
+                          onClick={() => setPreviewSrc(f.url)}
+                        />
+                      )}
+                      {f.kind === 'video' && (
+                        <video className={styles.refThumbMedia} src={resolveMediaSrc(f.url)} muted />
+                      )}
+                      {f.kind === 'audio' && (
+                        <div className={styles.refThumbAudio}>
+                          <Music size={20} strokeWidth={2} />
+                        </div>
+                      )}
+                      <button
+                        className={styles.refThumbRemove}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          removeAgentFile(f.id);
+                        }}
+                      >
+                        <X size={12} strokeWidth={2} />
+                      </button>
+                    </div>
+                    <span className={styles.refThumbLabel}>
+                      {f.kind === 'image' ? '图片' : f.kind === 'video' ? '视频' : '音频'} {idx + 1}
+                    </span>
+                  </div>
+                ))}
               </div>
 
               { }
@@ -1364,7 +1605,7 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                   className={styles.textarea}
                   placeholder="描述你想制作的视频，微电影、产品广告、社媒视频等都可支持。适合 1-5 分钟视频。"
                   value={inputValue}
-                  onChange={(e) => handleInputChange(e.target.value)}
+                  onChange={(e) => handleInputChange(e.target.value, slashTriggerIndex(e.target.value, e.target.selectionStart ?? 0))}
                   onKeyDown={handleKeyDown}
                   onCompositionStart={handleCompositionStart}
                   onCompositionEnd={handleCompositionEnd}
@@ -1386,9 +1627,14 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
             />
 
             { }
-            <div className={styles.toolbar}>
+            <div className={styles.paramBar}>
               { }
-              <div className={styles.toolbarLeft}>
+              <div className={styles.paramBarLeft}>
+                <ModeMenu
+                  value={activeTab}
+                  items={visibleModes.map((tab) => ({ key: tab.key, label: MODE_LABEL[tab.key] }))}
+                  onChange={setActiveTab}
+                />
                 { }
                 <button
                   className={styles.skillBtn}
@@ -1402,30 +1648,33 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
                   }}
                 >
                   <BookOpen size={16} strokeWidth={2} />
-                  <span>Skill</span>
+                  <span>技能库</span>
                 </button>
 
                 { }
-                <Select
-                  value={creationModel}
-                  onChange={setCreationModel}
-                  size="sm"
-                  side="top"
-                  ariaLabel="选择生成模型"
-                  triggerClassName={styles.modelBtn}
-                  options={creationModelOptions.map((m) => ({ value: m.key, label: m.label }))}
-                />
+                {activeTab !== 'agent' && (
+                  <Select
+                    value={creationModel}
+                    onChange={setCreationModel}
+                    size="sm"
+                    side="top"
+                    ariaLabel="选择生成模型"
+                    triggerClassName={styles.modelBtn}
+                    options={creationModelOptions.map((m) => ({ value: m.key, label: m.label }))}
+                  />
+                )}
               </div>
 
               { }
-              <div className={styles.toolbarRight}>
+              <div className={styles.paramBarRight}>
                 { }
+                <QuoteBadge />
                 <button
                   className={`${styles.sendBtn} ${inputValue.trim() ? styles.sendBtnActive : ''}`}
                   onClick={handleSend}
-                  disabled={!inputValue.trim()}
+                  disabled={!inputValue.trim() || sending}
                 >
-                  <ChevronUp size={18} strokeWidth={2.5} />
+                  {sending ? <Loader2 size={18} strokeWidth={2.5} className={styles.sendSpin} /> : <ChevronUp size={18} strokeWidth={2.5} />}
                 </button>
               </div>
             </div>
@@ -1436,13 +1685,15 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
       { }
       <SkillModal
         open={showSkillModal}
-        onClose={() => setShowSkillModal(false)}
+        onClose={() => {
+          setShowSkillModal(false);
+          setSlashPos(null);
+        }}
         onUseSkill={(s) => handleUseSkill(s)}
       />
 
       { }
-      {showLogin && <LoginModal onClose={handleLoginClose} />}
-
+      {showLogin && <LoginModal onClose={handleLoginClose} onSuccess={handleLoginClose} />}
       {refMenu && refMenuPos && createPortal(
         <div ref={refMenuRef} className={styles.refMenu} style={refMenuPos}>
           <button
@@ -1475,6 +1726,21 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
         document.body,
       )}
 
+      {previewSrc && createPortal(
+        <div className={styles.previewOverlay} role="dialog" aria-label="参考图预览" onClick={() => setPreviewSrc(null)}>
+          <img
+            className={styles.previewImage}
+            src={resolveMediaSrc(previewSrc)}
+            crossOrigin={remoteImageCrossOrigin(previewSrc)}
+            alt=""
+          />
+          <button type="button" className={styles.previewClose} onClick={() => setPreviewSrc(null)} title="关闭">
+            <X size={18} strokeWidth={2} />
+          </button>
+        </div>,
+        document.body,
+      )}
+
       { }
       {assetsPickerTarget && (
         <AssetsPickerModal
@@ -1495,6 +1761,8 @@ export default function ChatBox({ draft }: { draft?: { text: string; ts: number;
           rejectUnapprovedForVideo={assetsPickerTarget === 'video'}
         />
       )}
-    </>
+        </>
+      )}
+    </div>
   );
 }

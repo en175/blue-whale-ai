@@ -5,13 +5,11 @@ import {
   buildOutputCanvasNode,
   canaryTimestamp,
   candidateIdentityProblems,
-  checkSseWindowHealth,
   checkStorageIdentity,
   computeFactDigest,
   diffFactDigests,
   evidenceVerdict,
   findPendingOutputPlacements,
-  mergeSseEventIds,
   planOutputCanvasNodes,
   sanitizeEvidenceText,
   viewportAnchorPoint,
@@ -82,10 +80,6 @@ function makeSnapshot() {
         command_id: "cmd-1",
       },
     ],
-    scene_cards: [{ scene_card_id: "41", version: 2 }],
-    scene_card_generation_records: [
-      { record_id: "51", summary_status: "ready" },
-    ],
     generation_jobs: [
       { job_id: "101", status: "succeeded", source: "direct" },
       { job_id: "102", status: "succeeded", source: "direct" },
@@ -94,7 +88,6 @@ function makeSnapshot() {
     canvas: {
       nodes: JSON.stringify([{ id: "generation-output:301" }]),
     },
-    high_watermark_cursor: "999",
   };
 }
 
@@ -107,7 +100,6 @@ test("factDigest：数字与字符串 id 归一化后 digest 相同", () => {
   const a = makeSnapshot();
   const b = makeSnapshot();
   b.generation_jobs[0].job_id = 101;
-  b.scene_cards[0].scene_card_id = 41;
   assert.deepEqual(computeFactDigest(a), computeFactDigest(b));
 });
 
@@ -115,14 +107,9 @@ test("factDigest：字段清单与取值符合预期", () => {
   const digest = computeFactDigest(makeSnapshot());
   assert.deepEqual(digest, {
     messages: ["11:user:1"],
-    plans: ["21:image_generate:2026-08-09T00:00:00.000Z"],
-    receipts: ["31:image_generate:cmd-1"],
-    sceneCards: ["41:2"],
-    records: ["51:ready"],
     jobs: ["101:succeeded:direct", "102:succeeded:direct"],
     assets: ["201", "202"],
     canvasNodeIds: ["generation-output:301"],
-    highWatermark: "999",
   });
 });
 
@@ -134,19 +121,17 @@ test("factDigest 比对：一致时返回空问题列表", () => {
   );
 });
 
-test("factDigest 比对：job 状态漂移/画布节点缺失/水位漂移逐项列出", () => {
+test("factDigest 比对：job 状态漂移/画布节点缺失逐项列出", () => {
   const before = computeFactDigest(makeSnapshot());
   const afterSnapshot = makeSnapshot();
   afterSnapshot.generation_jobs[1].status = "failed";
   afterSnapshot.canvas.nodes = JSON.stringify([]);
-  afterSnapshot.high_watermark_cursor = "1000";
   const problems = diffFactDigests(before, computeFactDigest(afterSnapshot));
-  assert.equal(problems.length, 3);
+  assert.equal(problems.length, 2);
   assert.ok(problems[0].includes("jobs"), "应报 jobs 字段");
   assert.ok(problems[0].includes("102:failed:direct"), "应列出多出项");
   assert.ok(problems[1].includes("canvasNodeIds"), "应报 canvasNodeIds 字段");
   assert.ok(problems[1].includes("generation-output:301"), "应列出缺失节点");
-  assert.ok(problems[2].includes("highWatermark"), "应报 highWatermark 字段");
 });
 
 test("脱敏：sk-/Bearer/JWT/敏感键值/堆栈帧全部替换或剥除", () => {
@@ -177,54 +162,6 @@ test("脱敏：export 出去的错误对象 JSON 中的 token 键值也被替换
   );
   assert.ok(!out.includes("sk-live-999888"));
   assert.ok(out.includes('"quota":10'), "非敏感字段原样保留");
-});
-
-function sseEvent(eventId, cursor, projectId = "777") {
-  return {
-    schema_version: 1,
-    event_id: eventId,
-    event_type: "generation_job.created",
-    cursor: String(cursor),
-    project_id: projectId,
-  };
-}
-
-test("SSE 合并：断点前 + 续传去重后与全量回放一致", () => {
-  const before = [sseEvent("e1", 100), sseEvent("e2", 200)];
-  const resumed = [sseEvent("e3", 300), sseEvent("e4", 400)];
-  const full = [...before, ...resumed];
-  assert.deepEqual(mergeSseEventIds(before, resumed), mergeSseEventIds(full));
-});
-
-test("SSE 合并：防御性去重（重叠事件只计一次）", () => {
-  const before = [sseEvent("e1", 100), sseEvent("e2", 200)];
-  const resumed = [sseEvent("e2", 200), sseEvent("e3", 300)];
-  assert.deepEqual(mergeSseEventIds(before, resumed), ["e1", "e2", "e3"]);
-});
-
-test("SSE 合并：缺事件时与全量不一致（可检出缺口）", () => {
-  const before = [sseEvent("e1", 100)];
-  const resumed = [sseEvent("e3", 300)];
-  const full = [sseEvent("e1", 100), sseEvent("e2", 200), sseEvent("e3", 300)];
-  assert.notDeepEqual(
-    mergeSseEventIds(before, resumed),
-    mergeSseEventIds(full),
-  );
-});
-
-test("SSE 窗口健康：游标回退/事件重复/跨项目均被检出", () => {
-  assert.deepEqual(
-    checkSseWindowHealth([sseEvent("e1", 100), sseEvent("e2", 200)], "777"),
-    [],
-  );
-  const problems = checkSseWindowHealth(
-    [sseEvent("e1", 200), sseEvent("e1", 100), sseEvent("e3", 300, "888")],
-    "777",
-  );
-  assert.equal(problems.length, 3);
-  assert.ok(problems.some((p) => p.includes("重复")));
-  assert.ok(problems.some((p) => p.includes("未严格递增")));
-  assert.ok(problems.some((p) => p.includes("不属于项目")));
 });
 
 test("对象存储身份：TOS 转存 URL 通过，provider 直引 URL 不通过", () => {
@@ -360,25 +297,6 @@ test("放置规划：避开既有节点占位", () => {
     rect.y < blocked.y + blocked.height &&
     blocked.y < rect.y + rect.height;
   assert.equal(overlap, false, "新节点不得与既有 SceneCard 重叠");
-});
-
-test("放置规划：视频槽带 SceneCard 时挂到卡下方", () => {
-  const snapshot = makePlacementSnapshot();
-  snapshot.generation_jobs[1].input.scene_card_id = "9";
-  const pending = findPendingOutputPlacements(snapshot);
-  const card = {
-    id: "scene_card_9",
-    type: "scene_card",
-    scene_card_id: "9",
-    position: { x: 500, y: 500 },
-    width: 400,
-    height: 300,
-    status: "placed",
-  };
-  const additions = planOutputCanvasNodes([card], [pending[1]], null);
-  assert.equal(additions[0].sceneCardId, "9");
-  assert.equal(additions[0].position.x, 500);
-  assert.ok(additions[0].position.y >= 500 + 300, "应位于 SceneCard 下方");
 });
 
 test("视口锚点：{x,y,zoom} 反投，非法输入回退原点", () => {

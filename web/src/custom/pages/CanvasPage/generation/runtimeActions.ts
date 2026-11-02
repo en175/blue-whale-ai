@@ -1,4 +1,5 @@
 import { isApiError, envelopeErrorCode } from '@/shared/api/http';
+import { readJobRecoveryFacts } from '@/custom/api/jobRecovery';
 import type { JobDetail } from '@/custom/api/jobs';
 import type { CanvasBinding } from '@/custom/api/canvasRecovery';
 import type {
@@ -9,8 +10,17 @@ import { TARGET_OUTPUT_KEY, type ActiveExecution, type RuntimeContext } from './
 
 const STALE = Symbol('generation-submit-stale');
 
-export function createActions(ctx: RuntimeContext, polling: { poll: (execution: ActiveExecution, jobId: string) => void; converge: (execution: ActiveExecution, jobId: string, detail: JobDetail) => void }) {
-  const {
+function failureFactsOf(e: unknown): { errorCategory?: string; errorRetryable?: boolean } {
+  if (!isApiError(e)) return {};
+  const data = (e.data ?? {}) as Record<string, unknown>;
+  const facts = readJobRecoveryFacts(data);
+  return {
+    ...(facts.category ? { errorCategory: facts.category } : {}),
+    ...(facts.retryable != null ? { errorRetryable: facts.retryable } : {}),
+  };
+}
+
+export function createActions(ctx: RuntimeContext, polling: { poll: (execution: ActiveExecution, jobId: string) => void; converge: (execution: ActiveExecution, jobId: string, detail: JobDetail) => void }) {  const {
     host, doFetchJobStatus, active, ledger, nodeBindings, boundJobIds, deleting,
     retryAttempts, retryInFlight, submitAttempts, nextRound, newId, readMarker,
     defForNode, owns, recoveryItemIdOf, adoptBindingView, adoptConflictBindingRevision,
@@ -108,6 +118,7 @@ export function createActions(ctx: RuntimeContext, polling: { poll: (execution: 
           genStatus: 'failed',
           errorText: bindingConflict ? '卡片归属已变化，请复核后再发送' : (isApiError(e) ? e.message : '创建任务失败'),
           errorCode: isApiError(e) ? envelopeErrorCode(e) : undefined,
+          ...failureFactsOf(e),
         });
       });
     return true;
@@ -197,6 +208,7 @@ export function createActions(ctx: RuntimeContext, polling: { poll: (execution: 
             genStatus: 'failed',
             errorText: isApiError(e) ? e.message : '余额不足',
             errorCode: isApiError(e) ? envelopeErrorCode(e) : undefined,
+            ...failureFactsOf(e),
           });
           return;
         }
@@ -209,6 +221,7 @@ export function createActions(ctx: RuntimeContext, polling: { poll: (execution: 
           genStatus: 'failed',
           errorText: bindingConflict ? '卡片归属已变化，请复核后再发送' : (isApiError(e) ? e.message : '重试失败'),
           errorCode: isApiError(e) ? envelopeErrorCode(e) : undefined,
+          ...failureFactsOf(e),
         });
       });
     return true;

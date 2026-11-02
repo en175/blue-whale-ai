@@ -24,12 +24,6 @@ export {
   type ConversationQuoteRow,
 } from "./conversation-quote-repo.js";
 export {
-  createLegacyCardHistoryRepo,
-  type LegacyCardHistoryDraft,
-  type LegacyCardHistoryRepo,
-  type LegacyCardHistoryRow,
-} from "./legacy-card-history-repo.js";
-export {
   createJobRepo,
   type JobRepo,
   type JobListItem,
@@ -65,17 +59,7 @@ export {
   type SnapshotConversationState,
   type SnapshotMentionView,
   type SnapshotAssetRow,
-  type SnapshotSceneCardView,
-  type SnapshotSceneCardGenerationRecordView,
-  type SnapshotStoryboardPreviewView,
 } from "./snapshot-repo.js";
-export {
-  appendProjectEvent,
-  createProductEventRepo,
-  type AppendProjectEventInput,
-  type ProductEventRepo,
-  type ProductEventView,
-} from "./product-event-repo.js";
 export {
   transactionWithUniqueRetry,
 } from "./conversation-repo.js";
@@ -111,14 +95,6 @@ export {
   type AssetSourceFields,
   type PendingUploadAsset,
 } from "./asset-repo.js";
-export {
-  createSharedAssetRepo,
-  type SharedAssetRepo,
-  type SharedAssetRow,
-  type SharedAssetCreateInput,
-  type SharedAssetListFilter,
-  type SharedAssetPage,
-} from "./shared-asset-repo.js";
 export {
   createMaterialGroupRepo,
   type MaterialGroupRepo,
@@ -235,43 +211,14 @@ export {
 } from "./generation-finalize-repo.js";
 export type { JobBilling, JobBillingSource } from "./job-billing.js";
 export {
-  aggregateSlotStatus,
   resolveLogicalSlots,
   type OutputSlotStatus,
-  type SlotSummaryStatus,
 } from "./generation-output-slot-repo.js";
 export {
   validateDerivedReferences,
   type CapabilitySnapshot,
   type DerivedReference,
 } from "./plan-application-repo.js";
-export {
-  createSceneCardGenerationRepo,
-  type SceneCardGenerationRepo,
-  type RegenerateSceneCardInput,
-  type RegenerateSceneCardResult,
-  type SceneCardGenerationPresetView,
-  type SceneCardGenerationPresetViewResult,
-} from "./scene-card-generation-repo.js";
-export {
-  createSceneCardResourceRepo,
-  type SceneCardResourceRepo,
-  type SceneCardResourceResult,
-  type DeleteSceneCardResourceInput,
-  type DeleteSceneCardResourceResult,
-  type SceneCardSharedSnapshotSource,
-  type FindOwnedSceneCardWithPresetResult,
-  type CopySceneCardToProjectInput,
-  type CopySceneCardToProjectResult,
-} from "./scene-card-resource-repo.js";
-export {
-  createStoryboardPreviewRepo,
-  type StoryboardPreviewRepo,
-  type CreateStoryboardPreviewInput,
-  type CreateStoryboardPreviewResult,
-  type StoryboardPreviewView,
-  type ListStoryboardPreviewsResult,
-} from "./storyboard-preview-repo.js";
 export { createAssetOwnershipOps } from "./asset-ownership-repo.js";
 export type { AssetOwnershipOps, WorkerInputAsset } from "./asset-ownership-types.js";
 export {
@@ -285,6 +232,10 @@ export {
 } from "./topup-tier-repo.js";
 export {
   createOperationLogRepo,
+  OPERATION_STATUS_DONE,
+  OPERATION_STATUS_PENDING,
+  OPERATION_STATUS_SUCCEEDED,
+  OPERATION_STATUS_FAILED,
   type OperationLogRepo,
   type OperationLogView,
   type OperationLogFilter,

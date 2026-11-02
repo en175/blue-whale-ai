@@ -169,7 +169,7 @@ function mergeStored(
 
 function invalidConfigError(): NewApiError {
   return new NewApiError(
-    "自定义充值配置缺失或损坏：system_settings.rechargeCustom",
+    "自定义充值配置缺失或损坏：bw_platform_settings.rechargeCustom",
     503,
     "recharge_custom_unconfigured",
   );
@@ -180,7 +180,7 @@ export function createRechargeCustomConfigRepo(
   prisma: PrismaClient,
 ): RechargeCustomConfigRepo {
   async function readRow(): Promise<{ config: StoredConfig; row: SettingRow } | null> {
-    const row = await prisma.system_settings.findUnique({
+    const row = await prisma.bw_platform_settings.findUnique({
       where: { setting_key: RECHARGE_CUSTOM_SETTING_KEY },
     });
     if (!row) return null;
@@ -201,7 +201,7 @@ export function createRechargeCustomConfigRepo(
       if (!parseStoredConfig(JSON.stringify(next))) {
         throw new NewApiError("自定义充值配置不合法", 400);
       }
-      const { count } = await prisma.system_settings.updateMany({
+      const { count } = await prisma.bw_platform_settings.updateMany({
         where: {
           setting_key: RECHARGE_CUSTOM_SETTING_KEY,
           version: expectedVersion,
