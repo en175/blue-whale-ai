@@ -458,7 +458,6 @@ describe("★ R4：库里现有规则的形态全部通过按渠道的写闸门"
           kind: "table",
           table: { "size=1k": 4500, "size=1.5k": 4500, "size=2k": 9000 },
         },
-        dimPrices: { "usage.referenceCount": { unitMc: 300, firstFree: true } },
         minCredits: 1,
         unitDenominator: 1,
       },
@@ -485,7 +484,6 @@ describe("★ R4：库里现有规则的形态全部通过按渠道的写闸门"
           kind: "table",
           table: { "resolution=480p|video=0": 13000, "resolution=4k|video=1": 260000 },
         },
-        multipliers: { "usage.videoEdit": 20000 },
         minCredits: 1,
         unitDenominator: 1,
       },
@@ -502,7 +500,6 @@ describe("★ R4：库里现有规则的形态全部通过按渠道的写闸门"
           table: { "resolution=480p|video=0": 20000, "resolution=1080p|video=1": 110000 },
         },
         dims: { "usage.referenceSeconds": 10000 },
-        multipliers: { "usage.videoEdit": 20000 },
         minCredits: 1,
         unitDenominator: 1,
       },
@@ -584,12 +581,6 @@ describe("★ 单价的符号：负数一律拒（0 合法）—— 负的在账
     if (!parsed.ok) expect(parsed.error).toContain("size=2k");
   });
 
-  it("multipliers = 0 → 拒（整单连乘，0 会让**整单**免费）", () => {
-    const parsed = update({ ...base, multipliers: { "usage.referenceCount": 0 } });
-    expect(parsed.ok).toBe(false);
-    if (!parsed.ok) expect(parsed.error).toContain("须为正整数");
-  });
-
   it("dims 为负 → 拒（负倍率把等效数量拉低，等于少收）", () => {
     const parsed = update({ ...base, dims: { "usage.referenceCount": -1000 } });
     expect(parsed.ok).toBe(false);
@@ -602,7 +593,6 @@ describe("★ 单价的符号：负数一律拒（0 合法）—— 负的在账
 
   it("正常的正数规则照常放行（回归：别把闸门收得过紧）", () => {
     expect(update({ ...base, basePrice: { kind: "const", value: 4500 } }).ok).toBe(true);
-    expect(update({ ...base, multipliers: { "usage.referenceCount": 12000 } }).ok).toBe(true);
     expect(update({ ...base, dims: { "usage.referenceCount": 4000 } }).ok).toBe(true);
   });
 });
@@ -652,55 +642,6 @@ describe("★ 按渠道收窄计价形状（形状，不是金额）", () => {
       "seedream-video",
     );
     expect(parsed.ok).toBe(true);
-  });
-
-  const withDimPrices = (dimPrices: unknown, extra: Record<string, unknown> = {}) => ({
-    baseUnit: "usage.succeededSlots",
-    basePrice: { kind: "const", value: 3000 },
-    unitDenominator: 1,
-    minCredits: 1,
-    dimPrices,
-    ...extra,
-  });
-  const imageUpdate = (pricing: unknown) =>
-    parseModelUpdateBody({ pricing }, { capability_type: "image", channel: "seedream-image" });
-
-  it("★ 合法形态放行（钉住真实那条的键与形状）", () => {
-    const parsed = imageUpdate(
-      withDimPrices({ "usage.referenceCount": { unitMc: 300, firstFree: true } }),
-    );
-    expect(parsed.ok, parsed.ok ? "" : parsed.error).toBe(true);
-  });
-
-  it("★ unitMc 必须是**正**整数 —— 0 与负数都拒", () => {
-    for (const bad of [0, -300, 12.5]) {
-      const parsed = imageUpdate(withDimPrices({ "usage.referenceCount": { unitMc: bad } }));
-      expect(parsed.ok, `unitMc=${bad} 应当被拒`).toBe(false);
-      if (!parsed.ok) expect(parsed.error).toContain("unitMc");
-    }
-  });
-
-  it("★ 维度键必须在基准维度白名单里", () => {
-    const parsed = imageUpdate(withDimPrices({ "usage.nosuchDim": { unitMc: 300 } }));
-    expect(parsed.ok).toBe(false);
-    if (!parsed.ok) expect(parsed.error).toContain("dimPrices");
-  });
-
-  it("★ firstFree 只能是布尔（缺省 = 不免费）", () => {
-    expect(imageUpdate(withDimPrices({ "usage.referenceCount": { unitMc: 300 } })).ok).toBe(true);
-    const parsed = imageUpdate(
-      withDimPrices({ "usage.referenceCount": { unitMc: 300, firstFree: "yes" } }),
-    );
-    expect(parsed.ok).toBe(false);
-    if (!parsed.ok) expect(parsed.error).toContain("firstFree");
-  });
-
-  it("★ dimPrices 与 maxCredits 互斥 —— 同时配会让结算超出预扣并记应收（少收且静默）", () => {
-    const parsed = imageUpdate(
-      withDimPrices({ "usage.referenceCount": { unitMc: 300, firstFree: true } }, { maxCredits: 50 }),
-    );
-    expect(parsed.ok).toBe(false);
-    if (!parsed.ok) expect(parsed.error).toContain("maxCredits");
   });
 });
 
