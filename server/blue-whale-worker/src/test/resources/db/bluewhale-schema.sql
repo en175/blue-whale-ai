@@ -321,7 +321,7 @@ CREATE TABLE `user_skills` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
-CREATE TABLE `content_homepage_heroes` (
+CREATE TABLE `bw_homepage_heroes` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `media_type` VARCHAR(16) NOT NULL DEFAULT 'video',
     `media_url` VARCHAR(512) NOT NULL,

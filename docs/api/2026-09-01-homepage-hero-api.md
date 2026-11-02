@@ -34,7 +34,7 @@
 
 ---
 
-## 1. 数据模型 `content_homepage_heroes`
+## 1. 数据模型 `bw_homepage_heroes`
 
 | 字段（snake） | 接口字段（camel） | 类型 | 说明 |
 |---|---|---|---|
