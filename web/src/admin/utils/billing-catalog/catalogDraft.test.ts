@@ -255,6 +255,9 @@ describe('ruleFormError（只拦表单表达不出来的东西）', () => {
     expect(
       ruleFormError(form({ dims: [{ key: 'usage.seconds', value: '4000' }] })),
     ).toBeNull();
+    expect(ruleFormError(form({ dims: [{ key: ' ', value: '1' }] }))).toBe(
+      '维度表的键不能为空',
+    );
   });
 
   it('单位分母 / 上下限留空可以，填了就必须是整数', () => {

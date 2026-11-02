@@ -905,13 +905,15 @@ describe('ModelList 价格表按维度铺开', () => {
     expect(document.body.textContent).toContain('等价键');
   });
 
-  it('★ 附加维度在保存时原样保留', async () => {
+  it('★ 存量行里的倍率/绝对加价不再随保存提交，附加维度原样保留', async () => {
     api.fetchAdminModels.mockResolvedValue([
       {
         ...imagePriced,
         pricing: {
           ...(imagePriced.pricing as Record<string, unknown>),
           dims: { 'usage.referenceSeconds': 10000 },
+          multipliers: { 'usage.referenceCount': 12000 },
+          dimPrices: { 'usage.referenceCount': { unitMc: 300, firstFree: true } },
         },
       },
     ]);

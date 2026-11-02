@@ -285,6 +285,10 @@ export function ruleFromForm(
   if (Object.keys(dims).length > 0) rule.dims = dims;
   else delete rule.dims;
 
+  const legacy = rule as CatalogRuleView & { multipliers?: unknown; dimPrices?: unknown };
+  delete legacy.multipliers;
+  delete legacy.dimPrices;
+
   rule.maxCredits = form.maxCredits.trim() ? parseWhole(form.maxCredits) : null;
 
   return rule;
