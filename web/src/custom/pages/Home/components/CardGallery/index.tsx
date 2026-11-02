@@ -19,8 +19,6 @@ const FALLBACK_TAGS: TemplateTag[] = [
 
 const FEATURED_TAG: TemplateTag = { tag_code: '__featured', label: '精选' };
 
-const HIDDEN_CASE_TITLES = new Set(['测试20260828144946']);
-
 function mediaKindOf(record: TemplateRecord): GalleryMediaKind {
   return record.video ? 'video' : 'image';
 }
@@ -122,18 +120,15 @@ export default function CardGallery({ onCardClick }: { onCardClick?: (text: stri
 
   const tags = records.map((group) => group.tag);
 
-  const cards = useMemo(() => {
-    const groups = records
-      .filter((group) => !activeTag || group.tag.tag_code === activeTag)
-      .map(({ tag, records: list }) => ({
-        tag,
-        list: list.filter((record) => !HIDDEN_CASE_TITLES.has(record.title)),
-      }))
-      .filter((group) => group.list.length > 0);
-    return groups.flatMap((group) =>
-      group.list.map((record) => ({ record, tag: group.tag, mediaKind: mediaKindOf(record) })),
-    );
-  }, [records, activeTag]);
+  const cards = useMemo(
+    () =>
+      records
+        .filter((group) => !activeTag || group.tag.tag_code === activeTag)
+        .flatMap(({ tag, records: list }) =>
+          list.map((record) => ({ record, tag, mediaKind: mediaKindOf(record) })),
+        ),
+    [records, activeTag],
+  );
 
   return (
     <div className={styles.gallery}>
