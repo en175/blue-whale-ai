@@ -1,37 +1,38 @@
-import { useMemo } from 'react';
-import { Plus, Trash2 } from 'lucide-react';
+import { useEffect, useMemo } from 'react';
+import { Trash2 } from 'lucide-react';
 import {
   BASE_UNIT_OPTIONS,
   creditsToMc,
   describePriceInHuman,
+  mcToCredits,
   priceUnitLabel,
   type CatalogRuleView,
-  type DimPriceRow,
-  type KeyValueRow,
+  type PriceRow,
   type RuleForm,
 } from '../../utils/billing-catalog/catalogDraft';
-import { filledPriceRows, planRows } from '../../utils/billing-catalog/rowPlan';
 import {
+  axisValueInKey,
+  axisValueLabel,
   configuredSizePixels,
   defaultAxesForBaseUnit,
   describePixels,
-  priceTableCandidates,
+  priceTableAxes,
   sizeOfSpecKey,
   type ModelCapabilityView,
+  type SpecAxis,
 } from '../../utils/billing-catalog/sizeCandidates';
 import {
   Alert,
+  Badge,
   Button,
-  Checkbox,
   Field,
   Input,
   MetaRow,
   Select,
   formGrid,
-  type SelectOption,
 } from '../../ui';
 import { GRID3 } from './formLayout';
-import SpecRows, { KeyValueEditor } from './SpecRows';
+import { KeyValueEditor } from './SpecRows';
 import { channelOf, type ChannelId } from './model-form';
 
 const ROUNDING_OPTIONS = [
@@ -65,19 +66,6 @@ export default function PricingTab({
     ? BASE_UNIT_OPTIONS
     : [...BASE_UNIT_OPTIONS, { value: form.baseUnit, label: `${form.baseUnit}（库里的现值）` }];
 
-  const dimPriceOptions = useMemo(() => {
-    const extra = [
-      ...new Set(
-        form.dimPrices
-          .map((row) => row.key.trim())
-          .filter((key) => key !== '' && !BASE_UNIT_OPTIONS.some((o) => o.value === key)),
-      ),
-    ];
-    return extra.length === 0
-      ? BASE_UNIT_OPTIONS
-      : [...BASE_UNIT_OPTIONS, ...extra.map((key) => ({ value: key, label: `${key}（库里的现值）` }))];
-  }, [form.dimPrices]);
-
   const unitLabel = priceUnitLabel({
     baseUnit: form.baseUnit,
     unitDenominator: Number(form.unitDenominator.trim() || '1'),
@@ -97,15 +85,25 @@ export default function PricingTab({
 
   const originalPriceKeys = useMemo(() => Object.keys(rule?.basePrice?.table ?? {}), [rule]);
 
-  const priceCandidates = useMemo(
-    () => (capability === null ? null : priceTableCandidates(capability, priceAxes, originalPriceKeys)),
+  const axes = useMemo(
+    () => (capability === null ? null : priceTableAxes(capability, priceAxes, originalPriceKeys)),
     [capability, priceAxes, originalPriceKeys],
   );
 
-  const pricePlan = useMemo(
-    () => planRows(form.priceTable, priceCandidates, (key) => ({ key, value: '', originalMc: null })),
-    [form.priceTable, priceCandidates],
-  );
+  const usableAxes = axes !== null && axes.every((axis) => axis.values.length > 0);
+
+  useEffect(() => {
+    if (form.priceKind !== 'table' || axes === null || !usableAxes) return;
+    const combos = combinations(axes).map((picked) => priceKey(axes, picked));
+    const kept = form.priceTable.filter((row) => row.key.trim() !== '');
+    const known = new Set(kept.map((row) => normalizeKey(row.key)));
+    const missing = combos.filter((key) => !known.has(normalizeKey(key)));
+    if (kept.length === form.priceTable.length && missing.length === 0) return;
+    onChange({
+      ...form,
+      priceTable: [...kept, ...missing.map((key) => ({ key, value: '', originalMc: null }))],
+    });
+  }, [form, axes, usableAxes, onChange]);
 
   const priceCredits = form.priceValue.value.trim();
   const parsedCredits = Number(priceCredits);
@@ -165,7 +163,7 @@ export default function PricingTab({
               const kind = v === 'table' ? 'table' : v === 'unset' ? 'unset' : 'const';
               patch({
                 priceKind: kind,
-                ...(kind === 'table' && form.priceTable.length === 0
+                ...(kind === 'table' && !form.priceTable.some((row) => row.key.trim() !== '')
                   ? { priceTable: [{ key: '', value: '', originalMc: null }] }
                   : {}),
               });
@@ -190,29 +188,26 @@ export default function PricingTab({
         ) : form.priceKind === 'table' ? (
           <Field
             label={`价格表（规格键 → 单价，积分 / ${unitLabel}）`}
-            hint="行来自本行的尺寸与比例；这里只填价"
+            hint="维度取值勾好后自动铺行；这里只填价"
             info={
               <>
-                档位候选派生自本行声明的<b>尺寸与比例</b>，你只需要填价。
+                每行由一个维度的取值组合而成，规格键由系统生成、不需要手写。
                 <div style={{ marginTop: 'var(--admin-space-2)' }}>
                   没配到的档位组合提交会被<b>拒绝</b>——不会按 0 免费生成。
                 </div>
               </>
             }
           >
-            <SpecRows
-              plan={pricePlan}
-              derived={priceCandidates !== null}
-              ariaPrefix="价格表"
-              keyPlaceholder="resolution=720p|video=1"
-              valuePlaceholder="70"
-              fallbackNotice="本行的尺寸档与比例还没配，档位候选集派生不出来 —— 暂时按手工填键的方式编辑。配好尺寸与比例后，这里会显示成只读候选。"
-              hintOf={(row) => (capability === null ? '' : specKeyHint(capability, row))}
-              makeRow={() => ({ key: '', value: '', originalMc: null })}
-              onRows={(priceTable) =>
-                patch({ priceTable: priceCandidates === null ? priceTable : filledPriceRows(priceTable) })
-              }
-            />
+            {capability === null || axes === null || !usableAxes ? (
+              <PriceTableReadOnly axes={capability === null ? null : axes} rows={form.priceTable} />
+            ) : (
+              <PriceTableEditor
+                axes={axes}
+                rows={form.priceTable}
+                capability={capability}
+                onChange={(priceTable) => patch({ priceTable })}
+              />
+            )}
           </Field>
         ) : (
           <Alert tone="warning" title="单价还没填 —— 这个模型的提交会被拒绝">
@@ -262,7 +257,7 @@ export default function PricingTab({
       </div>
 
       {}
-      <div style={{ ...formGrid(2), marginTop: 'var(--admin-space-4)' }}>
+      <div style={{ marginTop: 'var(--admin-space-4)' }}>
         <Field label="附加维度（万分比）" hint="按用量加权：10000 = 1 倍，4000 = 0.4 倍。留空表示不加权">
           <KeyValueEditor
             rows={form.dims}
@@ -273,122 +268,211 @@ export default function PricingTab({
             onChange={(dims) => patch({ dims })}
           />
         </Field>
-        <Field label="整单倍率（万分比）" hint="整单连乘：12000 = 1.2 倍">
-          <KeyValueEditor
-            rows={form.multipliers}
-            ariaPrefix="整单倍率"
-            keyPlaceholder="usage.referenceCount"
-            valuePlaceholder="12000"
-            makeRow={() => ({ key: '', value: '' })}
-            onChange={(multipliers) => patch({ multipliers })}
-          />
-        </Field>
-      </div>
-
-      {}
-      <div style={{ marginTop: 'var(--admin-space-4)' }}>
-        <Field
-          label="维度绝对加价（积分 / 每个单位）"
-          hint={<>按维度收固定单价，<b>不乘</b>基准单价 —— 与上面的「附加维度」那种相对加价不同</>}
-          info={
-            <>
-              这里给的是<b>绝对值</b>：每个单位固定多少积分，与基准单价无关。所以它表达得了
-              「输出图分 0.3 / 0.6 两档，但参考图每张都是 0.02 积分」——上面的「附加维度」是万分比，
-              同一个数在两档下会算出两个价。
-              <div style={{ marginTop: 'var(--admin-space-2)' }}>
-                每行一个维度（与基准维度同一份白名单）。单价按<b>积分</b>填、写回是 mc，必须
-                <b>大于 0</b>：要让某个维度免费就整行删掉，别写 0。勾上「首张免费」则第一个单位
-                不计费（火山 Seedream 5.0 Pro 的「首张参考图免费」就是它）。
-              </div>
-              <div style={{ marginTop: 'var(--admin-space-2)' }}>
-                ⚠️ 与「积分上限」<b>互斥</b>：上限计价跳过用量计算、算不到这份加价，预扣会冻少，
-                结算超出后只记应收（少收且静默）。两者只能配一个。
-              </div>
-            </>
-          }
-        >
-          <DimPriceEditor
-            rows={form.dimPrices}
-            options={dimPriceOptions}
-            onChange={(dimPrices) => patch({ dimPrices })}
-          />
-        </Field>
       </div>
     </>
   );
 }
 
-function specKeyHint(capability: ModelCapabilityView, row: KeyValueRow): string {
-  const size = sizeOfSpecKey(capability, row.key);
-  if (size === null) return '';
-  const pixels = describePixels(configuredSizePixels(capability, size));
-  return pixels ? `本行尺寸：${pixels}` : '';
+const AXIS_LABELS: Record<string, string> = {
+  size: '尺寸档',
+  resolution: '分辨率档',
+  aspect_ratio: '比例',
+  video: '视频输入',
+  image_reference: '参考图',
+  duration: '时长',
+};
+
+function normalizeKey(key: string): string {
+  return key.trim().toLowerCase();
 }
 
-function DimPriceEditor({
+function combinations(axes: SpecAxis[]): Array<Record<string, string>> {
+  let picked: Array<Record<string, string>> = [{}];
+  for (const axis of axes) {
+    picked = picked.flatMap((prefix) =>
+      axis.values.map((value) => ({ ...prefix, [axis.name]: value })),
+    );
+  }
+  return picked;
+}
+
+function priceKey(axes: SpecAxis[], picked: Record<string, string>): string {
+  return axes.map((axis) => `${axis.name}=${picked[axis.name]}`).join('|');
+}
+
+function describeKey(capability: ModelCapabilityView, axes: SpecAxis[], key: string): string {
+  return axes
+    .map((axis) => axisValueLabel(capability, axis.name, axisValueInKey(key, axis.name)))
+    .join(' · ');
+}
+
+function specKeyHint(capability: ModelCapabilityView, key: string): string {
+  const size = sizeOfSpecKey(capability, key);
+  if (size === null) return '';
+  const pixels = describePixels(configuredSizePixels(capability, size));
+  return pixels ? `尺寸：${pixels}` : '';
+}
+
+function PriceTableEditor({
+  axes,
   rows,
-  options,
+  capability,
   onChange,
 }: {
-  rows: DimPriceRow[];
-  options: readonly SelectOption[];
-  onChange: (rows: DimPriceRow[]) => void;
+  axes: SpecAxis[];
+  rows: PriceRow[];
+  capability: ModelCapabilityView;
+  onChange: (rows: PriceRow[]) => void;
 }) {
-  const patchRow = (index: number, next: Partial<DimPriceRow>) =>
-    onChange(rows.map((row, i) => (i === index ? { ...row, ...next } : row)));
+  const combos = combinations(axes).map((picked) => priceKey(axes, picked));
+  const byKey = new Map(
+    rows.filter((row) => row.key.trim() !== '').map((row) => [normalizeKey(row.key), row]),
+  );
+  const known = new Set(combos.map(normalizeKey));
+  const merged = combos.map(
+    (key) => byKey.get(normalizeKey(key)) ?? { key, value: '', originalMc: null },
+  );
+  const orphans = rows.filter(
+    (row) => row.key.trim() !== '' && !known.has(normalizeKey(row.key)),
+  );
+
+  const setPrice = (key: string, value: string) => {
+    const wanted = normalizeKey(key);
+    if (!rows.some((row) => normalizeKey(row.key) === wanted)) {
+      onChange([...rows, { key, value, originalMc: null }]);
+      return;
+    }
+    onChange(rows.map((row) => (normalizeKey(row.key) === wanted ? { ...row, value } : row)));
+  };
+
+  const removeRow = (key: string) => {
+    const wanted = normalizeKey(key);
+    onChange(rows.filter((row) => normalizeKey(row.key) !== wanted));
+  };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--admin-space-2)' }}>
-      {rows.map((row, index) => (
-        <div key={index} style={{ display: 'flex', alignItems: 'center', gap: 'var(--admin-space-3)' }}>
-          {}
-          <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-            <Select
-              aria-label={`维度绝对加价第 ${index + 1} 行维度`}
-              options={options}
-              value={row.key.trim()}
-              placeholder="选择维度…"
-              onChange={(key) => patchRow(index, { key })}
-            />
-          </div>
-          <Input
-            aria-label={`维度绝对加价第 ${index + 1} 行单价`}
-            placeholder="例如 1"
-            value={row.value}
-            onChange={(e) => patchRow(index, { value: e.target.value })}
-            style={{ width: 120 }}
-          />
-          <Checkbox
-            aria-label={`维度绝对加价第 ${index + 1} 行首张免费`}
-            checked={row.firstFree}
-            onChange={(firstFree) => patchRow(index, { firstFree })}
-            label="首张免费"
-          />
-          <Button
-            size="sm"
-            variant="ghost"
-            title="删掉这一行"
-            aria-label={`删掉维度绝对加价第 ${index + 1} 行`}
-            icon={<Trash2 size={15} strokeWidth={2} />}
-            onClick={() => onChange(rows.filter((_, i) => i !== index))}
-          />
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      {axes.map((axis) => (
+        <div key={axis.name} style={{ fontSize: 'var(--admin-font-xs)', color: 'var(--admin-text-muted)' }}>
+          {AXIS_LABELS[axis.name] ?? axis.name}：
+          {axis.values.map((value) => axisValueLabel(capability, axis.name, value)).join(' / ')}
         </div>
       ))}
-      <div>
+      {merged.map((row) => (
+        <PriceRowLine
+          key={row.key}
+          row={row}
+          capability={capability}
+          axes={axes}
+          onPrice={(value) => setPrice(row.key, value)}
+        />
+      ))}
+      {orphans.map((row) => (
+        <PriceRowLine
+          key={row.key}
+          row={row}
+          capability={capability}
+          axes={axes}
+          orphan
+          onPrice={(value) => setPrice(row.key, value)}
+          onRemove={() => removeRow(row.key)}
+        />
+      ))}
+      {merged.length === 0 && (
+        <div style={{ fontSize: 'var(--admin-font-xs)', color: 'var(--admin-text-muted)' }}>
+          维度没有可用取值，生成不了价格行。
+        </div>
+      )}
+      {orphans.length > 0 && (
+        <div style={{ fontSize: 'var(--admin-font-xs)', color: 'var(--admin-text-muted)' }}>
+          标黄的行在模型配置里没有对应档位，用户选不到它 —— 要么在模型配置里补上，要么删掉。
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PriceRowLine({
+  row,
+  capability,
+  axes,
+  orphan,
+  onPrice,
+  onRemove,
+}: {
+  row: PriceRow;
+  capability: ModelCapabilityView;
+  axes: SpecAxis[];
+  orphan?: boolean;
+  onPrice: (value: string) => void;
+  onRemove?: () => void;
+}) {
+  const hint = specKeyHint(capability, row.key);
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <span style={{ fontSize: 13 }}>{describeKey(capability, axes, row.key)}</span>
+        {orphan && (
+          <span style={{ marginLeft: 8 }}>
+            <Badge tone="warning">模型配置里没有这一档</Badge>
+          </span>
+        )}
+        <div style={{ fontSize: 'var(--admin-font-xs)' }}>
+          <code>{row.key}</code>
+          {hint && <span style={{ marginLeft: 8 }}>{hint}</span>}
+        </div>
+      </div>
+      <Input
+        size="sm"
+        aria-label={`价格表 ${row.key} 单价`}
+        placeholder="70"
+        value={row.value}
+        onChange={(event) => onPrice(event.target.value)}
+        style={{ width: 120 }}
+      />
+      {orphan ? (
         <Button
           size="sm"
-          icon={<Plus size={15} strokeWidth={2} />}
-          aria-label="给维度绝对加价添加一行"
-          onClick={() =>
-            onChange([
-              ...rows,
-              { key: '', value: '', originalMc: null, firstFree: false, originalSpec: null },
-            ])
-          }
-        >
-          添加一行
-        </Button>
-      </div>
+          variant="ghost"
+          title="删掉这一行"
+          aria-label={`删掉价格表 ${row.key}`}
+          icon={<Trash2 size={15} strokeWidth={2} />}
+          onClick={onRemove}
+        />
+      ) : (
+        <span style={{ width: 30 }} />
+      )}
     </div>
+  );
+}
+
+function PriceTableReadOnly({ axes, rows }: { axes: SpecAxis[] | null; rows: PriceRow[] }) {
+  const missing = (axes ?? [])
+    .filter((axis) => axis.values.length === 0)
+    .map((axis) => AXIS_LABELS[axis.name] ?? axis.name);
+  return (
+    <>
+      <Alert tone="warning">
+        {axes === null
+          ? '这个模型的定价维度还没适配，价格表只读展示。'
+          : `${missing.join('、')}还没配置，价格表暂时只读。先到「尺寸与素材」配好，这里会自动铺开成可填价的行。`}
+      </Alert>
+      {rows.filter((row) => row.key.trim() !== '').length === 0 ? (
+        <div style={{ fontSize: 'var(--admin-font-xs)', color: 'var(--admin-text-muted)' }}>
+          库里还没有价格。
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {rows
+            .filter((row) => row.key.trim() !== '')
+            .map((row) => (
+              <div key={row.key} style={{ display: 'flex', gap: 8, fontSize: 13 }}>
+                <code style={{ flex: 1, minWidth: 0, fontSize: 'var(--admin-font-xs)' }}>{row.key}</code>
+                <span>{row.originalMc === null ? row.value : `${mcToCredits(row.originalMc)} 积分`}</span>
+              </div>
+            ))}
+        </div>
+      )}
+    </>
   );
 }

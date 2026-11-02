@@ -2,14 +2,18 @@ import { describe, expect, it } from 'vitest';
 import type { AdminModel } from '@/admin/api/adminModels';
 import {
   axisValueInKey,
+  axisValueLabel,
+  axisValues,
   buildCapabilityIndex,
   candidateSpecKeys,
   configuredSizePixels,
   defaultAxesForBaseUnit,
   describePixels,
   dimensionTableCandidates,
+  expandDurations,
   parsePixels,
   prefillDimensionValue,
+  priceTableAxes,
   priceTableCandidates,
   sizeOfSpecKey,
 } from './sizeCandidates';
@@ -185,6 +189,43 @@ describe('defaultAxesForBaseUnit（新建规则的初值）', () => {
     expect(defaultAxesForBaseUnit('usage.seconds')).toEqual(['resolution', 'video']);
     expect(defaultAxesForBaseUnit('usage.succeededSlots')).toEqual(['size']);
     expect(defaultAxesForBaseUnit('constant:1')).toEqual([]);
+  });
+});
+
+describe('价格表维度目录', () => {
+  it('image_reference 固定 0/1，按有无参考图分价', () => {
+    expect(axisValues(seedreamPro, 'image_reference')).toEqual(['0', '1']);
+  });
+
+  it('duration 按 [min, max, step] 展开；非法区间 → 空', () => {
+    const video = buildCapabilityIndex([
+      model({ model_id: 'm', capability_type: 'video', supported_durations: [4, 8, 2] }),
+    ]).get('m')!;
+    expect(axisValues(video, 'duration')).toEqual(['4', '6', '8']);
+    expect(expandDurations(null, 8, 1)).toEqual([]);
+    expect(expandDurations(1, 200, 1)).toEqual([]);
+    expect(expandDurations(8, 4, 1)).toEqual([]);
+  });
+
+  it('★ by 里的轴逐个取值域，并按轴序返回', () => {
+    expect(priceTableAxes(seedreamPro, ['image_reference', 'size'], [])).toEqual([
+      { name: 'size', values: ['1k', '1.5k', '2k'] },
+      { name: 'image_reference', values: ['0', '1'] },
+    ]);
+  });
+
+  it('未知轴 → null（调用方退回只读）；已知但没配置 → 空数组', () => {
+    expect(priceTableAxes(seedreamPro, ['fps'], [])).toBeNull();
+    const noSizes = buildCapabilityIndex([model({ model_id: 'm' })]).get('m')!;
+    expect(priceTableAxes(noSizes, ['size'], [])).toEqual([{ name: 'size', values: [] }]);
+  });
+
+  it('行标签用配置里的展示名，参考图与视频输入用中文', () => {
+    expect(axisValueLabel(seedreamPro, 'size', '1.5k')).toBe('1.5K');
+    expect(axisValueLabel(seedreamPro, 'image_reference', '0')).toBe('无参考图');
+    expect(axisValueLabel(seedreamPro, 'image_reference', '1')).toBe('有参考图');
+    expect(axisValueLabel(seedreamPro, 'video', '1')).toBe('含视频输入');
+    expect(axisValueLabel(seedreamPro, 'duration', '6')).toBe('6 秒');
   });
 });
 

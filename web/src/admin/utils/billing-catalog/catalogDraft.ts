@@ -187,6 +187,7 @@ function priceRowsError(rows: PriceRow[], field: string): string | null {
   for (const row of rows) {
     const key = row.key.trim();
     if (!key) return `${field}的键不能为空`;
+    if (row.value.trim() === '') return `${field}「${key}」还没填价`;
     if (parseMoney(row.value) === null) {
       return `${field}「${key}」的单价必须是一个数（单位：积分 / 每 unitDenominator 个单位，如 70 或 0.12）`;
     }
