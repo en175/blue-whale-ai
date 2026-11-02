@@ -145,6 +145,13 @@ export function createContext(host: GenerationRuntimeHost, deps: GenerationRunti
     nodeBindings.set(view.target_node_id, view.binding_revision);
     boundJobIds.add(String(view.job_id));
     reconciledSubmissions.add(view.submission_id);
+    const adoptedMarker = readMarker(host.findNode(view.target_node_id)?.data);
+    if (adoptedMarker !== null
+      && (adoptedMarker.submissionId !== view.submission_id || adoptedMarker.outputKey !== TARGET_OUTPUT_KEY)) {
+      host.patchNode(view.target_node_id, {
+        generationRecovery: { protocolVersion: 1, submissionId: view.submission_id, outputKey: TARGET_OUTPUT_KEY },
+      });
+    }
     setLedger({
       recoveryItemId: recoveryItemIdOf(view.submission_id, TARGET_OUTPUT_KEY),
       submissionId: view.submission_id,
