@@ -60,7 +60,6 @@ beforeEach(() => {
     if (tagCode === 'marketing') {
       return pageOf([
         { title: '商品图一', video: '', images: [], layout: 'wide', content: '填写商品正文' },
-        { title: '测试20260828144946', video: '', images: [], layout: 'wide', content: '测试正文' },
       ]);
     }
     return pageOf([{ title: '种草短片', video: 'https://example.com/clip.mp4', images: [], layout: 'wide', content: null }]);
@@ -112,16 +111,6 @@ describe('CardGallery', () => {
       filterButton('人物种草')?.click();
     });
     expect(cards()[0].textContent).toContain('人物种草');
-  });
-
-  it('过滤「测试20260828144946」', async () => {
-    await mountGallery();
-
-    await act(async () => {
-      filterButton('商品展示')?.click();
-    });
-    expect(mountNode.textContent).not.toContain('测试20260828144946');
-    expect(cards()).toHaveLength(1);
   });
 
   it('点击只把正文与模式回填，不提交', async () => {

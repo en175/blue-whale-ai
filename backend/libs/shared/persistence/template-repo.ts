@@ -43,6 +43,14 @@ export interface TemplateRepo {
   listAllTags(): Promise<TemplateTagAdminView[]>;
 }
 
+async function visibleTagCodes(prisma: PrismaClient, tagCode?: string): Promise<string[]> {
+  const tags = await prisma.catalog_template_tags.findMany({
+    where: { is_delete: 0, visible: 1, ...(tagCode ? { tag_code: tagCode } : {}) },
+    select: { tag_code: true },
+  });
+  return tags.map((t) => t.tag_code);
+}
+
 export function createTemplateRepo(prisma: PrismaClient): TemplateRepo {
   return {
     async listTags() {
@@ -68,7 +76,7 @@ export function createTemplateRepo(prisma: PrismaClient): TemplateRepo {
     async pageCards(query) {
       const where = {
         is_delete: 0,
-        ...(query.tagCode ? { tag_code: query.tagCode } : {}),
+        tag_code: { in: await visibleTagCodes(prisma, query.tagCode) },
         ...(query.isFeatured ? { is_featured: 1 } : {}),
       };
       const [total, cards] = await Promise.all([
