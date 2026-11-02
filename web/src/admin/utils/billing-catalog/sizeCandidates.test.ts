@@ -6,6 +6,7 @@ import {
   axisValues,
   buildCapabilityIndex,
   candidateSpecKeys,
+  canonicalSpecKey,
   configuredSizePixels,
   defaultAxesForBaseUnit,
   describePixels,
@@ -226,6 +227,14 @@ describe('价格表维度目录', () => {
     expect(axisValueLabel(seedreamPro, 'image_reference', '1')).toBe('有参考图');
     expect(axisValueLabel(seedreamPro, 'video', '1')).toBe('含视频输入');
     expect(axisValueLabel(seedreamPro, 'duration', '6')).toBe('6 秒');
+  });
+
+  it('★ 规格键按轴名排序归一（与 billing 的 normalizeSpecKey 同口径）', () => {
+    expect(canonicalSpecKey('size=1k|image_reference=0')).toBe('image_reference=0|size=1k');
+    expect(canonicalSpecKey('image_reference=0|size=1k')).toBe('image_reference=0|size=1k');
+    expect(canonicalSpecKey('Resolution=4K| Aspect_Ratio=16:9 ')).toBe(
+      'aspect_ratio=16:9|resolution=4k',
+    );
   });
 });
 

@@ -13,6 +13,7 @@ import {
 import {
   axisValueInKey,
   axisValueLabel,
+  canonicalSpecKey,
   configuredSizePixels,
   defaultAxesForBaseUnit,
   describePixels,
@@ -97,8 +98,8 @@ export default function PricingTab({
     if (form.priceKind !== 'table' || axes === null || !usableAxes) return;
     const combos = combinations(axes).map((picked) => priceKey(axes, picked));
     const kept = form.priceTable.filter((row) => row.key.trim() !== '');
-    const known = new Set(kept.map((row) => normalizeKey(row.key)));
-    const missing = combos.filter((key) => !known.has(normalizeKey(key)));
+    const known = new Set(kept.map((row) => canonicalSpecKey(row.key)));
+    const missing = combos.filter((key) => !known.has(canonicalSpecKey(key)));
     if (kept.length === form.priceTable.length && missing.length === 0) return;
     onChange({
       ...form,
@@ -162,12 +163,7 @@ export default function PricingTab({
             value={form.priceKind}
             onChange={(v) => {
               const kind = v === 'table' ? 'table' : v === 'unset' ? 'unset' : 'const';
-              patch({
-                priceKind: kind,
-                ...(kind === 'table' && !form.priceTable.some((row) => row.key.trim() !== '')
-                  ? { priceTable: [{ key: '', value: '', originalMc: null }] }
-                  : {}),
-              });
+              patch({ priceKind: kind });
             }}
           />
         </Field>
@@ -283,10 +279,6 @@ const AXIS_LABELS: Record<string, string> = {
   duration: '时长',
 };
 
-function normalizeKey(key: string): string {
-  return key.trim().toLowerCase();
-}
-
 function combinations(axes: SpecAxis[]): Array<Record<string, string>> {
   let picked: Array<Record<string, string>> = [{}];
   for (const axis of axes) {
@@ -303,7 +295,10 @@ function priceKey(axes: SpecAxis[], picked: Record<string, string>): string {
 
 function describeKey(capability: ModelCapabilityView, axes: SpecAxis[], key: string): string {
   return axes
-    .map((axis) => axisValueLabel(capability, axis.name, axisValueInKey(key, axis.name)))
+    .map((axis) => {
+      const value = axisValueInKey(key, axis.name);
+      return value === '' ? '（缺）' : axisValueLabel(capability, axis.name, value);
+    })
     .join(' · ');
 }
 
@@ -326,20 +321,20 @@ function PriceTableEditor({
   onChange: (rows: PriceRow[]) => void;
 }) {
   const byKey = new Map(
-    rows.filter((row) => row.key.trim() !== '').map((row) => [normalizeKey(row.key), row]),
+    rows.filter((row) => row.key.trim() !== '').map((row) => [canonicalSpecKey(row.key), row]),
   );
-  const known = new Set(combinations(axes).map((picked) => normalizeKey(priceKey(axes, picked))));
+  const known = new Set(combinations(axes).map((picked) => canonicalSpecKey(priceKey(axes, picked))));
   const orphans = rows.filter(
-    (row) => row.key.trim() !== '' && !known.has(normalizeKey(row.key)),
+    (row) => row.key.trim() !== '' && !known.has(canonicalSpecKey(row.key)),
   );
 
   const priceOf = (picked: Record<string, string>): string =>
-    byKey.get(normalizeKey(priceKey(axes, picked)))?.value ?? '';
+    byKey.get(canonicalSpecKey(priceKey(axes, picked)))?.value ?? '';
 
   const setCell = (picked: Record<string, string>, value: string) => {
     const key = priceKey(axes, picked);
-    const target = normalizeKey(key);
-    const found = rows.find((row) => normalizeKey(row.key) === target);
+    const target = canonicalSpecKey(key);
+    const found = rows.find((row) => canonicalSpecKey(row.key) === target);
     if (found === undefined) {
       onChange([...rows, { key, value, originalMc: null }]);
       return;
@@ -348,13 +343,13 @@ function PriceTableEditor({
   };
 
   const setRowValue = (key: string, value: string) => {
-    const target = normalizeKey(key);
-    onChange(rows.map((row) => (normalizeKey(row.key) === target ? { ...row, value } : row)));
+    const target = canonicalSpecKey(key);
+    onChange(rows.map((row) => (canonicalSpecKey(row.key) === target ? { ...row, value } : row)));
   };
 
   const removeRow = (key: string) => {
-    const target = normalizeKey(key);
-    onChange(rows.filter((row) => normalizeKey(row.key) !== target));
+    const target = canonicalSpecKey(key);
+    onChange(rows.filter((row) => canonicalSpecKey(row.key) !== target));
   };
 
   const rowAxis = axes.length > 1 ? axes[axes.length - 2]! : axes[0]!;
@@ -400,7 +395,9 @@ function PriceTableEditor({
             <Table>
               <thead>
                 <tr>
-                  <th style={{ width: 120 }}>{colAxis === null ? '档位' : ''}</th>
+                  <th scope="col" style={{ width: 120 }}>
+                    {colAxis === null ? '档位' : (AXIS_LABELS[rowAxis.name] ?? rowAxis.name)}
+                  </th>
                   {colAxis === null ? (
                     <th>单价（积分）</th>
                   ) : (
@@ -440,7 +437,6 @@ function PriceTableEditor({
           row={row}
           capability={capability}
           axes={axes}
-          orphan
           onPrice={(value) => setRowValue(row.key, value)}
           onRemove={() => removeRow(row.key)}
         />
@@ -458,27 +454,23 @@ function PriceRowLine({
   row,
   capability,
   axes,
-  orphan,
   onPrice,
   onRemove,
 }: {
   row: PriceRow;
   capability: ModelCapabilityView;
   axes: SpecAxis[];
-  orphan?: boolean;
   onPrice: (value: string) => void;
-  onRemove?: () => void;
+  onRemove: () => void;
 }) {
   const hint = specKeyHint(capability, row.key);
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
       <div style={{ flex: 1, minWidth: 0 }}>
         <span style={{ fontSize: 13 }}>{describeKey(capability, axes, row.key)}</span>
-        {orphan && (
-          <span style={{ marginLeft: 8 }}>
-            <Badge tone="warning">模型配置里没有这一档</Badge>
-          </span>
-        )}
+        <span style={{ marginLeft: 8 }}>
+          <Badge tone="warning">模型配置里没有这一档</Badge>
+        </span>
         <div style={{ fontSize: 'var(--admin-font-xs)' }}>
           <code>{row.key}</code>
           {hint && <span style={{ marginLeft: 8 }}>{hint}</span>}
@@ -492,18 +484,14 @@ function PriceRowLine({
         onChange={(event) => onPrice(event.target.value)}
         style={{ width: 120 }}
       />
-      {orphan ? (
-        <Button
-          size="sm"
-          variant="ghost"
-          title="删掉这一行"
-          aria-label={`删掉价格表 ${row.key}`}
-          icon={<Trash2 size={15} strokeWidth={2} />}
-          onClick={onRemove}
-        />
-      ) : (
-        <span style={{ width: 30 }} />
-      )}
+      <Button
+        size="sm"
+        variant="ghost"
+        title="删掉这一行"
+        aria-label={`删掉价格表 ${row.key}`}
+        icon={<Trash2 size={15} strokeWidth={2} />}
+        onClick={onRemove}
+      />
     </div>
   );
 }
@@ -517,7 +505,7 @@ function PriceTableReadOnly({ axes, rows }: { axes: SpecAxis[] | null; rows: Pri
       <Alert tone="warning">
         {axes === null
           ? '这个模型的定价维度还没适配，价格表只读展示。'
-          : `${missing.join('、')}还没配置，价格表暂时只读。先到「尺寸与素材」配好，这里会自动铺开成可填价的行。`}
+          : `${missing.join('、')}没有可用取值（未配置或档位超过 120），价格表暂时只读。先到「尺寸与素材」配好，这里会自动铺开成可填价的行。`}
       </Alert>
       {rows.filter((row) => row.key.trim() !== '').length === 0 ? (
         <div style={{ fontSize: 'var(--admin-font-xs)', color: 'var(--admin-text-muted)' }}>

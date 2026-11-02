@@ -206,6 +206,17 @@ export function axesOfKeys(keys: string[]): string[] {
   return [...seen];
 }
 
+export function canonicalSpecKey(key: string): string {
+  const parts: Array<[string, string]> = [];
+  for (const pair of key.split('|')) {
+    const at = pair.indexOf('=');
+    if (at <= 0) return key.trim().toLowerCase();
+    parts.push([pair.slice(0, at).trim().toLowerCase(), pair.slice(at + 1).trim().toLowerCase()]);
+  }
+  parts.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+  return parts.map(([axis, value]) => `${axis}=${value}`).join('|');
+}
+
 export function priceTableCandidates(
   view: ModelCapabilityView,
   by: string[],
