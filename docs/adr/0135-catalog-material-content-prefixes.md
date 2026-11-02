@@ -45,7 +45,7 @@ ADR-0117 §2 把前缀空间收敛为 `identity_ / billing_ / generation_`，§6
 - IKRGTJ `086`：`user_shared_asset_snapshots` 整表退役，后端 `shared-assets` 模块、路由与契约，前端共享资产弹窗与保存入口一并删除；`catalog_material_groups` 曾临时改名为 `user_material_info`。
 - IKRIFX `088` 修正素材域口径：`user_material_info` → `user_material_groups`（按 `user_id` 存用户人像库分组，归属是用户）；`catalog_material_states` → `user_material_info`（镜像上游素材状态）。三条含旧表名的索引随表改名为 `uk_user_material_info__material`、`idx_user_material_info__poll`、`idx_user_material_info__group`；`user_material_groups` 的三条索引不含旧表名，按决策 3 不改。
 - IKRIEG `087`：`content_homepage_heroes` → `bw_homepage_heroes`（运营内容表统一 `bw_` 前缀）；三条 `idx_hero_*` 索引不含旧表名，按决策 3 不改。
-- 破坏性窗口：新镜像先上线、迁移尚未执行时，它会按新表名访问仍是旧表名的库，素材组、素材状态与首页背景相关接口会直接 500；迁移执行后旧镜像立即读不到表。镜像发布与 `086` / `087` / `088` 必须在同一维护窗口内完成，先镜像后 DDL，且新镜像不得长时间空跑；迁移必须按 `078` → `086` → `088` 顺序执行，`088` 依赖 `086` 产出的 `user_material_info`。worker-java 的 `MaterialAssetMapper` 读 `user_material_info`，必须与 backend 同批；worker-java 不读 `bw_homepage_heroes`，无 jar 顺序要求。
+- 破坏性窗口：新镜像先上线、迁移尚未执行时，它会按新表名访问仍是旧表名的库，素材组、素材状态与首页背景相关接口会直接 500；迁移执行后旧镜像立即读不到表。镜像发布与 `086` / `087` / `088` 必须在同一维护窗口内完成，先镜像后 DDL，且新镜像不得长时间空跑；迁移必须按 `078` → `086` → `087` → `088` 顺序执行；`087` 与 `088` 互不依赖，均只依赖 `078` 之后的状态，`088` 依赖 `086` 产出的 `user_material_info`。worker-java 的 `MaterialAssetMapper` 读 `user_material_info`，必须与 backend 同批；worker-java 不读 `bw_homepage_heroes`，无 jar 顺序要求。
 - `087` 回滚：`RENAME TABLE bw_homepage_heroes TO content_homepage_heroes` 并回退 backend 镜像。
 - `content_` 前缀随 IKRIEG 退役：`bw_homepage_heroes` 是唯一曾用 `content_` 的表，运营内容统一归到既有 `bw_` 前缀。
 - `088` 回滚：先按逆序让状态表让出 `user_material_info`：

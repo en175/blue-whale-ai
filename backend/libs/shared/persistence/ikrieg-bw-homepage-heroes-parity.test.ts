@@ -67,6 +67,9 @@ describe("首页运营表归位 bw_ 前缀（IKRIEG）", () => {
   it("Prisma 模型与 Java 测试 schema 同步新表名", () => {
     expect(schemaPrisma).toContain("model bw_homepage_heroes {");
     expect(schemaPrisma).not.toContain("model content_homepage_heroes {");
+    expect(schemaPrisma).toContain('"idx_hero_enabled_sort"');
+    expect(schemaPrisma).toContain('"idx_hero_sort"');
+    expect(schemaPrisma).toContain('"idx_hero_scene_enabled_sort"');
     expect(javaSchemaSql).toContain("CREATE TABLE `bw_homepage_heroes`");
     expect(javaSchemaSql).not.toContain("CREATE TABLE `content_homepage_heroes`");
   });
