@@ -22,8 +22,6 @@ public record CatalogDocument(
             String baseUnit,
             BasePrice basePrice,
             Map<String, Integer> dims,
-            Map<String, Integer> multipliers,
-            Map<String, DimPrice> dimPrices,
             Long unitDenominator,
             Long minCredits,
             Long maxCredits,
@@ -32,8 +30,6 @@ public record CatalogDocument(
             Long quantityStep,
             Integer schemaVersion
     ) {}
-
-    public record DimPrice(Long unitMc, Boolean firstFree) {}
 
     public record BasePrice(
             String kind,

@@ -465,66 +465,19 @@ export function pricingFieldErr(pricing: unknown, channel?: ChannelId): string |
       return `计价规则(pricing).rounding 须为 halfUp / ceil / floor，实为「${String(rounding)}」`;
     }
   }
-  for (const key of ["dims", "multipliers"] as const) {
-    const v = pricing[key];
-    if (v === undefined || v === null) continue;
-    if (!isPlainObject(v)) return `计价规则(pricing).${key} 须为 JSON 对象`;
-    for (const [axis, raw] of Object.entries(v)) {
+  const dims = pricing.dims;
+  if (dims !== undefined && dims !== null) {
+    if (!isPlainObject(dims)) return "计价规则(pricing).dims 须为 JSON 对象";
+    for (const [axis, raw] of Object.entries(dims)) {
       if (!PRICING_BASE_UNITS.has(axis)) {
-        return `计价规则(pricing).${key} 的键须为基准维度，实为「${axis}」`;
+        return `计价规则(pricing).dims 的键须为基准维度，实为「${axis}」`;
       }
-
-
-
-
       if (typeof raw !== "number" || !Number.isInteger(raw)) {
-        return `计价规则(pricing).${key}.${axis} 须为整数（万分比），实为 ${String(raw)}`;
+        return `计价规则(pricing).dims.${axis} 须为整数（万分比），实为 ${String(raw)}`;
       }
-      if (key === "multipliers" && raw <= 0) {
-        return (
-          `计价规则(pricing).multipliers.${axis} 须为正整数（实为 ${raw}）：` +
-          `0 会让整单免费，「这一维不参与」应当是不写它`
-        );
-      }
-      if (key === "dims" && raw < 0) {
+      if (raw < 0) {
         return `计价规则(pricing).dims.${axis} 不能为负（实为 ${raw}）：负倍率把等效数量拉低，等于少收`;
       }
-    }
-  }
-
-
-
-
-
-  const dimPrices = pricing.dimPrices;
-  if (dimPrices !== undefined && dimPrices !== null) {
-    if (!isPlainObject(dimPrices)) return "计价规则(pricing).dimPrices 须为 JSON 对象";
-    for (const [axis, spec] of Object.entries(dimPrices)) {
-      if (!PRICING_BASE_UNITS.has(axis)) {
-        return `计价规则(pricing).dimPrices 的键须为基准维度，实为「${axis}」`;
-      }
-      if (!isPlainObject(spec)) {
-        return `计价规则(pricing).dimPrices.${axis} 须为对象 { unitMc: number, firstFree?: boolean }`;
-      }
-      const unitMc = spec.unitMc;
-
-
-      if (typeof unitMc !== "number" || !Number.isInteger(unitMc) || unitMc <= 0) {
-        return `计价规则(pricing).dimPrices.${axis}.unitMc 须为正整数（单位是 mc，与 basePrice.value 相同：`
-          + "1 积分 = 1000 mc。要让这个维度不计费，请整块删掉它，别写 0）";
-      }
-      if (spec.firstFree !== undefined && spec.firstFree !== null
-          && typeof spec.firstFree !== "boolean") {
-        return `计价规则(pricing).dimPrices.${axis}.firstFree 须为布尔（缺省 = 不免费）`;
-      }
-    }
-
-
-
-    if (typeof pricing.maxCredits === "number") {
-      return "计价规则(pricing).dimPrices 与 maxCredits 不能同时配："
-        + "上限计价跳过用量计算、算不到维度绝对加价，预扣会冻结一份不含加价的额度，"
-        + "结算超出后只记应收（少收且静默）。二选一";
     }
   }
 

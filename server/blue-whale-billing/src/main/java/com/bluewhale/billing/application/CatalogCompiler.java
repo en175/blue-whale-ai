@@ -81,33 +81,12 @@ public final class CatalogCompiler {
                 baseUnit,
                 basePrice,
                 compileDims(rule.dims()),
-                compileDims(rule.multipliers()),
-                compileDimPrices(rule.dimPrices()),
                 rule.unitDenominator() == null ? 1L : rule.unitDenominator(),
                 rule.minCredits() == null ? 1L : rule.minCredits(),
                 rule.maxCredits(),
                 compileRounding(rule.rounding()),
                 rule.quantityOffset() == null ? 0L : rule.quantityOffset(),
                 rule.quantityStep() == null ? 1L : rule.quantityStep());
-    }
-
-    static Map<UsageDim, CompiledRule.DimPrice> compileDimPrices(Map<String, CatalogDocument.DimPrice> raw) {
-        if (raw == null || raw.isEmpty()) {
-            return Map.of();
-        }
-        Map<UsageDim, CompiledRule.DimPrice> compiled = new LinkedHashMap<>();
-        for (Map.Entry<String, CatalogDocument.DimPrice> e : raw.entrySet()) {
-            UsageDim dim = UsageDim.of(e.getKey());
-            CatalogDocument.DimPrice price = e.getValue();
-            if (price == null || price.unitMc() == null || price.unitMc() <= 0) {
-                throw new CompileException("dimPrices." + e.getKey() + " 的 unitMc 必填且为正："
-                        + "它表示「每个计费单位多少 mc」，单位与 basePrice.value 相同（1 积分 = 1000 mc）。"
-                        + "要让某个维度不计费，请整个不写这个维度（写 0 会被读成配漏了）");
-            }
-            compiled.put(dim, new CompiledRule.DimPrice(
-                    price.unitMc(), Boolean.TRUE.equals(price.firstFree())));
-        }
-        return Map.copyOf(compiled);
     }
 
     private static BasePriceResolver compileBasePrice(CatalogDocument.BasePrice price) {

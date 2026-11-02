@@ -27,12 +27,11 @@ class PricingEngineTest {
 
     private static CompiledRule seedance() {
         return CompiledRule.of(
-                        UsageDim.SECONDS,
-                        new BasePriceResolver.Table(Map.of(
-                                "size=1024x1024", 2_000L,
-                                "size=1792x1024", 3_332L)),
-                        1L)
-                .withMultiplier(UsageDim.REFERENCE_COUNT, 12_000);
+                UsageDim.SECONDS,
+                new BasePriceResolver.Table(Map.of(
+                        "size=1024x1024", 2_000L,
+                        "size=1792x1024", 3_332L)),
+                1L);
     }
 
     private static CompiledRule cutout() {
@@ -44,8 +43,6 @@ class PricingEngineTest {
                 UsageDim.PROMPT_TOKENS,
                 new BasePriceResolver.Constant(2_000L),
                 Map.of(UsageDim.COMPLETION_TOKENS, 4_000),
-                Map.of(),
-                Map.of(),
                 1_000_000L, 1L, null, new RoundingPolicy.HalfUp());
     }
 
@@ -78,7 +75,7 @@ class PricingEngineTest {
         }
 
         @Test
-        void 视频_按秒乘分辨率单价_再加参考素材倍率() {
+        void 视频_按秒乘分辨率单价() {
             var usage = new Usage(null, null, Map.of(
                     UsageDim.SECONDS, 5L,
                     UsageDim.REFERENCE_COUNT, 2L));
@@ -86,7 +83,7 @@ class PricingEngineTest {
             long credits = engine().compute(
                     req("seedance-2.5", "text2video", Map.of("size", "1792x1024")), usage, T).credits();
 
-            assertThat(credits).isEqualTo(40);
+            assertThat(credits).isEqualTo(17);
         }
 
         @Test
@@ -159,7 +156,7 @@ class PricingEngineTest {
 
         private CompiledRule free(long minCredits) {
             return new CompiledRule(UsageDim.SUCCEEDED_SLOTS,
-                    new BasePriceResolver.Constant(0L), Map.of(), Map.of(), Map.of(), 1L,
+                    new BasePriceResolver.Constant(0L), Map.of(), 1L,
                     minCredits, null, new RoundingPolicy.HalfUp());
         }
 
@@ -238,7 +235,7 @@ class PricingEngineTest {
 
         @Test
         void 封顶在折扣之前生效() {
-            var capped = seedream().withMaxCredits(5L).withMultiplier(UsageDim.REFERENCE_COUNT, 10_000);
+            var capped = seedream().withMaxCredits(5L);
             var engine = PricingEngine.forMedia((m, t) -> capped, DiscountResolver.NONE);
 
             long credits = engine.compute(
@@ -355,7 +352,7 @@ class PricingEngineTest {
         @Test
         void maxCredits_小于_minCredits() {
             assertThatThrownBy(() -> new CompiledRule(
-                    UsageDim.SECONDS, new BasePriceResolver.Constant(1L), Map.of(), Map.of(), Map.of(),
+                    UsageDim.SECONDS, new BasePriceResolver.Constant(1L), Map.of(),
                     1L, 10L, 5L, new RoundingPolicy.HalfUp()))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("maxCredits");
@@ -364,7 +361,7 @@ class PricingEngineTest {
         @Test
         void unitDenominator_必须为正() {
             assertThatThrownBy(() -> new CompiledRule(
-                    UsageDim.SECONDS, new BasePriceResolver.Constant(1L), Map.of(), Map.of(), Map.of(),
+                    UsageDim.SECONDS, new BasePriceResolver.Constant(1L), Map.of(),
                     0L, 1L, null, new RoundingPolicy.HalfUp()))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("unitDenominator");
@@ -391,7 +388,7 @@ class PricingEngineTest {
         private long computeCredits(long quantity, long offset, long step) {
             var rule = new CompiledRule(
                     UsageDim.SECONDS, new BasePriceResolver.Constant(1000L),
-                    Map.of(), Map.of(), Map.of(), 1L, 1L, null,
+                    Map.of(), 1L, 1L, null,
                     new RoundingPolicy.HalfUp(), offset, step);
             return PricingEngine.forMedia((m, t) -> rule, DiscountResolver.NONE)
                     .compute(req("tool", "tool", Map.of()), Usage.of(UsageDim.SECONDS, quantity), T)
@@ -411,7 +408,7 @@ class PricingEngineTest {
         void convertsPerMinutePriceAndRoundsUp() {
             var rule = new CompiledRule(
                     UsageDim.SECONDS, new BasePriceResolver.Constant(45000L),
-                    Map.of(), Map.of(), Map.of(), 60L, 1L, null,
+                    Map.of(), 60L, 1L, null,
                     new RoundingPolicy.Ceil(), 0L, 1L);
             long result = PricingEngine.forMedia((m, t) -> rule, DiscountResolver.NONE)
                     .compute(req("tool", "tool", Map.of()), Usage.of(UsageDim.SECONDS, 15), T)
@@ -431,7 +428,7 @@ class PricingEngineTest {
         void appliesOffsetBeforeDims() {
             var rule = new CompiledRule(
                     UsageDim.SECONDS, new BasePriceResolver.Constant(1000L),
-                    Map.of(UsageDim.COMPLETION_TOKENS, 30000), Map.of(), Map.of(),
+                    Map.of(UsageDim.COMPLETION_TOKENS, 30000),
                     1L, 1L, null, new RoundingPolicy.HalfUp(), 1L, 5L);
             var usage = new Usage(null, null,
                     Map.of(UsageDim.SECONDS, 4L, UsageDim.COMPLETION_TOKENS, 1L));

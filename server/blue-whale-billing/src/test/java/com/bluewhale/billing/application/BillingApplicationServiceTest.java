@@ -125,28 +125,6 @@ class BillingApplicationServiceTest {
     }
 
     @Test
-    @DisplayName("★ 参考素材加价算进扣款 —— reference_count 也是契约量")
-    void 参考素材加价算进扣款() {
-
-        service();
-
-
-
-        charge(Map.of("expected_output_count", "2", "size", "2k", "reference_count", "2"),
-                """
-                {"baseUnit":"usage.succeededSlots",
-                 "basePrice":{"kind":"const","value":3000},
-                 "multipliers":{"usage.referenceCount":12000},
-                 "unitDenominator":1,"minCredits":1}
-                """);
-
-
-        assertThat(chargedCredits()).isEqualTo(14L);
-    }
-
-
-
-    @Test
     @DisplayName("★ 契约张数取不到 ⇒ 拒绝扣款，不按 0 落到下限")
     void 缺契约张数_拒绝而不是扣下限() {
         service();
