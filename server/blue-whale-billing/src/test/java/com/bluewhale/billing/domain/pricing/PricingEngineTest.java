@@ -75,7 +75,7 @@ class PricingEngineTest {
         }
 
         @Test
-        void 视频_按秒乘分辨率单价() {
+        void 视频_按秒乘分辨率单价_参考素材不再参与计价() {
             var usage = new Usage(null, null, Map.of(
                     UsageDim.SECONDS, 5L,
                     UsageDim.REFERENCE_COUNT, 2L));
