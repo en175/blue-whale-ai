@@ -48,7 +48,7 @@ import {
   type RuleForm,
 } from '../../utils/billing-catalog/catalogDraft';
 import type { ModelCapabilityView } from '../../utils/billing-catalog/sizeCandidates';
-import { dimensionTableCandidates } from '../../utils/billing-catalog/sizeCandidates';
+import { dimensionTableCandidates, expandDurations } from '../../utils/billing-catalog/sizeCandidates';
 import {
   DEFAULT_IMAGE_RATIOS,
   DEFAULT_IMAGE_SIZES,
@@ -246,10 +246,27 @@ export default function ModelFormModal({ initial, models, defaultType, onClose, 
           height: null,
         })),
       ratios: ratios.filter((ratio) => ratio.id.trim()).map((ratio) => ratio.id.trim()),
+      durations: expandDurations(
+        durationMin.trim() ? Number(durationMin) : null,
+        durationMax.trim() ? Number(durationMax) : null,
+        durationStep.trim() ? Number(durationStep) : null,
+      ),
       defaultRatio: defaultRatio.trim(),
       matrix: parser === 'seedream' ? seedreamMatrix : parser === 'gpt' ? gptMatrix : {},
     }),
-    [modelId, type, sizes, ratios, defaultRatio, parser, seedreamMatrix, gptMatrix],
+    [
+      modelId,
+      type,
+      sizes,
+      ratios,
+      durationMin,
+      durationMax,
+      durationStep,
+      defaultRatio,
+      parser,
+      seedreamMatrix,
+      gptMatrix,
+    ],
   );
 
 

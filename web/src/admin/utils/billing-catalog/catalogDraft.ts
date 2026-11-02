@@ -183,10 +183,26 @@ function rowsError(rows: KeyValueRow[], field: string): string | null {
   return null;
 }
 
+function canonicalPriceKey(key: string): string {
+  const parts: Array<[string, string]> = [];
+  for (const pair of key.split('|')) {
+    const at = pair.indexOf('=');
+    if (at <= 0) return key.trim().toLowerCase();
+    parts.push([pair.slice(0, at).trim().toLowerCase(), pair.slice(at + 1).trim().toLowerCase()]);
+  }
+  parts.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+  return parts.map(([axis, value]) => `${axis}=${value}`).join('|');
+}
+
 function priceRowsError(rows: PriceRow[], field: string): string | null {
+  const seen = new Set<string>();
   for (const row of rows) {
     const key = row.key.trim();
     if (!key) return `${field}的键不能为空`;
+    const canonical = canonicalPriceKey(key);
+    if (seen.has(canonical)) return `${field}存在等价键：「${key}」与已有行重复（轴顺序不同也算同一档）`;
+    seen.add(canonical);
+    if (row.value.trim() === '') return `${field}「${key}」还没填价`;
     if (parseMoney(row.value) === null) {
       return `${field}「${key}」的单价必须是一个数（单位：积分 / 每 unitDenominator 个单位，如 70 或 0.12）`;
     }
