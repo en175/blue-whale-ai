@@ -185,7 +185,7 @@ const videoPriced: AdminModel = {
 
 
 
-const imageDimPriced: AdminModel = {
+const imagePriced: AdminModel = {
   ...audio,
   id: '11',
   model_id: 'doubao-seedream-5-0-pro-260628',
@@ -206,7 +206,6 @@ const imageDimPriced: AdminModel = {
   pricing: {
     baseUnit: 'usage.succeededSlots',
     basePrice: { kind: 'table', by: ['size'], table: { 'size=1k': 4500, 'size=2k': 9000 } },
-    dimPrices: { 'usage.referenceCount': { unitMc: 300, firstFree: true } },
     unitDenominator: 1,
     minCredits: 1,
     maxCredits: null,
@@ -725,7 +724,7 @@ describe('ModelList 视频模式时长策略（IKLUVP）', () => {
 
 describe('ModelList 价格表按维度铺开', () => {
   const imageRefPriced: AdminModel = {
-    ...imageDimPriced,
+    ...imagePriced,
     id: '12',
     pricing: {
       baseUnit: 'usage.succeededSlots',
@@ -831,7 +830,7 @@ describe('ModelList 价格表按维度铺开', () => {
   });
 
   it('★ 整单倍率与维度绝对加价不再出现，附加维度保留', async () => {
-    api.fetchAdminModels.mockResolvedValue([imageDimPriced]);
+    api.fetchAdminModels.mockResolvedValue([imagePriced]);
     await renderPage();
     await openRowEdit('图片');
     await openTab('定价');
@@ -906,14 +905,13 @@ describe('ModelList 价格表按维度铺开', () => {
     expect(document.body.textContent).toContain('等价键');
   });
 
-  it('★ 不可见的整单倍率/维度绝对加价/附加维度在保存时原样保留', async () => {
+  it('★ 附加维度在保存时原样保留', async () => {
     api.fetchAdminModels.mockResolvedValue([
       {
-        ...imageDimPriced,
+        ...imagePriced,
         pricing: {
-          ...(imageDimPriced.pricing as Record<string, unknown>),
+          ...(imagePriced.pricing as Record<string, unknown>),
           dims: { 'usage.referenceSeconds': 10000 },
-          multipliers: { 'usage.referenceCount': 12000 },
         },
       },
     ]);
@@ -928,11 +926,9 @@ describe('ModelList 价格表按维度铺开', () => {
       pricing: Record<string, unknown>;
     };
     expect(payload.pricing.rounding).toBe('ceil');
-    expect(payload.pricing.dimPrices).toEqual({
-      'usage.referenceCount': { unitMc: 300, firstFree: true },
-    });
-    expect(payload.pricing.multipliers).toEqual({ 'usage.referenceCount': 12000 });
     expect(payload.pricing.dims).toEqual({ 'usage.referenceSeconds': 10000 });
+    expect(payload.pricing).not.toHaveProperty('multipliers');
+    expect(payload.pricing).not.toHaveProperty('dimPrices');
   });
 });
 

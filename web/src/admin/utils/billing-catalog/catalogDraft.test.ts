@@ -17,7 +17,6 @@ import {
   withCreditsPerYuan,
   withDiscountPolicy,
   emptyRuleForm,
-  type DimPriceRow,
   type RuleForm,
 } from './catalogDraft';
 
@@ -256,9 +255,6 @@ describe('ruleFormError（只拦表单表达不出来的东西）', () => {
     expect(
       ruleFormError(form({ dims: [{ key: 'usage.seconds', value: '4000' }] })),
     ).toBeNull();
-    expect(ruleFormError(form({ multipliers: [{ key: ' ', value: '1' }] }))).toBe(
-      '维度表的键不能为空',
-    );
   });
 
   it('单位分母 / 上下限留空可以，填了就必须是整数', () => {
@@ -315,7 +311,7 @@ describe('ruleFromForm', () => {
     expect(rule.basePrice).toEqual({ by: ['size'], kind: 'const', value: 100000 });
   });
 
-  it('查表：table 与 kind 一起换，空 dims / multipliers 不写进目录', () => {
+  it('查表：table 与 kind 一起换，空 dims 不写进目录', () => {
     const rule = ruleFromForm(
       form({
         priceKind: 'table',
@@ -333,7 +329,6 @@ describe('ruleFromForm', () => {
       table: { 'size=1k': 70000, 'size=2k': 100000 },
     });
     expect(rule).not.toHaveProperty('dims');
-    expect(rule).not.toHaveProperty('multipliers');
   });
 
   it('★ 维度键重复直接报错，不悄悄覆盖（覆盖会丢掉一条本来生效的配置）', () => {
@@ -365,17 +360,15 @@ describe('ruleFromForm', () => {
     ).toThrow(/键重复/);
   });
 
-  it('维度与倍率按万分比整数写入', () => {
+  it('维度按万分比整数写入', () => {
     const rule = ruleFromForm(
       form({
         dims: [{ key: 'usage.succeededSlots', value: '4000' }],
-        multipliers: [{ key: 'usage.referenceCount', value: '12000' }],
       }),
       {},
     );
 
     expect(rule.dims).toEqual({ 'usage.succeededSlots': 4000 });
-    expect(rule.multipliers).toEqual({ 'usage.referenceCount': 12000 });
   });
 });
 
@@ -465,126 +458,4 @@ describe('token 计价的规则编辑', () => {
     expect(BASE_UNIT_OPTIONS.map((o) => o.value)).not.toContain('usage.c');
   });
 
-});
-
-describe('维度绝对加价 dimPrices', () => {
-  const DIM_PRICE_RULE = {
-    baseUnit: 'usage.succeededSlots',
-    basePrice: { kind: 'const', value: 4500 },
-    dimPrices: { 'usage.referenceCount': { unitMc: 300, firstFree: true } },
-    unitDenominator: 1,
-    minCredits: 1,
-    maxCredits: null,
-    rounding: 'halfUp',
-  };
-
-  const row = (patch: Partial<DimPriceRow> = {}): DimPriceRow => ({
-    key: 'usage.referenceCount',
-    value: '0.02',
-    originalMc: null,
-    firstFree: false,
-    originalSpec: null,
-    ...patch,
-  });
-
-  const form = (patch: Partial<RuleForm> = {}): RuleForm => ({
-    ...emptyRuleForm(),
-    modelId: 'm',
-    taskType: 'image',
-    baseUnit: 'usage.succeededSlots',
-    priceValue: { value: '0.3', originalMc: null },
-    ...patch,
-  });
-
-  it('★ 读出来：单价渲染成积分数、原 mc 与「首张免费」一起带上', () => {
-    const read = formFromRule('m', 'image', DIM_PRICE_RULE);
-
-    expect(read.dimPrices).toEqual([
-      {
-        key: 'usage.referenceCount',
-        value: '0.3',
-        originalMc: 300,
-        firstFree: true,
-        originalSpec: { unitMc: 300, firstFree: true },
-      },
-    ]);
-  });
-
-  it('★ 读出来再写回去：dimPrices 一位不差（含 firstFree 与不认识的兄弟键）', () => {
-    const original = {
-      ...DIM_PRICE_RULE,
-      dimPrices: {
-        'usage.referenceCount': { unitMc: 300, firstFree: true },
-        'usage.seconds': { unitMc: 1800, futureOpt: '别删我' },
-      },
-    };
-
-    const back = ruleFromForm(formFromRule('m', 'image', original), original);
-
-    expect(back).toEqual(original);
-    expect(back.dimPrices?.['usage.seconds']).toEqual({ unitMc: 1800, futureOpt: '别删我' });
-  });
-
-  it('★ 没改过的那行原值写回，新填的按积分换算成 mc', () => {
-    const read = formFromRule('m', 'image', DIM_PRICE_RULE);
-    const rule = ruleFromForm(
-      {
-        ...read,
-        dimPrices: [...read.dimPrices, row({ key: 'usage.seconds', value: '0.03' })],
-      },
-      DIM_PRICE_RULE,
-    );
-
-    expect(rule.dimPrices).toEqual({
-      'usage.referenceCount': { unitMc: 300, firstFree: true },
-      'usage.seconds': { unitMc: 30 },
-    });
-  });
-
-  it('★ 整表删空 → 从文档里去掉（「我删了」必须真的删掉）', () => {
-    const read = formFromRule('m', 'image', DIM_PRICE_RULE);
-    const rule = ruleFromForm({ ...read, dimPrices: [] }, DIM_PRICE_RULE);
-
-    expect(rule).not.toHaveProperty('dimPrices');
-  });
-
-  it('★ 维度重复直接报错，不悄悄覆盖（覆盖会丢掉一条本来生效的配置）', () => {
-    expect(() => ruleFromForm(form({ dimPrices: [row(), row({ value: '0.05' })] }), {})).toThrow(
-      /键重复/,
-    );
-  });
-
-  it('单价必须是数，且折算回来必须 **> 0**（0 等于「这个维度免费」，该整行删掉）', () => {
-    expect(ruleFormError(form({ dimPrices: [row({ value: '白送' })] }))).toContain(
-      '单价必须是一个数',
-    );
-    expect(ruleFormError(form({ dimPrices: [row({ value: '0' })] }))).toContain('必须大于 0');
-    expect(ruleFormError(form({ dimPrices: [row({ value: '-1' })] }))).toContain(
-      '单价必须是一个数',
-    );
-    expect(ruleFormError(form({ dimPrices: [row({ value: '0.0000001' })] }))).toContain(
-      '必须大于 0',
-    );
-    expect(ruleFormError(form({ dimPrices: [row()] }))).toBeNull();
-  });
-
-  it('维度不能空（下拉里选了才算配了这一行）', () => {
-    expect(ruleFormError(form({ dimPrices: [row({ key: '  ' })] }))).toBe(
-      '维度绝对加价的维度不能为空',
-    );
-  });
-
-  it('★ 与积分上限互斥（后端写闸门同一条）：上限计价算不到绝对加价，会少收且静默', () => {
-    expect(ruleFormError(form({ dimPrices: [row()], maxCredits: '50' }))).toContain(
-      '不能同时配',
-    );
-    expect(ruleFormError(form({ dimPrices: [row()] }))).toBeNull();
-    expect(ruleFormError(form({ maxCredits: '50' }))).toBeNull();
-  });
-
-  it('★ 单价待配时不看基准单价，但仍校验绝对加价的维度行', () => {
-    expect(ruleFormError(form({ priceKind: 'unset', dimPrices: [row({ key: '' })] }))).toBe(
-      '维度绝对加价的维度不能为空',
-    );
-  });
 });

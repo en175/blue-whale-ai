@@ -11,8 +11,6 @@ export interface CatalogRuleView {
     table?: Record<string, unknown>;
   };
   dims?: Record<string, unknown>;
-  multipliers?: Record<string, unknown>;
-  dimPrices?: Record<string, unknown>;
   unitDenominator?: unknown;
   minCredits?: unknown;
   maxCredits?: unknown;
@@ -130,11 +128,6 @@ export interface MoneyField {
 
 export interface PriceRow extends KeyValueRow, MoneyField {}
 
-export interface DimPriceRow extends KeyValueRow, MoneyField {
-  firstFree: boolean;
-  originalSpec: Record<string, unknown> | null;
-}
-
 export interface RuleForm {
   modelId: string;
   taskType: string;
@@ -143,8 +136,6 @@ export interface RuleForm {
   priceValue: MoneyField;
   priceTable: PriceRow[];
   dims: KeyValueRow[];
-  multipliers: KeyValueRow[];
-  dimPrices: DimPriceRow[];
   unitDenominator: string;
   minCredits: string;
   maxCredits: string;
@@ -210,26 +201,10 @@ function priceRowsError(rows: PriceRow[], field: string): string | null {
   return null;
 }
 
-function dimPriceRowsError(rows: DimPriceRow[]): string | null {
-  for (const row of rows) {
-    const key = row.key.trim();
-    if (!key) return '维度绝对加价的维度不能为空';
-    if (parseMoney(row.value) === null) {
-      return `维度绝对加价「${key}」的单价必须是一个数（单位：积分 / 每个单位，如 0.02）`;
-    }
-    if (fieldToMc(row) <= 0) {
-      return `维度绝对加价「${key}」的单价必须大于 0（要让这个维度免费就整行删掉，别写 0）`;
-    }
-  }
-  return null;
-}
-
 export function ruleFormError(form: RuleForm): string | null {
   if (!form.modelId.trim()) return '模型 ID 必填';
   if (!form.taskType.trim()) return '任务类型必填';
   if (!form.baseUnit.trim()) return '基准维度必填';
-
-  const hasDimPrices = form.dimPrices.some((row) => row.key.trim() !== '');
 
   if (form.priceKind === 'const') {
     if (parseMoney(form.priceValue.value) === null) {
@@ -241,16 +216,8 @@ export function ruleFormError(form: RuleForm): string | null {
     if (priceError !== null) return priceError;
   }
 
-  const weightsError = rowsError([...form.dims, ...form.multipliers], '维度表');
+  const weightsError = rowsError(form.dims, '维度表');
   if (weightsError !== null) return weightsError;
-
-  const dimPricesError = dimPriceRowsError(form.dimPrices);
-  if (dimPricesError !== null) return dimPricesError;
-
-  if (hasDimPrices && form.maxCredits.trim()) {
-    return '维度绝对加价与积分上限不能同时配：上限计价算不到这份加价，预扣会冻少、'
-      + '结算超出后只记应收（少收且静默）。二选一';
-  }
 
   if (form.unitDenominator.trim() && parseWhole(form.unitDenominator) === null) {
     return '单位分母必须是整数（1 = 每秒/每张）';
@@ -315,15 +282,8 @@ export function ruleFromForm(
   };
 
   const dims = rowsToRecord(form.dims);
-  const multipliers = rowsToRecord(form.multipliers);
   if (Object.keys(dims).length > 0) rule.dims = dims;
   else delete rule.dims;
-  if (Object.keys(multipliers).length > 0) rule.multipliers = multipliers;
-  else delete rule.multipliers;
-
-  const dimPrices = dimPriceRowsToRecord(form.dimPrices);
-  if (Object.keys(dimPrices).length > 0) rule.dimPrices = dimPrices;
-  else delete rule.dimPrices;
 
   rule.maxCredits = form.maxCredits.trim() ? parseWhole(form.maxCredits) : null;
 
@@ -357,8 +317,6 @@ export function formFromRule(
       ...asCredits(value),
     })),
     dims: recordToRows(rule.dims),
-    multipliers: recordToRows(rule.multipliers),
-    dimPrices: recordToDimPriceRows(rule.dimPrices),
     unitDenominator: asText(rule.unitDenominator ?? 1),
     minCredits: asText(rule.minCredits ?? 1),
     maxCredits: asText(rule.maxCredits),
@@ -375,8 +333,6 @@ export function emptyRuleForm(): RuleForm {
     priceValue: { value: '', originalMc: null },
     priceTable: [{ key: '', value: '', originalMc: null }],
     dims: [],
-    multipliers: [],
-    dimPrices: [],
     unitDenominator: '1',
     minCredits: '1',
     maxCredits: '',
@@ -401,43 +357,6 @@ function recordToRows(record: Record<string, unknown> | undefined): KeyValueRow[
     key,
     value: typeof value === 'number' && Number.isFinite(value) ? String(value) : String(value ?? ''),
   }));
-}
-
-
-function recordToDimPriceRows(
-  record: Record<string, unknown> | undefined,
-): DimPriceRow[] {
-  if (!record || typeof record !== 'object') return [];
-  return Object.entries(record).map(([key, raw]) => {
-    const spec = raw !== null && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
-    const mc = typeof spec.unitMc === 'number' && Number.isFinite(spec.unitMc) ? spec.unitMc : null;
-    return {
-      key,
-      value: mc === null ? '' : mcToCredits(mc),
-      originalMc: mc,
-      firstFree: spec.firstFree === true,
-      originalSpec: spec,
-    };
-  });
-}
-
-function dimPriceRowsToRecord(
-  rows: DimPriceRow[],
-): Record<string, Record<string, unknown>> {
-  const out: Record<string, Record<string, unknown>> = {};
-  for (const row of rows) {
-    const key = row.key.trim();
-    if (!key) continue;
-    if (key in out) throw new Error(`键重复：${key}`);
-    const spec: Record<string, unknown> = {
-      ...(row.originalSpec ?? {}),
-      unitMc: fieldToMc(row),
-    };
-    if (row.firstFree) spec.firstFree = true;
-    else delete spec.firstFree;
-    out[key] = spec;
-  }
-  return out;
 }
 
 
