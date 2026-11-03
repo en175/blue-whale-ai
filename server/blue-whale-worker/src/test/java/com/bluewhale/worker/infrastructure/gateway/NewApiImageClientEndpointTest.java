@@ -230,11 +230,37 @@ class NewApiImageClientEndpointTest {
     }
 
     @Test
+    @DisplayName("水印开关关闭 + 支持渠道 → inline body 显式带 watermark:false")
+    void inlineSendsWatermarkFalseWhenDisabled() {
+        NewApiImageClient client = new NewApiImageClient(
+                new UpstreamBaseUrl(baseUrl),
+                new GenerationWatermarkPolicy(key -> "{\"enabled\":false}"));
+
+        client.generate("t", ImageProtocol.INLINE_IMAGE, "doubao-seedream-4-0", "猫", 1,
+                "1024x1024", null, false, false, List.of(), true);
+
+        assertThat(lastBody.get()).contains("\"watermark\":false");
+    }
+
+    @Test
     @DisplayName("水印开关开启但渠道不支持 → inline body 不带 watermark")
     void inlineSkipsWatermarkWhenChannelUnsupported() {
         NewApiImageClient client = new NewApiImageClient(
                 new UpstreamBaseUrl(baseUrl),
                 new GenerationWatermarkPolicy(key -> "{\"enabled\":true}"));
+
+        client.generate("t", ImageProtocol.INLINE_IMAGE, "gpt-image-2-light", "猫", 1,
+                "1024x1024", null, false, false, List.of(), false);
+
+        assertThat(lastBody.get()).doesNotContain("watermark");
+    }
+
+    @Test
+    @DisplayName("水印开关关闭且渠道不支持 → inline body 仍不带 watermark")
+    void inlineSkipsWatermarkWhenDisabledAndChannelUnsupported() {
+        NewApiImageClient client = new NewApiImageClient(
+                new UpstreamBaseUrl(baseUrl),
+                new GenerationWatermarkPolicy(key -> "{\"enabled\":false}"));
 
         client.generate("t", ImageProtocol.INLINE_IMAGE, "gpt-image-2-light", "猫", 1,
                 "1024x1024", null, false, false, List.of(), false);
