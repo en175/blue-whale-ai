@@ -244,11 +244,11 @@ describe("AccountController.consumptions（billing 账本）", () => {
       specs: { resolution: "1080p", duration: "5" },
       lot_source: null,
       lot_created_at: null,
-      detail: "1080p · 5s",
+      detail: "—",
     });
   });
 
-  it("★ 任务详情由后端拼好：规格 + 提示词，缺哪段留哪段", async () => {
+  it("★ 任务详情只取提示词：超长原样返回，无提示词与规格一律「—」", async () => {
     const consumeRow = (
       id: string,
       jobId: string | null,
@@ -296,11 +296,11 @@ describe("AccountController.consumptions（billing 账本）", () => {
     const items = (await controller.consumptions(USER, {})).data.items;
 
     expect(items.map((item: { detail: string }) => item.detail)).toEqual([
-      "1080p · 1024x1024 · 5s · 一只鲸鱼跃出水面",
-      "1024x1024",
+      "一只鲸鱼跃出水面",
+      "—",
       "只有提示词",
       "—",
-      "T5",
+      "—",
     ]);
   });
 

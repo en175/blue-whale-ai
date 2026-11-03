@@ -38,7 +38,7 @@ const PAGES: Record<string, unknown> = {
   '/api/account/consumptions': {
     code: 200,
     data: {
-      total: 1,
+      total: 2,
       items: [
         {
           id: 'led:1',
@@ -54,7 +54,23 @@ const PAGES: Record<string, unknown> = {
           model_id: 'seedance-2.5',
           model_label: 'Seedance 2.5',
           prompt: '一只猫在跑',
-          detail: '1080p · 5s',
+          detail: '一只猫在跑',
+        },
+        {
+          id: 'led:2',
+          type: 'consume',
+          direction: 'out',
+          title: '',
+          credits: 0,
+          status: 'done',
+          created_at: '2026-10-08T15:05:00+08:00',
+          settled_at: '2026-10-08T15:05:31+08:00',
+          job_id: '9105',
+          task_type: 'video',
+          model_id: 'seedance-2.5',
+          model_label: 'Seedance 2.5',
+          prompt: null,
+          detail: '—',
         },
       ],
     },
@@ -65,13 +81,12 @@ const PAGES: Record<string, unknown> = {
       total: 1,
       items: [
         {
-          trade_no: 'BW20260929143200801',
           product_name: '自定义充值 · 600 积分',
           product_type: 'custom',
           amount_fen: 4000,
           credits: 600,
           bonus_credits: 0,
-          status: 'paid_pending',
+          status: 'paid',
           created_at: '2026-09-29T14:32:00+08:00',
           paid_at: '2026-09-29T14:32:41+08:00',
           credits_valid_months: 24,
@@ -153,12 +168,13 @@ afterEach(async () => {
 });
 
 describe('AccountCredits', () => {
-  it('顶部只保留当前积分余额一个卡片', async () => {
+  it('顶部只保留当前积分余额一个卡片，并展示有效期与过期核销规则', async () => {
     await renderPage();
     expect(document.body.textContent).toContain('账户积分与订单');
     expect(document.body.textContent).toContain('当前积分余额');
     expect(document.body.textContent).toContain('12,345');
-    expect(document.body.textContent).not.toContain('积分有效期');
+    expect(document.body.textContent).toContain('2 年有效');
+    expect(document.body.textContent).toContain('按批次过期核销');
     expect(document.body.textContent).not.toContain('最近到期批次');
   });
 
@@ -182,31 +198,41 @@ describe('AccountCredits', () => {
     expect(document.body.textContent).toContain('自定义充值 · 600 积分，充值积分：600');
   });
 
-  it('已消耗展示任务类型中文名与规格', async () => {
+  it('已消耗任务详情只展示提示词，全额退回行记 0 而不是 -0', async () => {
     await renderPage();
     await act(async () => {
       clickByText('已消耗');
     });
     await flush();
     expect(document.body.textContent).toContain('视频');
-    expect(document.body.textContent).toContain('1080p · 5s');
+    expect(document.body.textContent).toContain('一只猫在跑');
+    expect(document.body.textContent).not.toContain('1080p · 5s');
     expect(document.body.textContent).toContain('Seedance 2.5');
+    const creditsCells = [...document.querySelectorAll('td')].map((td) => td.textContent ?? '');
+    expect(creditsCells).not.toContain('-0');
     expect(document.body.textContent).not.toContain('任务 ID');
   });
 
-  it('订单记录：六态含支付成功待到账，金额分换算，可复制订单号', async () => {
+  it('订单记录：用户侧只有三态，金额分换算，无操作列与订单号', async () => {
     await renderPage();
     await act(async () => {
       clickByText('订单记录');
     });
     await flush();
-    expect(document.body.textContent).toContain('支付成功待到账');
+    expect(document.body.textContent).toContain('已到账');
     expect(document.body.textContent).toContain('¥40.00');
+    expect(document.body.textContent).not.toContain('支付成功待到账');
+    expect(document.body.textContent).not.toContain('复制订单号');
     expect(document.body.textContent).not.toContain('订单编号');
+
     await act(async () => {
-      clickByText('复制订单号');
+      clickByText('全部状态');
     });
-    expect(navigator.clipboard.writeText).toHaveBeenCalledWith('BW20260929143200801');
+    await flush();
+    expect(document.body.textContent).toContain('待支付');
+    expect(document.body.textContent).toContain('已取消');
+    expect(document.body.textContent).not.toContain('支付失败');
+    expect(document.body.textContent).not.toContain('到账异常');
   });
 
   it('导出弹层：已消耗不带任务 ID 选项', async () => {
