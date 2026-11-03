@@ -4,15 +4,30 @@ import com.bluewhale.billing.application.CatalogHolder;
 import com.bluewhale.billing.application.CreditService;
 import com.bluewhale.billing.domain.ledger.CreditSource;
 import com.bluewhale.contracts.billing.v1.AdminConsumedCreditsRequest;
+import com.bluewhale.contracts.billing.v1.AdminDeleteMemberDiscountRequest;
+import com.bluewhale.contracts.billing.v1.AdminDeletePromotionRequest;
 import com.bluewhale.contracts.billing.v1.AdminGetActiveCatalogRequest;
 import com.bluewhale.contracts.billing.v1.AdminGetActiveCatalogResponse;
+import com.bluewhale.contracts.billing.v1.AdminGrantRequest;
+import com.bluewhale.contracts.billing.v1.AdminGrantResponse;
+import com.bluewhale.contracts.billing.v1.AdminListMemberDiscountsRequest;
+import com.bluewhale.contracts.billing.v1.AdminListPromotionsRequest;
 import com.bluewhale.contracts.billing.v1.AdminListTransactionsRequest;
 import com.bluewhale.contracts.billing.v1.AdminListTransactionsResponse;
+import com.bluewhale.contracts.billing.v1.AdminMemberDiscount;
+import com.bluewhale.contracts.billing.v1.AdminMemberDiscountInput;
+import com.bluewhale.contracts.billing.v1.AdminPromotion;
+import com.bluewhale.contracts.billing.v1.AdminPromotionInput;
+import com.bluewhale.contracts.billing.v1.AdminPublishCatalogRequest;
+import com.bluewhale.contracts.billing.v1.AdminPublishCatalogResponse;
 import com.bluewhale.contracts.billing.v1.AdminQueryBalanceRequest;
 import com.bluewhale.contracts.billing.v1.AdminQueryBalanceResponse;
 import com.bluewhale.contracts.billing.v1.AdminQueryUserStatsRequest;
 import com.bluewhale.contracts.billing.v1.AdminQueryUserStatsResponse;
+import com.bluewhale.contracts.billing.v1.AdminRefundRequest;
 import com.bluewhale.contracts.billing.v1.AdminTransactionItem;
+import com.bluewhale.contracts.billing.v1.AdminUpsertMemberDiscountRequest;
+import com.bluewhale.contracts.billing.v1.AdminUpsertPromotionRequest;
 import com.bluewhale.contracts.billing.v1.BillingAdminServiceGrpc;
 import com.bluewhale.contracts.billing.v1.BillingServiceGrpc;
 import com.bluewhale.contracts.billing.v1.ChargeRequest;
@@ -58,6 +73,10 @@ class BillingAdminGrpcIntegrationTest {
             {"schemaVersion":1,"currency":"CNY","creditsPerYuan":15,
              "discountPolicy":{"stackMode":"multiply","floorFactorBp":3000}}
             """;
+
+    private static final String CATALOG_V2 = CATALOG.replace("\"creditsPerYuan\":15", "\"creditsPerYuan\":20");
+
+    private static final String CATALOG_REJECTED = CATALOG.replace("\"creditsPerYuan\":15", "\"creditsPerYuan\":0");
 
     private static final String RULE = """
             {"baseUnit":"constant:1","basePrice":{"kind":"const","value":100000},
@@ -426,12 +445,335 @@ class BillingAdminGrpcIntegrationTest {
     }
 
 
+    @Test
+    void 发放_批次与账本同时落库_余额可查() {
+        AdminGrantResponse response = admin.adminGrant(AdminGrantRequest.newBuilder()
+                .setUserId(9401L).setSource("purchased").setAmount(1000)
+                .setBizId("RC-1").setBizType("recharge").build());
+
+        assertThat(response.getDuplicated()).isFalse();
+        assertThat(response.getLotId()).isPositive();
+        assertThat(admin.adminQueryBalance(AdminQueryBalanceRequest.newBuilder()
+                        .setUserId(9401L).build()).getAvailableCredits())
+                .isEqualTo(1000);
+        assertThat(jdbc.queryForObject(
+                "SELECT COUNT(*) FROM billing_ledger_entries WHERE user_id = 9401", Long.class))
+                .isEqualTo(2L);
+    }
+
+    @Test
+    void 发放_同一幂等键重复_返回duplicated与归属_不重复入账() {
+        admin.adminGrant(AdminGrantRequest.newBuilder()
+                .setUserId(9402L).setSource("purchased").setAmount(1000)
+                .setBizId("RC-FIRST").setGrantKey("k-1").build());
+
+        AdminGrantResponse second = admin.adminGrant(AdminGrantRequest.newBuilder()
+                .setUserId(9402L).setSource("purchased").setAmount(1000)
+                .setBizId("RC-SECOND").setGrantKey("k-1").build());
+
+        assertThat(second.getDuplicated()).isTrue();
+        assertThat(second.getExistingBizId()).isEqualTo("RC-FIRST");
+        assertThat(jdbc.queryForObject(
+                "SELECT COUNT(*) FROM billing_credit_lots WHERE user_id = 9402", Long.class))
+                .isEqualTo(1L);
+    }
+
+    @Test
+    void 发放_显式到期时刻按北京时间落库() {
+        admin.adminGrant(AdminGrantRequest.newBuilder()
+                .setUserId(9403L).setSource("purchased").setAmount(100)
+                .setBizId("RC-TZ").setExpiresAt("2028-11-03T02:38:05.000Z").build());
+
+        LocalDateTime expiresAt = jdbc.queryForObject(
+                "SELECT expires_at FROM billing_credit_lots WHERE user_id = 9403",
+                LocalDateTime.class);
+
+        assertThat(expiresAt).isEqualTo(LocalDateTime.of(2028, 11, 3, 10, 38, 5));
+    }
+
+    @Test
+    void 发放_未传到期时刻_按来源策略() {
+        admin.adminGrant(AdminGrantRequest.newBuilder()
+                .setUserId(9404L).setSource("purchased").setAmount(100)
+                .setBizId("RC-POLICY").build());
+
+        LocalDateTime expiresAt = jdbc.queryForObject(
+                "SELECT expires_at FROM billing_credit_lots WHERE user_id = 9404",
+                LocalDateTime.class);
+        LocalDateTime expected = LocalDateTime.now().plusYears(2);
+
+        assertThat(expiresAt)
+                .isBetween(expected.minusSeconds(60), expected.plusSeconds(60));
+    }
+
+    @Test
+    void 发放_缺bizId或未知来源_报INVALID_ARGUMENT() {
+        assertThatThrownBy(() -> admin.adminGrant(AdminGrantRequest.newBuilder()
+                .setUserId(1).setSource("purchased").setAmount(1).build()))
+                .isInstanceOf(StatusRuntimeException.class)
+                .satisfies(thrown -> assertThat(((StatusRuntimeException) thrown).getStatus().getCode())
+                        .isEqualTo(Status.Code.INVALID_ARGUMENT));
+
+        assertThatThrownBy(() -> admin.adminGrant(AdminGrantRequest.newBuilder()
+                .setUserId(1).setSource("nope").setAmount(1).setBizId("x").build()))
+                .isInstanceOf(StatusRuntimeException.class)
+                .satisfies(thrown -> assertThat(((StatusRuntimeException) thrown).getStatus().getCode())
+                        .isEqualTo(Status.Code.INVALID_ARGUMENT));
+    }
+
+    @Test
+    void 人工返还_退回扣费() {
+        userFacing.charge(charge(USER, "adm-rpc-refund", 9_501L));
+        long charged = admin.adminQueryBalance(AdminQueryBalanceRequest.newBuilder()
+                .setUserId(USER).build()).getAvailableCredits();
+
+        admin.adminRefund(AdminRefundRequest.newBuilder()
+                .setJobId(9_501L).setReason("人工释放").build());
+
+        assertThat(admin.adminQueryBalance(AdminQueryBalanceRequest.newBuilder()
+                .setUserId(USER).build()).getAvailableCredits())
+                .isEqualTo(charged + 100);
+    }
+
+    @Test
+    void 目录发布_同内容不新开版本_改内容版本递增() {
+        AdminPublishCatalogResponse first = admin.adminPublishCatalog(
+                AdminPublishCatalogRequest.newBuilder()
+                        .setDocumentJson(CATALOG).setPublishedBy("42").setNote("首版").build());
+        AdminPublishCatalogResponse same = admin.adminPublishCatalog(
+                AdminPublishCatalogRequest.newBuilder()
+                        .setDocumentJson(CATALOG).setPublishedBy("42").build());
+        AdminPublishCatalogResponse changed = admin.adminPublishCatalog(
+                AdminPublishCatalogRequest.newBuilder()
+                        .setDocumentJson(CATALOG_V2).setPublishedBy("42").build());
+
+        assertThat(same.getCatalogVersion()).isEqualTo(first.getCatalogVersion());
+        assertThat(changed.getCatalogVersion()).isGreaterThan(first.getCatalogVersion());
+        assertThat(changed.getCreditsPerYuan()).isEqualTo(20);
+        assertThat(jdbc.queryForObject(
+                "SELECT COUNT(*) FROM billing_pricing_catalogs WHERE status = 'active'", Long.class))
+                .as("重新发布后只能有一版 active")
+                .isEqualTo(1L);
+        assertThat(jdbc.queryForObject(
+                "SELECT COUNT(*) FROM billing_pricing_catalogs WHERE status = 'retired'", Long.class))
+                .isPositive();
+    }
+
+    @Test
+    void 目录发布_合法JSON但校验不过_报INVALID_ARGUMENT且不新增版本() {
+        long before = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM billing_pricing_catalogs", Long.class);
+
+        assertThatThrownBy(() -> admin.adminPublishCatalog(
+                AdminPublishCatalogRequest.newBuilder()
+                        .setDocumentJson(CATALOG_REJECTED).build()))
+                .isInstanceOf(StatusRuntimeException.class)
+                .satisfies(thrown -> assertThat(((StatusRuntimeException) thrown).getStatus().getCode())
+                        .isEqualTo(Status.Code.INVALID_ARGUMENT));
+
+        assertThat(jdbc.queryForObject(
+                "SELECT COUNT(*) FROM billing_pricing_catalogs", Long.class))
+                .isEqualTo(before);
+    }
+
+    @Test
+    void 目录发布_非法JSON_报INVALID_ARGUMENT() {
+        assertThatThrownBy(() -> admin.adminPublishCatalog(
+                AdminPublishCatalogRequest.newBuilder().setDocumentJson("{").build()))
+                .isInstanceOf(StatusRuntimeException.class)
+                .satisfies(thrown -> assertThat(((StatusRuntimeException) thrown).getStatus().getCode())
+                        .isEqualTo(Status.Code.INVALID_ARGUMENT));
+    }
+
+    @Test
+    void 会员折扣_增改删全链路与404() {
+        AdminMemberDiscount created = admin.adminUpsertMemberDiscount(
+                AdminUpsertMemberDiscountRequest.newBuilder()
+                        .setInput(memberDiscountInput(9000, "enabled")).build()).getDiscount();
+        assertThat(created.getId()).isPositive();
+        assertThat(admin.adminListMemberDiscounts(
+                        AdminListMemberDiscountsRequest.newBuilder().build()).getItemsList())
+                .hasSize(1);
+        assertThat(admin.adminListMemberDiscounts(AdminListMemberDiscountsRequest.newBuilder()
+                        .setTier("pro").setStatus("enabled").build()).getItemsList())
+                .hasSize(1);
+        assertThat(admin.adminListMemberDiscounts(AdminListMemberDiscountsRequest.newBuilder()
+                        .setTier("max").build()).getItemsList())
+                .isEmpty();
+
+        AdminMemberDiscount updated = admin.adminUpsertMemberDiscount(
+                AdminUpsertMemberDiscountRequest.newBuilder()
+                        .setId(created.getId())
+                        .setInput(memberDiscountInput(8000, "disabled")).build()).getDiscount();
+        assertThat(updated.getDiscountBp()).isEqualTo(8000);
+
+        admin.adminDeleteMemberDiscount(AdminDeleteMemberDiscountRequest.newBuilder()
+                .setId(created.getId()).build());
+        assertThat(admin.adminListMemberDiscounts(
+                        AdminListMemberDiscountsRequest.newBuilder().build()).getItemsList())
+                .isEmpty();
+
+        assertThatThrownBy(() -> admin.adminUpsertMemberDiscount(
+                AdminUpsertMemberDiscountRequest.newBuilder()
+                        .setId(9_999L)
+                        .setInput(memberDiscountInput(8000, "enabled")).build()))
+                .isInstanceOf(StatusRuntimeException.class)
+                .satisfies(thrown -> assertThat(((StatusRuntimeException) thrown).getStatus().getCode())
+                        .isEqualTo(Status.Code.NOT_FOUND));
+    }
+
+    @Test
+    void 会员折扣_校验失败是INVALID_ARGUMENT() {
+        assertThatThrownBy(() -> admin.adminUpsertMemberDiscount(
+                AdminUpsertMemberDiscountRequest.newBuilder()
+                        .setInput(memberDiscountInput(0, "enabled")).build()))
+                .isInstanceOf(StatusRuntimeException.class)
+                .satisfies(thrown -> assertThat(((StatusRuntimeException) thrown).getStatus().getCode())
+                        .isEqualTo(Status.Code.INVALID_ARGUMENT));
+    }
+
+    @Test
+    void 活动_空范围归一null_时段可清空() {
+        AdminPromotion created = admin.adminUpsertPromotion(
+                AdminUpsertPromotionRequest.newBuilder()
+                        .setOperator("42")
+                        .setInput(promotionInput(false, false)).build()).getPromotion();
+
+        assertThat(created.getTaskTypesList()).isEmpty();
+        assertThat(created.getTierScopeList()).isEmpty();
+        assertThat(created.getDaysOfWeekList()).isEmpty();
+        assertThat(created.getCreatedBy()).isEqualTo("42");
+        assertThat(created.getStartAt()).isEqualTo("2026-10-01T00:00");
+
+        AdminPromotion withWindow = admin.adminUpsertPromotion(
+                AdminUpsertPromotionRequest.newBuilder()
+                        .setId(created.getId())
+                        .setInput(promotionInput(true, true)).build()).getPromotion();
+        assertThat(withWindow.getDailyTimeStart()).isEqualTo("22:00");
+        assertThat(withWindow.getDailyTimeEnd()).isEqualTo("06:00");
+
+        AdminPromotion cleared = admin.adminUpsertPromotion(
+                AdminUpsertPromotionRequest.newBuilder()
+                        .setId(created.getId())
+                        .setInput(promotionInput(false, true)).build()).getPromotion();
+        assertThat(cleared.getDailyTimeStart()).isEmpty();
+        assertThat(cleared.getDailyTimeEnd()).isEmpty();
+
+        admin.adminDeletePromotion(AdminDeletePromotionRequest.newBuilder()
+                .setId(created.getId()).build());
+        assertThat(admin.adminListPromotions(
+                        AdminListPromotionsRequest.newBuilder().build()).getItemsList())
+                .isEmpty();
+    }
+
+    @Test
+    void 活动_非空范围往返与列表过滤() {
+        AdminPromotion created = admin.adminUpsertPromotion(
+                AdminUpsertPromotionRequest.newBuilder()
+                        .setInput(AdminPromotionInput.newBuilder()
+                                .setCode("peak").setName("高峰")
+                                .setDiscountBp(7000)
+                                .addModelIds("seedance-*")
+                                .addTaskTypes("text2video")
+                                .addTierScope("pro")
+                                .addTierScope("max")
+                                .addDaysOfWeek(1)
+                                .addDaysOfWeek(5)
+                                .setStartAt("2026-10-01T00:00")
+                                .setEndAt("2026-11-01T00:00")
+                                .setStatus("enabled")
+                                .build())
+                        .build()).getPromotion();
+
+        assertThat(created.getModelIdsList()).containsExactly("seedance-*");
+        assertThat(created.getTaskTypesList()).containsExactly("text2video");
+        assertThat(created.getTierScopeList()).containsExactly("pro", "max");
+        assertThat(created.getDaysOfWeekList()).containsExactly(1, 5);
+        assertThat(admin.adminListPromotions(
+                        AdminListPromotionsRequest.newBuilder().setStatus("enabled").build())
+                .getItemsList())
+                .extracting(AdminPromotion::getCode)
+                .contains("peak");
+    }
+
+    @Test
+    void 管理端建的会员折扣_计价侧命中() {
+        admin.adminUpsertMemberDiscount(AdminUpsertMemberDiscountRequest.newBuilder()
+                .setInput(AdminMemberDiscountInput.newBuilder()
+                        .setTier("free")
+                        .setModelPattern("*")
+                        .setTaskPattern("*")
+                        .setDiscountBp(9000)
+                        .setStatus("enabled")
+                        .build())
+                .build());
+
+        assertThat(userFacing.charge(charge(USER, "adm-rpc-discount", 9_602L))
+                .getChargedCredits())
+                .isEqualTo(90);
+    }
+
+    @Test
+    void 活动_模型范围为空或时段只填一半_都报INVALID_ARGUMENT() {
+        assertThatThrownBy(() -> admin.adminUpsertPromotion(
+                AdminUpsertPromotionRequest.newBuilder()
+                        .setInput(AdminPromotionInput.newBuilder()
+                                .setCode("bad-empty").setName("空范围")
+                                .setDiscountBp(7000)
+                                .setStartAt("2026-10-01T00:00")
+                                .setEndAt("2026-11-01T00:00")
+                                .build())
+                        .build()))
+                .isInstanceOf(StatusRuntimeException.class)
+                .satisfies(thrown -> assertThat(((StatusRuntimeException) thrown).getStatus().getCode())
+                        .isEqualTo(Status.Code.INVALID_ARGUMENT));
+
+        assertThatThrownBy(() -> admin.adminUpsertPromotion(
+                AdminUpsertPromotionRequest.newBuilder()
+                        .setInput(AdminPromotionInput.newBuilder()
+                                .setCode("bad-window").setName("半截时段")
+                                .setDiscountBp(7000)
+                                .addModelIds("*")
+                                .setStartAt("2026-10-01T00:00")
+                                .setEndAt("2026-11-01T00:00")
+                                .setDailyTimeStart("22:00")
+                                .build())
+                        .build()))
+                .isInstanceOf(StatusRuntimeException.class)
+                .satisfies(thrown -> assertThat(((StatusRuntimeException) thrown).getStatus().getCode())
+                        .isEqualTo(Status.Code.INVALID_ARGUMENT));
+    }
+
+    private static AdminMemberDiscountInput memberDiscountInput(int discountBp, String status) {
+        return AdminMemberDiscountInput.newBuilder()
+                .setTier("pro")
+                .setModelPattern("*")
+                .setTaskPattern("*")
+                .setDiscountBp(discountBp)
+                .setStatus(status)
+                .build();
+    }
+
+    private static AdminPromotionInput promotionInput(boolean withDailyWindow, boolean enabled) {
+        AdminPromotionInput.Builder input = AdminPromotionInput.newBuilder()
+                .setCode("night-70")
+                .setName("夜间 7 折")
+                .setDiscountBp(7000)
+                .addModelIds("*")
+                .setStartAt("2026-10-01T00:00")
+                .setEndAt("2026-11-01T00:00")
+                .setStatus(enabled ? "enabled" : "draft");
+        if (withDailyWindow) {
+            input.setDailyTimeStart("22:00").setDailyTimeEnd("06:00");
+        }
+        return input.build();
+    }
+
     private List<AdminTransactionItem> adminList(long userId) {
         return admin.adminListTransactions(AdminListTransactionsRequest.newBuilder()
                         .setUserId(userId).setPageSize(50).build())
                 .getItemsList();
     }
-
     private List<AdminTransactionItem> adminListTyped(long userId, String type) {
         return admin.adminListTransactions(AdminListTransactionsRequest.newBuilder()
                         .setUserId(userId).setType(type).setPageSize(50).build())

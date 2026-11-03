@@ -299,7 +299,7 @@ describe("AdminConsumptionRecordsController.list", () => {
   });
 
   it("billing 管理端地址没配 → 503（重试不会好，要人去改配置）", async () => {
-    listAdminTransactions.mockRejectedValue(new BillingAdminConfigError("缺 BILLING_ADMIN_URL"));
+    listAdminTransactions.mockRejectedValue(new BillingAdminConfigError("缺 BILLING_GRPC_URL"));
 
     await expect(controller.list({})).rejects.toMatchObject({ status: 503 });
   });

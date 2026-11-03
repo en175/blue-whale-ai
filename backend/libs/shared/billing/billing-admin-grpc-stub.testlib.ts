@@ -15,6 +15,15 @@ export type AdminServiceHandlers = Partial<ServiceImpl<typeof BillingAdminServic
 export type BillingServiceHandlers = Partial<ServiceImpl<typeof BillingService>>;
 
 let currentRouter: Transport | undefined;
+let adminHandlers: AdminServiceHandlers = {};
+let billingHandlers: BillingServiceHandlers = {};
+
+function rebuildRouter(): void {
+  currentRouter = createRouterTransport(({ service }) => {
+    service(BillingAdminService, adminHandlers);
+    service(BillingService, billingHandlers);
+  });
+}
 
 export function grpcStubTransport(): Transport {
   if (!currentRouter) {
@@ -31,18 +40,19 @@ let urlSeq = 0;
 export function freshGrpcUrl(): void {
   urlSeq += 1;
   vi.stubEnv(BILLING_URL_ENV, `http://billing.grpc.test:4004/t${urlSeq}`);
+  adminHandlers = {};
+  billingHandlers = {};
+  currentRouter = undefined;
 }
 
 export function grpcAdminService(handlers: AdminServiceHandlers): void {
-  currentRouter = createRouterTransport(({ service }) => {
-    service(BillingAdminService, handlers);
-  });
+  adminHandlers = { ...adminHandlers, ...handlers };
+  rebuildRouter();
 }
 
 export function grpcBillingService(handlers: BillingServiceHandlers): void {
-  currentRouter = createRouterTransport(({ service }) => {
-    service(BillingService, handlers);
-  });
+  billingHandlers = { ...billingHandlers, ...handlers };
+  rebuildRouter();
 }
 
 export function grpcActiveCatalog(

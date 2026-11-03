@@ -292,7 +292,7 @@ describe("AdminUsersController.manage（冻结强制登出）", () => {
   });
 
   it("adjustBalance：billing 管理端没配 → 503（重试不会好，要人去改配置）", async () => {
-    grantCredits.mockRejectedValue(new BillingAdminConfigError("缺 BILLING_ADMIN_URL"));
+    grantCredits.mockRejectedValue(new BillingAdminConfigError("缺 BILLING_GRPC_URL"));
     const { controller, operationLog } = createController();
 
     await expect(
@@ -461,7 +461,7 @@ describe("AdminUsersController.list（余额三列来自 billing）", () => {
     const { controller } = createController({
       listAdminUsers: vi
         .fn()
-        .mockRejectedValue(new BillingAdminConfigError("缺 BILLING_ADMIN_URL")),
+        .mockRejectedValue(new BillingAdminConfigError("缺 BILLING_GRPC_URL")),
     });
 
     await expect(controller.list(USER, {})).rejects.toMatchObject({ status: 503 });

@@ -60,12 +60,12 @@ describe("AdminBillingCatalogController.active", () => {
 
   it("billing 管理端地址没配 → 503，且不伪装成 500", async () => {
     billing.fetchActiveCatalog.mockRejectedValue(
-      new BillingAdminConfigError("计费管理端地址未配置（缺环境变量 BILLING_ADMIN_URL）"),
+      new BillingAdminConfigError("计费管理端地址未配置（缺环境变量 BILLING_GRPC_URL）"),
     );
 
     await expect(createController().active()).rejects.toMatchObject({
       status: 503,
-      message: "计费管理端地址未配置（缺环境变量 BILLING_ADMIN_URL）",
+      message: "计费管理端地址未配置（缺环境变量 BILLING_GRPC_URL）",
     });
   });
 });

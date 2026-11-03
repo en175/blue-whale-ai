@@ -1,8 +1,20 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { create } from "@bufbuild/protobuf";
+import { Code, ConnectError } from "@connectrpc/connect";
 import {
+  AdminGrantResponseSchema,
+  AdminDeleteMemberDiscountResponseSchema,
+  AdminListMemberDiscountsResponseSchema,
   AdminListTransactionsResponseSchema,
+  AdminMemberDiscountSchema,
+  AdminPromotionSchema,
+  AdminPublishCatalogResponseSchema,
   AdminTransactionItemSchema,
+  AdminUpsertMemberDiscountResponseSchema,
+  AdminUpsertPromotionResponseSchema,
+  type AdminGrantRequest,
+  type AdminUpsertMemberDiscountRequest,
+  type AdminUpsertPromotionRequest,
 } from "../../contracts/gen/billing/v1/billing_pb.js";
 import {
   freshGrpcUrl,
@@ -16,7 +28,6 @@ import {
   CatalogRejectedError,
   DiscountNotFoundError,
   DiscountRejectedError,
-  billingAdminUrl,
   createMemberDiscount,
   createPromotion,
   deleteMemberDiscount,
@@ -30,28 +41,6 @@ import {
   updateMemberDiscount,
   updatePromotion,
 } from "./billing-admin-client.js";
-
-const ENV = { BILLING_ADMIN_URL: "http://billing.internal:4003/" };
-
-function stub(body: unknown, status = 200) {
-  const calls: { url: string; body: unknown; raw: string }[] = [];
-  vi.stubGlobal(
-    "fetch",
-    vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
-      const raw = init?.body ? String(init.body) : "";
-      calls.push({
-        url: String(url),
-        body: raw ? (JSON.parse(raw) as Record<string, unknown>) : {},
-        raw,
-      });
-      return new Response(JSON.stringify(body), {
-        status,
-        headers: { "Content-Type": "application/json" },
-      });
-    }),
-  );
-  return calls;
-}
 
 
 vi.mock("@connectrpc/connect-node", async (importOriginal) => {
@@ -79,17 +68,16 @@ const PROMOTION_INPUT = {
 };
 
 describe("billing-admin-client", () => {
-  beforeEach(() => {
-    vi.stubEnv("BILLING_ADMIN_URL", ENV.BILLING_ADMIN_URL);
-  });
   afterEach(() => {
     vi.unstubAllEnvs();
     vi.unstubAllGlobals();
   });
 
-  it("管理端地址未配置 → 直接抛（发放配不出地址时不许静默跳过）", () => {
-    expect(() => billingAdminUrl({})).toThrow(BillingAdminConfigError);
-    expect(billingAdminUrl(ENV)).toBe("http://billing.internal:4003");
+  it("管理端 gRPC 地址未配置 → 直接抛（发放配不出地址时不许静默跳过）", async () => {
+    vi.stubEnv("BILLING_GRPC_URL", "");
+    await expect(grantCredits({ userId: 1, credits: 1, bizId: "RC1" })).rejects.toThrow(
+      BillingAdminConfigError,
+    );
   });
 
   it("换算率从定价目录读，不是代码常量", async () => {
@@ -104,23 +92,32 @@ describe("billing-admin-client", () => {
     await expect(fetchCreditsPerYuan()).rejects.toThrow(BillingAdminConfigError);
   });
 
-  it("发放：请求体用我们自己的交易单号做幂等键，source 是 purchased", async () => {
-    const calls = stub({ lotId: 77 });
+  it("发放：用我们自己的交易单号做幂等键，source 是 purchased", async () => {
+    freshGrpcUrl();
+    const seen: AdminGrantRequest[] = [];
+    grpcAdminService({
+      adminGrant: (req) => {
+        seen.push(req);
+        return create(AdminGrantResponseSchema, { lotId: 77n });
+      },
+    });
+
     const result = await grantCredits({ userId: 9001, credits: 1500, bizId: "RC1" });
 
-    expect(calls[0]?.url).toBe("http://billing.internal:4003/admin/credits/grants");
-    expect(calls[0]?.body).toEqual({
-      userId: 9001,
-      source: "purchased",
-      amount: 1500,
-      bizId: "RC1",
-      bizType: "recharge",
-    });
+    expect(seen[0]?.userId).toBe(9001n);
+    expect(seen[0]?.source).toBe("purchased");
+    expect(seen[0]?.amount).toBe(1500n);
+    expect(seen[0]?.bizId).toBe("RC1");
+    expect(seen[0]?.bizType).toBe("recharge");
+    expect(seen[0]?.expiresAt).toBe("");
     expect(result).toEqual({ lotId: "77", duplicated: false, existingBizId: null });
   });
 
-  it("重复发放（billing 409）→ 当成「已经发过了」的正常结果，不当成故障", async () => {
-    stub({ code: "DUPLICATE" }, 409);
+  it("重复发放 → 当成「已经发过了」的正常结果，不当成故障", async () => {
+    freshGrpcUrl();
+    grpcAdminService({
+      adminGrant: () => create(AdminGrantResponseSchema, { duplicated: true }),
+    });
     await expect(grantCredits({ userId: 1, credits: 1500, bizId: "RC1" })).resolves.toEqual({
       lotId: "",
       duplicated: true,
@@ -128,8 +125,15 @@ describe("billing-admin-client", () => {
     });
   });
 
-  it("★ 409 带上 existingBizId：调用方靠它分辨「我自己发过」与「别人先占了」", async () => {
-    stub({ code: "DUPLICATE", existingBizId: "RC-FIRST" }, 409);
+  it("★ 重复发放带上 existingBizId：调用方靠它分辨「我自己发过」与「别人先占了」", async () => {
+    freshGrpcUrl();
+    grpcAdminService({
+      adminGrant: () =>
+        create(AdminGrantResponseSchema, {
+          duplicated: true,
+          existingBizId: "RC-FIRST",
+        }),
+    });
 
     const result = await grantCredits({ userId: 1, credits: 1000, bizId: "RC-SECOND" });
 
@@ -137,7 +141,12 @@ describe("billing-admin-client", () => {
   });
 
   it("其它错误码 → 抛错（调用方要让网关重投）", async () => {
-    stub({ code: "INTERNAL" }, 500);
+    freshGrpcUrl();
+    grpcAdminService({
+      adminGrant: () => {
+        throw new ConnectError("boom", Code.Internal);
+      },
+    });
     await expect(grantCredits({ userId: 1, credits: 1, bizId: "RC1" })).rejects.toThrow(
       BillingAdminError,
     );
@@ -267,11 +276,18 @@ describe("billing-admin-client", () => {
     expect(seen).toEqual([0n, 42n]);
   });
 
-  it("发布：请求体就是文档文本本身，不包一层 {document: ...}", async () => {
-    const calls = stub({
-      catalogVersion: 4,
-      documentHash: "def",
-      creditsPerYuan: 15,
+  it("发布：文档原文交给 gRPC，不包一层 {document: ...}", async () => {
+    freshGrpcUrl();
+    const seen: string[] = [];
+    grpcAdminService({
+      adminPublishCatalog: (req) => {
+        seen.push(req.documentJson);
+        return create(AdminPublishCatalogResponseSchema, {
+          catalogVersion: 4n,
+          documentHash: "def",
+          creditsPerYuan: 15n,
+        });
+      },
     });
 
     const document = '{"schemaVersion":1,"creditsPerYuan":15}';
@@ -283,14 +299,19 @@ describe("billing-admin-client", () => {
       creditsPerYuan: 15,
     });
 
-    expect(calls[0]?.url).toBe(
-      "http://billing.internal:4003/admin/catalogs?publishedBy=42&note=%E6%94%B9%E4%BB%B7",
-    );
-    expect(calls[0]?.raw).toBe(document);
+    expect(seen[0]).toBe(document);
   });
 
-  it("发布：文档被拒（400）→ 抛 CatalogRejectedError 并带上 billing 的原话", async () => {
-    stub({ code: "INVALID_ARGUMENT", message: "baseUnit 指向不存在的维度 usage.x" }, 400);
+  it("发布：文档被拒（INVALID_ARGUMENT）→ 抛 CatalogRejectedError 并带上 billing 的原话", async () => {
+    freshGrpcUrl();
+    grpcAdminService({
+      adminPublishCatalog: () => {
+        throw new ConnectError(
+          "INVALID_ARGUMENT: baseUnit 指向不存在的维度 usage.x",
+          Code.InvalidArgument,
+        );
+      },
+    });
 
     await expect(
       publishCatalog({ document: "{}", publishedBy: "42" }),
@@ -300,8 +321,13 @@ describe("billing-admin-client", () => {
     ).rejects.toThrow(/usage\.x/);
   });
 
-  it("发布：其它非 2xx → BillingAdminError（可重试的一类）", async () => {
-    stub({ message: "网关超时" }, 502);
+  it("发布：服务不可用 → BillingAdminError（可重试的一类）", async () => {
+    freshGrpcUrl();
+    grpcAdminService({
+      adminPublishCatalog: () => {
+        throw new ConnectError("unavailable", Code.Unavailable);
+      },
+    });
 
     await expect(
       publishCatalog({ document: "{}", publishedBy: "42" }),
@@ -309,18 +335,54 @@ describe("billing-admin-client", () => {
   });
 
 
-  it("会员折扣：列 / 建 / 改 / 删各打对端点", async () => {
-    const listCalls = stub([{ id: 1, tier: "pro", discountBp: 9000 }]);
-    await listMemberDiscounts({ tier: "pro", status: "enabled" });
-    expect(listCalls[0]?.url).toBe(
-      "http://billing.internal:4003/admin/member-discounts?tier=pro&status=enabled",
-    );
+  it("会员折扣：列 / 建 / 改 / 删各打对 RPC", async () => {
+    freshGrpcUrl();
+    const lists: Array<{ tier: string; status: string }> = [];
+    const upserts: AdminUpsertMemberDiscountRequest[] = [];
+    const deletes: bigint[] = [];
+    grpcAdminService({
+      adminListMemberDiscounts: (req) => {
+        lists.push({ tier: req.tier, status: req.status });
+        return create(AdminListMemberDiscountsResponseSchema, {
+          items: [
+            create(AdminMemberDiscountSchema, {
+              id: 1n,
+              tier: "pro",
+              modelPattern: "*",
+              taskPattern: "*",
+              discountBp: 9000,
+              status: "enabled",
+            }),
+          ],
+        });
+      },
+      adminUpsertMemberDiscount: (req) => {
+        upserts.push(req);
+        return create(AdminUpsertMemberDiscountResponseSchema, {
+          discount: create(AdminMemberDiscountSchema, {
+            id: req.id === 0n ? 7n : req.id,
+            tier: req.input?.tier ?? "",
+            discountBp: req.input?.discountBp ?? 0,
+          }),
+        });
+      },
+      adminDeleteMemberDiscount: (req) => {
+        deletes.push(req.id);
+        return create(AdminDeleteMemberDiscountResponseSchema, {
+          id: req.id,
+          deleted: true,
+        });
+      },
+    });
 
-    const bareCalls = stub([]);
+    const listed = await listMemberDiscounts({ tier: "pro", status: "enabled" });
     await listMemberDiscounts();
-    expect(bareCalls[0]?.url).toBe("http://billing.internal:4003/admin/member-discounts");
+    expect(lists).toEqual([
+      { tier: "pro", status: "enabled" },
+      { tier: "", status: "" },
+    ]);
+    expect(listed[0]).toMatchObject({ id: 1, tier: "pro", discountBp: 9000 });
 
-    const writeCalls = stub({ id: 7 });
     await createMemberDiscount({
       tier: "pro",
       modelPattern: "*",
@@ -329,10 +391,10 @@ describe("billing-admin-client", () => {
       priority: 0,
       status: "enabled",
     });
-    expect(writeCalls[0]?.url).toBe("http://billing.internal:4003/admin/member-discounts");
-    expect(writeCalls[0]?.body).toMatchObject({ tier: "pro", discountBp: 9000 });
+    expect(upserts[0]?.id).toBe(0n);
+    expect(upserts[0]?.input?.tier).toBe("pro");
+    expect(upserts[0]?.input?.discountBp).toBe(9000);
 
-    const updateCalls = stub({ id: 7 });
     await updateMemberDiscount(7, {
       tier: "pro",
       modelPattern: "*",
@@ -341,41 +403,56 @@ describe("billing-admin-client", () => {
       priority: 1,
       status: "disabled",
     });
-    expect(updateCalls[0]?.url).toBe("http://billing.internal:4003/admin/member-discounts/7");
+    expect(upserts[1]?.id).toBe(7n);
+    expect(upserts[1]?.input?.discountBp).toBe(8000);
 
-    const deleteCalls = stub({ id: 7, deleted: true });
     await deleteMemberDiscount(7);
-    expect(deleteCalls[0]?.url).toBe("http://billing.internal:4003/admin/member-discounts/7");
+    expect(deletes).toEqual([7n]);
   });
 
-  it("活动：建的时候把操作人带上（billing 那边没有鉴权，这是唯一的来路）", async () => {
-    const calls = stub({ id: 3, code: "night-70" });
-
-    await createPromotion(
-      {
-        code: "night-70",
-        name: "夜间 7 折",
-        discountBp: 7000,
-        modelIds: ["seedance-*"],
-        taskTypes: null,
-        tierScope: ["pro", "max"],
-        startAt: "2026-10-01T00:00",
-        endAt: "2026-11-01T00:00",
-        dailyTimeStart: "22:00",
-        dailyTimeEnd: "06:00",
-        daysOfWeek: [1, 5],
-        status: "draft",
-        priority: 0,
+  it("活动：建的时候把操作人带上，空范围归一成空数组", async () => {
+    freshGrpcUrl();
+    const seen: AdminUpsertPromotionRequest[] = [];
+    grpcAdminService({
+      adminUpsertPromotion: (req) => {
+        seen.push(req);
+        return create(AdminUpsertPromotionResponseSchema, {
+          promotion: create(AdminPromotionSchema, {
+            id: 3n,
+            code: req.input?.code ?? "",
+            startAt: req.input?.startAt ?? "",
+            endAt: req.input?.endAt ?? "",
+          }),
+        });
       },
-      "42",
-    );
+    });
 
-    expect(calls[0]?.url).toBe("http://billing.internal:4003/admin/promotions?operator=42");
-    expect(calls[0]?.body).toMatchObject({ taskTypes: null, daysOfWeek: [1, 5] });
+    await createPromotion(PROMOTION_INPUT, "42");
+
+    expect(seen[0]?.id).toBe(0n);
+    expect(seen[0]?.operator).toBe("42");
+    expect(seen[0]?.input?.taskTypes).toEqual([]);
+    expect(seen[0]?.input?.daysOfWeek).toEqual([]);
+    expect(seen[0]?.input?.startAt).toBe("2026-10-01T00:00");
+    expect(seen[0]?.input?.endAt).toBe("2026-11-01T00:00");
   });
 
-  it("折扣写入被拒（400）→ DiscountRejectedError，且带上 billing 的原话", async () => {
-    stub({ code: "INVALID_ARGUMENT", message: "折扣必须大于 0：万分比 0 表示免费" }, 400);
+  it("折扣写入被拒（INVALID_ARGUMENT）→ DiscountRejectedError，且带上 billing 的原话", async () => {
+    freshGrpcUrl();
+    grpcAdminService({
+      adminUpsertMemberDiscount: () => {
+        throw new ConnectError(
+          "INVALID_ARGUMENT: 折扣必须大于 0：万分比 0 表示免费",
+          Code.InvalidArgument,
+        );
+      },
+      adminDeleteMemberDiscount: () => {
+        throw new ConnectError(
+          "INVALID_ARGUMENT: 折扣必须大于 0：万分比 0 表示免费",
+          Code.InvalidArgument,
+        );
+      },
+    });
 
     await expect(
       createMemberDiscount({
@@ -387,19 +464,30 @@ describe("billing-admin-client", () => {
         status: "enabled",
       }),
     ).rejects.toThrow(DiscountRejectedError);
-    await expect(
-      deleteMemberDiscount(7),
-    ).rejects.toThrow(/折扣必须大于 0/);
+    await expect(deleteMemberDiscount(7)).rejects.toThrow(/折扣必须大于 0/);
   });
 
-  it("目标已被删（404）→ DiscountNotFoundError，与 400 分开（一个刷新、一个改表单）", async () => {
-    stub({ code: "NOT_FOUND", message: "活动不存在（可能已被删除）：id=7" }, 404);
+  it("目标已被删（NOT_FOUND）→ DiscountNotFoundError，与 INVALID_ARGUMENT 分开", async () => {
+    freshGrpcUrl();
+    grpcAdminService({
+      adminUpsertPromotion: () => {
+        throw new ConnectError(
+          "NOT_FOUND: 活动不存在（可能已被删除）：id=7",
+          Code.NotFound,
+        );
+      },
+    });
 
     await expect(updatePromotion(7, PROMOTION_INPUT)).rejects.toThrow(DiscountNotFoundError);
   });
 
-  it("billing 不可用（502）→ BillingAdminError，与服务故障同向", async () => {
-    stub({ message: "网关超时" }, 502);
+  it("billing 不可用 → BillingAdminError，与服务故障同向", async () => {
+    freshGrpcUrl();
+    grpcAdminService({
+      adminListPromotions: () => {
+        throw new ConnectError("unavailable", Code.Unavailable);
+      },
+    });
 
     await expect(listPromotions()).rejects.toThrow(BillingAdminError);
   });
