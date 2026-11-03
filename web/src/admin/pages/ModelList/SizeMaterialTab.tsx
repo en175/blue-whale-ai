@@ -497,8 +497,7 @@ export default function SizeMaterialTab({
       )}
 
       <h3 style={SECTION}>
-        特性 features（结构化）
-        <Hint>结构化键在保存时写入 features；未列出的键与历史脏值去「高级 JSON」维护。</Hint>
+        特性 features（结构化） <Hint>结构化键在保存时写入 features；未列出的键与历史脏值去「高级 JSON」维护。</Hint>
         {!visible.structuredFeature && (
           <Hint>该类型没有专属的结构化特性键，可直接去「高级」用 JSON 配置。</Hint>
         )}
