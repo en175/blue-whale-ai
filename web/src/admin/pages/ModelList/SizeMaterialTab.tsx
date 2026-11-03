@@ -23,7 +23,21 @@ import {
 import { Badge, Button, Checkbox, Chip, Field, Input, Segmented, Select, Table } from '../../ui';
 import DimensionMatrix from './DimensionMatrix';
 import { Hint } from '../../ui';
-import { CHIP_LIST, CHECK_STACK, FULL, GRID2, GRID3, INLINE_ROW, LABEL, SECTION, SIZE_ROW } from './formLayout';
+import {
+  CHIP_LIST,
+  FEATURE_FIELD_GRID,
+  FEATURE_FLAG_GRID,
+  FEATURE_GROUP_LABEL,
+  FEATURE_GROUPS,
+  FULL,
+  GRID2,
+  GRID3,
+  INLINE_ROW,
+  LABEL,
+  PANEL,
+  SECTION,
+  SIZE_ROW,
+} from './formLayout';
 
 interface SizeMaterialTabProps {
   type: ModelType;
@@ -108,6 +122,9 @@ export default function SizeMaterialTab({
   taskTypes,
 }: SizeMaterialTabProps) {
   const parser = channelOf(channel).parser ?? 'seedream';
+  const flagEntries = Object.entries(FEATURE_BOOL_LABELS).filter(([, meta]) => featureApplies(meta, type));
+  const numberEntries = Object.entries(FEATURE_NUMBER_LABELS).filter(([, meta]) => featureApplies(meta, type));
+  const stringEntries = Object.entries(FEATURE_STRING_LABELS).filter(([, meta]) => featureApplies(meta, type));
   return (
     <>
       {visible.sizeRatio && (
@@ -416,51 +433,7 @@ export default function SizeMaterialTab({
       )}
 
       {}
-      <h3 style={SECTION}>
-        特性 features（结构化）
-        {!visible.structuredFeature && (
-          <Hint>该类型没有专属的结构化特性键，可直接去「高级」用 JSON 配置。</Hint>
-        )}
-      </h3>
-      <div style={CHECK_STACK}>
-        {Object.entries(FEATURE_BOOL_LABELS)
-          .filter(([, meta]) => featureApplies(meta, type))
-          .map(([key, meta]) => (
-            <Checkbox key={key} checked={!!features.flags[key]} onChange={() => features.toggle(key)} label={meta.label} />
-          ))}
-      </div>
-      <div style={GRID2}>
-        {Object.entries(FEATURE_NUMBER_LABELS)
-          .filter(([, meta]) => featureApplies(meta, type))
-          .map(([key, meta]) => (
-            <Field key={key} label={<>{meta.label} <span>（留空不写入）</span></>}>
-              <Input
-                type="number"
-                min={0}
-                placeholder={meta.placeholder}
-                value={features.numbers[key] ?? ''}
-                onChange={(e) => features.setNumber(key, e.target.value)}
-                style={FULL}
-              />
-            </Field>
-          ))}
-      </div>
-      <div style={GRID2}>
-        {Object.entries(FEATURE_STRING_LABELS)
-          .filter(([, meta]) => featureApplies(meta, type))
-          .map(([key, meta]) => (
-            <Field key={key} label={<>{meta.label} <span>（留空不写入）</span></>}>
-              <Input
-                placeholder={meta.placeholder}
-                value={features.strings[key] ?? ''}
-                onChange={(e) => features.setString(key, e.target.value)}
-                style={FULL}
-              />
-            </Field>
-          ))}
-      </div>
 
-      {}
       {type === 'video' && (
         <>
           <h3 style={SECTION}>视频模式 task_types <Hint>勾选 = 该模式对模型开放；未勾选的模式不出现。比例留空 = 该模式沿用基础「比例选项」。时长策略逐模式配置：指定秒数 = 只能选基础范围；仅自动 = 用户不可选秒数；自动或指定 = 用户可二选一。</Hint></h3>
@@ -519,6 +492,65 @@ export default function SizeMaterialTab({
             </tbody>
           </Table>
         </>
+      )}
+
+      <h3 style={SECTION}>
+        特性 features（结构化） <Hint>结构化键在保存时写入 features；未列出的键与历史脏值去「高级 JSON」维护。</Hint>
+        {!visible.structuredFeature && (
+          <Hint>该类型没有专属的结构化特性键，可直接去「高级」用 JSON 配置。</Hint>
+        )}
+      </h3>
+      {visible.structuredFeature && (
+        <div style={PANEL}>
+          <div style={FEATURE_GROUPS}>
+            {flagEntries.length > 0 && (
+              <div>
+                <div style={FEATURE_GROUP_LABEL}>开关</div>
+                <div style={FEATURE_FLAG_GRID}>
+                  {flagEntries.map(([key, meta]) => (
+                    <Checkbox key={key} checked={!!features.flags[key]} onChange={() => features.toggle(key)} label={meta.label} />
+                  ))}
+                </div>
+              </div>
+            )}
+            {numberEntries.length > 0 && (
+              <div>
+                <div style={FEATURE_GROUP_LABEL}>数值</div>
+                <div style={FEATURE_FIELD_GRID}>
+                  {numberEntries.map(([key, meta]) => (
+                    <Field key={key} label={<>{meta.label} <span>（留空不写入）</span></>}>
+                      <Input
+                        type="number"
+                        min={0}
+                        placeholder={meta.placeholder}
+                        value={features.numbers[key] ?? ''}
+                        onChange={(e) => features.setNumber(key, e.target.value)}
+                        style={FULL}
+                      />
+                    </Field>
+                  ))}
+                </div>
+              </div>
+            )}
+            {stringEntries.length > 0 && (
+              <div>
+                <div style={FEATURE_GROUP_LABEL}>文本</div>
+                <div style={FEATURE_FIELD_GRID}>
+                  {stringEntries.map(([key, meta]) => (
+                    <Field key={key} label={<>{meta.label} <span>（留空不写入）</span></>}>
+                      <Input
+                        placeholder={meta.placeholder}
+                        value={features.strings[key] ?? ''}
+                        onChange={(e) => features.setString(key, e.target.value)}
+                        style={FULL}
+                      />
+                    </Field>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
       )}
     </>
   );
