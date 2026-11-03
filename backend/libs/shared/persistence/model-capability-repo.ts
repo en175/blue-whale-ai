@@ -1,8 +1,4 @@
 import type { PrismaClient } from "@prisma/client";
-import {
-  DEFAULT_MAX_REFERENCE_IMAGE_PIXELS,
-  DEFAULT_MAX_REFERENCE_IMAGE_RATIO,
-} from "../model-capability/constants.js";
 import { capabilityDigestFromModelCapability } from "./capability-digest.js";
 import {
   getModelCapabilityList,
@@ -52,8 +48,9 @@ export interface ModelFeatures {
   audio_reference: boolean;
   audio_reference_max: number;
   image_reference_max: number;
-  max_reference_image_pixels: number;
-  max_reference_image_ratio: number;
+  max_reference_image_pixels: number | null;
+  max_reference_image_ratio: number | null;
+  max_reference_image_bytes: number | null;
   max_reference_duration_sec: number | null;
   task_types: Record<string, unknown> | null;
   video_dimensions: Record<string, string> | null;
@@ -141,6 +138,8 @@ type FeaturesJson = {
   max_reference_image_pixels?: unknown;
   maxReferenceImageRatio?: unknown;
   max_reference_image_ratio?: unknown;
+  maxReferenceImageBytes?: unknown;
+  max_reference_image_bytes?: unknown;
   maxReferenceDurationSec?: unknown;
   max_reference_duration_sec?: unknown;
   taskTypes?: unknown;
@@ -231,12 +230,15 @@ export function toFeatures(json: unknown, capabilityType?: string): ModelFeature
       (capabilityType === "audio"
         ? DEFAULT_IMAGE_REFERENCE_MAX_FOR_AUDIO
         : DEFAULT_IMAGE_REFERENCE_MAX),
-    max_reference_image_pixels:
-      pickPositiveInt(f.maxReferenceImagePixels ?? f.max_reference_image_pixels) ??
-      DEFAULT_MAX_REFERENCE_IMAGE_PIXELS,
-    max_reference_image_ratio:
-      pickPositiveNumber(f.maxReferenceImageRatio ?? f.max_reference_image_ratio) ??
-      DEFAULT_MAX_REFERENCE_IMAGE_RATIO,
+    max_reference_image_pixels: pickPositiveInt(
+      f.maxReferenceImagePixels ?? f.max_reference_image_pixels,
+    ),
+    max_reference_image_ratio: pickPositiveNumber(
+      f.maxReferenceImageRatio ?? f.max_reference_image_ratio,
+    ),
+    max_reference_image_bytes: pickPositiveInt(
+      f.maxReferenceImageBytes ?? f.max_reference_image_bytes,
+    ),
     max_reference_duration_sec: pickPositiveNumber(
       f.maxReferenceDurationSec ?? f.max_reference_duration_sec,
     ),

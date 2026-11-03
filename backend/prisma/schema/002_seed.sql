@@ -82,6 +82,8 @@ INSERT INTO generation_model_capability (
       'audio_reference_max', 3,
       'image_reference_max', 1,
       'max_reference_duration_sec', 15,
+      'max_reference_image_pixels', 36000000,
+      'max_reference_image_ratio', 2.5,
       'task_types', JSON_OBJECT(
         'text2video', JSON_OBJECT(),
         'omni', JSON_OBJECT(),
@@ -129,6 +131,8 @@ INSERT INTO generation_model_capability (
       'image_reference_max', 30,
       'max_reference_duration_sec', 30,
       'omni_reference_task_type', TRUE,
+      'max_reference_image_pixels', 36000000,
+      'max_reference_image_ratio', 2.5,
       'task_types', JSON_OBJECT(
         'text2video', JSON_OBJECT(),
         'omni', JSON_OBJECT(),
@@ -174,7 +178,10 @@ INSERT INTO generation_model_capability (
     'mp3',
     '',
     NULL,
-    JSON_OBJECT('watermark', TRUE),
+    JSON_OBJECT(
+      'watermark', TRUE,
+      'max_reference_image_bytes', 10485760
+    ),
     TRUE,
     30,
     NULL

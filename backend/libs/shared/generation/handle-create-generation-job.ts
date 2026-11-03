@@ -7,7 +7,11 @@ import {
 import type { ReferenceItemInput } from "./reference-item-input.js";
 import { freezePromptPlans } from "./prompt-plan-snapshot.js";
 import { checkReferenceLimits } from "../generation-runtime/reference-limits.js";
-import { validateReferenceImages } from "../generation-runtime/image-reference-validation.js";
+import {
+  validateConfiguredReferenceImages,
+  validateReferenceImageMedia,
+  validateReferenceImages,
+} from "../generation-runtime/image-reference-validation.js";
 import {
   freezeReferenceLimits,
   validateReferences,
@@ -2237,6 +2241,45 @@ export async function handleCreateGenerationJob(
           error instanceof Error ? error.message : "参考素材不受支持",
           { code },
         );
+      }
+      const legacyFrameIds = referencesProvided
+        ? []
+        : [assetId(body.first_frame_asset_id), assetId(body.last_frame_asset_id)].filter(
+            (id): id is string => id !== null,
+          );
+      const legacyFrameAssets =
+        legacyFrameIds.length > 0
+          ? await deps.assets.resolveInputAssets(legacyFrameIds, userId, projectId)
+          : [];
+      const imageAssets = [
+        ...ruling.assetsById.values(),
+        ...(referencesProvided ? [] : resolvedReferenceAssets),
+        ...legacyFrameAssets,
+      ].filter((asset) => asset.type === "image");
+      const imageLimitErr = validateConfiguredReferenceImages(
+        [...new Map(imageAssets.map((asset) => [asset.id, asset])).values()],
+        capability.features,
+      );
+      if (imageLimitErr) {
+        return fail(errorCodeToNumeric(ERROR_INVALID_REFERENCE), imageLimitErr.message, {
+          code: ERROR_INVALID_REFERENCE,
+          params: imageLimitErr.params,
+        });
+      }
+    }
+
+    if (type === "audio" && capability?.features) {
+      const maxBytes = capability.features.max_reference_image_bytes;
+      if (maxBytes != null) {
+        const imageMediaErr = validateReferenceImageMedia(
+          [...ruling.assetsById.values()].filter((asset) => asset.type === "image"),
+          maxBytes,
+        );
+        if (imageMediaErr) {
+          return fail(errorCodeToNumeric(imageMediaErr.code), imageMediaErr.message, {
+            code: imageMediaErr.code,
+          });
+        }
       }
     }
 

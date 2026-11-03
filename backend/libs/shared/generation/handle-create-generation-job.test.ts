@@ -4142,3 +4142,212 @@ describe("handleCreateGenerationJob 参考图总像素预检（IKQYEH）", () =>
     expect(createJob).toHaveBeenCalled();
   });
 });
+
+
+
+describe("handleCreateGenerationJob 视频/音频参考图上限（IKSLLC）", () => {
+  function referenceImageAsset(overrides: Record<string, unknown> = {}) {
+    return {
+      id: "11",
+      type: "image",
+      url: "https://tos.test/11.png",
+      mime: "image/png",
+      size: 100,
+      width: 2048,
+      height: 2048,
+      duration: null,
+      material_id: null,
+      ...overrides,
+    };
+  }
+
+  const VIDEO_IMAGE_LIMITS = {
+    max_reference_image_pixels: 36_000_000,
+    max_reference_image_ratio: 2.5,
+  };
+
+  async function createVideoWithImage(
+    features: Record<string, unknown>,
+    refs: Array<Record<string, unknown>>,
+    assets: Array<Record<string, unknown>>,
+  ) {
+    const { deps, createJob, resolveInputAssets } = buildCapabilityDeps([
+      { ...VIDEO_CAPABILITY_ROW, features },
+    ]);
+    resolveInputAssets.mockResolvedValue(assets);
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      { ...VIDEO_PARAMS_OK, references: refs },
+      null,
+      deps,
+    );
+    return { result, createJob };
+  }
+
+  it("首帧 6144×6144 超过 3600 万像素 → 400 invalid_reference，不建任务", async () => {
+    const { result, createJob } = await createVideoWithImage(
+      VIDEO_IMAGE_LIMITS,
+      [{ role: "first_frame", asset_id: "11", type: "image" }],
+      [referenceImageAsset({ width: 6144, height: 6144 })],
+    );
+    expect(result.code).toBe(1034);
+    expect(result.data?.code).toBe("invalid_reference");
+    expect(result.msg).toBe(
+      "参考图总像素超出当前模型限制（单张最多 3600 万像素），请更换较小的图片后重试",
+    );
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("omni 参考图 7000×5200 超过 3600 万像素 → 400 invalid_reference", async () => {
+    const { result, createJob } = await createVideoWithImage(
+      VIDEO_IMAGE_LIMITS,
+      [{ role: "reference", asset_id: "11", type: "image" }],
+      [referenceImageAsset({ width: 7000, height: 5200 })],
+    );
+    expect(result.code).toBe(1034);
+    expect(result.data?.code).toBe("invalid_reference");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("首帧比例超出 2.5 → 400 invalid_reference", async () => {
+    const { result, createJob } = await createVideoWithImage(
+      VIDEO_IMAGE_LIMITS,
+      [{ role: "first_frame", asset_id: "11", type: "image" }],
+      [referenceImageAsset({ width: 6400, height: 400 })],
+    );
+    expect(result.code).toBe(1034);
+    expect(result.data?.params).toMatchObject({ max_reference_ratio: 2.5 });
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("首帧 2048×2048 正常尺寸 → 200", async () => {
+    const { result, createJob } = await createVideoWithImage(
+      VIDEO_IMAGE_LIMITS,
+      [{ role: "first_frame", asset_id: "11", type: "image" }],
+      [referenceImageAsset()],
+    );
+    expect(result.code).toBe(200);
+    expect(createJob).toHaveBeenCalled();
+  });
+
+  it("能力行未配参考图上限 → 不校验，6144×6144 首帧放行", async () => {
+    const { result, createJob } = await createVideoWithImage(
+      { first_frame: true },
+      [{ role: "first_frame", asset_id: "11", type: "image" }],
+      [referenceImageAsset({ width: 6144, height: 6144 })],
+    );
+    expect(result.code).toBe(200);
+    expect(createJob).toHaveBeenCalled();
+  });
+
+  const AUDIO_IMAGE_LIMITS = {
+    image_reference_max: 1,
+    audio_reference_max: 3,
+    max_reference_image_bytes: 10_485_760,
+  };
+
+  async function createAudioWithImage(
+    features: Record<string, unknown>,
+    asset: Record<string, unknown>,
+  ) {
+    const { deps, createJob, resolveInputAssets } = buildCapabilityDeps([
+      { ...AUDIO_CAPABILITY_ROW, features },
+    ]);
+    resolveInputAssets.mockResolvedValue([asset]);
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      {
+        ...AUDIO_BODY,
+        references: [{ role: "reference", asset_id: "42", type: "image" }],
+      },
+      null,
+      deps,
+    );
+    return { result, createJob };
+  }
+
+  it("音频参考图 gif → 400 invalid_reference_media", async () => {
+    const { result, createJob } = await createAudioWithImage(AUDIO_IMAGE_LIMITS, {
+      ...referenceImageAsset({ id: "42", mime: "image/gif" }),
+    });
+    expect(result.code).toBe(1036);
+    expect(result.data?.code).toBe("invalid_reference_media");
+    expect(result.msg).toBe("参考图仅支持 JPEG、PNG 或 WebP 格式");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("音频参考图超过 10 MB → 400 invalid_reference_media", async () => {
+    const { result, createJob } = await createAudioWithImage(AUDIO_IMAGE_LIMITS, {
+      ...referenceImageAsset({ id: "42", size: 10_485_761 }),
+    });
+    expect(result.code).toBe(1036);
+    expect(result.msg).toBe("参考图不能超过 10 MB");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("音频参考图 png 且大小合规 → 200", async () => {
+    const { result, createJob } = await createAudioWithImage(AUDIO_IMAGE_LIMITS, {
+      ...referenceImageAsset({ id: "42" }),
+    });
+    expect(result.code).toBe(200);
+    expect(createJob).toHaveBeenCalled();
+  });
+
+  it("音频能力行未配图片上限 → 不校验格式与大小", async () => {
+    const { result, createJob } = await createAudioWithImage(
+      { image_reference_max: 1, audio_reference_max: 3 },
+      { ...referenceImageAsset({ id: "42", mime: "image/gif", size: 99_999_999 }) },
+    );
+    expect(result.code).toBe(200);
+    expect(createJob).toHaveBeenCalled();
+  });
+
+  it("旧字段 first_frame_asset_id 首帧超限 → 400 invalid_reference", async () => {
+    const { deps, createJob, resolveInputAssets } = buildCapabilityDeps([
+      { ...VIDEO_CAPABILITY_ROW, features: VIDEO_IMAGE_LIMITS },
+    ]);
+    resolveInputAssets.mockImplementation(async (ids: string[]) =>
+      ids.map((id) =>
+        referenceImageAsset({ id: String(id), width: 6144, height: 6144 }),
+      ),
+    );
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      { ...VIDEO_PARAMS_OK, first_frame_asset_id: "11" },
+      null,
+      deps,
+    );
+    expect(result.code).toBe(1034);
+    expect(result.data?.code).toBe("invalid_reference");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("references 与 input_asset_ids 同时出现 → 只校验实际生效的 references", async () => {
+    const { deps, createJob, resolveInputAssets } = buildCapabilityDeps([
+      { ...VIDEO_CAPABILITY_ROW, features: VIDEO_IMAGE_LIMITS },
+    ]);
+    resolveInputAssets.mockImplementation(async (ids: string[]) =>
+      ids.map((id) =>
+        String(id) === "99"
+          ? referenceImageAsset({ id: "99", width: 6144, height: 6144 })
+          : referenceImageAsset({ id: String(id) }),
+      ),
+    );
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      {
+        ...VIDEO_PARAMS_OK,
+        references: [{ role: "first_frame", asset_id: "11", type: "image" }],
+        input_asset_ids: ["99"],
+      },
+      null,
+      deps,
+    );
+    expect(result.code).toBe(200);
+    expect(createJob).toHaveBeenCalled();
+  });
+});
