@@ -53,7 +53,7 @@ public class AdminCreditController {
                     request.bizType() == null ? "grant" : request.bizType(),
                     request.bizId(),
                     grantKey,
-                    request.expiresAt());
+                    request.expiresAtLocal());
         } catch (DuplicateKeyException e) {
             throw new DuplicateGrantKeyException(billing.findGrantOwner(grantKey));
         }
