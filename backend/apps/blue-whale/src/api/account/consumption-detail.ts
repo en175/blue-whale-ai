@@ -22,24 +22,6 @@ export function dateOnly(value: string): string {
 
 export const EXPIRE_TYPE = "expire";
 
-const SPEC_KEYS = ["resolution", "size", "duration", "aspect_ratio"] as const;
-
-export function formatSpecs(specs: Record<string, string> | null): string {
-  if (specs === null) return "";
-  const parts: string[] = [];
-  for (const key of SPEC_KEYS) {
-    const raw = specs[key];
-    if (raw === undefined || raw === "") continue;
-    if (key === "duration") {
-      if (Number(raw) <= 0) continue;
-      parts.push(`${raw}s`);
-    } else {
-      parts.push(raw);
-    }
-  }
-  return parts.join(" · ");
-}
-
 export interface ConsumptionDetailRow {
   type: string;
   title: string;
@@ -55,7 +37,5 @@ export function consumeDetail(row: ConsumptionDetailRow): string {
     if (row.lot_source === null || row.lot_created_at === null) return "—";
     return `${dateOnly(row.lot_created_at)} ${lotSourceText(row.lot_source)}批次`;
   }
-  const parts = [formatSpecs(row.specs), row.prompt ?? ""].filter((part) => part !== "");
-  if (parts.length > 0) return parts.join(" · ");
-  return row.task_type === null ? row.title : "—";
+  return row.prompt?.trim() || "—";
 }

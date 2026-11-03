@@ -69,6 +69,7 @@ export default function UserDropdown() {
           </button>
         </div>
         {loginOpen && <LoginModal onClose={() => setLoginOpen(false)} />}
+        {showRecharge && <RechargeModal onClose={closeRecharge} />}
       </div>
     );
   }

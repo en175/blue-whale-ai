@@ -40,10 +40,10 @@ afterEach(async () => {
 });
 
 describe('CreditsShopButton', () => {
-  it('未登录时不渲染入口', async () => {
+  it('未登录时同样渲染入口，游客可见价格后再引导登录', async () => {
     await renderButton();
 
-    expect(mountNode.innerHTML).toBe('');
+    expect(mountNode.querySelector('button')?.textContent).toBe('积分超市');
   });
 
   it('登录后展示铜钱图标（外圆内方）与「积分超市」文案', async () => {

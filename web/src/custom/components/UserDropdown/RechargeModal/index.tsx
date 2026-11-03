@@ -3,6 +3,7 @@ import { Check, CheckCircle2, Clock, ScanLine, XCircle, Zap } from 'lucide-react
 import { QRCodeSVG } from 'qrcode.react';
 import { toast } from '@/custom/components/Toast';
 import Modal from '@/custom/components/Modal';
+import LoginModal from '@/custom/components/LoginModal';
 import CustomRecharge from '@/custom/components/CustomRecharge';
 import styles from './index.module.css';
 import { fetchCredits } from '@/custom/api/auth';
@@ -65,6 +66,7 @@ export default function RechargeModal({ onClose }: RechargeModalProps) {
   const [creditsPending, setCreditsPending] = useState(false);
   const [grantFailed, setGrantFailed] = useState(false);
   const [priceChanged, setPriceChanged] = useState(false);
+  const [loginOpen, setLoginOpen] = useState(false);
 
   const user = useAuthStore((s) => s.user);
   const tiers = catalog?.tiers ?? [];
@@ -148,6 +150,10 @@ export default function RechargeModal({ onClose }: RechargeModalProps) {
   };
 
   const handleBuyTier = (tierId: string, shownPrice: number) => {
+    if (guest) {
+      setLoginOpen(true);
+      return;
+    }
     if (paying || phase === 'paid') return;
     const tier = tiers.find((item) => item.id === tierId);
     if (!tier || tier.can_purchase === false) return;
@@ -166,6 +172,10 @@ export default function RechargeModal({ onClose }: RechargeModalProps) {
   };
 
   const handleCustomConfirm = (customCredits: number) => {
+    if (guest) {
+      setLoginOpen(true);
+      return;
+    }
     if (paying) return;
     startPay();
     const shownFen = customConfig
@@ -213,17 +223,18 @@ export default function RechargeModal({ onClose }: RechargeModalProps) {
   };
 
   return (
-    <Modal
-      open
-      footer={null}
-      onCancel={handleClose}
-      width="min(1120px, calc(100vw - 48px))"
-      ariaLabel="积分超市"
-      classNames={{
-        container: styles.modal,
-        body: styles.body,
-      }}
-    >
+    <>
+      <Modal
+        open
+        footer={null}
+        onCancel={handleClose}
+        width="min(1120px, calc(100vw - 48px))"
+        ariaLabel="积分超市"
+        classNames={{
+          container: styles.modal,
+          body: styles.body,
+        }}
+      >
       <div className={styles.content}>
         <div className={styles.main}>
           <h2 className={styles.title}>积分超市 / 通用积分卡</h2>
@@ -310,6 +321,7 @@ export default function RechargeModal({ onClose }: RechargeModalProps) {
             <CustomRecharge
               config={customConfig}
               onConfirm={handleCustomConfirm}
+              onRequireLogin={() => setLoginOpen(true)}
               submitting={customSubmitting}
               error={customError}
               locked={paying}
@@ -410,5 +422,7 @@ export default function RechargeModal({ onClose }: RechargeModalProps) {
         </div>
       </Modal>
     </Modal>
+    {loginOpen && <LoginModal onClose={() => setLoginOpen(false)} />}
+    </>
   );
 }

@@ -47,15 +47,13 @@ function formatCredits(value: number | null): string {
 const fenToYuan = (fen: number | null): string =>
   fen == null ? '—' : `¥${(fen / 100).toFixed(2)}`;
 
-function copyText(text: string) {
-  void navigator.clipboard.writeText(text);
-}
-
 const PAGE_SIZE_OPTIONS = PAGE_SIZES.map((size) => ({ value: String(size), label: `${size} 条` }));
+
+const USER_ORDER_STATUSES: OrderStatus[] = ['pending', 'paid', 'expired'];
 
 const ORDER_STATUS_OPTIONS = [
   { value: '', label: '全部状态' },
-  ...(Object.keys(ORDER_STATUS_LABEL) as OrderStatus[]).map((key) => ({
+  ...USER_ORDER_STATUSES.map((key) => ({
     value: key,
     label: ORDER_STATUS_LABEL[key],
   })),
@@ -299,15 +297,14 @@ function OrdersTable({ query }: { query: { isPending: boolean; isError: boolean;
           <th>支付金额</th>
           <th>到账积分</th>
           <th>状态</th>
-          <th>操作</th>
         </tr>
       </thead>
       <tbody>
-        {state === 'loading' ? <LoadingRow cols={6} />
-          : state === 'error' ? <ErrorRow cols={6} />
-          : state === 'empty' ? <EmptyRow cols={6} />
-          : rows.map((row) => (
-            <tr key={row.trade_no}>
+        {state === 'loading' ? <LoadingRow cols={5} />
+          : state === 'error' ? <ErrorRow cols={5} />
+          : state === 'empty' ? <EmptyRow cols={5} />
+          : rows.map((row, index) => (
+            <tr key={`${row.created_at}-${row.product_name}-${index}`}>
               <td>{formatBeijingDateTime(row.created_at)}</td>
               <td>{row.product_name}</td>
               <td>{fenToYuan(row.amount_fen)}</td>
@@ -316,11 +313,6 @@ function OrdersTable({ query }: { query: { isPending: boolean; isError: boolean;
                 <span className={`${styles.badge} ${ORDER_STATUS_CLASS[row.status] ?? styles.statusMuted}`}>
                   {ORDER_STATUS_LABEL[row.status] ?? row.status}
                 </span>
-              </td>
-              <td>
-                <button type="button" className={styles.copyBtn} onClick={() => copyText(row.trade_no)}>
-                  复制订单号
-                </button>
               </td>
             </tr>
           ))}
@@ -393,8 +385,10 @@ function ConsumedTable({ query }: { query: { isPending: boolean; isError: boolea
               <td>{formatBeijingDateTime(row.created_at)}</td>
               <td><span className={styles.tag}>{consumedTypeLabel(row)}</span></td>
               <td>{row.model_label ?? row.model_id ?? '—'}</td>
-              <td>{dash(row.detail)}</td>
-              <td className={styles.minus}>{row.credits == null ? '—' : `-${formatCredits(row.credits)}`}</td>
+              <td className={styles.detailCell}>
+                <span className={styles.detailText} title={row.detail ?? undefined}>{dash(row.detail)}</span>
+              </td>
+              <td className={styles.minus}>{row.credits == null ? '—' : row.credits === 0 ? '0' : `-${formatCredits(row.credits)}`}</td>
             </tr>
           ))}
       </tbody>

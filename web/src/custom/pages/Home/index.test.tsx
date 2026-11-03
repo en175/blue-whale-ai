@@ -68,12 +68,12 @@ describe('Home 顶栏', () => {
     expect(avatar.getAttribute('data-testid')).toBe('user-dropdown');
   });
 
-  it('未登录时顶栏只剩用户入口占位', async () => {
+  it('未登录时保留积分超市入口与用户入口，余额卡不渲染', async () => {
     useAuthStore.setState({ user: null, credits: null });
     await renderHome();
 
     const topBar = mountNode.firstElementChild?.firstElementChild;
     expect(topBar?.querySelector('[data-testid="user-dropdown"]')).not.toBeNull();
-    expect(topBar?.textContent).toBe('');
+    expect(topBar?.textContent).toBe('积分超市');
   });
 });
