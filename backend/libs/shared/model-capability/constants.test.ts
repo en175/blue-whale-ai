@@ -809,7 +809,7 @@ it.each(["text2video", "omni", "image_reference", "first_frame", "first_last_fra
 });
 
 describe("参考图总像素与宽高比写侧闸门（IKQYEH）", () => {
-  it.each([0, 0.5, -1, 1.5, 101])("宽高比 %s → 拒绝", (value) => {
+  it.each([0, 0.5, -1, 101])("宽高比 %s → 拒绝", (value) => {
     expect(
       parseModelUpdateBody({ features: { max_reference_image_ratio: value } }).ok,
     ).toBe(false);
@@ -818,7 +818,7 @@ describe("参考图总像素与宽高比写侧闸门（IKQYEH）", () => {
   it.each(["max_reference_image_ratio", "maxReferenceImageRatio"])(
     "宽高比合法值（%s）→ 放行",
     (key) => {
-      for (const value of [1, 16, 100]) {
+      for (const value of [1, 2.5, 16, 100]) {
         expect(
           parseModelUpdateBody({ features: { [key]: value } }).ok,
         ).toBe(true);
@@ -836,6 +836,23 @@ describe("参考图总像素与宽高比写侧闸门（IKQYEH）", () => {
     "总像素合法值（%s）→ 放行",
     (key) => {
       for (const value of [1, 1_000_000, 36_000_000]) {
+        expect(
+          parseModelUpdateBody({ features: { [key]: value } }).ok,
+        ).toBe(true);
+      }
+    },
+  );
+
+  it.each([0, 1.5, 104_857_601])("参考图大小 %s → 拒绝", (value) => {
+    expect(
+      parseModelUpdateBody({ features: { max_reference_image_bytes: value } }).ok,
+    ).toBe(false);
+  });
+
+  it.each(["max_reference_image_bytes", "maxReferenceImageBytes"])(
+    "参考图大小合法值（%s）→ 放行",
+    (key) => {
+      for (const value of [1, 10_485_760, 104_857_600]) {
         expect(
           parseModelUpdateBody({ features: { [key]: value } }).ok,
         ).toBe(true);

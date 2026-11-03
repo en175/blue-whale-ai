@@ -146,21 +146,32 @@ const RULINGS: Record<string, Ruling> = {
   },
   max_reference_image_pixels: {
     consumer:
-      "backend/libs/shared/generation-runtime/image-reference-validation.ts（validateReferenceImages：单张参考图总像素上限）；" +
+      "backend/libs/shared/generation-runtime/image-reference-validation.ts（validateReferenceImages：图片生成的单张参考图总像素上限；" +
+      "validateConfiguredReferenceImages：视频参考图只在能力行显式配置时校验）；" +
       "经 handle-create-generation-job 在提交前拒绝，不建任务、不扣费。写侧形态闸门在 " +
       "backend/libs/shared/model-capability/constants.ts（featuresFieldErr）",
     fallback:
-      "DEFAULT_MAX_REFERENCE_IMAGE_PIXELS = 36,000,000（火山方舟图片生成 API 单张输入图总像素上限 6000×6000；IKQYEH）",
+      "null（IKSLLC：能力行未配 = 视频不校验）；图片生成路径仍回退 DEFAULT_MAX_REFERENCE_IMAGE_PIXELS = 36,000,000（IKQYEH）",
     configWinsTest:
       "backend/libs/shared/generation-runtime/image-reference-validation.test.ts",
   },
   max_reference_image_ratio: {
     consumer:
-      "backend/libs/shared/generation-runtime/image-reference-validation.ts（validateReferenceImages：单张参考图宽高比 [1/N, N]）；" +
+      "backend/libs/shared/generation-runtime/image-reference-validation.ts（validateReferenceImages：图片生成的单张参考图宽高比 [1/N, N]；" +
+      "validateConfiguredReferenceImages：视频参考图只在能力行显式配置时校验）；" +
       "经 handle-create-generation-job 在提交前拒绝。写侧形态闸门在 " +
       "backend/libs/shared/model-capability/constants.ts（featuresFieldErr）",
     fallback:
-      "DEFAULT_MAX_REFERENCE_IMAGE_RATIO = 16（火山方舟图片生成 API 单张输入图宽高比 [1/16, 16]；IKQYEH）",
+      "null（IKSLLC：能力行未配 = 视频不校验）；图片生成路径仍回退 DEFAULT_MAX_REFERENCE_IMAGE_RATIO = 16（IKQYEH）",
+    configWinsTest:
+      "backend/libs/shared/generation-runtime/image-reference-validation.test.ts",
+  },
+  max_reference_image_bytes: {
+    consumer:
+      "backend/libs/shared/generation-runtime/image-reference-validation.ts（validateReferenceImageMedia：音频生成参考图的格式与单张大小）；" +
+      "经 handle-create-generation-job 在提交前拒绝。写侧形态闸门在 " +
+      "backend/libs/shared/model-capability/constants.ts（featuresFieldErr）",
+    fallback: "null（IKSLLC：能力行未配 = 音频不校验格式与大小）",
     configWinsTest:
       "backend/libs/shared/generation-runtime/image-reference-validation.test.ts",
   },
