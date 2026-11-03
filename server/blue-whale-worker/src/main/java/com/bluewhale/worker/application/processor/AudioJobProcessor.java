@@ -135,7 +135,7 @@ public class AudioJobProcessor implements JobProcessor {
             durationMs = (int) Math.round(audio.duration() * 1000);
         } else {
             log.warn("[audio] 上游未返回 duration：jobId={} —— "
-                    + "可用 billing 的 POST /admin/credits/jobs/{id}/refund 兜底", job.id());
+                    + "可用 billing 的 gRPC AdminRefund 兜底", job.id());
         }
 
         String assetId = stateMachine.createAsset(new JobStateMachineService.CreateAssetInput(

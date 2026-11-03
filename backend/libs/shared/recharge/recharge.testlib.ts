@@ -1,4 +1,8 @@
 import { vi } from "vitest";
+import { create } from "@bufbuild/protobuf";
+import { Code, ConnectError } from "@connectrpc/connect";
+import { AdminGrantResponseSchema } from "../../contracts/gen/billing/v1/billing_pb.js";
+import { grpcAdminService } from "../billing/billing-admin-grpc-stub.testlib.js";
 import {
   RECHARGE_CUSTOM_SETTING_KEY,
   type TopupTierPermission,
@@ -191,30 +195,38 @@ export function makeHttp(gatewayState = 1) {
   let grantFailures = 0;
   let unifiedOrderFailures = 0;
 
+  grpcAdminService({
+    adminGrant: (req) => {
+      const body: Record<string, unknown> = {
+        userId: Number(req.userId),
+        source: req.source,
+        amount: Number(req.amount),
+        bizId: req.bizId,
+        bizType: req.bizType,
+      };
+      if (req.grantKey) body.grantKey = req.grantKey;
+      if (req.expiresAt) body.expiresAt = req.expiresAt;
+      grantBodies.push(body);
+      if (grantFailures > 0) {
+        grantFailures -= 1;
+        throw new ConnectError("boom", Code.Unavailable);
+      }
+      const idempotencyKey = req.grantKey || `${req.source || "purchased"}:${req.bizId}`;
+      const owner = grantedKeys.get(idempotencyKey);
+      if (owner !== undefined) {
+        return create(AdminGrantResponseSchema, { duplicated: true, existingBizId: owner });
+      }
+      grantedKeys.set(idempotencyKey, req.bizId);
+      granted.push({ amount: Number(req.amount), bizId: req.bizId });
+      return create(AdminGrantResponseSchema, { lotId: 42n });
+    },
+  });
+
   const fetchMock = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
     const target = String(url);
     const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {};
     calls.push({ url: target, body });
 
-    if (target.endsWith("/admin/credits/grants")) {
-      grantBodies.push(body);
-      if (grantFailures > 0) {
-        grantFailures -= 1;
-        return new Response("boom", { status: 500 });
-      }
-      const bizId = String(body.bizId);
-      const idempotencyKey = String(body.grantKey ?? `${String(body.source ?? "purchased")}:${bizId}`);
-      const owner = grantedKeys.get(idempotencyKey);
-      if (owner !== undefined) {
-        return new Response(
-          JSON.stringify({ code: "DUPLICATE", message: "该幂等键已存在", existingBizId: owner }),
-          { status: 409 },
-        );
-      }
-      grantedKeys.set(idempotencyKey, bizId);
-      granted.push({ amount: Number(body.amount), bizId });
-      return json({ lotId: 42, userId: body.userId, source: body.source ?? "purchased", amount: body.amount });
-    }
     if (target.endsWith("/api/pay/unifiedOrder")) {
       if (unifiedOrderFailures > 0) {
         unifiedOrderFailures -= 1;

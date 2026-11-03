@@ -9,13 +9,11 @@ import com.bluewhale.billing.domain.discount.DiscountRules;
 import com.bluewhale.billing.infrastructure.discount.PatternJson;
 import com.bluewhale.billing.infrastructure.persistence.mapper.PromotionMapper;
 import com.bluewhale.billing.infrastructure.persistence.po.PromotionEntity;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
 
 @Service
-@ConditionalOnProperty(name = "billing.admin.enabled", havingValue = "true")
 public class PromotionAdminService {
 
     private final PromotionMapper mapper;

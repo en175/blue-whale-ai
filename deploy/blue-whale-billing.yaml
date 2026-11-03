@@ -71,8 +71,6 @@ spec:
           value: "true"
         - name: BILLING_MQ_TOPIC_TERMINAL
           value: "generation-job-terminal"
-        - name: BILLING_ADMIN_ENABLED
-          value: "true"
         startupProbe:
           httpGet:
             path: /ready

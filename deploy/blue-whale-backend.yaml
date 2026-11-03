@@ -169,8 +169,6 @@ spec:
           value: "http://blue-whale-agent-svc:4112"
         - name: BILLING_GRPC_URL
           value: "http://blue-whale-billing-svc:4004"
-        - name: BILLING_ADMIN_URL
-          value: "http://blue-whale-billing-svc:4003"
         - name: PAY_SERVER_BASE_URL
           value: "http://192.168.0.148:9216"
         - name: SMS_PROVIDER

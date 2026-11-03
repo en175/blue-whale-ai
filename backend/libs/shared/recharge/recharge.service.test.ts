@@ -36,7 +36,6 @@ vi.mock("@connectrpc/connect-node", async (importOriginal) => {
 describe("RechargeService — 下单", () => {
   beforeEach(() => {
     vi.stubEnv("PAY_SERVER_BASE_URL", "https://pay.example.com");
-    vi.stubEnv("BILLING_ADMIN_URL", "https://billing.example.com");
     vi.stubEnv(SYSTEM_SETTINGS_SECRET_ENV, "a".repeat(64));
     freshGrpcUrl();
   });
@@ -292,7 +291,6 @@ describe("RechargeService — 下单", () => {
 describe("RechargeService — 回调到账", () => {
   beforeEach(() => {
     vi.stubEnv("PAY_SERVER_BASE_URL", "https://pay.example.com");
-    vi.stubEnv("BILLING_ADMIN_URL", "https://billing.example.com");
     vi.stubEnv(SYSTEM_SETTINGS_SECRET_ENV, "a".repeat(64));
     freshGrpcUrl();
   });
@@ -310,8 +308,7 @@ describe("RechargeService — 回调到账", () => {
     expect(await service.handleNotify(await signed(notifyParams(created.tradeNo)))).toBe(true);
 
     expect(http.granted).toEqual([{ amount: 7500, bizId: created.tradeNo }]);
-    const grant = http.calls.find((c) => c.url.endsWith("/admin/credits/grants"));
-    expect(grant?.body.bizType).toBe("recharge");
+    expect(http.grantBodies[0]?.bizType).toBe("recharge");
     const order = orders.get(created.tradeNo);
     expect(order?.status).toBe("paid");
     expect(order?.paid_at).toBeInstanceOf(Date);
@@ -358,8 +355,7 @@ describe("RechargeService — 回调到账", () => {
     expect(await service.handleNotify(params)).toBe(true);
     expect(await service.handleNotify(params)).toBe(true);
 
-    const grants = http.calls.filter((c) => c.url.endsWith("/admin/credits/grants"));
-    expect(grants).toHaveLength(1);
+    expect(http.grantBodies).toHaveLength(1);
     expect(statusWrites).toEqual(["paid_pending", "paid"]);
     expect(http.granted).toHaveLength(1);
     expect(http.granted[0]?.amount).toBe(7500);
@@ -379,7 +375,7 @@ describe("RechargeService — 回调到账", () => {
     expect(await service.handleNotify(params)).toBe(true);
     expect(orders.get(created.tradeNo)?.status).toBe("paid");
     expect(http.granted).toEqual([{ amount: 7500, bizId: created.tradeNo }]);
-    expect(http.calls.filter((c) => c.url.endsWith("/admin/credits/grants"))).toHaveLength(2);
+    expect(http.grantBodies).toHaveLength(2);
     expect(statusWrites).toEqual(["paid_pending", "paid"]);
   });
 
@@ -441,20 +437,12 @@ describe("RechargeService — 回调到账", () => {
   });
 
   it("发放失败（billing 不可用）：不应答 SUCCESS，订单停在 paid_pending 而不是退回 pending", async () => {
-    makeHttp();
+    const http = makeHttp();
     grpcActiveCatalog();
     const { service, orders, statusWrites } = await makeService();
     const created = await service.createOrder({ userId: 9001, tierId: TIER.id });
 
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (url: string | URL | Request) => {
-        if (String(url).endsWith("/admin/credits/grants")) {
-          return new Response("boom", { status: 500 });
-        }
-        throw new Error(`未预期的请求：${String(url)}`);
-      }),
-    );
+    http.failNextGrants(1);
 
     expect(await service.handleNotify(await signed(notifyParams(created.tradeNo)))).toBe(false);
     expect(orders.get(created.tradeNo)?.status).toBe("paid_pending");
@@ -465,7 +453,6 @@ describe("RechargeService — 回调到账", () => {
 describe("RechargeService — 首购加赠（每档首次）", () => {
   beforeEach(() => {
     vi.stubEnv("PAY_SERVER_BASE_URL", "https://pay.example.com");
-    vi.stubEnv("BILLING_ADMIN_URL", "https://billing.example.com");
     vi.stubEnv(SYSTEM_SETTINGS_SECRET_ENV, "a".repeat(64));
     freshGrpcUrl();
   });
@@ -547,7 +534,6 @@ describe("RechargeService — 首购加赠（每档首次）", () => {
 describe("RechargeService — 查单补偿（回调丢失时）", () => {
   beforeEach(() => {
     vi.stubEnv("PAY_SERVER_BASE_URL", "https://pay.example.com");
-    vi.stubEnv("BILLING_ADMIN_URL", "https://billing.example.com");
     vi.stubEnv(SYSTEM_SETTINGS_SECRET_ENV, "a".repeat(64));
     freshGrpcUrl();
   });
@@ -715,7 +701,6 @@ describe("RechargeService — 查单补偿（回调丢失时）", () => {
 describe("RechargeService — 档位目录带上有效期（C-1）", () => {
   beforeEach(() => {
     vi.stubEnv("PAY_SERVER_BASE_URL", "https://pay.example.com");
-    vi.stubEnv("BILLING_ADMIN_URL", "https://billing.example.com");
     vi.stubEnv(SYSTEM_SETTINGS_SECRET_ENV, "a".repeat(64));
     freshGrpcUrl();
   });
@@ -753,7 +738,6 @@ describe("RechargeService — 档位目录带上有效期（C-1）", () => {
 describe("RechargeService — 超窗 WARN 的频次（M-1）", () => {
   beforeEach(() => {
     vi.stubEnv("PAY_SERVER_BASE_URL", "https://pay.example.com");
-    vi.stubEnv("BILLING_ADMIN_URL", "https://billing.example.com");
     vi.stubEnv(SYSTEM_SETTINGS_SECRET_ENV, "a".repeat(64));
     freshGrpcUrl();
   });
@@ -817,7 +801,6 @@ describe("RechargeService — 超窗 WARN 的频次（M-1）", () => {
 describe("RechargeService — 重试窗口两条路同一个值", () => {
   beforeEach(() => {
     vi.stubEnv("PAY_SERVER_BASE_URL", "https://pay.example.com");
-    vi.stubEnv("BILLING_ADMIN_URL", "https://billing.example.com");
     vi.stubEnv(SYSTEM_SETTINGS_SECRET_ENV, "a".repeat(64));
     freshGrpcUrl();
   });
@@ -886,7 +869,6 @@ describe("RechargeService — 重试窗口两条路同一个值", () => {
 describe("RechargeService — 管理端人工补发（E-1 的第三条出口）", () => {
   beforeEach(() => {
     vi.stubEnv("PAY_SERVER_BASE_URL", "https://pay.example.com");
-    vi.stubEnv("BILLING_ADMIN_URL", "https://billing.example.com");
     vi.stubEnv(SYSTEM_SETTINGS_SECRET_ENV, "a".repeat(64));
     freshGrpcUrl();
   });

@@ -35,7 +35,6 @@ vi.mock("@connectrpc/connect-node", async (importOriginal) => {
 describe("RechargeService — 自定义充值下单（模块 B，PRD §7）", () => {
   beforeEach(() => {
     vi.stubEnv("PAY_SERVER_BASE_URL", "https://pay.example.com");
-    vi.stubEnv("BILLING_ADMIN_URL", "https://billing.example.com");
     vi.stubEnv(SYSTEM_SETTINGS_SECRET_ENV, "a".repeat(64));
     freshGrpcUrl();
   });

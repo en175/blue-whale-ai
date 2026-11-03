@@ -53,7 +53,7 @@ describe("AdminBillingDiscountsController.list", () => {
 
   it("billing 管理端地址没配 → 503，不伪装成 500", async () => {
     billing.listMemberDiscounts.mockRejectedValue(
-      new BillingAdminConfigError("计费管理端地址未配置（缺环境变量 BILLING_ADMIN_URL）"),
+      new BillingAdminConfigError("计费管理端地址未配置（缺环境变量 BILLING_GRPC_URL）"),
     );
 
     await expect(createController().list(undefined, undefined)).rejects.toMatchObject({

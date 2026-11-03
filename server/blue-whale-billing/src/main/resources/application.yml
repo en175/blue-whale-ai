@@ -39,9 +39,6 @@ billing:
     enabled: true
     port: ${BILLING_GRPC_PORT:4004}
 
-  admin:
-    enabled: ${BILLING_ADMIN_ENABLED:false}
-
   catalog:
     reload-interval: ${BILLING_CATALOG_RELOAD_INTERVAL:PT5M}
     reload-initial-delay: ${BILLING_CATALOG_RELOAD_INITIAL_DELAY:PT1M}

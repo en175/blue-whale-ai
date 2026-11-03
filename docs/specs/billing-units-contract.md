@@ -37,7 +37,7 @@
 
 - `creditsPerYuan` 仍是**定价目录 `billing_pricing_catalogs` 的配置字段**（`document.creditsPerYuan`，当前 15），不是代码里的常量：
   - 与目录一起**版本化**、可整体回滚；
-  - 改口径 = 发一版新目录，不改代码、不重启（`POST /admin/catalogs`）；
+  - 改口径 = 发一版新目录，不改代码、不重启（`BillingAdminService.AdminPublishCatalog`）；
   - 管理端可查当前值：`BillingAdminService.AdminGetActiveCatalog` → `credits_per_yuan`（发布接口回包同样带它；读接口 2026-09-26 迁到 gRPC，`GET /admin/catalogs/active` 已删）。
 - 编译期校验：`creditsPerYuan` ≤ 0 或 > 100000 的目录**发不出去**（`CatalogCompiler`）。
 - ⚠️ **旧口径已作废**：原先的「积分 = quota ÷ 50,000（1 元 = 10 积分）」
