@@ -245,6 +245,24 @@ class AdminApiIntegrationTest {
     }
 
     @Test
+    void 充值本金_带到期时刻时按北京时间落库_不能少8小时() throws Exception {
+        mvc.perform(post("/admin/credits/grants")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"userId":9312,"source":"purchased","amount":1000,"bizId":"tz-exp",
+                                 "expiresAt":"2028-11-03T02:38:05.000Z"}
+                                """))
+                .andExpect(status().isOk());
+
+        LocalDateTime expiresAt = jdbc.queryForObject(
+                "SELECT expires_at FROM billing_credit_lots WHERE user_id = 9312",
+                LocalDateTime.class);
+        assertThat(expiresAt)
+                .as("传入的是 UTC 时刻，落库必须是同一个时刻的北京时间墙钟")
+                .isEqualTo(LocalDateTime.of(2028, 11, 3, 10, 38, 5));
+    }
+
+    @Test
     void 赠送类来源_按策略带默认有效期() throws Exception {
         mvc.perform(post("/admin/credits/grants")
                         .contentType(MediaType.APPLICATION_JSON)
