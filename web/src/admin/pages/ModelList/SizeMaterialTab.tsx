@@ -125,7 +125,6 @@ export default function SizeMaterialTab({
   const flagEntries = Object.entries(FEATURE_BOOL_LABELS).filter(([, meta]) => featureApplies(meta, type));
   const numberEntries = Object.entries(FEATURE_NUMBER_LABELS).filter(([, meta]) => featureApplies(meta, type));
   const stringEntries = Object.entries(FEATURE_STRING_LABELS).filter(([, meta]) => featureApplies(meta, type));
-  const hasStructuredFeatures = flagEntries.length + numberEntries.length + stringEntries.length > 0;
   return (
     <>
       {visible.sizeRatio && (
@@ -435,7 +434,6 @@ export default function SizeMaterialTab({
 
       {}
 
-      {}
       {type === 'video' && (
         <>
           <h3 style={SECTION}>视频模式 task_types <Hint>勾选 = 该模式对模型开放；未勾选的模式不出现。比例留空 = 该模式沿用基础「比例选项」。时长策略逐模式配置：指定秒数 = 只能选基础范围；仅自动 = 用户不可选秒数；自动或指定 = 用户可二选一。</Hint></h3>
@@ -502,7 +500,7 @@ export default function SizeMaterialTab({
           <Hint>该类型没有专属的结构化特性键，可直接去「高级」用 JSON 配置。</Hint>
         )}
       </h3>
-      {hasStructuredFeatures && (
+      {visible.structuredFeature && (
         <div style={PANEL}>
           <div style={FEATURE_GROUPS}>
             {flagEntries.length > 0 && (

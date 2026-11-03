@@ -426,6 +426,7 @@ describe('ModelList 按类型分表单', () => {
     expect(text.indexOf('特性 features（结构化）')).toBeGreaterThan(
       text.indexOf('视频模式 task_types'),
     );
+    expect(text).toContain('开关');
   });
 
   it('★ 切换渠道 → 下面换表（三种解析器各一次，都在「尺寸与素材」的「出站尺寸映射」）', async () => {
