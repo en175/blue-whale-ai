@@ -27,6 +27,8 @@ import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -85,6 +87,7 @@ class ListTransactionsIntegrationTest {
     @Autowired private CreditExpirySweeper expirySweeper;
     @Autowired private LedgerRepository ledger;
     @Autowired private CatalogHolder catalog;
+    @Autowired private PlatformTransactionManager txManager;
 
     private ManagedChannel channel;
     private BillingServiceGrpc.BillingServiceBlockingStub stub;
@@ -393,10 +396,11 @@ class ListTransactionsIntegrationTest {
 
     @Test
     void 过期核销_按账本凭证出一行() {
-        ledger.insert(Voucher.base("expire:user-9501:2026-09", USER, BizType.EXPIRE, "2026-09")
-                .debit(Account.WALLET, 500, "过期核销")
-                .credit(Account.COST, 500, "过期核销")
-                .build());
+        new TransactionTemplate(txManager).executeWithoutResult(tx ->
+                ledger.insert(Voucher.base("expire:user-9501:2026-09", USER, BizType.EXPIRE, "2026-09")
+                        .debit(Account.WALLET, 500, "过期核销")
+                        .credit(Account.COST, 500, "过期核销")
+                        .build()));
 
         List<UserTransaction> items = list("expire", USER).getItemsList();
 
@@ -495,10 +499,11 @@ class ListTransactionsIntegrationTest {
 
     @Test
     void 人工调账行_拿不到批次上下文也不会掉行() {
-        ledger.insert(Voucher.base("adjust:user-9501:manual", USER, BizType.ADJUST, "manual-1")
-                .debit(Account.COST, 120, "人工调账")
-                .credit(Account.WALLET, 120, "人工调账")
-                .build());
+        new TransactionTemplate(txManager).executeWithoutResult(tx ->
+                ledger.insert(Voucher.base("adjust:user-9501:manual", USER, BizType.ADJUST, "manual-1")
+                        .debit(Account.COST, 120, "人工调账")
+                        .credit(Account.WALLET, 120, "人工调账")
+                        .build()));
 
         UserTransaction row = rowOf(list(newPageRequest(20, 1), USER).getItemsList(), "compensation");
 

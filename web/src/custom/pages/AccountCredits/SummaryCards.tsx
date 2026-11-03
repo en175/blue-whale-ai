@@ -16,6 +16,7 @@ export default function SummaryCards({ balance }: SummaryCardsProps) {
         <div className={styles.label}>当前积分余额</div>
         <div className={styles.value}>{formatCredits(balance)}</div>
       </article>
+      <p className={styles.rule}>积分自到账起 2 年有效，按批次过期核销</p>
     </section>
   );
 }

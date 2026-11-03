@@ -7,7 +7,6 @@ import { type ExportScope, type OrderStatus, SOURCE_LABELS } from '@/custom/enum
 export type { UsageTokenData, UsageTokenLot } from '@/shared/stores/auth';
 
 export interface OrderRow {
-  trade_no: string;
   product_name: string;
   product_type: string;
   amount_fen: number;
@@ -38,7 +37,6 @@ export interface ConsumptionRow {
   status: 'pending' | 'done';
   created_at: string;
   settled_at: string;
-  job_id: string | null;
   task_type: string | null;
   model_id: string | null;
   model_label: string | null;

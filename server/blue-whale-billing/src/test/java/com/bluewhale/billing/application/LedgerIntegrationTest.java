@@ -182,6 +182,31 @@ class LedgerIntegrationTest {
     }
 
     @Test
+    void 发放_同用户并发_账本写入不死锁且余额累计() throws Exception {
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        CyclicBarrier barrier = new CyclicBarrier(2);
+        try {
+            List<Future<Long>> results = new ArrayList<>();
+            for (int i = 0; i < 2; i++) {
+                String grantKey = "g-concurrent-" + i;
+                results.add(pool.submit(() -> {
+                    barrier.await(10, TimeUnit.SECONDS);
+                    return credits.grant(USER, CreditSource.GIFT, 100, null, "grant", grantKey, grantKey);
+                }));
+            }
+            for (Future<Long> result : results) {
+                assertThat(result.get(30, TimeUnit.SECONDS)).isPositive();
+            }
+            assertThat(ledger.balanceOf(USER, Account.WALLET))
+                    .as("两笔并发到账都要记入账本，不能因死锁丢失")
+                    .isEqualTo(200);
+            assertInvariant();
+        } finally {
+            pool.shutdownNow();
+        }
+    }
+
+    @Test
     void 返还_没有扣款记录的任务_无操作() {
         credits.refund(999_001L, "免费任务入队失败");
 

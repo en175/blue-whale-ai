@@ -53,7 +53,6 @@
 .subTab,
 .subTabOn,
 .exportBtn,
-.copyBtn,
 .pageBtn {
   appearance: none;
   cursor: pointer;
@@ -77,7 +76,6 @@
 }
 
 .exportBtn,
-.copyBtn,
 .pageBtn {
   padding: 6px 14px;
   border: 1px solid #3a3a3e;
@@ -87,7 +85,6 @@
 }
 
 .exportBtn:hover,
-.copyBtn:hover,
 .pageBtn:hover:not(:disabled) {
   border-color: #5a5a5e;
   color: #f0f0f0;
@@ -274,6 +271,18 @@
 
 .expireSoon {
   color: #e8b84a;
+}
+
+.detailCell {
+  max-width: 360px;
+}
+
+.detailText {
+  display: block;
+  max-width: 360px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .empty {

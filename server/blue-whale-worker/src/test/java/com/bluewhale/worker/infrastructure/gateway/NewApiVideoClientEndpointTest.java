@@ -818,7 +818,7 @@ class NewApiVideoClientEndpointTest {
 
 
     @Test
-    @DisplayName("IKIZQC: finalize → POST /v1/videos/{样片公开任务ID}/finalize，体仅 resolution=1080p")
+    @DisplayName("IKIZQC: finalize → POST /v1/videos/{样片公开任务ID}/finalize，体为 resolution=1080p + watermark:false")
     void finalizePostsToVideoFinalizePathWithResolutionOnly() throws Exception {
         SubmitResult result =
                 new NewApiVideoClient(new UpstreamBaseUrl(baseUrl)).finalize("t", "task-sample-9");
@@ -828,8 +828,9 @@ class NewApiVideoClientEndpointTest {
         assertThat(lastPath.get()).isEqualTo("/v1/videos/task-sample-9/finalize");
 
         JsonNode body = JSON.readTree(lastBody.get());
-        assertThat(body).hasSize(1);
+        assertThat(body).hasSize(2);
         assertThat(body.get("resolution").asText()).isEqualTo("1080p");
+        assertThat(body.get("watermark").asBoolean()).isFalse();
     }
 
     @Test
@@ -888,8 +889,8 @@ class NewApiVideoClientEndpointTest {
     }
 
     @Test
-    @DisplayName("水印开关关闭 → submit 的 metadata 不带 watermark")
-    void submitOmitsWatermarkWhenDisabled() throws Exception {
+    @DisplayName("水印开关关闭 → submit 的 metadata 显式带 watermark:false")
+    void submitSendsWatermarkFalseWhenDisabled() throws Exception {
         VideoSubmitInput input = new VideoSubmitInput(
                 "doubao-seedance-2-0-260128", "猫", 5, "720p", "16:9",
                 null, null, List.of(), null);
@@ -900,7 +901,7 @@ class NewApiVideoClientEndpointTest {
                 .submit("t", input);
 
         JsonNode body = JSON.readTree(lastBody.get());
-        assertThat(body.get("metadata").has("watermark")).isFalse();
+        assertThat(body.get("metadata").get("watermark").asBoolean()).isFalse();
     }
 
     @Test
@@ -914,5 +915,17 @@ class NewApiVideoClientEndpointTest {
         JsonNode body = JSON.readTree(lastBody.get());
         assertThat(body.get("watermark").asBoolean()).isTrue();
         assertThat(body.has("metadata")).isFalse();
+    }
+
+    @Test
+    @DisplayName("水印开关关闭 → finalize 顶层显式带 watermark:false")
+    void finalizeSendsWatermarkFalseWhenDisabled() throws Exception {
+        new NewApiVideoClient(
+                new UpstreamBaseUrl(baseUrl),
+                new GenerationWatermarkPolicy(key -> "{\"enabled\":false}"))
+                .finalize("t", "task-final");
+
+        JsonNode body = JSON.readTree(lastBody.get());
+        assertThat(body.get("watermark").asBoolean()).isFalse();
     }
 }

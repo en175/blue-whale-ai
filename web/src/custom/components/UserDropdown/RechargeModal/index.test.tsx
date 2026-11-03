@@ -38,6 +38,13 @@ vi.mock('sonner', () => ({
   Toaster: () => null,
 }));
 
+vi.mock('@/custom/components/LoginModal', async () => {
+  const { createElement } = await import('react');
+  return {
+    default: () => createElement('div', { 'data-testid': 'login-modal' }, '登录弹窗'),
+  };
+});
+
 const TIER_ID = 'tier-1';
 
 let root: Root;
@@ -166,6 +173,31 @@ describe('RechargeModal', () => {
     expect(document.body.textContent).toContain(
       '价格与积分以后台配置为准，下单时冻结快照；配置变更只影响新订单。',
     );
+  });
+
+  it('★ 游客点击购买引导登录，不创建订单（固定卡与自定义充值同口径）', async () => {
+    authState.user = null;
+    rechargeApi.fetchRechargeCustomConfig.mockResolvedValue({
+      enabled: true,
+      min_credits: 600,
+      max_credits: 499_995,
+      default_credits: 600,
+      step_credits: 15,
+      credits_per_yuan: 15,
+      credits_valid_months: 24,
+      can_purchase: null,
+      denied_hint: '',
+    });
+    await renderRechargeModal();
+    await flush();
+
+    await clickButton('立即购买');
+    expect(document.body.querySelector('[data-testid="login-modal"]')).not.toBeNull();
+    expect(rechargeApi.createRechargeOrder).not.toHaveBeenCalled();
+
+    await clickButton('登录后购买');
+    expect(document.body.querySelector('[data-testid="login-modal"]')).not.toBeNull();
+    expect(rechargeApi.createCustomRechargeOrder).not.toHaveBeenCalled();
   });
 
   it('★ 有效期按档位可配：配 6 个月的档位，卡片上出现的是 6 个月而不是 2 年', async () => {

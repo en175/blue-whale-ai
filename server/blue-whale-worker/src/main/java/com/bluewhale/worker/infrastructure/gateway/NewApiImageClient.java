@@ -82,8 +82,7 @@ public class NewApiImageClient {
                             traceId);
         } else {
             request = buildInlineGenerationsRequest(token, model, prompt, n, size, quality,
-                    webSearch, sequential, sourceImages, traceId,
-                    watermarkSupported && watermarkPolicy.enabled());
+                    webSearch, sequential, sourceImages, traceId, watermarkSupported);
         }
 
         Response response;
@@ -221,7 +220,7 @@ public class NewApiImageClient {
     private Request buildInlineGenerationsRequest(
             String token, String model, String prompt, int n,
             String size, String quality, boolean webSearch, boolean sequential,
-            List<String> sourceImages, String traceId, boolean watermark
+            List<String> sourceImages, String traceId, boolean watermarkSupported
     ) {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("model", model);
@@ -230,7 +229,7 @@ public class NewApiImageClient {
         payload.put("stream", false);
         if (size != null) payload.put("size", size);
         if (quality != null) payload.put("quality", quality);
-        if (watermark) payload.put("watermark", true);
+        if (watermarkSupported) payload.put("watermark", watermarkPolicy.enabled());
         if (sourceImages != null && !sourceImages.isEmpty()) {
             payload.put("image", sourceImages.size() == 1 ? sourceImages.get(0) : sourceImages);
         }
