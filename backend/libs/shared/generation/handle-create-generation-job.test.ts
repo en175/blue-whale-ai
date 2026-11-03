@@ -4303,4 +4303,51 @@ describe("handleCreateGenerationJob 视频/音频参考图上限（IKSLLC）", (
     expect(result.code).toBe(200);
     expect(createJob).toHaveBeenCalled();
   });
+
+  it("旧字段 first_frame_asset_id 首帧超限 → 400 invalid_reference", async () => {
+    const { deps, createJob, resolveInputAssets } = buildCapabilityDeps([
+      { ...VIDEO_CAPABILITY_ROW, features: VIDEO_IMAGE_LIMITS },
+    ]);
+    resolveInputAssets.mockImplementation(async (ids: string[]) =>
+      ids.map((id) =>
+        referenceImageAsset({ id: String(id), width: 6144, height: 6144 }),
+      ),
+    );
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      { ...VIDEO_PARAMS_OK, first_frame_asset_id: "11" },
+      null,
+      deps,
+    );
+    expect(result.code).toBe(1034);
+    expect(result.data?.code).toBe("invalid_reference");
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("references 与 input_asset_ids 同时出现 → 只校验实际生效的 references", async () => {
+    const { deps, createJob, resolveInputAssets } = buildCapabilityDeps([
+      { ...VIDEO_CAPABILITY_ROW, features: VIDEO_IMAGE_LIMITS },
+    ]);
+    resolveInputAssets.mockImplementation(async (ids: string[]) =>
+      ids.map((id) =>
+        String(id) === "99"
+          ? referenceImageAsset({ id: "99", width: 6144, height: 6144 })
+          : referenceImageAsset({ id: String(id) }),
+      ),
+    );
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      {
+        ...VIDEO_PARAMS_OK,
+        references: [{ role: "first_frame", asset_id: "11", type: "image" }],
+        input_asset_ids: ["99"],
+      },
+      null,
+      deps,
+    );
+    expect(result.code).toBe(200);
+    expect(createJob).toHaveBeenCalled();
+  });
 });

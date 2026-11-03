@@ -401,4 +401,29 @@ describe("显式默认标记（IKE0VX）", () => {
     expect(isDefault).toBe(notDefault);
     expect(isDefault).toBe(capabilityDigest(CAP_FIELDS));
   });
+
+  it("IKSLLC：参考图上限未配置 → null；显式配置 → 原值", async () => {
+    const { repo } = repoWith([
+      buildRow({ features: {} }),
+      buildRow({
+        features: {
+          max_reference_image_pixels: 36_000_000,
+          max_reference_image_ratio: 2.5,
+          max_reference_image_bytes: 10_485_760,
+        },
+      }),
+    ]);
+    const views = await repo.listEnabledByType("video");
+
+    expect(views[0]!.features).toMatchObject({
+      max_reference_image_pixels: null,
+      max_reference_image_ratio: null,
+      max_reference_image_bytes: null,
+    });
+    expect(views[1]!.features).toMatchObject({
+      max_reference_image_pixels: 36_000_000,
+      max_reference_image_ratio: 2.5,
+      max_reference_image_bytes: 10_485_760,
+    });
+  });
 });

@@ -2242,9 +2242,19 @@ export async function handleCreateGenerationJob(
           { code },
         );
       }
+      const legacyFrameIds = referencesProvided
+        ? []
+        : [assetId(body.first_frame_asset_id), assetId(body.last_frame_asset_id)].filter(
+            (id): id is string => id !== null,
+          );
+      const legacyFrameAssets =
+        legacyFrameIds.length > 0
+          ? await deps.assets.resolveInputAssets(legacyFrameIds, userId, projectId)
+          : [];
       const imageAssets = [
         ...ruling.assetsById.values(),
-        ...resolvedReferenceAssets,
+        ...(referencesProvided ? [] : resolvedReferenceAssets),
+        ...legacyFrameAssets,
       ].filter((asset) => asset.type === "image");
       const imageLimitErr = validateConfiguredReferenceImages(
         [...new Map(imageAssets.map((asset) => [asset.id, asset])).values()],

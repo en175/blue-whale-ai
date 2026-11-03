@@ -119,7 +119,11 @@ export function validateReferenceImageMedia(
         message: "参考图仅支持 JPEG、PNG 或 WebP 格式",
       };
     }
-    if (asset.size !== null && asset.size > maxBytes) {
+    if (
+      typeof asset.size === "number" &&
+      Number.isFinite(asset.size) &&
+      asset.size > maxBytes
+    ) {
       return {
         code: ERROR_INVALID_REFERENCE_MEDIA,
         message: `参考图不能超过 ${formatMegabytes(maxBytes)}`,
