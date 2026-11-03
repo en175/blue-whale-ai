@@ -100,7 +100,7 @@ public class NewApiVideoClient {
         if (effectiveRatio != null) metadata.put("ratio", effectiveRatio);
         if (omniTaskType != null) metadata.put("omni_reference_task_type", omniTaskType);
         if (input.generateAudio() != null) metadata.put("generate_audio", input.generateAudio());
-        if (watermarkPolicy.enabled()) metadata.put("watermark", true);
+        metadata.put("watermark", watermarkPolicy.enabled());
         metadata.set("content", content);
 
         ObjectNode body = JSON.createObjectNode();
@@ -173,7 +173,7 @@ public class NewApiVideoClient {
 
         ObjectNode body = JSON.createObjectNode();
         body.put("resolution", VideoSampleContract.VIDEO_FINAL_RESOLUTION);
-        if (watermarkPolicy.enabled()) body.put("watermark", true);
+        body.put("watermark", watermarkPolicy.enabled());
 
         String bodyJson;
         try {
