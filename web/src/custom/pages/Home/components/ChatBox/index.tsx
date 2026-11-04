@@ -1531,7 +1531,7 @@ export default function ChatBox({
             {armedSkill && (
               <div className={styles.armedSkill}>
                 <BookText size={13} strokeWidth={2} />
-                <span>技能</span>
+                <span>{armedSkill.name || '技能'}</span>
                 <button
                   type="button"
                   className={styles.armedSkillClear}
@@ -1668,7 +1668,7 @@ export default function ChatBox({
               { }
               <div className={styles.paramBarRight}>
                 { }
-                <QuoteBadge />
+                {activeTab !== 'agent' && <QuoteBadge />}
                 <button
                   className={`${styles.sendBtn} ${inputValue.trim() ? styles.sendBtnActive : ''}`}
                   onClick={handleSend}

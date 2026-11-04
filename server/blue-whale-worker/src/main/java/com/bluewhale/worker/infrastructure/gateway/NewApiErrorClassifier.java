@@ -48,6 +48,11 @@ public final class NewApiErrorClassifier {
             Pattern.CASE_INSENSITIVE
     );
 
+    private static final Pattern REFERENCE_IMAGE_SIZE_PATTERN = Pattern.compile(
+            "(?:width|height)\\s+to\\s+be\\s+(?:at\\s+least|no\\s+less\\s+than)|image\\s+pixel\\s+count|图片(?:宽度|高度|尺寸)[^。]{0,10}(?:至少|不小于|小于|大于|不符合)",
+            Pattern.CASE_INSENSITIVE
+    );
+
     public static String classifyError(String text, int httpStatus) {
         if (isCopyrightSignal(text)) {
             return GenerationError.ERROR_CONTENT_REJECTED_REFERENCE;
@@ -96,5 +101,9 @@ public final class NewApiErrorClassifier {
         if (VIDEO_EDIT_TASK_PROSE_PATTERN.matcher(text).find()) return true;
         return VIDEO_EDIT_RATIO_PATTERN.matcher(text).find()
                 && VIDEO_EDIT_DURATION_PATTERN.matcher(text).find();
+    }
+
+    public static boolean isReferenceImageSizeSignal(String text) {
+        return text != null && REFERENCE_IMAGE_SIZE_PATTERN.matcher(text).find();
     }
 }

@@ -2100,8 +2100,9 @@ export async function handleCreateGenerationJob(
     if (type === "image") {
       const limitErr = validateReferenceImages(resolved, capability?.features ?? null);
       if (limitErr) {
-        return fail(errorCodeToNumeric(ERROR_INVALID_REFERENCE), limitErr.message, {
-          code: ERROR_INVALID_REFERENCE,
+        const code = limitErr.code ?? ERROR_INVALID_REFERENCE;
+        return fail(errorCodeToNumeric(code), limitErr.message, {
+          code,
           params: limitErr.params,
         });
       }
@@ -2267,8 +2268,9 @@ export async function handleCreateGenerationJob(
         capability.features,
       );
       if (imageLimitErr) {
-        return fail(errorCodeToNumeric(ERROR_INVALID_REFERENCE), imageLimitErr.message, {
-          code: ERROR_INVALID_REFERENCE,
+        const code = imageLimitErr.code ?? ERROR_INVALID_REFERENCE;
+        return fail(errorCodeToNumeric(code), imageLimitErr.message, {
+          code,
           params: imageLimitErr.params,
         });
       }

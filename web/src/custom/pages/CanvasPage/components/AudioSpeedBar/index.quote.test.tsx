@@ -63,7 +63,9 @@ afterEach(async () => {
 describe('AudioSpeedBar 报价接线', () => {
   it('按素材与倍速请求报价并展示徽标', async () => {
     await render('31');
-    await waitFor(() => document.body.textContent?.includes('本次预计消耗 3 积分') === true);
+    await waitFor(
+      () => document.querySelector('[data-testid="audio-speed-quote"]')?.textContent === '3',
+    );
 
     expect(http.apiRequest).toHaveBeenCalledWith(
       '/api/media-tools/audio_speed/quote',

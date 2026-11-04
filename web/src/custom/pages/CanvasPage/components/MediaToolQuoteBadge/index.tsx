@@ -38,18 +38,8 @@ function QuoteBadge({
   if (credits === null) {
     if (!isError) return null;
     return (
-      <span className={base} data-testid={testId}>
-        <Zap size={iconSize} fill="currentColor" strokeWidth={0} />
-        暂无法报价
-      </span>
-    );
-  }
-
-  if (credits <= 0) {
-    return (
-      <span className={base} data-testid={testId}>
-        <Zap size={iconSize} fill="currentColor" strokeWidth={0} />
-        本工具当前不计费
+      <span className={`${base} ${styles.danger}`} data-testid={testId}>
+        加载计费失败
       </span>
     );
   }
@@ -66,8 +56,7 @@ function QuoteBadge({
   return (
     <span className={className} data-testid={testId}>
       <Zap size={iconSize} fill="currentColor" strokeWidth={0} />
-      本次预计消耗 <strong>{credits} 积分</strong>
-      {insufficient ? ` · 余额 ${balance}` : null}
+      <strong>{credits}</strong>
     </span>
   );
 }

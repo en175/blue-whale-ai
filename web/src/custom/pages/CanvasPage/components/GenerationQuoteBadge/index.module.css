@@ -1,9 +1,22 @@
 .badge {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: var(--spacing-xs);
+  gap: 3px;
   white-space: nowrap;
   font-size: var(--font-size-xs);
-  color: var(--color-text-tertiary);
+  color: var(--color-text-secondary);
+  background-color: var(--color-bg-hover);
+  border-radius: var(--radius-sm);
+  padding: 4px 7px;
   user-select: none;
+}
+
+.badge strong {
+  color: var(--color-text-primary);
+  font-weight: 600;
+}
+
+.danger,
+.danger strong {
+  color: var(--color-error);
 }

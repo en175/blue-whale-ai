@@ -45,6 +45,7 @@ export const KNOWN_FEATURE_KEYS = [
   'max_reference_image_pixels',
   'max_reference_image_ratio',
   'max_reference_image_bytes',
+  'min_reference_image_side',
   'sample_mode',
   'omni_reference_task_type',
   'i2i_model_name',
@@ -726,6 +727,7 @@ const FEATURE_NUMBER_KEYS = new Set([
   'max_reference_image_pixels',
   'max_reference_image_ratio',
   'max_reference_image_bytes',
+  'min_reference_image_side',
 ]);
 
 

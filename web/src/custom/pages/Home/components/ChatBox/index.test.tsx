@@ -28,8 +28,23 @@ vi.mock('@/shared/utils/auth', () => ({
 vi.mock('@/custom/api/projects', () => ({ createProject }));
 
 vi.mock('../SkillModal', () => ({
-  default: ({ open }: { open: boolean }) =>
-    open ? createElement('div', { role: 'dialog', 'aria-label': '技能库' }) : null,
+  default: ({ open, onUseSkill }: { open: boolean; onUseSkill?: (skill: unknown) => void }) =>
+    open
+      ? createElement(
+          'div',
+          { role: 'dialog', 'aria-label': '技能库' },
+          createElement(
+            'button',
+            {
+              type: 'button',
+              'data-testid': 'use-skill',
+              onClick: () =>
+                onUseSkill?.({ creative_skill_id: 'skill-1', name: '电影技法工具箱', asset_domain: 'official' }),
+            },
+            '直接使用',
+          ),
+        )
+      : null,
 }));
 vi.mock('@/custom/components/LoginModal', () => ({ default: () => null }));
 
@@ -341,11 +356,23 @@ describe('V1.3.0 首页输入区模式', () => {
 
   it('发送按钮左侧常驻预计消耗积分位，未接入报价时不显示数字', async () => {
     await renderChatBox();
+    await switchMode('图片');
 
     const quote = mountNode.querySelector<HTMLElement>('[data-testid="home-quote"]')!;
     expect(quote).not.toBeNull();
     expect(quote.querySelector('svg')).not.toBeNull();
     expect(quote.textContent ?? '').toBe('');
+  });
+
+  it('Agent 模式不展示积分位，图片与视频模式展示', async () => {
+    await renderChatBox();
+    expect(mountNode.querySelector('[data-testid="home-quote"]')).toBeNull();
+
+    await switchMode('图片');
+    expect(mountNode.querySelector('[data-testid="home-quote"]')).not.toBeNull();
+
+    await switchMode('视频');
+    expect(mountNode.querySelector('[data-testid="home-quote"]')).not.toBeNull();
   });
 });
 
@@ -418,6 +445,20 @@ describe('IKR63N 参考展示与技能指令', () => {
     await act(async () => { typePrompt('参考 https://example.com/a 的风格'); });
 
     expect(mountNode.querySelector('[role="dialog"][aria-label="技能库"]')).toBeNull();
+  });
+
+  it('直接使用技能后首页展示技能名称', async () => {
+    await renderChatBox();
+    await act(async () => { typePrompt('/'); });
+
+    await act(async () => {
+      mountNode.querySelector<HTMLButtonElement>('[data-testid="use-skill"]')!.click();
+      await Promise.resolve();
+    });
+
+    const chip = mountNode.querySelector<HTMLElement>(`.${styles.armedSkill}`);
+    expect(chip?.textContent).toContain('电影技法工具箱');
+    expect(chip?.textContent).not.toBe('技能');
   });
 });
 
@@ -517,13 +558,13 @@ describe('IKR63N 首页积分预估接线', () => {
     });
   });
 
-  it('视频智能体页不请求，徽标只有图标', async () => {
+  it('Agent 模式不展示积分位，也不请求报价', async () => {
     await renderChatBox();
     await act(async () => { typePrompt('画一只猫'); });
     await settleQuote();
 
     expect(requestsToQuoteApi(quoteFetch)).toHaveLength(0);
-    expect(quoteBadge().textContent).toBe('');
+    expect(mountNode.querySelector('[data-testid="home-quote"]')).toBeNull();
   });
 
   it('未登录不请求', async () => {

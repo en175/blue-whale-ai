@@ -91,14 +91,14 @@ afterEach(() => {
 });
 
 describe('GenerationQuoteBadge', () => {
-  it('有报价 → 显示「本次预计消耗 N 积分」，请求带的是定价维度', async () => {
+  it('有报价 → 只显示图标与积分数字，请求带的是定价维度', async () => {
     const fetchMock = vi.fn().mockResolvedValue(quoteResponse(42));
     fetchGuard.stub(fetchMock);
 
     await renderBadge({});
 
     await vi.waitFor(() =>
-      expect(container.textContent).toContain('本次预计消耗 42 积分'),
+      expect(container.textContent).toBe('42'),
     );
     const [url, init] = fetchMock.mock.calls[0]! as [string, RequestInit];
     expect(url).toBe('/api/projects/p1/generation-jobs/quote');
@@ -147,7 +147,7 @@ describe('GenerationQuoteBadge', () => {
     expect(container.querySelector('[data-testid="generation-quote"]')).toBeNull();
   });
 
-  it('★ 报价请求失败 → 什么都不显示（预览失败不阻断、不打扰）', async () => {
+  it('★ 报价请求失败 → 红字提示加载计费失败', async () => {
     fetchGuard.stub(
       vi.fn().mockRejectedValue(new TypeError('Failed to fetch')),
     );
@@ -155,7 +155,26 @@ describe('GenerationQuoteBadge', () => {
     await renderBadge({});
     await settle();
 
-    expect(container.textContent).toBe('');
+    const badge = container.querySelector('[data-testid="generation-quote"]');
+    expect(badge?.textContent).toBe('加载计费失败');
+    expect(badge?.className).toContain('danger');
+  });
+
+  it('★ 已有报价时刷新失败 → 保留原数字，不转红', async () => {
+    fetchGuard.stub(vi.fn().mockResolvedValue(quoteResponse(42)));
+
+    await renderBadge({});
+    await vi.waitFor(() => expect(container.textContent).toBe('42'));
+
+    fetchGuard.stub(vi.fn().mockRejectedValue(new TypeError('Failed to fetch')));
+    await act(async () => {
+      await client.refetchQueries();
+    });
+    await settle();
+
+    const badge = container.querySelector('[data-testid="generation-quote"]');
+    expect(badge?.textContent).toBe('42');
+    expect(badge?.className).not.toContain('danger');
   });
 
   it('项目或模型未定 → 不发请求', async () => {
@@ -167,13 +186,13 @@ describe('GenerationQuoteBadge', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('★ 徽标只报本次预计消耗，服务端仍带 duration_basis 也不再附注说明', async () => {
+  it('★ 徽标只有数字，服务端仍带 duration_basis 也不附注说明', async () => {
     fetchGuard.stub(vi.fn().mockResolvedValue(quoteResponseWithBasis(58)));
 
     await renderBadge({});
 
     await vi.waitFor(() =>
-      expect(container.textContent).toContain('本次预计消耗 58 积分'),
+      expect(container.textContent).toBe('58'),
     );
     expect(container.textContent).not.toContain('按源视频时长预估');
     expect(container.querySelector('[data-testid="generation-quote-basis"]')).toBeNull();
@@ -192,13 +211,13 @@ describe('GenerationQuoteBadge', () => {
     expect(JSON.parse((fetchMock.mock.calls[1]![1] as RequestInit).body as string).target_node_id).toBe('media-9');
   });
 
-  it('★ 无标记（延长/参考单）→ 只显积分，不出现口径标注', async () => {
+  it('★ 无标记（延长/参考单）→ 只显数字，不出现口径标注', async () => {
     fetchGuard.stub(vi.fn().mockResolvedValue(quoteResponse(58)));
 
     await renderBadge({});
 
     await vi.waitFor(() =>
-      expect(container.textContent).toContain('本次预计消耗 58 积分'),
+      expect(container.textContent).toBe('58'),
     );
     expect(container.textContent).not.toContain('按源视频时长预估');
   });

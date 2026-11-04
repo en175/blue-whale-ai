@@ -78,7 +78,7 @@
 }
 
 .phoneBrand h2 {
-  margin: -10px 0 8px;
+  margin: 4px 0 8px;
   color: #111;
   font-size: 25px;
   font-weight: 600;
@@ -110,8 +110,9 @@
 }
 
 .welcomeLogo {
-  width: 78px;
-  height: 68px;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
 }
 
 .migrationBrand {

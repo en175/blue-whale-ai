@@ -51,6 +51,7 @@ export interface ModelFeatures {
   max_reference_image_pixels: number | null;
   max_reference_image_ratio: number | null;
   max_reference_image_bytes: number | null;
+  min_reference_image_side: number | null;
   max_reference_duration_sec: number | null;
   task_types: Record<string, unknown> | null;
   video_dimensions: Record<string, string> | null;
@@ -140,6 +141,8 @@ type FeaturesJson = {
   max_reference_image_ratio?: unknown;
   maxReferenceImageBytes?: unknown;
   max_reference_image_bytes?: unknown;
+  minReferenceImageSide?: unknown;
+  min_reference_image_side?: unknown;
   maxReferenceDurationSec?: unknown;
   max_reference_duration_sec?: unknown;
   taskTypes?: unknown;
@@ -238,6 +241,9 @@ export function toFeatures(json: unknown, capabilityType?: string): ModelFeature
     ),
     max_reference_image_bytes: pickPositiveInt(
       f.maxReferenceImageBytes ?? f.max_reference_image_bytes,
+    ),
+    min_reference_image_side: pickPositiveInt(
+      f.minReferenceImageSide ?? f.min_reference_image_side,
     ),
     max_reference_duration_sec: pickPositiveNumber(
       f.maxReferenceDurationSec ?? f.max_reference_duration_sec,

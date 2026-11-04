@@ -2,6 +2,9 @@
 .composer {
   --chat-fg: #fff;
   --chat-fg-muted: rgba(255, 255, 255, 0.7);
+  --chat-control-border: rgba(255, 255, 255, 0.05);
+  --chat-control-bg: rgba(255, 255, 255, 0.02);
+  --chat-control-bg-hover: rgba(255, 255, 255, 0.07);
   position: relative;
   display: block;
   width: 100%;
@@ -370,21 +373,21 @@
 .skillBtn {
   display: flex;
   align-items: center;
-  gap: var(--spacing-xs);
-  padding: calc(var(--spacing-xs) + 2px) calc(var(--spacing-md) + 2px);
-  border-radius: var(--radius-lg);
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  background: rgba(255, 255, 255, 0.08);
-  color: var(--chat-fg-muted);
-  font-size: var(--font-size-sm);
+  gap: 6px;
+  min-height: 34px;
+  padding: 6px 10px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--chat-control-border);
+  background: var(--chat-control-bg);
+  color: #f2f2f2;
+  font-size: 14px;
   cursor: pointer;
-  transition: color var(--transition-fast), background-color var(--transition-fast), border-color var(--transition-fast);
+  white-space: nowrap;
+  transition: background-color var(--transition-fast);
 }
 
 .skillBtn:hover {
-  color: var(--chat-fg);
-  background: rgba(255, 255, 255, 0.16);
-  border-color: rgba(255, 255, 255, 0.28);
+  background: var(--chat-control-bg-hover);
 }
 
 .skillIcon {

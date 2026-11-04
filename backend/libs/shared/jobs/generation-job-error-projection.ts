@@ -3,6 +3,7 @@ import {
   ERROR_IMAGE_GENERATION_FAILED,
   ERROR_INVALID_INPUT,
   ERROR_INVALID_REFERENCE,
+  ERROR_INVALID_REFERENCE_MEDIA,
   ERROR_MEDIA_EXTRACT_FAILED,
   ERROR_PLATFORM_QUOTA_EXHAUSTED,
   ERROR_PROVIDER_FAILED,
@@ -75,7 +76,13 @@ export function projectPublicError(
   const tableMessage = messageFor(code, type);
   const numericCode = errorCodeToNumeric(code);
   const recovery = errorRecoveryOf(numericCode);
-  if (tableMessage !== "未知错误") {
+  const storedMessage =
+    typeof storedError.message === "string" && storedError.message.trim() !== ""
+      ? storedError.message.trim()
+      : null;
+  const preferStored =
+    code === ERROR_INVALID_REFERENCE_MEDIA && storedMessage !== null;
+  if (tableMessage !== "未知错误" && !preferStored) {
     return {
       code: numericCode,
       reason: code,
@@ -83,14 +90,10 @@ export function projectPublicError(
       ...recovery,
     };
   }
-  const storedMessage =
-    typeof storedError.message === "string" && storedError.message.trim() !== ""
-      ? storedError.message.trim()
-      : null;
   return {
     code: numericCode,
     reason: code,
-    message: storedMessage ?? "生成失败",
+    message: storedMessage ?? tableMessage,
     ...recovery,
   };
 }
