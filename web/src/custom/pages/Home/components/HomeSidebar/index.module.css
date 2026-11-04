@@ -19,7 +19,7 @@
 }
 
 .expanded {
-  --sidebar-width: clamp(280px, 19vw, 380px);
+  --sidebar-width: 260px;
   align-items: stretch;
   box-shadow: 30px 0 100px rgba(0, 0, 0, 0.69);
 }
@@ -32,7 +32,7 @@
   justify-content: center;
   gap: 8px;
   height: auto;
-  padding: 12px 0 8px;
+  padding: 12px 14px 8px;
   flex-shrink: 0;
 }
 
@@ -41,7 +41,7 @@
   align-items: center;
   justify-content: flex-start;
   gap: 12px;
-  padding: 22px 20px 14px;
+  padding: 22px 14px 14px;
 }
 
 .brand {
@@ -116,13 +116,12 @@
   align-items: center;
   gap: 10px;
   width: 100%;
-  padding: 8px;
+  padding: 8px 14px;
 }
 
 .expanded .menu {
   align-items: stretch;
   gap: 5px;
-  padding: 8px 14px;
 }
 
 .menuItem {

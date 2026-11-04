@@ -58,8 +58,6 @@ export default function HomeSidebar({
   const pendingItem = useRef<(typeof menuItems)[0] | null>(null);
   const requestRef = useRef(0);
 
-  const historyOpen = location.pathname === '/';
-
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedKeyword(keyword), SEARCH_DEBOUNCE_MS);
     return () => clearTimeout(timer);
@@ -69,7 +67,7 @@ export default function HomeSidebar({
     fetchProjectListQuery({ source, page, size: PAGE_SIZE, keyword: search || undefined });
 
   useEffect(() => {
-    if (!user || !historyOpen) return;
+    if (!user) return;
     const ticket = ++requestRef.current;
     const search = debouncedKeyword.trim();
     setGroups({ dialog: { ...EMPTY_GROUP, loading: true }, canvas: { ...EMPTY_GROUP, loading: true } });
@@ -80,7 +78,7 @@ export default function HomeSidebar({
         canvas: pages[1] ? { records: pages[1].records, page: 1, total: pages[1].total, loading: false } : EMPTY_GROUP,
       });
     });
-  }, [debouncedKeyword, user, historyOpen]);
+  }, [debouncedKeyword, user]);
 
   const loadMore = async (source: ProjectSource) => {
     const group = groups[source];
@@ -214,107 +212,105 @@ export default function HomeSidebar({
         })}
       </nav>
 
-      {historyOpen && (
-        <section className={styles.historyPanel} aria-label="历史项目">
-          {expanded && (
-            <label className={styles.search}>
-              <Search size={14} strokeWidth={2} />
-              <input
-                value={keyword}
-                onChange={(event) => handleKeyword(event.target.value)}
-                placeholder="搜索项目"
-                aria-label="搜索项目"
-              />
-            </label>
-          )}
-          <div className={styles.historyScroll}>
-            {pendingSearch ? (
-              <p className={styles.historyEmpty}>搜索中…</p>
-            ) : searching && !hasHistory ? (
-              <p className={styles.historyEmpty}>没有匹配的项目</p>
-            ) : (
-              GROUPS.map((group) => {
-                const items = groups[group.key].records;
-                return (
-                  <section key={group.key} className={styles.historyGroup} aria-label={group.label}>
-                    <h3 className={styles.historyHeading} title={group.label}>
-                      {group.key === 'dialog' ? (
-                        <MessageSquare size={16} strokeWidth={1.8} aria-hidden="true" className={styles.headingIcon} />
-                      ) : (
-                        <LayoutGrid size={16} strokeWidth={1.8} aria-hidden="true" className={styles.headingIcon} />
-                      )}
-                      <span className={styles.headingLabel}>{group.label}</span>
-                    </h3>
-                    {items.length === 0 ? (
-                      <p className={styles.historyEmpty}>
-                        {groups[group.key].loading ? '加载中…' : `暂无${group.label}`}
-                      </p>
+      <section className={styles.historyPanel} aria-label="历史项目">
+        {expanded && (
+          <label className={styles.search}>
+            <Search size={14} strokeWidth={2} />
+            <input
+              value={keyword}
+              onChange={(event) => handleKeyword(event.target.value)}
+              placeholder="搜索项目"
+              aria-label="搜索项目"
+            />
+          </label>
+        )}
+        <div className={styles.historyScroll}>
+          {pendingSearch ? (
+            <p className={styles.historyEmpty}>搜索中…</p>
+          ) : searching && !hasHistory ? (
+            <p className={styles.historyEmpty}>没有匹配的项目</p>
+          ) : (
+            GROUPS.map((group) => {
+              const items = groups[group.key].records;
+              return (
+                <section key={group.key} className={styles.historyGroup} aria-label={group.label}>
+                  <h3 className={styles.historyHeading} title={group.label}>
+                    {group.key === 'dialog' ? (
+                      <MessageSquare size={16} strokeWidth={1.8} aria-hidden="true" className={styles.headingIcon} />
                     ) : (
-                      <ul className={styles.historyItems}>
-                        {items.map((record) => {
-                          const cover = projectPreviews(record)[0];
-                          return (
-                            <li key={record.id} className={styles.historyItem}>
-                              <button
-                                className={styles.historyRow}
-                                title={record.name}
-                                onClick={() => openCanvasTab(record.id)}
-                              >
-                                <span className={styles.historyThumb}>
-                                  {cover ? (
-                                    cover.type === 'video' ? (
-                                      <video
-                                        src={resolveMediaSrc(cover.url)}
-                                        muted
-                                        playsInline
-                                        preload="metadata"
-                                        aria-hidden="true"
-                                      />
-                                    ) : (
-                                      <img src={resolveMediaSrc(cover.url)} alt="" loading="lazy" />
-                                    )
+                      <LayoutGrid size={16} strokeWidth={1.8} aria-hidden="true" className={styles.headingIcon} />
+                    )}
+                    <span className={styles.headingLabel}>{group.label}</span>
+                  </h3>
+                  {items.length === 0 ? (
+                    <p className={styles.historyEmpty}>
+                      {groups[group.key].loading ? '加载中…' : `暂无${group.label}`}
+                    </p>
+                  ) : (
+                    <ul className={styles.historyItems}>
+                      {items.map((record) => {
+                        const cover = projectPreviews(record)[0];
+                        return (
+                          <li key={record.id} className={styles.historyItem}>
+                            <button
+                              className={styles.historyRow}
+                              title={record.name}
+                              onClick={() => openCanvasTab(record.id)}
+                            >
+                              <span className={styles.historyThumb}>
+                                {cover ? (
+                                  cover.type === 'video' ? (
+                                    <video
+                                      src={resolveMediaSrc(cover.url)}
+                                      muted
+                                      playsInline
+                                      preload="metadata"
+                                      aria-hidden="true"
+                                    />
                                   ) : (
-                                    <LayoutGrid size={16} strokeWidth={1.8} aria-hidden="true" />
-                                  )}
-                                </span>
-                                <span className={styles.historyName}>{record.name}</span>
-                              </button>
-                              <button
-                                className={styles.itemMore}
-                                onClick={() => setMenuOpen(menuOpen === String(record.id) ? null : String(record.id))}
-                                aria-label={`${record.name} 的更多操作`}
-                                aria-haspopup="menu"
-                                aria-expanded={menuOpen === String(record.id)}
-                              >
-                                ···
-                              </button>
-                              {menuOpen === String(record.id) && (
-                                <div className={styles.itemMenu} role="menu">
-                                  <button role="menuitem" onClick={() => handleRename(record)}>
-                                    重命名
-                                  </button>
-                                  <button role="menuitem" onClick={() => handleDelete(record)}>
-                                    删除
-                                  </button>
-                                </div>
-                              )}
-                            </li>
-                          );
-                        })}
-                      </ul>
-                    )}
-                    {groups[group.key].records.length < groups[group.key].total && (
-                      <button className={styles.historyMore} onClick={() => loadMore(group.key)}>
-                        更多
-                      </button>
-                    )}
+                                    <img src={resolveMediaSrc(cover.url)} alt="" loading="lazy" />
+                                  )
+                                ) : (
+                                  <LayoutGrid size={16} strokeWidth={1.8} aria-hidden="true" />
+                                )}
+                              </span>
+                              <span className={styles.historyName}>{record.name}</span>
+                            </button>
+                            <button
+                              className={styles.itemMore}
+                              onClick={() => setMenuOpen(menuOpen === String(record.id) ? null : String(record.id))}
+                              aria-label={`${record.name} 的更多操作`}
+                              aria-haspopup="menu"
+                              aria-expanded={menuOpen === String(record.id)}
+                            >
+                              ···
+                            </button>
+                            {menuOpen === String(record.id) && (
+                              <div className={styles.itemMenu} role="menu">
+                                <button role="menuitem" onClick={() => handleRename(record)}>
+                                  重命名
+                                </button>
+                                <button role="menuitem" onClick={() => handleDelete(record)}>
+                                  删除
+                                </button>
+                              </div>
+                            )}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                  {groups[group.key].records.length < groups[group.key].total && (
+                    <button className={styles.historyMore} onClick={() => loadMore(group.key)}>
+                      更多
+                    </button>
+                  )}
                   </section>
                 );
               })
             )}
           </div>
-        </section>
-      )}
+      </section>
 
       {showLogin && <LoginModal onClose={handleLoginClose} />}
     </aside>

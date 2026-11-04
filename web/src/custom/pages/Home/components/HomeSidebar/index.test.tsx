@@ -199,12 +199,13 @@ describe('首页搜索与项目列表', () => {
     expect(items().map((b) => b.textContent)).toEqual(['生成一', '生成二', '画布一']);
   });
 
-  it('项目页展开时不显示搜索与项目列表', async () => {
+  it('项目页与首页展示一致：显示搜索与项目列表', async () => {
     await renderSidebar({ route: '/projects' });
 
-    expect(mountNode.querySelector('input[aria-label="搜索项目"]')).toBeNull();
-    expect(mountNode.querySelector('h3')).toBeNull();
-    expect(api.fetchProjectListQuery).not.toHaveBeenCalled();
+    expect(mountNode.querySelector('input[aria-label="搜索项目"]')).not.toBeNull();
+    expect([...mountNode.querySelectorAll('h3')].map((h) => h.textContent)).toEqual(['生成', '画布']);
+    expect(items().map((b) => b.textContent)).toEqual(['生成一', '生成二', '画布一']);
+    expect(api.fetchProjectListQuery).toHaveBeenCalledWith(expect.objectContaining({ source: 'dialog', page: 1 }));
   });
 
   it('缩略图取预览第一项，图片项渲染 img、视频项渲染 video，无预览时用默认图标', async () => {
