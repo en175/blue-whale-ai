@@ -1668,7 +1668,7 @@ export default function ChatBox({
               { }
               <div className={styles.paramBarRight}>
                 { }
-                <QuoteBadge />
+                {activeTab !== 'agent' && <QuoteBadge />}
                 <button
                   className={`${styles.sendBtn} ${inputValue.trim() ? styles.sendBtnActive : ''}`}
                   onClick={handleSend}
