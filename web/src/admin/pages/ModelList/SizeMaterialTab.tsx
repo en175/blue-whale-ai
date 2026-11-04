@@ -527,6 +527,7 @@ export default function SizeMaterialTab({
                     <Input
                       type="number"
                       min={meta.min ?? 0}
+                      {...(meta.max !== undefined ? { max: meta.max } : {})}
                       {...(meta.step !== undefined ? { step: meta.step } : {})}
                       aria-label={meta.label}
                       placeholder={meta.placeholder}

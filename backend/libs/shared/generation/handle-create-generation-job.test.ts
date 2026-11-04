@@ -4405,4 +4405,30 @@ describe("handleCreateGenerationJob 视频/音频参考图上限（IKSLLC）", (
     expect(result.code).toBe(200);
     expect(createJob).toHaveBeenCalled();
   });
+
+  it("omni 参考图 400×200 同样按最小边拒绝", async () => {
+    const { result, createJob } = await createVideoWithImage(
+      MIN_SIDE_LIMITS,
+      [{ role: "reference", asset_id: "11", type: "image" }],
+      [referenceImageAsset({ width: 400, height: 200 })],
+    );
+    expect(result.code).toBe(1036);
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("尾帧 200×400 同样按最小边拒绝", async () => {
+    const { result, createJob } = await createVideoWithImage(
+      MIN_SIDE_LIMITS,
+      [
+        { role: "first_frame", asset_id: "11", type: "image" },
+        { role: "last_frame", asset_id: "12", type: "image" },
+      ],
+      [
+        referenceImageAsset({ id: "11", width: 1024, height: 1024 }),
+        referenceImageAsset({ id: "12", width: 200, height: 400 }),
+      ],
+    );
+    expect(result.code).toBe(1036);
+    expect(createJob).not.toHaveBeenCalled();
+  });
 });

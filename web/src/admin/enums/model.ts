@@ -21,7 +21,7 @@ export const FEATURE_BOOL_LABELS: Record<string, { label: string; types?: ModelT
 
 export const FEATURE_NUMBER_LABELS: Record<
   string,
-  { label: string; types?: ModelType[]; placeholder: string; step?: string; min?: number }
+  { label: string; types?: ModelType[]; placeholder: string; step?: string; min?: number; max?: number }
 > = {
   max_prompt_length: {
     label: '提示词上限 max_prompt_length',
@@ -56,6 +56,7 @@ export const FEATURE_NUMBER_LABELS: Record<
     types: ['video'],
     placeholder: '如 300（留空 = 不校验）',
     min: 1,
+    max: 10_000,
   },
 };
 

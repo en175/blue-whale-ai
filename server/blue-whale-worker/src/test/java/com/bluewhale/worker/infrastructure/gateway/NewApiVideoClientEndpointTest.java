@@ -344,6 +344,34 @@ class NewApiVideoClientEndpointTest {
     }
 
     @Test
+    @DisplayName("IKSUVD: submit 400 参考图过小 → invalid_reference_media + 中文文案")
+    void submitReferenceImageTooSmallMapsToReferenceMedia() throws Exception {
+        server.createContext("/v1/video/generations", exchange -> {
+            byte[] resp = ("{\"error\":{\"message\":\"InvalidParameter: expected the width " +
+                    "to be at least 300px, but received a 200x200px image\"}}")
+                    .getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(400, resp.length);
+            try (OutputStream out = exchange.getResponseBody()) {
+                out.write(resp);
+            }
+        });
+
+        VideoSubmitInput input = new VideoSubmitInput(
+                "doubao-seedance-2-5-260628", "一只猫在跑步", 5.0, "720p", "16:9",
+                null, null, List.of(), null);
+
+        assertThatThrownBy(() -> new NewApiVideoClient(new UpstreamBaseUrl(baseUrl)).submit("t", input))
+                .isInstanceOf(VideoProviderError.class)
+                .satisfies(e -> {
+                    assertThat(((VideoProviderError) e).getCode())
+                            .isEqualTo("invalid_reference_media");
+                    assertThat(e.getMessage())
+                            .isEqualTo("参考图尺寸不符合模型要求，请更换尺寸合适的图片后重试");
+                });
+    }
+
+    @Test
     @DisplayName("IKPPYX: poll FAILURE 视频编辑英文正文 → task_type_param_constraint")
     void pollVideoEditProseMapsToTaskTypeConstraint() throws Exception {
         String text = "The parameters `ratio` and `duration` specified in the request are not valid. "
