@@ -579,6 +579,10 @@ export interface TurnAccount {
   cardFailureRetryable: boolean;
 }
 
+export function shouldRefreshCreditsOf(account: Pick<TurnAccount, 'outcome' | 'tokenUsage'> | null | undefined): boolean {
+  return account?.outcome === 'completed' && account.tokenUsage !== null;
+}
+
 const NON_RETRYABLE_CARD_FAILURES: ReadonlySet<string> = new Set([
   'asset_binding_unavailable',
   'target_media_unresolved',
