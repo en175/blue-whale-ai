@@ -406,14 +406,14 @@ describe('IKNB99 参数错误重新编辑与主动提交', () => {
   it('用户确认视频编辑和跟随原视频时长，看到新报价后主动发送', async () => {
     await renderPage();
     await clickFixFollow('v1');
-    await vi.waitFor(() => expect(container.textContent).toContain('本次预计消耗 160 积分'));
+    await vi.waitFor(() => expect(container.querySelector('[data-testid="generation-quote"]')?.textContent).toBe('160'));
     expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();
     await act(async () => {
       [...container.querySelectorAll('button')].find((button) => button.textContent === '全能参考')!.click();
     });
     await clickSelectOption('视频编辑');
     await vi.waitFor(() => expect(container.textContent).toContain('跟随原视频时长'));
-    await vi.waitFor(() => expect(container.textContent).toContain('本次预计消耗 320 积分'));
+    await vi.waitFor(() => expect(container.querySelector('[data-testid="generation-quote"]')?.textContent).toBe('320'));
     expect(nodeOf('v1').data).toMatchObject({ draftMode: 'edit', draftDuration: -1, draftRatio: 'adaptive' });
     expect(apiMocks.createGenerationJob).not.toHaveBeenCalled();
     await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="video-send"]')!.click(); });

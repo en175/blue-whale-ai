@@ -19,7 +19,7 @@ export default function GenerationQuoteBadge(props: GenerationQuoteBadgeProps) {
 }
 
 function QuoteBadge({ projectId, type, parameters, references, targetNodeId }: GenerationQuoteBadgeProps) {
-  const { data } = useQuery({
+  const { data, isError } = useQuery({
     ...generationQuoteOptions(projectId, {
       type,
       parameters,
@@ -31,12 +31,19 @@ function QuoteBadge({ projectId, type, parameters, references, targetNodeId }: G
   });
 
   const credits = data?.credits ?? null;
-  if (credits === null) return null;
+  if (credits === null) {
+    if (!isError) return null;
+    return (
+      <span className={`${styles.badge} ${styles.danger}`} data-testid="generation-quote">
+        加载计费失败
+      </span>
+    );
+  }
 
   return (
     <span className={styles.badge} data-testid="generation-quote">
-      <Zap size={12} strokeWidth={2} />
-      <span>本次预计消耗 {credits} 积分</span>
+      <Zap size={12} fill="currentColor" strokeWidth={0} />
+      <strong>{credits}</strong>
     </span>
   );
 }

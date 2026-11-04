@@ -74,20 +74,20 @@ describe('MediaToolQuoteBadge 参数变化', () => {
     http.apiRequest.mockReturnValueOnce(first.promise);
     await render(1);
     first.resolve({ credits: 2, quote_revision: null });
-    await waitFor(() => text().includes('2 积分'));
+    await waitFor(() => text() === '2');
 
     const second = deferred<{ credits: number; quote_revision: null }>();
     http.apiRequest.mockReturnValueOnce(second.promise);
     await render(5);
-    expect(text()).toContain('2 积分');
+    expect(text()).toBe('2');
 
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 350));
     });
-    expect(text()).toContain('2 积分');
+    expect(text()).toBe('2');
     expect(document.body.querySelector('[data-testid="quote"]')!.className).toContain('loading');
 
     second.resolve({ credits: 3, quote_revision: null });
-    await waitFor(() => text().includes('3 积分'));
+    await waitFor(() => text() === '3');
   });
 });

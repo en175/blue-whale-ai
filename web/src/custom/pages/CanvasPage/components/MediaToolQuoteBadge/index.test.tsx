@@ -78,15 +78,15 @@ afterEach(async () => {
 });
 
 describe('MediaToolQuoteBadge', () => {
-  it('展示本次预计消耗', async () => {
+  it('展示积分数字', async () => {
     await renderBadge();
-    expect(badge()!.textContent).toContain('本次预计消耗 42 积分');
+    expect(badge()!.textContent).toBe('42');
   });
 
-  it('不计费时提示当前不计费', async () => {
+  it('不计费时显示 ⚡ 0', async () => {
     state.credits = 0;
     await renderBadge();
-    expect(badge()!.textContent).toContain('本工具当前不计费');
+    expect(badge()!.textContent).toBe('0');
   });
 
   it('无计价或加载中不渲染', async () => {
@@ -96,17 +96,19 @@ describe('MediaToolQuoteBadge', () => {
     expect(badge()).toBeNull();
   });
 
-  it('报价失败时提示暂无法报价', async () => {
+  it('报价失败时红字提示加载计费失败', async () => {
     state.credits = null;
     state.isError = true;
     await renderBadge();
-    expect(badge()!.textContent).toContain('暂无法报价');
+    expect(badge()!.textContent).toBe('加载计费失败');
+    expect(badge()!.className).toContain('danger');
   });
 
-  it('余额低于报价时标红并带出余额', async () => {
+  it('余额低于报价时标红且不显示余额数字', async () => {
     state.credits = 150;
     await renderBadge();
-    expect(badge()!.textContent).toContain('余额 100');
+    expect(badge()!.textContent).toBe('150');
+    expect(badge()!.className).toContain('danger');
   });
 
   it('输入为空时不渲染', async () => {
@@ -117,7 +119,7 @@ describe('MediaToolQuoteBadge', () => {
   it('刷新中保留上次数字并降低透明度', async () => {
     state.isFetching = true;
     await renderBadge();
-    expect(badge()!.textContent).toContain('本次预计消耗 42 积分');
+    expect(badge()!.textContent).toBe('42');
     expect(badge()!.className).toContain('loading');
   });
 });
