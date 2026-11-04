@@ -174,6 +174,21 @@ describe("projectPublicError", () => {
     expect("details" in out!).toBe(false);
   });
 
+  it("IKSUVD：invalid_reference_media 保留具体文案，不回退码表兜底", () => {
+    const out = projectPublicError(
+      {
+        code: "invalid_reference_media",
+        message: "参考图尺寸不符合模型要求，请更换尺寸合适的图片后重试",
+      },
+      "video",
+    );
+    expect(out!.code).toBe(1036);
+    expect(out!.reason).toBe("invalid_reference_media");
+    expect(out!.message).toBe(
+      "参考图尺寸不符合模型要求，请更换尺寸合适的图片后重试",
+    );
+  });
+
   it("quota_exhausted + 上游英文欠费原文：按证据翻成 1061，上游英文不回显", () => {
     const out = projectPublicError(
       {

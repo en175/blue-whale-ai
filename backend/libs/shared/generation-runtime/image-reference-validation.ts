@@ -8,6 +8,7 @@ import {
 export interface ReferenceImageLimitFeatures {
   max_reference_image_pixels?: number | null;
   max_reference_image_ratio?: number | null;
+  min_reference_image_side?: number | null;
 }
 
 export interface ReferenceImageSize {
@@ -23,6 +24,7 @@ export interface ReferenceImageMedia {
 export interface ReferenceImageLimitError {
   message: string;
   params: Record<string, number>;
+  code?: string;
 }
 
 export interface ReferenceImageMediaError {
@@ -58,10 +60,18 @@ function checkReferenceImages(
   assets: ReadonlyArray<ReferenceImageSize>,
   maxPixels: number | null,
   ratioLimit: number | null,
+  minSide: number | null,
 ): ReferenceImageLimitError | null {
   for (const asset of assets) {
     const { width, height } = asset;
     if (width === null || height === null || width <= 0 || height <= 0) continue;
+    if (minSide !== null && (width < minSide || height < minSide)) {
+      return {
+        code: ERROR_INVALID_REFERENCE_MEDIA,
+        message: `参考图单边小于当前模型限制（单边至少 ${minSide} 像素，当前 ${width}×${height}），请更换较大的图片后重试`,
+        params: { min_reference_image_side: minSide },
+      };
+    }
     if (maxPixels !== null && width * height > maxPixels) {
       return {
         message: `参考图总像素超出当前模型限制（单张最多 ${formatPixels(maxPixels)}），请更换较小的图片后重试`,
@@ -94,6 +104,7 @@ export function validateReferenceImages(
       features?.max_reference_image_ratio,
       DEFAULT_MAX_REFERENCE_IMAGE_RATIO,
     ),
+    configuredLimit(features?.min_reference_image_side),
   );
 }
 
@@ -103,8 +114,9 @@ export function validateConfiguredReferenceImages(
 ): ReferenceImageLimitError | null {
   const maxPixels = configuredLimit(features?.max_reference_image_pixels);
   const ratioLimit = configuredLimit(features?.max_reference_image_ratio);
-  if (maxPixels === null && ratioLimit === null) return null;
-  return checkReferenceImages(assets, maxPixels, ratioLimit);
+  const minSide = configuredLimit(features?.min_reference_image_side);
+  if (maxPixels === null && ratioLimit === null && minSide === null) return null;
+  return checkReferenceImages(assets, maxPixels, ratioLimit, minSide);
 }
 
 export function validateReferenceImageMedia(

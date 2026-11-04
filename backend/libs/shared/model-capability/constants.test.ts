@@ -859,4 +859,21 @@ describe("参考图总像素与宽高比写侧闸门（IKQYEH）", () => {
       }
     },
   );
+
+  it.each([0, 1.5, 10_001])("最小边 %s → 拒绝", (value) => {
+    expect(
+      parseModelUpdateBody({ features: { min_reference_image_side: value } }).ok,
+    ).toBe(false);
+  });
+
+  it.each(["min_reference_image_side", "minReferenceImageSide"])(
+    "最小边合法值（%s）→ 放行",
+    (key) => {
+      for (const value of [1, 300, 10_000]) {
+        expect(
+          parseModelUpdateBody({ features: { [key]: value } }).ok,
+        ).toBe(true);
+      }
+    },
+  );
 });

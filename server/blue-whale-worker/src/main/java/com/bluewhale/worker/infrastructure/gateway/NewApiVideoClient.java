@@ -42,6 +42,9 @@ public class NewApiVideoClient {
             "failed", true, "failure", true, "error", true,
             "cancelled", true, "canceled", true);
 
+    private static final String REFERENCE_IMAGE_SIZE_MESSAGE =
+            "参考图尺寸不符合模型要求，请更换尺寸合适的图片后重试";
+
     private final OkHttpClient submitClient;
     private final OkHttpClient pollClient;
     private final String baseUrl;
@@ -144,10 +147,10 @@ public class NewApiVideoClient {
             String rawText = respBody != null ? respBody.string() : "";
 
             if (!response.isSuccessful()) {
-                String code = classifySubmitFailure(rawText, response.code());
+                String code = classifyFailure(rawText, response.code());
                 String truncated = rawText.length() > 300 ? rawText.substring(0, 300) + "…" : rawText;
                 throw new VideoProviderError(code,
-                        "new-api 视频提交失败: HTTP " + response.code() + " body=" + truncated,
+                        failureMessage(code, "new-api 视频提交失败", response.code(), truncated),
                         new HttpStatusException(response.code()));
             }
 
@@ -206,10 +209,10 @@ public class NewApiVideoClient {
             String rawText = respBody != null ? respBody.string() : "";
 
             if (!response.isSuccessful()) {
-                String code = classifySubmitFailure(rawText, response.code());
+                String code = classifyFailure(rawText, response.code());
                 String truncated = rawText.length() > 300 ? rawText.substring(0, 300) + "…" : rawText;
                 throw new VideoProviderError(code,
-                        "new-api 成片提交失败: HTTP " + response.code() + " body=" + truncated,
+                        failureMessage(code, "new-api 成片提交失败", response.code(), truncated),
                         new HttpStatusException(response.code()));
             }
 
@@ -230,13 +233,25 @@ public class NewApiVideoClient {
         }
     }
 
-    private static String classifySubmitFailure(String rawText, int httpStatus) {
+    private static String classifyFailure(String rawText, int httpStatus) {
         String code = NewApiErrorClassifier.classifyError(rawText, httpStatus);
         if (GenerationError.ERROR_PROVIDER_FAILED.equals(code)
                 && NewApiErrorClassifier.isTaskTypeSignal(rawText)) {
             return GenerationError.ERROR_TASK_TYPE_PARAM_CONSTRAINT;
         }
+        if (GenerationError.ERROR_PROVIDER_FAILED.equals(code)
+                && NewApiErrorClassifier.isReferenceImageSizeSignal(rawText)) {
+            return GenerationError.ERROR_INVALID_REFERENCE_MEDIA;
+        }
         return code;
+    }
+
+    private static String failureMessage(String code, String prefix, int httpStatus,
+                                         String truncated) {
+        if (GenerationError.ERROR_INVALID_REFERENCE_MEDIA.equals(code)) {
+            return REFERENCE_IMAGE_SIZE_MESSAGE;
+        }
+        return prefix + ": HTTP " + httpStatus + " body=" + truncated;
     }
 
     private static SubmitResult parseSubmitResult(JsonNode parsed) {
@@ -282,10 +297,10 @@ public class NewApiVideoClient {
             String rawText = respBody != null ? respBody.string() : "";
 
             if (!response.isSuccessful()) {
-                String code = NewApiErrorClassifier.classifyError(rawText, response.code());
+                String code = classifyFailure(rawText, response.code());
                 String truncated = rawText.length() > 300 ? rawText.substring(0, 300) + "…" : rawText;
                 throw new VideoProviderError(code,
-                        "new-api 视频轮询失败: HTTP " + response.code() + " body=" + truncated,
+                        failureMessage(code, "new-api 视频轮询失败", response.code(), truncated),
                         new HttpStatusException(response.code()));
             }
 
@@ -356,6 +371,9 @@ public class NewApiVideoClient {
                     code = GenerationError.ERROR_CONTENT_REJECTED;
                 } else if (NewApiErrorClassifier.isQuotaSignal(upstreamText)) {
                     code = GenerationError.ERROR_PLATFORM_QUOTA_EXHAUSTED;
+                } else if (NewApiErrorClassifier.isReferenceImageSizeSignal(upstreamText)) {
+                    code = GenerationError.ERROR_INVALID_REFERENCE_MEDIA;
+                    message = REFERENCE_IMAGE_SIZE_MESSAGE;
                 } else if (NewApiErrorClassifier.isTaskTypeSignal(upstreamText)) {
                     code = GenerationError.ERROR_TASK_TYPE_PARAM_CONSTRAINT;
                 } else {
