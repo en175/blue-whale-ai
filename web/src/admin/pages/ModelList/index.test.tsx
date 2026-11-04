@@ -336,7 +336,7 @@ async function pickChannel(label: string) {
 function shownMatrix(): 'gpt' | 'banana' | 'seedream' | null {
   if ((document.body.textContent ?? '').includes('尺寸 → quality')) return 'banana';
   if (document.body.querySelector('input[aria-label*=" 行 "][aria-label$=" 列"]')) return 'seedream';
-  if ((document.body.textContent ?? '').includes('留空')) return 'gpt';
+  if (document.body.querySelector('[role="combobox"][aria-label*=" 行 "][aria-label$=" 列"]')) return 'gpt';
   return null;
 }
 

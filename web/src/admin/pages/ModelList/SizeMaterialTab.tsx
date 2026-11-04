@@ -524,7 +524,7 @@ export default function SizeMaterialTab({
               <div style={FEATURE_GROUP_LABEL}>数值</div>
               <div style={FEATURE_FIELD_GRID}>
                 {numberEntries.map(([key, meta]) => (
-                  <Field key={key} label={<>{meta.label} <span>（留空不写入）</span></>}>
+                  <Field key={key} label={meta.label}>
                     <Input
                       type="number"
                       min={0}
@@ -545,7 +545,7 @@ export default function SizeMaterialTab({
               <div style={FEATURE_GROUP_LABEL}>文本</div>
               <div style={FEATURE_FIELD_GRID}>
                 {stringEntries.map(([key, meta]) => (
-                  <Field key={key} label={<>{meta.label} <span>（留空不写入）</span></>}>
+                  <Field key={key} label={meta.label}>
                     <Input
                       placeholder={meta.placeholder}
                       value={features.strings[key] ?? ''}
