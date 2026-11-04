@@ -192,6 +192,21 @@ export default function SkillModal({ open, onClose, onUseSkill }: SkillModalProp
     }
   };
 
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      if (removalTarget) return;
+      if (detailTarget) {
+        setDetailTarget(null);
+        return;
+      }
+      onClose();
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [open, detailTarget, removalTarget, onClose]);
+
   if (!open) return null;
 
   function SkillMarkdown({ text }: { text: string }) {
