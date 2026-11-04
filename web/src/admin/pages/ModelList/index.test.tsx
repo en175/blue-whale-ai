@@ -272,6 +272,12 @@ async function openSelect(trigger: HTMLElement | null) {
 }
 
 
+function tabNames(): string[] {
+  return [...document.body.querySelectorAll<HTMLButtonElement>('button[role="tab"]')].map(
+    (b) => b.textContent?.trim() ?? '',
+  );
+}
+
 async function openTab(label: string) {
   const tab = [...document.body.querySelectorAll<HTMLButtonElement>('button[role="tab"]')].find(
     (b) => b.textContent?.trim() === label,
@@ -449,7 +455,7 @@ describe('ModelList 按类型分表单', () => {
     expect(shownMatrix()).toBe('seedream');
   });
 
-  it('新建文本模型：基础无供应商输入、尺寸与素材无尺寸/比例/时长，但 features 与高级 JSON 仍有出口', async () => {
+  it('新建文本模型：基础无供应商输入、尺寸与素材无尺寸/比例/时长，但 features 与 JSON 兜底仍有出口', async () => {
     api.fetchAdminModels.mockResolvedValue([]);
     await renderPage();
     await openCreateModal();
@@ -463,11 +469,11 @@ describe('ModelList 按类型分表单', () => {
 
 
     expect(document.body.textContent).toContain('特性 features（结构化）');
-    await openTab('高级');
-    expect(document.body.textContent).toContain('高级 JSON');
+    expect(document.body.textContent).toContain('其他特性 JSON');
+    expect(tabNames()).not.toContain('高级');
   });
 
-  it('编辑音频行：身份字段在「基础」，默认时长/features 在「尺寸与素材」，高级 JSON 在「高级」', async () => {
+  it('编辑音频行：身份字段在「基础」，默认时长/features 与 JSON 兜底都在「尺寸与素材」', async () => {
     api.fetchAdminModels.mockResolvedValue([audio]);
     await renderPage();
     await openRowEdit('音频');
@@ -485,8 +491,7 @@ describe('ModelList 按类型分表单', () => {
     expect(document.body.textContent).not.toContain('尺寸选项');
 
     expect(document.body.textContent).toContain('特性 features（结构化）');
-    await openTab('高级');
-    expect(document.body.textContent).toContain('高级 JSON');
+    expect(document.body.textContent).toContain('其他特性 JSON');
   });
 
   it('编辑 seedream 图片行：出现矩阵编辑器（在「尺寸与素材」）', async () => {
@@ -502,17 +507,14 @@ describe('ModelList 按类型分表单', () => {
     expect(cellInputs.length).toBe(1);
   });
 
-  it('「高级」tab 只剩 JSON 兜底：渠道控件与三张映射表都不在了', async () => {
+  it('「尺寸与素材」唯一保留 JSON 兜底：渠道控件与三张映射表只在各自分区，不再有独立的「高级」tab', async () => {
     api.fetchAdminModels.mockResolvedValue([gptImage]);
     await renderPage();
     await openRowEdit('图片');
-    await openTab('高级');
-    expect(document.body.textContent).toContain('高级 JSON');
-    expect(document.body.textContent).toContain('未识别字段');
-
-    expect(document.body.querySelector('button[aria-label="渠道"]')).toBeNull();
-    expect(matrixTable()).toBeUndefined();
-    expect(shownMatrix()).toBeNull();
+    await openTab('尺寸与素材');
+    expect(document.body.textContent).toContain('其他特性 JSON');
+    expect(document.body.querySelector('textarea[aria-label="其他特性 JSON"]')).not.toBeNull();
+    expect(tabNames()).not.toContain('高级');
   });
 
   it('gpt 行删掉一个尺寸行后，其它交叉格的值仍在', async () => {
@@ -1174,14 +1176,14 @@ describe('ModelList 渠道', () => {
     expect(payload.request_mapping).toEqual({ quality: {}, size: {} });
   });
 
-  it('★ 出站协议没有自由文本框、也不在高级 JSON 里（它由渠道决定，键已整键退役）', async () => {
+  it('★ 出站协议没有自由文本框、也不在 JSON 兜底里（它由渠道决定，键已整键退役）', async () => {
     api.fetchAdminModels.mockResolvedValue([gptOfficial]);
     await renderPage();
     await openRowEdit('图片');
     await openTab('尺寸与素材');
     expect(document.body.textContent).not.toContain('出站图片协议');
-    await openTab('高级');
 
-    expect(document.body.querySelector('textarea')?.value ?? '').not.toContain('image_protocol');
+    const json = document.body.querySelector<HTMLTextAreaElement>('textarea[aria-label="其他特性 JSON"]');
+    expect(json?.value ?? '').not.toContain('image_protocol');
   });
 });

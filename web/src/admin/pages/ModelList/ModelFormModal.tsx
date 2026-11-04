@@ -99,13 +99,11 @@ import { Alert, Button, Modal, Tabs } from '../../ui';
 import BasicsTab from './BasicsTab';
 import SizeMaterialTab from './SizeMaterialTab';
 import PricingTab from './PricingTab';
-import AdvancedTab from './AdvancedTab';
 
 const TAB_ITEMS = [
   { key: 'basics', label: '基础' },
   { key: 'size', label: '尺寸与素材' },
   { key: 'pricing', label: '定价' },
-  { key: 'advanced', label: '高级' },
 ] as const;
 
 type TabKey = (typeof TAB_ITEMS)[number]['key'];
@@ -463,7 +461,7 @@ export default function ModelFormModal({ initial, models, defaultType, onClose, 
       JSON.parse(extraFeatures || '{}');
     } catch {
       setError('其他特性 JSON 解析失败，请检查格式。');
-      setTab('advanced');
+      setTab('size');
       return;
     }
     const built = buildCreateParams(snapshot());
@@ -599,6 +597,7 @@ export default function ModelFormModal({ initial, models, defaultType, onClose, 
             strings: featureStrings,
             setString: (key, value) => setFeatureStrings((p) => ({ ...p, [key]: value })),
           }}
+          extraFeatures={{ value: extraFeatures, set: setExtraFeatures }}
           taskTypes={{
             ratios: taskTypeRatios,
             enabled: taskTypeEnabled,
@@ -629,8 +628,6 @@ export default function ModelFormModal({ initial, models, defaultType, onClose, 
           }}
         />
       )}
-
-      {tab === 'advanced' && <AdvancedTab extraFeatures={extraFeatures} setExtraFeatures={setExtraFeatures} />}
 
       {error && (
         <div style={{ marginTop: 12 }}>

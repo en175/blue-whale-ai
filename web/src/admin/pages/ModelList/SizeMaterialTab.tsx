@@ -20,7 +20,7 @@ import {
 import {
   featureApplies,
 } from './feature-fields';
-import { Badge, Button, Checkbox, Chip, Field, Input, Segmented, Select, Table } from '../../ui';
+import { Badge, Button, Checkbox, Chip, Field, Input, Segmented, Select, Table, Textarea } from '../../ui';
 import DimensionMatrix from './DimensionMatrix';
 import { Hint } from '../../ui';
 import {
@@ -92,6 +92,10 @@ interface SizeMaterialTabProps {
     strings: Record<string, string>;
     setString: (key: string, value: string) => void;
   };
+  extraFeatures: {
+    value: string;
+    set: (value: string) => void;
+  };
   taskTypes: {
     ratios: Record<string, string[]>;
     enabled: Record<string, boolean>;
@@ -119,6 +123,7 @@ export default function SizeMaterialTab({
   durations,
   formats,
   features,
+  extraFeatures,
   taskTypes,
 }: SizeMaterialTabProps) {
   const parser = channelOf(channel).parser ?? 'seedream';
@@ -495,63 +500,72 @@ export default function SizeMaterialTab({
       )}
 
       <h3 style={SECTION}>
-        特性 features（结构化） <Hint>结构化键在保存时写入 features；未列出的键与历史脏值去「高级 JSON」维护。</Hint>
-        {!visible.structuredFeature && (
-          <Hint>该类型没有专属的结构化特性键，可直接去「高级」用 JSON 配置。</Hint>
-        )}
+        特性 features（结构化） <Hint>结构化键在保存时写入 features；结构化控件没覆盖的键、或形态对不上的历史脏值，填在下面「其他特性 JSON」里，保存时与结构化键合并。</Hint>
       </h3>
-      {visible.structuredFeature && (
-        <div style={PANEL}>
-          <div style={FEATURE_GROUPS}>
-            {flagEntries.length > 0 && (
-              <div>
-                <div style={FEATURE_GROUP_LABEL}>开关</div>
-                <div style={FEATURE_FLAG_GRID}>
-                  {flagEntries.map(([key, meta]) => (
-                    <Checkbox key={key} checked={!!features.flags[key]} onChange={() => features.toggle(key)} label={meta.label} />
-                  ))}
-                </div>
+      <div style={PANEL}>
+        <div style={FEATURE_GROUPS}>
+          {!visible.structuredFeature && (
+            <div style={FEATURE_GROUP_LABEL}>该类型没有专属的结构化特性键，直接在「其他特性 JSON」里配置。</div>
+          )}
+          {flagEntries.length > 0 && (
+            <div>
+              <div style={FEATURE_GROUP_LABEL}>开关</div>
+              <div style={FEATURE_FLAG_GRID}>
+                {flagEntries.map(([key, meta]) => (
+                  <Checkbox key={key} checked={!!features.flags[key]} onChange={() => features.toggle(key)} label={meta.label} />
+                ))}
               </div>
-            )}
-            {numberEntries.length > 0 && (
-              <div>
-                <div style={FEATURE_GROUP_LABEL}>数值</div>
-                <div style={FEATURE_FIELD_GRID}>
-                  {numberEntries.map(([key, meta]) => (
-                    <Field key={key} label={<>{meta.label} <span>（留空不写入）</span></>}>
-                      <Input
-                        type="number"
-                        min={0}
-                        placeholder={meta.placeholder}
-                        value={features.numbers[key] ?? ''}
-                        onChange={(e) => features.setNumber(key, e.target.value)}
-                        style={FULL}
-                      />
-                    </Field>
-                  ))}
-                </div>
+            </div>
+          )}
+          {numberEntries.length > 0 && (
+            <div>
+              <div style={FEATURE_GROUP_LABEL}>数值</div>
+              <div style={FEATURE_FIELD_GRID}>
+                {numberEntries.map(([key, meta]) => (
+                  <Field key={key} label={<>{meta.label} <span>（留空不写入）</span></>}>
+                    <Input
+                      type="number"
+                      min={0}
+                      placeholder={meta.placeholder}
+                      value={features.numbers[key] ?? ''}
+                      onChange={(e) => features.setNumber(key, e.target.value)}
+                      style={FULL}
+                    />
+                  </Field>
+                ))}
               </div>
-            )}
-            {stringEntries.length > 0 && (
-              <div>
-                <div style={FEATURE_GROUP_LABEL}>文本</div>
-                <div style={FEATURE_FIELD_GRID}>
-                  {stringEntries.map(([key, meta]) => (
-                    <Field key={key} label={<>{meta.label} <span>（留空不写入）</span></>}>
-                      <Input
-                        placeholder={meta.placeholder}
-                        value={features.strings[key] ?? ''}
-                        onChange={(e) => features.setString(key, e.target.value)}
-                        style={FULL}
-                      />
-                    </Field>
-                  ))}
-                </div>
+            </div>
+          )}
+          {stringEntries.length > 0 && (
+            <div>
+              <div style={FEATURE_GROUP_LABEL}>文本</div>
+              <div style={FEATURE_FIELD_GRID}>
+                {stringEntries.map(([key, meta]) => (
+                  <Field key={key} label={<>{meta.label} <span>（留空不写入）</span></>}>
+                    <Input
+                      placeholder={meta.placeholder}
+                      value={features.strings[key] ?? ''}
+                      onChange={(e) => features.setString(key, e.target.value)}
+                      style={FULL}
+                    />
+                  </Field>
+                ))}
               </div>
-            )}
+            </div>
+          )}
+          <div>
+            <div style={FEATURE_GROUP_LABEL}>
+              其他特性 JSON <Hint>未识别字段与映射兜底：结构化控件没覆盖的键、或形态对不上的历史脏值。保存时与上面的结构化键合并，同键以结构化控件为准。</Hint>
+            </div>
+            <Textarea
+              aria-label="其他特性 JSON"
+              value={extraFeatures.value}
+              onChange={(e) => extraFeatures.set(e.target.value)}
+              style={FULL}
+            />
           </div>
         </div>
-      )}
+      </div>
     </>
   );
 }
