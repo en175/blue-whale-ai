@@ -3,6 +3,7 @@ import { beforeEach, onTestFinished, vi } from 'vitest';
 type FetchRoute = readonly [method: string, path: string];
 
 const MEDIA_TOOL_QUOTE_PATH = /^\/api\/media-tools\/[a-z0-9_]+\/quote$/;
+const USAGE_TOKEN_PATH = '/api/usage/token';
 
 export function createFetchGuard() {
   let handler: typeof fetch | undefined;
@@ -16,6 +17,12 @@ export function createFetchGuard() {
     if (method === 'POST' && MEDIA_TOOL_QUOTE_PATH.test(path)) {
       return new Response(
         JSON.stringify({ code: 200, data: { credits: null, quote_revision: null } }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    }
+    if (method === 'GET' && path === USAGE_TOKEN_PATH) {
+      return new Response(
+        JSON.stringify({ code: 200, data: { credits: 0 } }),
         { status: 200, headers: { 'Content-Type': 'application/json' } },
       );
     }

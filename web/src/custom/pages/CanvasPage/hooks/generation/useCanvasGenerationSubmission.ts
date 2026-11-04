@@ -32,6 +32,7 @@ import { isInPlaceRegenTarget } from '../../media/mediaReEdit';
 import { newNodeId } from '../../graph/nodeId';
 import { mergedVideoMediaRefsOf, videoRefSourceError } from '../../tools/video/videoMediaRefs';
 import { draftVideoModeOf } from '../../tools/video/videoModes';
+import { refreshCredits } from '@/custom/api/creditsRefresh';
 import type { CanvasGenerationTerminalHost } from './useCanvasGenerationTerminal';
 
 type ToolMode = 'drag' | 'select';
@@ -186,6 +187,9 @@ export function useCanvasGenerationSubmission(host: CanvasGenerationSubmissionHo
           ui.markUnknown();
           showToast('warn', ui.unknownToast);
           return true;
+        },
+        onAccepted: () => {
+          void refreshCredits();
         },
       },
     );
@@ -790,6 +794,9 @@ export function useCanvasGenerationSubmission(host: CanvasGenerationSubmissionHo
           },
         },
         {
+          onAccepted: () => {
+            void refreshCredits();
+          },
           onCreateFailure: (e: unknown) => {
             const rollbackInPlace = () => {
               const rollbackNode = mediaNodesRef.current.find((n) => n.id === nodeId);
