@@ -264,8 +264,7 @@ describe('SkillModal', () => {
     expect(cardButton('添加')).toBeTruthy();
   });
 
-  it('「我的技能」为空时展示空态，点击「去技能库」切到技能库', async () => {
-    api.fetchMySkills.mockResolvedValue({ current: 1, records: [], total: 0 });
+  it('「我的技能」为空时展示空态，点击「去技能库」切到技能库', async () => {    api.fetchMySkills.mockResolvedValue({ current: 1, records: [], total: 0 });
     mountNode = document.createElement('div');
     document.body.appendChild(mountNode);
     root = createRoot(mountNode);
@@ -290,5 +289,65 @@ describe('SkillModal', () => {
     });
     expect(document.body.textContent).not.toContain('暂无技能');
     expect(document.body.textContent).toContain('分镜脚本');
+  });
+
+  it('按 Esc 关闭技能库弹窗', async () => {
+    mountNode = document.createElement('div');
+    document.body.appendChild(mountNode);
+    const onClose = vi.fn();
+    root = createRoot(mountNode);
+    await act(async () => {
+      root.render(createElement(SkillModal, { open: true, onClose }));
+    });
+
+    await act(async () => {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('详情弹窗打开时按 Esc 只关闭详情，主弹窗保持打开', async () => {
+    mountNode = document.createElement('div');
+    document.body.appendChild(mountNode);
+    const onClose = vi.fn();
+    root = createRoot(mountNode);
+    await act(async () => {
+      root.render(createElement(SkillModal, { open: true, onClose }));
+    });
+
+    await act(async () => {
+      pointerClick(document.body.querySelector('button[title="更多操作"]') as HTMLButtonElement);
+    });
+    expect(document.body.textContent).toContain('查看');
+
+    await act(async () => {
+      pointerClick(document.body.querySelector('[title="查看技能详情"]') as HTMLElement);
+      await Promise.resolve();
+    });
+    expect(document.body.textContent).toContain('这是一个测试技能。');
+
+    await act(async () => {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+
+    expect(document.body.textContent).not.toContain('这是一个测试技能。');
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('弹窗关闭后按 Esc 不再触发关闭回调', async () => {
+    mountNode = document.createElement('div');
+    document.body.appendChild(mountNode);
+    const onClose = vi.fn();
+    root = createRoot(mountNode);
+    await act(async () => {
+      root.render(createElement(SkillModal, { open: false, onClose }));
+    });
+
+    await act(async () => {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+
+    expect(onClose).not.toHaveBeenCalled();
   });
 });
