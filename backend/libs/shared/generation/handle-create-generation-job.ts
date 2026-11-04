@@ -314,7 +314,7 @@ export type GenerationType = "image" | "video" | "audio";
 
 
 export interface ValidationOptions {
-  requireSubmitFields?: boolean;
+  requirePrompt?: boolean;
 }
 
 function validateCommon(
@@ -332,8 +332,7 @@ function validateCommon(
 
   if (!params) return { code: ERROR_INVALID_INPUT, message: "prompt 无效" };
 
-  const promptRequired =
-    type === "audio" || options?.requireSubmitFields !== false;
+  const promptRequired = type === "audio" || options?.requirePrompt !== false;
   if (promptRequired) {
     if (!isStr(params.prompt) && (params.prompt !== undefined || !hasTargetNode)) {
       return { code: ERROR_INVALID_INPUT, message: "prompt 无效" };
@@ -343,7 +342,7 @@ function validateCommon(
       return { code: ERROR_INVALID_INPUT, message: "prompt 无效" };
     }
   }
-  if (type !== "audio" && options?.requireSubmitFields !== false) {
+  if (type !== "audio") {
 
     if (
       !isStr(params.aspect_ratio) ||

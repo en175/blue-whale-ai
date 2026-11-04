@@ -113,7 +113,7 @@ export async function handleQuoteGenerationJob(
     }
   }
 
-  if (validateGenerationRequest(type, body, capability, { requireSubmitFields: false })) {
+  if (validateGenerationRequest(type, body, capability, { requirePrompt: false })) {
     return ok(EMPTY_QUOTE);
   }
 
@@ -170,7 +170,7 @@ export async function handleQuoteGenerationJob(
   if (
     effectiveBody !== body &&
     (type === "video" || type === "audio") &&
-    validateGenerationRequest(type, effectiveBody, capability, { requireSubmitFields: false })
+    validateGenerationRequest(type, effectiveBody, capability, { requirePrompt: false })
   ) {
     return ok(EMPTY_QUOTE);
   }
