@@ -1,5 +1,6 @@
 import type { JobDetail } from '@/custom/api/jobs';
 import type { GenerationRecoveryRecord } from '@/custom/api/canvasRecovery';
+import { refreshCredits } from '@/custom/api/creditsRefresh';
 import { isRecoveryTargetRestorable, type RuntimeNodeView } from './types';
 import { TARGET_OUTPUT_KEY, PRIMARY_OUTPUT_KEY, type ActiveExecution, type RuntimeContext } from './runtimeState';
 
@@ -44,6 +45,7 @@ export function createPolling(ctx: RuntimeContext) {
   const converge = (execution: ActiveExecution, jobId: string, detail: JobDetail) => {
     const nodeId = execution.nodeId;
     clearTimer(nodeId);
+    void refreshCredits();
     const mediaType = detail.asset?.type === 'video' || detail.asset?.type === 'audio' ? detail.asset.type : 'image';
     if (detail.status === 'succeeded') host.rememberAsset(detail.asset, mediaType);
     host.applyTerminal(nodeId, jobId, detail);

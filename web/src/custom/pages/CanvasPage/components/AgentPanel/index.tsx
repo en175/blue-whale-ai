@@ -15,6 +15,7 @@ import Checkbox from '@/custom/components/Checkbox';
 import Empty from '@/custom/components/Empty';
 import styles from './index.module.css';
 import { fetchMySkills } from '@/custom/api/skills';
+import { refreshCredits } from '@/custom/api/creditsRefresh';
 import { useAgentSession } from '../../hooks/agent/useAgentSession';
 import {
   type SessionContentBlock,
@@ -51,7 +52,7 @@ import {
   readPersistedPanelWidth,
   type AgentDrawerLayout,
 } from './drawerWidth';
-import { showsTurnFooter } from '../../hooks/agent/sessionTimeline';
+import { shouldRefreshCreditsOf, showsTurnFooter } from '../../hooks/agent/sessionTimeline';
 import { collectKnownAssets } from './assetMentions';
 import { Markdown } from './Markdown';
 import { LastTurnLine, TurnFooter } from './TurnTimeline';
@@ -212,6 +213,9 @@ export default function AgentPanel({ open = true, onClose, initialInput, initial
     refreshSessions,
   } = useAgentSession(projectId ?? '');
   const lastAccount = turns.length > 0 ? turns[turns.length - 1].account : null;
+  useEffect(() => {
+    if (shouldRefreshCreditsOf(lastAccount)) void refreshCredits();
+  }, [lastAccount]);
   const knownAssets = useMemo(() => collectKnownAssets(turns), [turns]);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; title: string } | null>(null);

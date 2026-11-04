@@ -7,6 +7,12 @@ import { videoToolsTask } from './videoTools';
 import type { GenerationRuntimeHost, GenerationTaskDefinition, RuntimeNodeView } from './types';
 import { generationRecoveryKeys, generationRecoveryPageOptions, type GenerationRecoveryPage, type GenerationRecoveryRecord } from '@/custom/api/canvasRecovery';
 
+vi.mock('@/custom/api/creditsRefresh', () => ({
+  refreshCredits: vi.fn(async () => null),
+}));
+
+const { refreshCredits } = await import('@/custom/api/creditsRefresh');
+
 class ManualClock {
   now = 0;
   private seq = 0;
@@ -306,6 +312,25 @@ describe('生成任务运行时：submit', () => {
 });
 
 describe('生成任务运行时：轮询归属与乱序', () => {
+  it('轮询到终态后刷新积分余额，取消也刷新', async () => {
+    const refresh = vi.mocked(refreshCredits);
+    const { fake, runtime, kit } = setup({ script: [{ status: 'succeeded', asset: null }] });
+    fake.nodes.set('n1', { id: 'n1', type: 'mediaNode', position: { x: 0, y: 0 }, data: {} });
+    kit.respond.create(async () => ({ jobId: '501', canvasBinding: BINDING_VIEW('uuid-0001', 'n1', '501') }));
+    refresh.mockClear();
+    runtime.submit(kit.def, { payload: {}, target: targetFacts('n1') });
+    await flushMicrotasks();
+    expect(refresh).toHaveBeenCalledTimes(1);
+
+    const second = setup({ script: [{ status: 'cancelled', asset: null }] });
+    second.fake.nodes.set('n2', { id: 'n2', type: 'mediaNode', position: { x: 0, y: 0 }, data: {} });
+    second.kit.respond.create(async () => ({ jobId: '502', canvasBinding: BINDING_VIEW('uuid-0002', 'n2', '502') }));
+    refresh.mockClear();
+    second.runtime.submit(second.kit.def, { payload: {}, target: targetFacts('n2') });
+    await flushMicrotasks();
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
   it('同卡新执行接管后，旧执行迟到响应丢弃且不续链', async () => {
     const { fake, runtime, kit, clock, status } = setup();
     fake.nodes.set('n1', { id: 'n1', type: 'mediaNode', position: { x: 0, y: 0 }, data: {} });
