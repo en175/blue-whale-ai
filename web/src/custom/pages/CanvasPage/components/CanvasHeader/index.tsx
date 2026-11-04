@@ -1,8 +1,11 @@
+import { type CSSProperties } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Bot } from 'lucide-react';
 import RechargeModal from '@/custom/components/UserDropdown/RechargeModal';
+import CreditsBadge from '@/custom/components/CreditsBadge';
 import { useRechargeUiStore } from '@/custom/stores/recharge';
 import ProjectSelector, { type CanvasProject } from '../ProjectSelector';
+import { drawerPushOffset, type AgentDrawerLayout } from '../AgentPanel/drawerWidth';
 import styles from './index.module.css';
 
 interface CanvasHeaderProps {
@@ -15,6 +18,7 @@ interface CanvasHeaderProps {
   onNewProject: () => void;
   onToggleAgent: () => void;
   hideAgentEntry?: boolean;
+  agentDrawer?: AgentDrawerLayout | null;
 }
 
 export default function CanvasHeader({
@@ -27,10 +31,12 @@ export default function CanvasHeader({
   onNewProject,
   onToggleAgent,
   hideAgentEntry = false,
+  agentDrawer = null,
 }: CanvasHeaderProps) {
   const navigate = useNavigate();
   const showRecharge = useRechargeUiStore((s) => s.open);
   const closeRecharge = useRechargeUiStore((s) => s.closeRecharge);
+  const pushOffset = drawerPushOffset(agentDrawer);
 
   return (
     <header className={styles.header}>
@@ -55,7 +61,11 @@ export default function CanvasHeader({
       </div>
 
       {}
-      <div className={styles.right}>
+      <div
+        className={`${styles.right} ${pushOffset > 0 ? styles.rightPushed : ''} ${agentDrawer?.resizing ? styles.rightFollowingResize : ''}`}
+        style={{ '--agent-drawer-push': `${pushOffset}px` } as CSSProperties}
+      >
+        <CreditsBadge />
         <button
           className={`${styles.agentBtn} ${hideAgentEntry ? styles.agentBtnHidden : ''}`}
           onClick={onToggleAgent}

@@ -5,7 +5,7 @@ import styles from './index.module.css';
 export default function CreditsBadge() {
   const credits = useAuthStore((s) => s.credits);
 
-  if (credits === null) return null;
+  if (typeof credits !== 'number') return null;
 
   return (
     <div className={styles.badge}>

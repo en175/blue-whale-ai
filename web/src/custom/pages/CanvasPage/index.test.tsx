@@ -72,7 +72,7 @@ const apiMocks = vi.hoisted(() => ({
   touchProjectLastOpened: vi.fn(async () => undefined),
   pinProject: vi.fn(async () => undefined),
   fetchMe: vi.fn(async () => null),
-  fetchCredits: vi.fn(async () => ({})),
+  fetchCredits: vi.fn(async () => ({ credits: 0 })),
   toSessionUser: vi.fn(() => null),
 }));
 
