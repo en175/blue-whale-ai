@@ -8,6 +8,7 @@ export const TYPE_TABS: { key: ModelType; label: string }[] = [
 ];
 
 export const FEATURE_BOOL_LABELS: Record<string, { label: string; types?: ModelType[] }> = {
+  watermark: { label: '水印 watermark' },
   reference_image: { label: '参考图 reference_image', types: ['image', 'video'] },
   stream: { label: '流式输出 stream', types: ['image'] },
   sequential_image_generation: { label: '顺序生成 sequential_image_generation', types: ['image'] },
@@ -19,11 +20,12 @@ export const FEATURE_BOOL_LABELS: Record<string, { label: string; types?: ModelT
   audio_reference: { label: '音频素材参考 audio_reference', types: ['video'] },
   tools: { label: '工具调用 tools' },
   omni_reference_task_type: { label: '显式任务类型 omni_reference_task_type', types: ['video'] },
+  sample_mode: { label: '样片模式 sample_mode', types: ['video'] },
 };
 
 export const FEATURE_NUMBER_LABELS: Record<
   string,
-  { label: string; types?: ModelType[]; placeholder: string }
+  { label: string; types?: ModelType[]; placeholder: string; step?: string; min?: number }
 > = {
   quantity_max: { label: '单次生成数量 quantity_max', types: ['image'], placeholder: '如 1' },
   max_prompt_length: {
@@ -35,6 +37,25 @@ export const FEATURE_NUMBER_LABELS: Record<
   audio_reference_max: { label: '音频参考上限 audio_reference_max', types: ['audio', 'video'], placeholder: '如 3' },
   image_reference_max: { label: '图片参考上限 image_reference_max', types: ['image', 'video', 'audio'], placeholder: '如 10' },
   max_reference_duration_sec: { label: '参考素材总时长上限秒 max_reference_duration_sec', types: ['video', 'audio'], placeholder: '如 15（留空 = 不限）' },
+  max_reference_image_pixels: {
+    label: '参考图总像素上限 max_reference_image_pixels',
+    types: ['image', 'video'],
+    placeholder: '如 36000000（留空 = 不校验）',
+    min: 1,
+  },
+  max_reference_image_ratio: {
+    label: '参考图宽高比上限 max_reference_image_ratio',
+    types: ['image', 'video'],
+    placeholder: '如 2.5（留空 = 不校验）',
+    step: '0.1',
+    min: 1,
+  },
+  max_reference_image_bytes: {
+    label: '参考图大小上限字节 max_reference_image_bytes',
+    types: ['audio'],
+    placeholder: '如 10485760（=10MB，留空 = 不校验）',
+    min: 1,
+  },
 };
 
 export const FEATURE_STRING_LABELS: Record<
