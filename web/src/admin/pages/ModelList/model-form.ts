@@ -21,20 +21,23 @@ export function camelFeatureKey(key: string): string {
 }
 
 
-export const KNOWN_FEATURE_KEYS = [
-  'reference_image',
+export const HIDDEN_FEATURE_KEYS = new Set([
   'watermark',
   'stream',
   'sequential_image_generation',
+  'tools',
+  'quantity_max',
+]);
+
+export const KNOWN_FEATURE_KEYS = [
+  'reference_image',
   'first_frame',
   'last_frame',
   'first_last_frame',
   'audio',
   'video_reference',
   'audio_reference',
-  'tools',
   'image_reference_max',
-  'quantity_max',
   'max_prompt_length',
   'video_reference_max',
   'audio_reference_max',

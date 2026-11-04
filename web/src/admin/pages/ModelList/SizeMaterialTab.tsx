@@ -2,6 +2,7 @@ import { Plus, X } from 'lucide-react';
 import type { KeyValueRow } from '../../utils/billing-catalog/catalogDraft';
 import {
   GPT_PROVIDER_SIZES,
+  HIDDEN_FEATURE_KEYS,
   TASK_TYPE_DURATION_OPTIONS,
   TASK_TYPE_KEYS,
   channelOf,
@@ -128,7 +129,7 @@ export default function SizeMaterialTab({
   const flagEntries = Object.entries(FEATURE_BOOL_LABELS).filter(([, meta]) => featureApplies(meta, type));
   const numberEntries = Object.entries(FEATURE_NUMBER_LABELS).filter(([, meta]) => featureApplies(meta, type));
   const stringEntries = Object.entries(FEATURE_STRING_LABELS).filter(([, meta]) => featureApplies(meta, type));
-  const unrecognisedEntries = Object.entries(unrecognised);
+  const unrecognisedEntries = Object.entries(unrecognised).filter(([key]) => !HIDDEN_FEATURE_KEYS.has(key));
   return (
     <>
       {visible.sizeRatio && (

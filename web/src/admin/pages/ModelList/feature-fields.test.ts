@@ -17,6 +17,16 @@ describe('结构化控件与 KNOWN 键集合必须对齐', () => {
     ];
     expect(controlled.filter((key) => !known.has(key))).toEqual([]);
   });
+
+  it('无消费方的键不提供结构化控件', () => {
+    const controlled = new Set([
+      ...Object.keys(FEATURE_BOOL_LABELS),
+      ...Object.keys(FEATURE_NUMBER_LABELS),
+      ...Object.keys(FEATURE_STRING_LABELS),
+    ]);
+    const inert = ['watermark', 'tools', 'stream', 'sequential_image_generation', 'quantity_max'];
+    expect(inert.filter((key) => controlled.has(key))).toEqual([]);
+  });
 });
 
 describe('输出像素表 video_dimensions', () => {
@@ -54,7 +64,7 @@ describe('结构化控件与未识别字段的边界', () => {
       videoDimensions: { 'resolution=480p|aspect_ratio=16:9': '864x496' },
       task_types: { first_frame: { allowed_ratios: ['16:9'] } },
       reference_image: true,
-      quantity_max: 1,
+      max_prompt_length: 4000,
     });
     expect(extra).toEqual({});
   });
