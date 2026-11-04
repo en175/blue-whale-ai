@@ -39,6 +39,10 @@ export const KNOWN_FEATURE_KEYS = [
   'video_reference_max',
   'audio_reference_max',
   'max_reference_duration_sec',
+  'max_reference_image_pixels',
+  'max_reference_image_ratio',
+  'max_reference_image_bytes',
+  'sample_mode',
   'i2i_model_name',
 
 
@@ -715,6 +719,9 @@ const FEATURE_NUMBER_KEYS = new Set([
   'video_reference_max',
   'audio_reference_max',
   'max_reference_duration_sec',
+  'max_reference_image_pixels',
+  'max_reference_image_ratio',
+  'max_reference_image_bytes',
 ]);
 
 

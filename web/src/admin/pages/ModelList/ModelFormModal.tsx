@@ -92,7 +92,6 @@ import {
   pickFeatureNumbers,
   pickFeatureStrings,
   pickVideoDimensions,
-  pretty,
   readTaskTypesBase,
 } from './feature-fields';
 import { Alert, Button, Modal, Tabs } from '../../ui';
@@ -159,8 +158,8 @@ export default function ModelFormModal({ initial, models, defaultType, onClose, 
   const [videoDimensions, setVideoDimensions] = useState<KeyValueRow[]>(() =>
     pickVideoDimensions(initial?.features),
   );
-  const [extraFeatures, setExtraFeatures] = useState(
-    initial ? pretty(dropKnownFeatures(initial.features)) : '{}',
+  const [extraFeatures, setExtraFeatures] = useState<Record<string, unknown>>(
+    initial ? dropKnownFeatures(initial.features) : {},
   );
   const [defaultSize, setDefaultSize] = useState(initial?.default_size ?? '');
   const [defaultRatio, setDefaultRatio] = useState(initial?.default_aspect_ratio ?? '');
@@ -289,7 +288,7 @@ export default function ModelFormModal({ initial, models, defaultType, onClose, 
     setTaskTypeDuration(pickTaskTypeDuration(src.features));
     setTaskTypesBase(readTaskTypesBase(src.features));
     setVideoDimensions(pickVideoDimensions(src.features));
-    setExtraFeatures(pretty(dropKnownFeatures(src.features)));
+    setExtraFeatures(dropKnownFeatures(src.features));
     setDefaultSize(src.default_size ?? '');
     setDefaultRatio(src.default_aspect_ratio ?? '');
     setDefaultFormat(src.default_format ?? '');
@@ -400,12 +399,7 @@ export default function ModelFormModal({ initial, models, defaultType, onClose, 
   };
 
   const snapshot = (): FormSnapshot => {
-    let extra: Record<string, unknown> = {};
-    try {
-      extra = JSON.parse(extraFeatures || '{}') as Record<string, unknown>;
-    } catch {
-      extra = {};
-    }
+    const extra = extraFeatures;
     const taskTypes = buildTaskTypes(taskTypesBase, taskTypeRatios, taskTypeEnabled, taskTypeDuration);
     const dimensions = buildVideoDimensions(videoDimensions);
     return {
@@ -457,13 +451,6 @@ export default function ModelFormModal({ initial, models, defaultType, onClose, 
 
   const handleSave = async () => {
     if (saving) return;
-    try {
-      JSON.parse(extraFeatures || '{}');
-    } catch {
-      setError('其他特性 JSON 解析失败，请检查格式。');
-      setTab('size');
-      return;
-    }
     const built = buildCreateParams(snapshot());
     if (!built.ok) {
       setError(built.error);
@@ -597,7 +584,11 @@ export default function ModelFormModal({ initial, models, defaultType, onClose, 
             strings: featureStrings,
             setString: (key, value) => setFeatureStrings((p) => ({ ...p, [key]: value })),
           }}
-          extraFeatures={{ value: extraFeatures, set: setExtraFeatures }}
+          extraFeatures={{
+            entries: extraFeatures,
+            remove: (key) =>
+              setExtraFeatures((prev) => Object.fromEntries(Object.entries(prev).filter(([k]) => k !== key))),
+          }}
           taskTypes={{
             ratios: taskTypeRatios,
             enabled: taskTypeEnabled,

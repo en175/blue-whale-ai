@@ -20,7 +20,7 @@ import {
 import {
   featureApplies,
 } from './feature-fields';
-import { Badge, Button, Checkbox, Chip, Field, Input, Segmented, Select, Table, Textarea } from '../../ui';
+import { Badge, Button, Checkbox, Chip, Field, Input, Segmented, Select, Table } from '../../ui';
 import DimensionMatrix from './DimensionMatrix';
 import { Hint } from '../../ui';
 import {
@@ -93,8 +93,8 @@ interface SizeMaterialTabProps {
     setString: (key: string, value: string) => void;
   };
   extraFeatures: {
-    value: string;
-    set: (value: string) => void;
+    entries: Record<string, unknown>;
+    remove: (key: string) => void;
   };
   taskTypes: {
     ratios: Record<string, string[]>;
@@ -130,6 +130,8 @@ export default function SizeMaterialTab({
   const flagEntries = Object.entries(FEATURE_BOOL_LABELS).filter(([, meta]) => featureApplies(meta, type));
   const numberEntries = Object.entries(FEATURE_NUMBER_LABELS).filter(([, meta]) => featureApplies(meta, type));
   const stringEntries = Object.entries(FEATURE_STRING_LABELS).filter(([, meta]) => featureApplies(meta, type));
+  const unrecognisedEntries = Object.entries(extraFeatures.entries);
+  const hasUnrecognised = unrecognisedEntries.length > 0;
   return (
     <>
       {visible.sizeRatio && (
@@ -500,12 +502,12 @@ export default function SizeMaterialTab({
       )}
 
       <h3 style={SECTION}>
-        特性 features（结构化） <Hint>结构化键在保存时写入 features；结构化控件没覆盖的键、或形态对不上的历史脏值，填在下面「其他特性 JSON」里，保存时与结构化键合并。</Hint>
+        特性 features（结构化） <Hint>开关、数值、文本直接对应 features 里的同名键，留空 = 不写入该键。老数据里形态对不上的键会列在「未识别字段」，可按原样保留或删除。</Hint>
       </h3>
       <div style={PANEL}>
         <div style={FEATURE_GROUPS}>
           {!visible.structuredFeature && (
-            <div style={FEATURE_GROUP_LABEL}>该类型没有专属的结构化特性键，直接在「其他特性 JSON」里配置。</div>
+            <div style={FEATURE_GROUP_LABEL}>该类型的特性键都在下面按类型展示。</div>
           )}
           {flagEntries.length > 0 && (
             <div>
@@ -526,6 +528,8 @@ export default function SizeMaterialTab({
                     <Input
                       type="number"
                       min={0}
+                      {...(meta.step !== undefined ? { step: meta.step } : {})}
+                      aria-label={meta.label}
                       placeholder={meta.placeholder}
                       value={features.numbers[key] ?? ''}
                       onChange={(e) => features.setNumber(key, e.target.value)}
@@ -553,17 +557,36 @@ export default function SizeMaterialTab({
               </div>
             </div>
           )}
-          <div>
-            <div style={FEATURE_GROUP_LABEL}>
-              其他特性 JSON <Hint>未识别字段与映射兜底：结构化控件没覆盖的键、或形态对不上的历史脏值。保存时与上面的结构化键合并，同键以结构化控件为准。</Hint>
+          {hasUnrecognised && (
+            <div>
+              <div style={FEATURE_GROUP_LABEL}>
+                未识别字段 <Hint>老数据里形态对不上的键（如类型不符的脏值）。按原样保留，保存时合并回 features；确认无用可点右侧删除。</Hint>
+              </div>
+              <div style={FEATURE_FIELD_GRID}>
+                {unrecognisedEntries.map(([key, value]) => (
+                  <Field
+                    key={key}
+                    label={
+                      <>
+                        {key}
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          title="删除这个键"
+                          style={{ marginLeft: 'auto' }}
+                          onClick={() => extraFeatures.remove(key)}
+                        >
+                          删除
+                        </Button>
+                      </>
+                    }
+                  >
+                    <Input readOnly value={JSON.stringify(value)} style={FULL} />
+                  </Field>
+                ))}
+              </div>
             </div>
-            <Textarea
-              aria-label="其他特性 JSON"
-              value={extraFeatures.value}
-              onChange={(e) => extraFeatures.set(e.target.value)}
-              style={FULL}
-            />
-          </div>
+          )}
         </div>
       </div>
     </>

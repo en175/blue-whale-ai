@@ -469,11 +469,11 @@ describe('ModelList 按类型分表单', () => {
 
 
     expect(document.body.textContent).toContain('特性 features（结构化）');
-    expect(document.body.textContent).toContain('其他特性 JSON');
+    expect(inputByLabel('提示词上限 max_prompt_length')).toBeInstanceOf(HTMLInputElement);
     expect(tabNames()).not.toContain('高级');
   });
 
-  it('编辑音频行：身份字段在「基础」，默认时长/features 与 JSON 兜底都在「尺寸与素材」', async () => {
+  it('编辑音频行：身份字段在「基础」，默认时长/features 都在「尺寸与素材」', async () => {
     api.fetchAdminModels.mockResolvedValue([audio]);
     await renderPage();
     await openRowEdit('音频');
@@ -491,7 +491,7 @@ describe('ModelList 按类型分表单', () => {
     expect(document.body.textContent).not.toContain('尺寸选项');
 
     expect(document.body.textContent).toContain('特性 features（结构化）');
-    expect(document.body.textContent).toContain('其他特性 JSON');
+    expect(document.body.textContent).toContain('参考图大小上限字节 max_reference_image_bytes');
   });
 
   it('编辑 seedream 图片行：出现矩阵编辑器（在「尺寸与素材」）', async () => {
@@ -507,13 +507,20 @@ describe('ModelList 按类型分表单', () => {
     expect(cellInputs.length).toBe(1);
   });
 
-  it('「尺寸与素材」唯一保留 JSON 兜底：渠道控件与三张映射表只在各自分区，不再有独立的「高级」tab', async () => {
-    api.fetchAdminModels.mockResolvedValue([gptImage]);
+  it('参考图上限三个新键与图片参考上限同处「数值」结构化分组（IKSLLC）', async () => {
+    api.fetchAdminModels.mockResolvedValue([videoPriced]);
     await renderPage();
-    await openRowEdit('图片');
+    await openRowEdit('视频');
     await openTab('尺寸与素材');
-    expect(document.body.textContent).toContain('其他特性 JSON');
-    expect(document.body.querySelector('textarea[aria-label="其他特性 JSON"]')).not.toBeNull();
+
+    for (const label of [
+      '图片参考上限 image_reference_max',
+      '参考图总像素上限 max_reference_image_pixels',
+      '参考图宽高比上限 max_reference_image_ratio',
+    ]) {
+      expect(inputByLabel(label)).toBeInstanceOf(HTMLInputElement);
+    }
+    expect(document.body.querySelector('textarea')).toBeNull();
     expect(tabNames()).not.toContain('高级');
   });
 
@@ -1183,7 +1190,7 @@ describe('ModelList 渠道', () => {
     await openTab('尺寸与素材');
     expect(document.body.textContent).not.toContain('出站图片协议');
 
-    const json = document.body.querySelector<HTMLTextAreaElement>('textarea[aria-label="其他特性 JSON"]');
-    expect(json?.value ?? '').not.toContain('image_protocol');
+    const values = [...document.body.querySelectorAll<HTMLInputElement>('input')].map((el) => el.value);
+    expect(values.some((v) => v.includes('image_protocol'))).toBe(false);
   });
 });
