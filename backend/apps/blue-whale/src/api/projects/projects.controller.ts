@@ -16,6 +16,7 @@ import {
 } from "@lib/contracts";
 import { CurrentUser } from "@lib/infra/decorators/current-user.decorator.js";
 import { CanvasService } from "@lib/shared/canvas/canvas.service.js";
+import { ProjectCreateLock } from "@lib/shared/project/project-create-lock.js";
 import { ProjectService } from "@lib/shared/project/project.service.js";
 import { SnapshotService } from "@lib/shared/snapshot/snapshot.service.js";
 import { handleGetSnapshot } from "@lib/shared/snapshot/handle-snapshot.js";
@@ -29,6 +30,7 @@ export class ProjectsController {
     private readonly project: ProjectService,
     private readonly canvas: CanvasService,
     private readonly snapshot: SnapshotService,
+    private readonly createLock: ProjectCreateLock,
   ) {}
 
   @Get()
@@ -73,7 +75,13 @@ export class ProjectsController {
     const name = typeof body.name === "string" ? body.name.trim() : "";
     const parsedSource = parseProjectSource(body.source);
     if (!parsedSource.ok) return fail(FAILURE_CODE, parsedSource.reason);
-    return ok(await this.project.create(user.userId, name, parsedSource.source));
+    const lease = await this.createLock.acquire(user.userId);
+    if (!lease) return fail(FAILURE_CODE, "项目创建处理中，请稍后重试");
+    try {
+      return ok(await this.project.create(user.userId, name, parsedSource.source));
+    } finally {
+      await lease.release();
+    }
   }
 
   @Post("batch-delete")
