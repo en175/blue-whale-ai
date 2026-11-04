@@ -356,11 +356,23 @@ describe('V1.3.0 首页输入区模式', () => {
 
   it('发送按钮左侧常驻预计消耗积分位，未接入报价时不显示数字', async () => {
     await renderChatBox();
+    await switchMode('图片');
 
     const quote = mountNode.querySelector<HTMLElement>('[data-testid="home-quote"]')!;
     expect(quote).not.toBeNull();
     expect(quote.querySelector('svg')).not.toBeNull();
     expect(quote.textContent ?? '').toBe('');
+  });
+
+  it('Agent 模式不展示积分位，图片与视频模式展示', async () => {
+    await renderChatBox();
+    expect(mountNode.querySelector('[data-testid="home-quote"]')).toBeNull();
+
+    await switchMode('图片');
+    expect(mountNode.querySelector('[data-testid="home-quote"]')).not.toBeNull();
+
+    await switchMode('视频');
+    expect(mountNode.querySelector('[data-testid="home-quote"]')).not.toBeNull();
   });
 });
 
@@ -546,13 +558,13 @@ describe('IKR63N 首页积分预估接线', () => {
     });
   });
 
-  it('视频智能体页不请求，徽标只有图标', async () => {
+  it('Agent 模式不展示积分位，也不请求报价', async () => {
     await renderChatBox();
     await act(async () => { typePrompt('画一只猫'); });
     await settleQuote();
 
     expect(requestsToQuoteApi(quoteFetch)).toHaveLength(0);
-    expect(quoteBadge().textContent).toBe('');
+    expect(mountNode.querySelector('[data-testid="home-quote"]')).toBeNull();
   });
 
   it('未登录不请求', async () => {

@@ -9,9 +9,9 @@
   gap: 6px;
   min-height: 34px;
   padding: 6px 10px;
-  border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.05);
-  background: rgba(255, 255, 255, 0.02);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--chat-control-border);
+  background: var(--chat-control-bg);
   color: #f2f2f2;
   font-size: 14px;
   cursor: pointer;
@@ -21,13 +21,13 @@
 
 .modeTrigger:hover,
 .modeTrigger[aria-expanded='true'] {
-  background: rgba(255, 255, 255, 0.07);
+  background: var(--chat-control-bg-hover);
 }
 
 .modePopover {
   position: absolute;
   left: 0;
-  bottom: calc(100% + 10px);
+  top: calc(100% + 10px);
   z-index: 20;
   width: 230px;
   padding: 6px;

@@ -467,7 +467,7 @@ export default function LoginModal({ onClose, onSuccess, notice }: LoginModalPro
               }}
             >
               <div className={styles.phoneBrand}>
-                <img src="/blue_whale.svg" alt="" className={styles.welcomeLogo} />
+                <img src="/project.png" alt="" className={styles.welcomeLogo} />
                 <h2>欢迎来到蓝鲸</h2>
                 <p>手机号验证通过后即可登录，未注册将自动创建账号。</p>
               </div>
