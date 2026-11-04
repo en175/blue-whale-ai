@@ -91,10 +91,8 @@ interface SizeMaterialTabProps {
     strings: Record<string, string>;
     setString: (key: string, value: string) => void;
   };
-  extraFeatures: {
-    entries: Record<string, unknown>;
-    remove: (key: string) => void;
-  };
+  unrecognised: Record<string, unknown>;
+  onRemoveUnrecognised: (key: string) => void;
   taskTypes: {
     ratios: Record<string, string[]>;
     enabled: Record<string, boolean>;
@@ -122,15 +120,15 @@ export default function SizeMaterialTab({
   durations,
   formats,
   features,
-  extraFeatures,
+  unrecognised,
+  onRemoveUnrecognised,
   taskTypes,
 }: SizeMaterialTabProps) {
   const parser = channelOf(channel).parser ?? 'seedream';
   const flagEntries = Object.entries(FEATURE_BOOL_LABELS).filter(([, meta]) => featureApplies(meta, type));
   const numberEntries = Object.entries(FEATURE_NUMBER_LABELS).filter(([, meta]) => featureApplies(meta, type));
   const stringEntries = Object.entries(FEATURE_STRING_LABELS).filter(([, meta]) => featureApplies(meta, type));
-  const unrecognisedEntries = Object.entries(extraFeatures.entries);
-  const hasUnrecognised = unrecognisedEntries.length > 0;
+  const unrecognisedEntries = Object.entries(unrecognised);
   return (
     <>
       {visible.sizeRatio && (
@@ -553,7 +551,7 @@ export default function SizeMaterialTab({
               </div>
             </div>
           )}
-          {hasUnrecognised && (
+          {unrecognisedEntries.length > 0 && (
             <div>
               <div style={FEATURE_GROUP_LABEL}>
                 未识别字段 <Hint>老数据里形态对不上的键（如类型不符的脏值）。按原样保留，保存时合并回 features；确认无用可点右侧删除。</Hint>
@@ -570,7 +568,7 @@ export default function SizeMaterialTab({
                           variant="ghost"
                           title="删除这个键"
                           style={{ marginLeft: 'auto' }}
-                          onClick={() => extraFeatures.remove(key)}
+                          onClick={() => onRemoveUnrecognised(key)}
                         >
                           删除
                         </Button>

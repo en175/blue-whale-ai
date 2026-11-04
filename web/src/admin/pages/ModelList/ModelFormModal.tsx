@@ -152,7 +152,7 @@ export default function ModelFormModal({ initial, models, defaultType, onClose, 
   const [videoDimensions, setVideoDimensions] = useState<KeyValueRow[]>(() =>
     pickVideoDimensions(initial?.features),
   );
-  const [extraFeatures, setExtraFeatures] = useState<Record<string, unknown>>(
+  const [unrecognisedFeatures, setUnrecognisedFeatures] = useState<Record<string, unknown>>(
     initial ? dropKnownFeatures(initial.features) : {},
   );
   const [defaultSize, setDefaultSize] = useState(initial?.default_size ?? '');
@@ -276,7 +276,7 @@ export default function ModelFormModal({ initial, models, defaultType, onClose, 
     setTaskTypeDuration(pickTaskTypeDuration(src.features));
     setTaskTypesBase(readTaskTypesBase(src.features));
     setVideoDimensions(pickVideoDimensions(src.features));
-    setExtraFeatures(dropKnownFeatures(src.features));
+    setUnrecognisedFeatures(dropKnownFeatures(src.features));
     setDefaultSize(src.default_size ?? '');
     setDefaultRatio(src.default_aspect_ratio ?? '');
     setDefaultFormat(src.default_format ?? '');
@@ -387,7 +387,6 @@ export default function ModelFormModal({ initial, models, defaultType, onClose, 
   };
 
   const snapshot = (): FormSnapshot => {
-    const extra = extraFeatures;
     const taskTypes = buildTaskTypes(taskTypesBase, taskTypeRatios, taskTypeEnabled, taskTypeDuration);
     const dimensions = buildVideoDimensions(videoDimensions);
     return {
@@ -410,7 +409,7 @@ export default function ModelFormModal({ initial, models, defaultType, onClose, 
       defaultDuration,
       enabled,
       features: {
-        ...extra,
+        ...unrecognisedFeatures,
         ...omitEmpty(featureNumbers),
         ...omitEmptyStrings(featureStrings),
         ...Object.fromEntries(
@@ -572,11 +571,10 @@ export default function ModelFormModal({ initial, models, defaultType, onClose, 
             strings: featureStrings,
             setString: (key, value) => setFeatureStrings((p) => ({ ...p, [key]: value })),
           }}
-          extraFeatures={{
-            entries: extraFeatures,
-            remove: (key) =>
-              setExtraFeatures((prev) => Object.fromEntries(Object.entries(prev).filter(([k]) => k !== key))),
-          }}
+          unrecognised={unrecognisedFeatures}
+          onRemoveUnrecognised={(key) =>
+            setUnrecognisedFeatures((prev) => Object.fromEntries(Object.entries(prev).filter(([k]) => k !== key)))
+          }
           taskTypes={{
             ratios: taskTypeRatios,
             enabled: taskTypeEnabled,
