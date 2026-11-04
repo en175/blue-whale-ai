@@ -563,6 +563,43 @@
   flex: 1;
 }
 
+.mineEmpty {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 0;
+}
+
+.mineEmptyIcon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 52px;
+  margin-bottom: 10px;
+  border-radius: 14px;
+  border: 1px solid #2e2e2e;
+  background-color: #1e1e1e;
+  color: #a3a3a3;
+}
+
+.emptyAction {
+  padding: 8px 20px;
+  border: none;
+  border-radius: 8px;
+  background-color: var(--color-accent-primary);
+  color: var(--color-accent-text);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+  transition: background-color var(--transition-fast);
+}
+
+.emptyAction:hover {
+  background-color: var(--color-accent-hover);
+}
+
 .noMore {
   text-align: center;
   color: #666;

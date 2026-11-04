@@ -34,6 +34,7 @@ import Select from '@/custom/components/Select';
 import Tabs from '@/custom/components/Tabs';
 import ConfirmModal from '@/custom/components/ConfirmModal';
 import DropdownMenu from '@/custom/components/DropdownMenu';
+import Empty from '@/custom/components/Empty';
 
 interface SkillModalProps {
   open: boolean;
@@ -249,7 +250,12 @@ export default function SkillModal({ open, onClose, onUseSkill }: SkillModalProp
     setRemovalTarget(null);
     const request = target.asset_domain === 'personal' ? deletePersonalSkill(id) : removeMySkill(id);
     request
-      .then(() => setMySkills((prev) => prev.filter((skill) => skill.creative_skill_id !== id)))
+      .then(() => {
+        setMySkills((prev) => prev.filter((skill) => skill.creative_skill_id !== id));
+        setLibraryList((prev) =>
+          prev.map((skill) => (skill.creative_skill_id === id ? { ...skill, added: false } : skill)),
+        );
+      })
       .catch((e) => window.alert(errMsg(e)));
   };
 
@@ -319,20 +325,20 @@ export default function SkillModal({ open, onClose, onUseSkill }: SkillModalProp
             onChange={setTab}
             items={[
               {
-                key: 'mine',
-                label: (
-                  <>
-                    <BookMarked size={15} strokeWidth={2} />
-                    <span>我的技能</span>
-                  </>
-                ),
-              },
-              {
                 key: 'library',
                 label: (
                   <>
                     <Store size={15} strokeWidth={2} />
                     <span>技能库</span>
+                  </>
+                ),
+              },
+              {
+                key: 'mine',
+                label: (
+                  <>
+                    <BookMarked size={15} strokeWidth={2} />
+                    <span>我的技能</span>
                   </>
                 ),
               },
@@ -460,74 +466,95 @@ export default function SkillModal({ open, onClose, onUseSkill }: SkillModalProp
 
         {tab === 'mine' && (
           <div className={styles.mineWrap}>
-            <div ref={mineGridRef} className={styles.cardGrid} onScroll={handleMineScroll}>
-              {coverMine.map((s) => {
-                const sid = s.creative_skill_id ?? s.name ?? '';
-                return (
-                  <div key={sid} className={styles.card}>
-                    <div className={styles.cardMenu}>
-                      <DropdownMenu
-                        trigger={
-                          <button className={styles.menuBtn} type="button" title="更多操作">
-                            <MoreHorizontal size={14} strokeWidth={2} />
-                          </button>
-                        }
-                        items={[
-                          {
-                            key: 'view',
-                            title: '查看技能详情',
-                            label: (
-                              <>
-                                <Eye size={13} strokeWidth={2} />
-                                <span>查看</span>
-                              </>
-                            ),
-                            onSelect: () => openDetail(s),
-                          },
-                        ]}
-                      />
-                    </div>
-                    <img className={styles.coverImg} src={resolveMediaSrc(s.cover_url)} crossOrigin={remoteImageCrossOrigin(s.cover_url)} alt={s.name ?? ''} />
-                    <div className={styles.cardBody}>
-                      <div className={styles.cardTitleRow}>
-                        <h4 className={styles.cardTitle}>{s.name ?? ''}</h4>
-                        {s.asset_domain === 'official' && <span className={styles.officialTag}>官方</span>}
-                        {s.asset_domain === 'official' && (
+            {mineLoadedRef.current && coverMine.length === 0 ? (
+              <div className={styles.mineEmpty}>
+                <Empty
+                  icon={
+                    <span className={styles.mineEmptyIcon} aria-hidden="true">
+                      <Sparkles size={22} strokeWidth={1.8} />
+                    </span>
+                  }
+                  title="暂无技能"
+                  description="前往技能库，添加你需要的技能"
+                  action={
+                    <button className={styles.emptyAction} onClick={() => setTab('library')}>
+                      去技能库
+                    </button>
+                  }
+                />
+              </div>
+            ) : (
+              <>
+                <div ref={mineGridRef} className={styles.cardGrid} onScroll={handleMineScroll}>
+                  {coverMine.map((s) => {
+                  const sid = s.creative_skill_id ?? s.name ?? '';
+                  return (
+                    <div key={sid} className={styles.card}>
+                      <div className={styles.cardMenu}>
+                        <DropdownMenu
+                          trigger={
+                            <button className={styles.menuBtn} type="button" title="更多操作">
+                              <MoreHorizontal size={14} strokeWidth={2} />
+                            </button>
+                          }
+                          items={[
+                            {
+                              key: 'view',
+                              title: '查看技能详情',
+                              label: (
+                                <>
+                                  <Eye size={13} strokeWidth={2} />
+                                  <span>查看</span>
+                                </>
+                              ),
+                              onSelect: () => openDetail(s),
+                            },
+                          ]}
+                        />
+                      </div>
+                      <img className={styles.coverImg} src={resolveMediaSrc(s.cover_url)} crossOrigin={remoteImageCrossOrigin(s.cover_url)} alt={s.name ?? ''} />
+                      <div className={styles.cardBody}>
+                        <div className={styles.cardTitleRow}>
+                          <h4 className={styles.cardTitle}>{s.name ?? ''}</h4>
+                          {s.asset_domain === 'official' && <span className={styles.officialTag}>官方</span>}
+                          {s.asset_domain === 'official' && (
+                            <button
+                              className={styles.cardAction}
+                              onClick={() => handleRemoveOfficial(s)}
+                              title="从我的技能移除"
+                            >
+                              <span>移除</span>
+                            </button>
+                          )}
+                          {s.asset_domain === 'personal' && (
+                            <button
+                              className={styles.cardAction}
+                              onClick={() => handleDeletePersonal(s)}
+                              title="删除个人技能"
+                            >
+                              <span>删除</span>
+                            </button>
+                          )}
+                        </div>
+                        <p className={styles.cardDesc} title={s.description ?? ''}>{s.description ?? ''}</p>
+                        <div className={`${styles.cardFooter} ${styles.cardFooterEnd}`}>
                           <button
                             className={styles.cardAction}
-                            onClick={() => handleRemoveOfficial(s)}
-                            title="从我的技能移除"
+                            onClick={() => s.creative_skill_id && onUseSkill?.(s)}
+                            title={s.creative_skill_id ? '直接使用（强制激活该技能）' : '该技能暂不可直接使用'}
                           >
-                            <span>移除</span>
+                            <AtSign size={12} strokeWidth={2} />
+                            <span>直接使用</span>
                           </button>
-                        )}
-                        {s.asset_domain === 'personal' && (
-                          <button
-                            className={styles.cardAction}
-                            onClick={() => handleDeletePersonal(s)}
-                            title="删除个人技能"
-                          >
-                            <span>删除</span>
-                          </button>
-                        )}
-                      </div>
-                      <p className={styles.cardDesc} title={s.description ?? ''}>{s.description ?? ''}</p>
-                      <div className={`${styles.cardFooter} ${styles.cardFooterEnd}`}>
-                        <button
-                          className={styles.cardAction}
-                          onClick={() => s.creative_skill_id && onUseSkill?.(s)}
-                          title={s.creative_skill_id ? '直接使用（强制激活该技能）' : '该技能暂不可直接使用'}
-                        >
-                          <AtSign size={12} strokeWidth={2} />
-                          <span>直接使用</span>
-                        </button>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                );
-              })}
-            </div>
-            <div className={styles.noMore}>{mineHasMore ? '滚动加载更多' : '没有更多了'}</div>
+                  );
+                })}
+                </div>
+                <div className={styles.noMore}>{mineHasMore ? '滚动加载更多' : '没有更多了'}</div>
+              </>
+            )}
           </div>
         )}
 
