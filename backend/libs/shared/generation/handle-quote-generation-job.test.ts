@@ -256,6 +256,57 @@ describe("handleQuoteGenerationJob", () => {
     expect(quoteArg.taskType).toBe("image");
   });
 
+  it("★ 画布图片面板不带 prompt 也出价 —— 报价不套「提交必填项」", async () => {
+    const { client, quote } = fakeBilling();
+    const result = await handleQuoteGenerationJob(
+      USER_ID,
+      PROJECT_ID,
+      {
+        type: "image",
+        expected_output_count: 1,
+        references: [{ role: "reference", type: "image", asset_id: "4" }],
+        parameters: {
+          model_id: IMAGE_MODEL_ID,
+          size: "2k",
+          aspect_ratio: "1:1",
+        },
+      },
+      previewDeps(client, vi.fn().mockResolvedValue("free")),
+    );
+
+    expect(result.code).toBe(200);
+    expect(result.data).toEqual({ credits: 42, quote_revision: expect.any(String) });
+    const quoteArg = quote.mock.calls[0]?.[0] as unknown as QuoteArgs;
+    expect(quoteArg.taskType).toBe("image");
+    expect(quoteArg.specs.size).toBe("2k");
+    expect(quoteArg.specs.image_reference).toBe("1");
+  });
+
+  it("★ 画布视频面板不带 prompt 也出价（未绑定节点时同样不带）", async () => {
+    const { client, quote } = fakeBilling();
+    const result = await handleQuoteGenerationJob(
+      USER_ID,
+      PROJECT_ID,
+      {
+        type: "video",
+        expected_output_count: 1,
+        parameters: {
+          model_id: MODEL_ID,
+          aspect_ratio: "16:9",
+          resolution: "720p",
+          duration: 5,
+          generate_audio: true,
+          mode: "text2video",
+        },
+      },
+      previewDeps(client, vi.fn().mockResolvedValue("free")),
+    );
+
+    expect(result.code).toBe(200);
+    expect(result.data?.credits).toBe(42);
+    expect(quote.mock.calls[0]?.[0]).toMatchObject({ taskType: "video" });
+  });
+
   it("★ 图片文本带入参考：报价与实扣同口径（image_reference=1，reference_count=2）", async () => {
     const { client, quote } = fakeBilling();
     const deps = {
@@ -1159,6 +1210,20 @@ describe("报价按能力行配置校验（IKRQYW）", () => {
 
   it("合法组合仍正常报价", async () => {
     const { quote, result } = run(quoteBody({ duration: 15 }));
+    expect((await result).data?.credits).toBe(42);
+    expect(quote).toHaveBeenCalled();
+  });
+
+  it("不带 prompt 时上限校验照样生效（画布面板报价）", async () => {
+    const { prompt: _dropped, ...noPrompt } = quoteBody().parameters;
+    const { quote, result } = run({ ...quoteBody(), parameters: { ...noPrompt, duration: 31 } });
+    expect((await result).data).toEqual({ credits: null, quote_revision: null });
+    expect(quote).not.toHaveBeenCalled();
+  });
+
+  it("不带 prompt 且参数合法 → 正常报价（画布面板报价）", async () => {
+    const { prompt: _dropped, ...noPrompt } = quoteBody().parameters;
+    const { quote, result } = run({ ...quoteBody(), parameters: noPrompt });
     expect((await result).data?.credits).toBe(42);
     expect(quote).toHaveBeenCalled();
   });
