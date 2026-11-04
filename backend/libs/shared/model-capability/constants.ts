@@ -187,6 +187,18 @@ function featuresFieldErr(features: unknown): string | null {
       return `参考图大小上限(max_reference_image_bytes)须为 1–${MAX_REFERENCE_IMAGE_BYTES} 的整数或 null`;
   }
 
+  const refImageMinSide =
+    features.min_reference_image_side ?? features.minReferenceImageSide;
+  if (refImageMinSide !== undefined && refImageMinSide !== null) {
+    if (
+      typeof refImageMinSide !== "number" ||
+      !Number.isInteger(refImageMinSide) ||
+      refImageMinSide < 1 ||
+      refImageMinSide > 10_000
+    )
+      return `参考图最小边(min_reference_image_side)须为 1–10000 的整数或 null`;
+  }
+
   const taskTypes = features.task_types ?? features.taskTypes;
   if (taskTypes !== undefined && taskTypes !== null) {
     if (!isPlainObject(taskTypes))

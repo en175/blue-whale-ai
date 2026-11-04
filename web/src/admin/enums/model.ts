@@ -51,6 +51,12 @@ export const FEATURE_NUMBER_LABELS: Record<
     placeholder: '如 10485760（=10MB，留空 = 不校验）',
     min: 1,
   },
+  min_reference_image_side: {
+    label: '参考图单边下限 min_reference_image_side',
+    types: ['video'],
+    placeholder: '如 300（留空 = 不校验）',
+    min: 1,
+  },
 };
 
 export const FEATURE_STRING_LABELS: Record<

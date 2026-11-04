@@ -4350,4 +4350,59 @@ describe("handleCreateGenerationJob 视频/音频参考图上限（IKSLLC）", (
     expect(result.code).toBe(200);
     expect(createJob).toHaveBeenCalled();
   });
+
+  const MIN_SIDE_LIMITS = { min_reference_image_side: 300 };
+
+  it("首帧 200×200 低于最小边 → 400 invalid_reference_media，文案带实际尺寸", async () => {
+    const { result, createJob } = await createVideoWithImage(
+      MIN_SIDE_LIMITS,
+      [{ role: "first_frame", asset_id: "11", type: "image" }],
+      [referenceImageAsset({ width: 200, height: 200 })],
+    );
+    expect(result.code).toBe(1036);
+    expect(result.data?.code).toBe("invalid_reference_media");
+    expect(result.msg).toBe(
+      "参考图单边小于当前模型限制（单边至少 300 像素，当前 200×200），请更换较大的图片后重试",
+    );
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("首帧恰好 300×300 放行", async () => {
+    const { result, createJob } = await createVideoWithImage(
+      MIN_SIDE_LIMITS,
+      [{ role: "first_frame", asset_id: "11", type: "image" }],
+      [referenceImageAsset({ width: 300, height: 300 })],
+    );
+    expect(result.code).toBe(200);
+    expect(createJob).toHaveBeenCalled();
+  });
+
+  it("旧字段 first_frame_asset_id 的 299×400 同样拒绝", async () => {
+    const { deps, createJob, resolveInputAssets } = buildCapabilityDeps([
+      { ...VIDEO_CAPABILITY_ROW, features: MIN_SIDE_LIMITS },
+    ]);
+    resolveInputAssets.mockResolvedValue([
+      referenceImageAsset({ width: 299, height: 400 }),
+    ]);
+    const result = await handleCreateGenerationJob(
+      "u1",
+      "p1",
+      { ...VIDEO_PARAMS_OK, first_frame_asset_id: "11" },
+      null,
+      deps,
+    );
+    expect(result.code).toBe(1036);
+    expect(result.data?.params).toEqual({ min_reference_image_side: 300 });
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
+  it("未配置最小边 → 200×200 放行", async () => {
+    const { result, createJob } = await createVideoWithImage(
+      {},
+      [{ role: "first_frame", asset_id: "11", type: "image" }],
+      [referenceImageAsset({ width: 200, height: 200 })],
+    );
+    expect(result.code).toBe(200);
+    expect(createJob).toHaveBeenCalled();
+  });
 });

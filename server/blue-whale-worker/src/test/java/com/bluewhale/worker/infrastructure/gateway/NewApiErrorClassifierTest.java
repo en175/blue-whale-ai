@@ -172,4 +172,29 @@ class NewApiErrorClassifierTest {
         assertThat(NewApiErrorClassifier.isTaskTypeSignal("ratio must be 16:9")).isFalse();
         assertThat(NewApiErrorClassifier.isTaskTypeSignal(null)).isFalse();
     }
+
+    @Test
+    @DisplayName("IKSUVD: 参考图尺寸类上游报错命中参考素材信号")
+    void referenceImageSizeSignal() {
+        assertThat(NewApiErrorClassifier.isReferenceImageSizeSignal(
+                "InvalidParameter: expected the width to be at least 300px, " +
+                        "but received a 200x200px image")).isTrue();
+        assertThat(NewApiErrorClassifier.isReferenceImageSizeSignal(
+                "InvalidParameter: expected the height to be at least 300px")).isTrue();
+        assertThat(NewApiErrorClassifier.isReferenceImageSizeSignal(
+                "the parameter image pixel count specified in the request must be " +
+                        "less than or equal to 36000000")).isTrue();
+        assertThat(NewApiErrorClassifier.isReferenceImageSizeSignal(
+                "图片尺寸不符合要求")).isTrue();
+    }
+
+    @Test
+    @DisplayName("IKSUVD: 无关报错不误判为参考图尺寸")
+    void referenceImageSizeNotMatched() {
+        assertThat(NewApiErrorClassifier.isReferenceImageSizeSignal(
+                "InvalidParameter: ratio must be adaptive")).isFalse();
+        assertThat(NewApiErrorClassifier.isReferenceImageSizeSignal(
+                "Service Unavailable")).isFalse();
+        assertThat(NewApiErrorClassifier.isReferenceImageSizeSignal(null)).isFalse();
+    }
 }

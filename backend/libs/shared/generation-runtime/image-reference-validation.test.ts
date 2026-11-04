@@ -184,3 +184,36 @@ describe("validateReferenceImageMedia 音频参考图格式与大小（IKSLLC）
     ).toBeNull();
   });
 });
+
+describe("参考图单边下限（IKSUVD）", () => {
+  const FEATURES = { min_reference_image_side: 300 };
+
+  it("未配置 → 不校验，200×200 放行", () => {
+    expect(validateConfiguredReferenceImages([image(200, 200)], {})).toBeNull();
+  });
+
+  it("恰好 300 → 放行", () => {
+    expect(validateConfiguredReferenceImages([image(300, 300)], FEATURES)).toBeNull();
+  });
+
+  it("299 → 拒绝并带实际尺寸与下限", () => {
+    expect(validateConfiguredReferenceImages([image(299, 400)], FEATURES)).toEqual({
+      code: "invalid_reference_media",
+      message:
+        "参考图单边小于当前模型限制（单边至少 300 像素，当前 299×400），请更换较大的图片后重试",
+      params: { min_reference_image_side: 300 },
+    });
+  });
+
+  it("只有高度不足也拒绝", () => {
+    expect(
+      validateConfiguredReferenceImages([image(400, 200)], FEATURES)?.params,
+    ).toEqual({ min_reference_image_side: 300 });
+  });
+
+  it("尺寸缺失放行，不新增误拒", () => {
+    expect(
+      validateConfiguredReferenceImages([image(null, null)], FEATURES),
+    ).toBeNull();
+  });
+});

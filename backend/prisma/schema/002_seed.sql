@@ -84,6 +84,7 @@ INSERT INTO generation_model_capability (
       'max_reference_duration_sec', 15,
       'max_reference_image_pixels', 36000000,
       'max_reference_image_ratio', 2.5,
+      'min_reference_image_side', 300,
       'task_types', JSON_OBJECT(
         'text2video', JSON_OBJECT(),
         'omni', JSON_OBJECT(),
@@ -133,6 +134,7 @@ INSERT INTO generation_model_capability (
       'omni_reference_task_type', TRUE,
       'max_reference_image_pixels', 36000000,
       'max_reference_image_ratio', 2.5,
+      'min_reference_image_side', 300,
       'task_types', JSON_OBJECT(
         'text2video', JSON_OBJECT(),
         'omni', JSON_OBJECT(),

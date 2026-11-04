@@ -366,6 +366,30 @@ class NewApiVideoClientEndpointTest {
         assertThat(observation.error().code()).isEqualTo("task_type_param_constraint");
     }
 
+    @Test
+    @DisplayName("IKSUVD: poll FAILURE 参考图过小 → invalid_reference_media + 中文文案")
+    void pollReferenceImageTooSmallMapsToReferenceMedia() throws Exception {
+        String text = "InvalidParameter: expected the width to be at least 300px, "
+                + "but received a 200x200px image";
+        server.createContext("/v1/video/generations/task-small-ref", exchange -> {
+            byte[] resp = ("{\"task_id\":\"task-small-ref\",\"status\":\"FAILURE\"," +
+                    "\"fail_reason\":\"" + text + "\"}").getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, resp.length);
+            try (OutputStream out = exchange.getResponseBody()) {
+                out.write(resp);
+            }
+        });
+
+        VideoTaskObservation observation =
+                new NewApiVideoClient(new UpstreamBaseUrl(baseUrl)).poll("t", "task-small-ref");
+        assertThat(observation.status()).isEqualTo("failed");
+        assertThat(observation.error()).isNotNull();
+        assertThat(observation.error().code()).isEqualTo("invalid_reference_media");
+        assertThat(observation.error().message())
+                .isEqualTo("参考图尺寸不符合模型要求，请更换尺寸合适的图片后重试");
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {"InvalidParameter.TaskTypeConstraint", "InvalidParameter.TaskTypeMismatch"})
     @DisplayName("IKNB96: 网关任务内层上游错误映射参数约束，保留任务层状态与用量")

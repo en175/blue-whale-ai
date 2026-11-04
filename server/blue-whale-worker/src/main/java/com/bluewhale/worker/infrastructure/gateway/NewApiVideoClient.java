@@ -356,6 +356,9 @@ public class NewApiVideoClient {
                     code = GenerationError.ERROR_CONTENT_REJECTED;
                 } else if (NewApiErrorClassifier.isQuotaSignal(upstreamText)) {
                     code = GenerationError.ERROR_PLATFORM_QUOTA_EXHAUSTED;
+                } else if (NewApiErrorClassifier.isReferenceImageSizeSignal(upstreamText)) {
+                    code = GenerationError.ERROR_INVALID_REFERENCE_MEDIA;
+                    message = "参考图尺寸不符合模型要求，请更换尺寸合适的图片后重试";
                 } else if (NewApiErrorClassifier.isTaskTypeSignal(upstreamText)) {
                     code = GenerationError.ERROR_TASK_TYPE_PARAM_CONSTRAINT;
                 } else {

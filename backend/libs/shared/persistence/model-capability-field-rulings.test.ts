@@ -175,6 +175,15 @@ const RULINGS: Record<string, Ruling> = {
     configWinsTest:
       "backend/libs/shared/generation-runtime/image-reference-validation.test.ts",
   },
+  min_reference_image_side: {
+    consumer:
+      "backend/libs/shared/generation-runtime/image-reference-validation.ts（validateReferenceImages / validateConfiguredReferenceImages：参考图单边下限）；" +
+      "经 handle-create-generation-job 在提交前拒绝。写侧形态闸门在 " +
+      "backend/libs/shared/model-capability/constants.ts（featuresFieldErr）",
+    fallback: "null（IKSUVD：能力行未配 = 不校验单边下限）",
+    configWinsTest:
+      "backend/libs/shared/generation-runtime/image-reference-validation.test.ts",
+  },
   max_reference_duration_sec: {
     consumer:
       "backend/libs/shared/generation-runtime/reference-limits.ts（参考素材已知总时长）；" +
