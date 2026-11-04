@@ -365,7 +365,12 @@ export function jobDetailView(row: {
     status: row.status,
     progress: row.progress,
     output_asset_ids: row.output_asset_ids ?? [],
-    stored_error: projectPublicError(row.error as Record<string, unknown> | null, row.type),
+    stored_error: row.status === "failed"
+      ? projectPublicError(
+          (row.error ?? null) as Record<string, unknown> | null,
+          row.type,
+        )
+      : null,
     created_at: wallClockRfc3339(row.gmt_create),
   };
 }

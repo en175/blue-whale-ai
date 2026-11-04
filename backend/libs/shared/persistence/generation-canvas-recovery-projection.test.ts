@@ -27,9 +27,29 @@ describe("恢复快照任务错误投影（IKST3J）", () => {
     expect(JSON.stringify(view)).not.toContain("oss timeout");
   });
 
+  it("历史行只有 msg 时也不外泄原文", () => {
+    const view = jobDetailView({
+      ...BASE,
+      error: { msg: "内部堆栈: provider stacktrace" },
+    });
+
+    expect(JSON.stringify(view)).not.toContain("provider stacktrace");
+    expect(view.stored_error).toMatchObject({ code: 1022 });
+  });
+
   it("无错误时保持 null", () => {
     expect(jobDetailView({ ...BASE, status: "succeeded", error: null }).stored_error)
       .toBeNull();
+  });
+
+  it("非失败态不下发错误，与实时任务路径一致", () => {
+    const view = jobDetailView({
+      ...BASE,
+      status: "succeeded",
+      error: { code: "storage_failed", message: "oss timeout" },
+    });
+
+    expect(view.stored_error).toBeNull();
   });
 
   it("未知码回落为类型级失败文案，不回落原始 message", () => {
@@ -39,6 +59,6 @@ describe("恢复快照任务错误投影（IKST3J）", () => {
     });
 
     expect(JSON.stringify(view)).not.toContain("internal stacktrace");
-    expect(view.stored_error).toMatchObject({ category: expect.any(String) });
+    expect(view.stored_error).toMatchObject({ code: 1022 });
   });
 });
