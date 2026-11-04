@@ -111,6 +111,14 @@ describe('MediaToolQuoteBadge', () => {
     expect(badge()!.className).toContain('danger');
   });
 
+  it('已有报价时刷新失败保留原数字且不转红', async () => {
+    state.credits = 42;
+    state.isError = true;
+    await renderBadge();
+    expect(badge()!.textContent).toBe('42');
+    expect(badge()!.className).not.toContain('danger');
+  });
+
   it('输入为空时不渲染', async () => {
     await renderBadge(null);
     expect(badge()).toBeNull();

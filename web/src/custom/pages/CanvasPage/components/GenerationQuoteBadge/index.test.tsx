@@ -160,6 +160,23 @@ describe('GenerationQuoteBadge', () => {
     expect(badge?.className).toContain('danger');
   });
 
+  it('★ 已有报价时刷新失败 → 保留原数字，不转红', async () => {
+    fetchGuard.stub(vi.fn().mockResolvedValue(quoteResponse(42)));
+
+    await renderBadge({});
+    await vi.waitFor(() => expect(container.textContent).toBe('42'));
+
+    fetchGuard.stub(vi.fn().mockRejectedValue(new TypeError('Failed to fetch')));
+    await act(async () => {
+      await client.refetchQueries();
+    });
+    await settle();
+
+    const badge = container.querySelector('[data-testid="generation-quote"]');
+    expect(badge?.textContent).toBe('42');
+    expect(badge?.className).not.toContain('danger');
+  });
+
   it('项目或模型未定 → 不发请求', async () => {
     const fetchMock = vi.fn().mockResolvedValue(quoteResponse(42));
     fetchGuard.stub(fetchMock);
