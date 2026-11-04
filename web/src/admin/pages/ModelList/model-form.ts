@@ -43,6 +43,7 @@ export const KNOWN_FEATURE_KEYS = [
   'max_reference_image_ratio',
   'max_reference_image_bytes',
   'sample_mode',
+  'omni_reference_task_type',
   'i2i_model_name',
 
 

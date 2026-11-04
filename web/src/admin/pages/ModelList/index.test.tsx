@@ -246,6 +246,14 @@ function button(label: string): HTMLButtonElement {
   return target;
 }
 
+function checkbox(label: string): HTMLButtonElement {
+  const target = [...document.body.querySelectorAll<HTMLButtonElement>('button[role="checkbox"]')].find((b) =>
+    b.textContent?.includes(label),
+  );
+  if (!target) throw new Error(`没有找到勾选框：${label}`);
+  return target;
+}
+
 async function click(el: HTMLElement | undefined | null) {
   if (!el) throw new Error('要点的元素不存在');
   await act(async () => el.click());
@@ -455,7 +463,7 @@ describe('ModelList 按类型分表单', () => {
     expect(shownMatrix()).toBe('seedream');
   });
 
-  it('新建文本模型：基础无供应商输入、尺寸与素材无尺寸/比例/时长，但 features 与 JSON 兜底仍有出口', async () => {
+  it('新建文本模型：基础无供应商输入、尺寸与素材无尺寸/比例/时长，但 features 与未识别字段仍有出口', async () => {
     api.fetchAdminModels.mockResolvedValue([]);
     await renderPage();
     await openCreateModal();
@@ -547,7 +555,7 @@ describe('ModelList 按类型分表单', () => {
     expect(payload.features.max_reference_image_ratio).toBe(3.5);
   });
 
-  it('★ 样片模式与未识别脏值都不在保存时丢失', async () => {
+  it('★ 样片模式是结构化开关：取消勾选写入 false，未识别脏值原样保留', async () => {
     api.fetchAdminModels.mockResolvedValue([
       { ...videoPriced, features: { sample_mode: true, tools: 'yes', legacy_key: 7 } },
     ]);
@@ -555,18 +563,31 @@ describe('ModelList 按类型分表单', () => {
     await openRowEdit('视频');
     await openTab('尺寸与素材');
 
-    expect(document.body.textContent).toContain('样片模式 sample_mode');
     expect(document.body.textContent).toContain('未识别字段');
     expect(document.body.textContent).toContain('tools');
     expect(document.body.textContent).toContain('legacy_key');
 
-    await type(inputByLabel('第 1 行展示名'), '480P');
+    await click(checkbox('样片模式 sample_mode'));
     await click(button('保存'));
 
     const payload = api.updateAdminModel.mock.calls[0]?.[1] as { features: Record<string, unknown> };
-    expect(payload.features.sample_mode).toBe(true);
+    expect(payload.features.sample_mode).toBe(false);
     expect(payload.features.tools).toBe('yes');
     expect(payload.features.legacy_key).toBe(7);
+  });
+
+  it('★ 水印勾选写入 true，未配置过的布尔键不写成 false', async () => {
+    api.fetchAdminModels.mockResolvedValue([{ ...videoPriced, features: {} }]);
+    await renderPage();
+    await openRowEdit('视频');
+    await openTab('尺寸与素材');
+
+    await click(checkbox('水印 watermark'));
+    await click(button('保存'));
+
+    const payload = api.updateAdminModel.mock.calls[0]?.[1] as { features: Record<string, unknown> };
+    expect(payload.features.watermark).toBe(true);
+    expect(payload.features.sample_mode).toBeUndefined();
   });
 
   it('★ 未识别字段删除按钮只删那一个键', async () => {
@@ -583,7 +604,6 @@ describe('ModelList 按类型分表单', () => {
     expect(removeButtons.length).toBe(2);
     await click(removeButtons[0]);
 
-    await type(inputByLabel('第 1 行展示名'), '480P');
     await click(button('保存'));
 
     const payload = api.updateAdminModel.mock.calls[0]?.[1] as { features: Record<string, unknown> };

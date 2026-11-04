@@ -521,7 +521,7 @@ export default function SizeMaterialTab({
                   <Field key={key} label={meta.label}>
                     <Input
                       type="number"
-                      min={0}
+                      min={meta.min ?? 0}
                       {...(meta.step !== undefined ? { step: meta.step } : {})}
                       aria-label={meta.label}
                       placeholder={meta.placeholder}
@@ -541,6 +541,7 @@ export default function SizeMaterialTab({
                 {stringEntries.map(([key, meta]) => (
                   <Field key={key} label={meta.label}>
                     <Input
+                      aria-label={meta.label}
                       placeholder={meta.placeholder}
                       value={features.strings[key] ?? ''}
                       onChange={(e) => features.setString(key, e.target.value)}
