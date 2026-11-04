@@ -555,15 +555,16 @@ describe('ModelList 按类型分表单', () => {
     expect(payload.features.max_reference_image_ratio).toBe(3.5);
   });
 
-  it('★ 样片模式是结构化开关：取消勾选写入 false，未识别脏值原样保留', async () => {
+  it('★ 样片模式是结构化开关：取消勾选写入 false，脏值可见可删、合法死键隐藏', async () => {
     api.fetchAdminModels.mockResolvedValue([
-      { ...videoPriced, features: { sample_mode: true, tools: 'yes', legacy_key: 7 } },
+      { ...videoPriced, features: { sample_mode: true, watermark: true, tools: 'yes', legacy_key: 7 } },
     ]);
     await renderPage();
     await openRowEdit('视频');
     await openTab('尺寸与素材');
 
     expect(document.body.textContent).toContain('未识别字段');
+    expect(document.body.textContent).not.toContain('watermark');
     expect(document.body.textContent).toContain('tools');
     expect(document.body.textContent).toContain('legacy_key');
 
@@ -576,23 +577,23 @@ describe('ModelList 按类型分表单', () => {
     expect(payload.features.legacy_key).toBe(7);
   });
 
-  it('★ 水印勾选写入 true，未配置过的布尔键不写成 false', async () => {
+  it('★ 样片模式勾选写入 true，未配置过的布尔键不写成 false', async () => {
     api.fetchAdminModels.mockResolvedValue([{ ...videoPriced, features: {} }]);
     await renderPage();
     await openRowEdit('视频');
     await openTab('尺寸与素材');
 
-    await click(checkbox('水印 watermark'));
+    await click(checkbox('样片模式 sample_mode'));
     await click(button('保存'));
 
     const payload = api.updateAdminModel.mock.calls[0]?.[1] as { features: Record<string, unknown> };
-    expect(payload.features.watermark).toBe(true);
-    expect(payload.features.sample_mode).toBeUndefined();
+    expect(payload.features.sample_mode).toBe(true);
+    expect(payload.features.reference_image).toBeUndefined();
   });
 
   it('★ 未识别字段删除按钮只删那一个键', async () => {
     api.fetchAdminModels.mockResolvedValue([
-      { ...videoPriced, features: { tools: 'yes', legacy_key: 7 } },
+      { ...videoPriced, features: { legacy_a: 7, legacy_b: 'x' } },
     ]);
     await renderPage();
     await openRowEdit('视频');
@@ -607,8 +608,8 @@ describe('ModelList 按类型分表单', () => {
     await click(button('保存'));
 
     const payload = api.updateAdminModel.mock.calls[0]?.[1] as { features: Record<string, unknown> };
-    expect(payload.features.tools).toBeUndefined();
-    expect(payload.features.legacy_key).toBe(7);
+    expect(payload.features.legacy_a).toBeUndefined();
+    expect(payload.features.legacy_b).toBe('x');
   });
 
   it('gpt 行删掉一个尺寸行后，其它交叉格的值仍在', async () => {

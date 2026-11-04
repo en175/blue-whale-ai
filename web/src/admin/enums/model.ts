@@ -8,17 +8,13 @@ export const TYPE_TABS: { key: ModelType; label: string }[] = [
 ];
 
 export const FEATURE_BOOL_LABELS: Record<string, { label: string; types?: ModelType[] }> = {
-  watermark: { label: '水印 watermark' },
   reference_image: { label: '参考图 reference_image', types: ['image', 'video'] },
-  stream: { label: '流式输出 stream', types: ['image'] },
-  sequential_image_generation: { label: '顺序生成 sequential_image_generation', types: ['image'] },
   first_frame: { label: '首帧 first_frame', types: ['video'] },
   last_frame: { label: '尾帧 last_frame', types: ['video'] },
   first_last_frame: { label: '首尾帧 first_last_frame', types: ['video'] },
   audio: { label: '音频 audio', types: ['video'] },
   video_reference: { label: '视频素材参考 video_reference', types: ['video'] },
   audio_reference: { label: '音频素材参考 audio_reference', types: ['video'] },
-  tools: { label: '工具调用 tools' },
   omni_reference_task_type: { label: '显式任务类型 omni_reference_task_type', types: ['video'] },
   sample_mode: { label: '样片模式 sample_mode', types: ['video'] },
 };
@@ -27,7 +23,6 @@ export const FEATURE_NUMBER_LABELS: Record<
   string,
   { label: string; types?: ModelType[]; placeholder: string; step?: string; min?: number }
 > = {
-  quantity_max: { label: '单次生成数量 quantity_max', types: ['image'], placeholder: '如 1' },
   max_prompt_length: {
     label: '提示词上限 max_prompt_length',
     types: ['image', 'video', 'text'],
