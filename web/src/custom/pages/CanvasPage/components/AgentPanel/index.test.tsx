@@ -152,6 +152,36 @@ describe('AgentPanel 停靠抽屉（IKDLD4）', () => {
     expect(resizeHandle()).not.toBeNull();
   });
 
+  it('向上报告抽屉几何：宽度随调宽同步、滑出中与浮动时让出推动位', async () => {
+    const onDrawerLayoutChange = vi.fn();
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root.render(
+        createElement(AgentPanel, {
+          onClose: vi.fn(),
+          projectId: 'p1',
+          onPlaceFileOnCanvas: vi.fn(async () => ({ asset_id: 'a1', url: 'blob:x' })),
+          onDrawerLayoutChange,
+        }),
+      );
+    });
+
+    const last = () => onDrawerLayoutChange.mock.calls.at(-1)?.[0];
+    expect(last()).toEqual({ open: true, closing: false, floating: false, resizing: false, width: DEFAULT_PANEL_WIDTH });
+
+    const handle = resizeHandle()!;
+    await pointer('pointerdown', handle, 500);
+    await pointer('pointermove', handle, 400);
+    expect(last()).toMatchObject({ resizing: true, width: 512 });
+
+    await act(async () => {
+      container.querySelector<HTMLElement>(`.${styles.iconBtn}`)!.click();
+    });
+    expect(last()).toMatchObject({ floating: true });
+  });
+
   it('持久化宽度在下次打开时回显', async () => {
     localStorage.setItem(PANEL_WIDTH_STORAGE_KEY, '560');
     vi.stubGlobal('innerWidth', 1600);

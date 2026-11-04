@@ -6,7 +6,9 @@ import {
   MIN_PANEL_WIDTH,
   PANEL_WIDTH_STORAGE_KEY,
   clampPanelWidth,
+  drawerPushOffset,
   readPersistedPanelWidth,
+  type AgentDrawerLayout,
 } from './drawerWidth';
 
 describe('clampPanelWidth', () => {
@@ -52,5 +54,22 @@ describe('readPersistedPanelWidth', () => {
   it('持久化值损坏（非数字）时回退默认宽度', () => {
     localStorage.setItem(PANEL_WIDTH_STORAGE_KEY, 'not-a-number');
     expect(readPersistedPanelWidth(1440)).toBe(DEFAULT_PANEL_WIDTH);
+  });
+});
+
+describe('drawerPushOffset', () => {
+  const base: AgentDrawerLayout = { open: true, closing: false, floating: false, resizing: false, width: 468 };
+
+  it('抽屉展开时按当前宽度推移右上角内容', () => {
+    expect(drawerPushOffset(base)).toBe(468);
+    expect(drawerPushOffset({ ...base, width: 520, resizing: true })).toBe(520);
+  });
+
+  it('收起、滑出中、浮动或未传入时不移位', () => {
+    expect(drawerPushOffset(null)).toBe(0);
+    expect(drawerPushOffset(undefined)).toBe(0);
+    expect(drawerPushOffset({ ...base, open: false })).toBe(0);
+    expect(drawerPushOffset({ ...base, closing: true })).toBe(0);
+    expect(drawerPushOffset({ ...base, floating: true, width: 360 })).toBe(0);
   });
 });

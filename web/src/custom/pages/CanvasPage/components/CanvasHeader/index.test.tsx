@@ -2,6 +2,7 @@
 import { act, createElement, type ComponentProps } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { useAuthStore } from '@/shared/stores/auth';
 import CanvasHeader from './index';
 import styles from './index.module.css';
 
@@ -50,6 +51,7 @@ async function renderHeader(overrides: Partial<ComponentProps<typeof CanvasHeade
 
 beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  useAuthStore.setState({ credits: null });
 });
 
 afterEach(async () => {
@@ -88,5 +90,46 @@ describe('CanvasHeader', () => {
 
     const agentBtn = mountNode.querySelector(`.${styles.agentBtn}`);
     expect(agentBtn?.classList.contains(styles.agentBtnHidden)).toBe(false);
+  });
+
+  it('右上角展示与首页一致的积分余额，未登录/未加载时不渲染', async () => {
+    await renderHeader();
+    expect(mountNode.textContent).not.toContain('12,345');
+
+    useAuthStore.setState({ credits: 12345 });
+    await renderHeader();
+
+    const right = mountNode.querySelector(`.${styles.right}`);
+    expect(right?.textContent).toContain('12,345');
+    expect(right?.querySelector('svg')?.getAttribute('fill')).toBe('#FBBF24');
+  });
+
+  it('Agent 抽屉展开时右上角内容按抽屉宽度左移，关闭/浮动/收起回原位', async () => {
+    useAuthStore.setState({ credits: 300 });
+
+    await renderHeader({ agentDrawer: { open: true, closing: false, floating: false, resizing: false, width: 468 } });
+    let right = mountNode.querySelector<HTMLElement>(`.${styles.right}`)!;
+    expect(right.classList.contains(styles.rightPushed)).toBe(true);
+    expect(right.style.getPropertyValue('--agent-drawer-push')).toBe('468px');
+
+    await renderHeader({ agentDrawer: { open: true, closing: true, floating: false, resizing: false, width: 468 } });
+    right = mountNode.querySelector<HTMLElement>(`.${styles.right}`)!;
+    expect(right.classList.contains(styles.rightPushed)).toBe(false);
+
+    await renderHeader({ agentDrawer: { open: true, closing: false, floating: true, resizing: false, width: 360 } });
+    right = mountNode.querySelector<HTMLElement>(`.${styles.right}`)!;
+    expect(right.classList.contains(styles.rightPushed)).toBe(false);
+
+    await renderHeader({ agentDrawer: { open: false, closing: false, floating: false, resizing: false, width: 0 } });
+    right = mountNode.querySelector<HTMLElement>(`.${styles.right}`)!;
+    expect(right.classList.contains(styles.rightPushed)).toBe(false);
+  });
+
+  it('拖拽调宽时关闭位移过渡，跟手移动', async () => {
+    await renderHeader({ agentDrawer: { open: true, closing: false, floating: false, resizing: true, width: 520 } });
+
+    const right = mountNode.querySelector<HTMLElement>(`.${styles.right}`)!;
+    expect(right.classList.contains(styles.rightFollowingResize)).toBe(true);
+    expect(right.style.getPropertyValue('--agent-drawer-push')).toBe('520px');
   });
 });
