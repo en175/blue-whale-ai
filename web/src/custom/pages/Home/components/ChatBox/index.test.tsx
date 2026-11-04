@@ -28,8 +28,23 @@ vi.mock('@/shared/utils/auth', () => ({
 vi.mock('@/custom/api/projects', () => ({ createProject }));
 
 vi.mock('../SkillModal', () => ({
-  default: ({ open }: { open: boolean }) =>
-    open ? createElement('div', { role: 'dialog', 'aria-label': '技能库' }) : null,
+  default: ({ open, onUseSkill }: { open: boolean; onUseSkill?: (skill: unknown) => void }) =>
+    open
+      ? createElement(
+          'div',
+          { role: 'dialog', 'aria-label': '技能库' },
+          createElement(
+            'button',
+            {
+              type: 'button',
+              'data-testid': 'use-skill',
+              onClick: () =>
+                onUseSkill?.({ creative_skill_id: 'skill-1', name: '电影技法工具箱', asset_domain: 'official' }),
+            },
+            '直接使用',
+          ),
+        )
+      : null,
 }));
 vi.mock('@/custom/components/LoginModal', () => ({ default: () => null }));
 
@@ -418,6 +433,20 @@ describe('IKR63N 参考展示与技能指令', () => {
     await act(async () => { typePrompt('参考 https://example.com/a 的风格'); });
 
     expect(mountNode.querySelector('[role="dialog"][aria-label="技能库"]')).toBeNull();
+  });
+
+  it('直接使用技能后首页展示技能名称', async () => {
+    await renderChatBox();
+    await act(async () => { typePrompt('/'); });
+
+    await act(async () => {
+      mountNode.querySelector<HTMLButtonElement>('[data-testid="use-skill"]')!.click();
+      await Promise.resolve();
+    });
+
+    const chip = mountNode.querySelector<HTMLElement>(`.${styles.armedSkill}`);
+    expect(chip?.textContent).toContain('电影技法工具箱');
+    expect(chip?.textContent).not.toBe('技能');
   });
 });
 
