@@ -524,6 +524,73 @@ describe('ModelList 按类型分表单', () => {
     expect(tabNames()).not.toContain('高级');
   });
 
+  it('★ 参考图上限键预填 → 改宽高比 → 保存提交数值（含小数）', async () => {
+    api.fetchAdminModels.mockResolvedValue([
+      {
+        ...videoPriced,
+        features: { max_reference_image_pixels: 36_000_000, max_reference_image_ratio: 2.5 },
+      },
+    ]);
+    await renderPage();
+    await openRowEdit('视频');
+    await openTab('尺寸与素材');
+
+    expect(inputByLabel('参考图总像素上限 max_reference_image_pixels').value).toBe('36000000');
+    const ratioInput = inputByLabel('参考图宽高比上限 max_reference_image_ratio');
+    expect(ratioInput.value).toBe('2.5');
+
+    await type(ratioInput, '3.5');
+    await click(button('保存'));
+
+    const payload = api.updateAdminModel.mock.calls[0]?.[1] as { features: Record<string, unknown> };
+    expect(payload.features.max_reference_image_pixels).toBe(36_000_000);
+    expect(payload.features.max_reference_image_ratio).toBe(3.5);
+  });
+
+  it('★ 样片模式与未识别脏值都不在保存时丢失', async () => {
+    api.fetchAdminModels.mockResolvedValue([
+      { ...videoPriced, features: { sample_mode: true, tools: 'yes', legacy_key: 7 } },
+    ]);
+    await renderPage();
+    await openRowEdit('视频');
+    await openTab('尺寸与素材');
+
+    expect(document.body.textContent).toContain('样片模式 sample_mode');
+    expect(document.body.textContent).toContain('未识别字段');
+    expect(document.body.textContent).toContain('tools');
+    expect(document.body.textContent).toContain('legacy_key');
+
+    await type(inputByLabel('第 1 行展示名'), '480P');
+    await click(button('保存'));
+
+    const payload = api.updateAdminModel.mock.calls[0]?.[1] as { features: Record<string, unknown> };
+    expect(payload.features.sample_mode).toBe(true);
+    expect(payload.features.tools).toBe('yes');
+    expect(payload.features.legacy_key).toBe(7);
+  });
+
+  it('★ 未识别字段删除按钮只删那一个键', async () => {
+    api.fetchAdminModels.mockResolvedValue([
+      { ...videoPriced, features: { tools: 'yes', legacy_key: 7 } },
+    ]);
+    await renderPage();
+    await openRowEdit('视频');
+    await openTab('尺寸与素材');
+
+    const removeButtons = [...document.body.querySelectorAll<HTMLButtonElement>('button')].filter(
+      (b) => b.textContent?.trim() === '删除',
+    );
+    expect(removeButtons.length).toBe(2);
+    await click(removeButtons[0]);
+
+    await type(inputByLabel('第 1 行展示名'), '480P');
+    await click(button('保存'));
+
+    const payload = api.updateAdminModel.mock.calls[0]?.[1] as { features: Record<string, unknown> };
+    expect(payload.features.tools).toBeUndefined();
+    expect(payload.features.legacy_key).toBe(7);
+  });
+
   it('gpt 行删掉一个尺寸行后，其它交叉格的值仍在', async () => {
     api.fetchAdminModels.mockResolvedValue([gptImage]);
     await renderPage();
@@ -1183,14 +1250,19 @@ describe('ModelList 渠道', () => {
     expect(payload.request_mapping).toEqual({ quality: {}, size: {} });
   });
 
-  it('★ 出站协议没有自由文本框、也不在 JSON 兜底里（它由渠道决定，键已整键退役）', async () => {
-    api.fetchAdminModels.mockResolvedValue([gptOfficial]);
+  it('★ 出站协议没有可编辑文本框（它由渠道决定，键已整键退役）', async () => {
+    api.fetchAdminModels.mockResolvedValue([
+      { ...gptOfficial, features: { image_protocol: 'openai-images' } },
+    ]);
     await renderPage();
     await openRowEdit('图片');
     await openTab('尺寸与素材');
     expect(document.body.textContent).not.toContain('出站图片协议');
+    expect(document.body.querySelector('textarea')).toBeNull();
 
-    const values = [...document.body.querySelectorAll<HTMLInputElement>('input')].map((el) => el.value);
-    expect(values.some((v) => v.includes('image_protocol'))).toBe(false);
+    const editable = [...document.body.querySelectorAll<HTMLInputElement>('input:not([readonly])')].map(
+      (el) => el.value,
+    );
+    expect(editable.some((value) => value.includes('openai-images'))).toBe(false);
   });
 });

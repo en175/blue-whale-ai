@@ -76,16 +76,10 @@ import {
   type SizeForm,
   type TaskTypeDurationStrategy,
 } from './model-form';
-import {
-  FEATURE_BOOL_LABELS,
-  FEATURE_NUMBER_LABELS,
-  FEATURE_STRING_LABELS,
-  type ModelType,
-} from '@/admin/enums';
+import { type ModelType } from '@/admin/enums';
 import {
   buildVideoDimensions,
   dropKnownFeatures,
-  featureApplies,
   omitEmpty,
   omitEmptyStrings,
   pickFeatureBooleans,
@@ -214,12 +208,6 @@ export default function ModelFormModal({ initial, models, defaultType, onClose, 
 
   const showDefaultDuration = type === 'video' || type === 'audio';
   const showFormat = type === 'audio' || type === 'video';
-  const hasStructuredFeature = [
-    ...Object.values(FEATURE_BOOL_LABELS),
-    ...Object.values(FEATURE_NUMBER_LABELS),
-    ...Object.values(FEATURE_STRING_LABELS),
-  ].some((meta) => featureApplies(meta, type));
-
 
 
 
@@ -547,7 +535,7 @@ export default function ModelFormModal({ initial, models, defaultType, onClose, 
             size: bananaSize,
             setSize: setBananaSize,
           }}
-          visible={{ sizeRatio: showSizeRatio, duration: showDuration, defaultDuration: showDefaultDuration, format: showFormat, structuredFeature: hasStructuredFeature }}
+          visible={{ sizeRatio: showSizeRatio, duration: showDuration, defaultDuration: showDefaultDuration, format: showFormat }}
           sizes={{ rows: sizes, add: addSizeRow, update: updateSize, remove: removeSize }}
           ratios={{
             rows: ratios,

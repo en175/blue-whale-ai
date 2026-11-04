@@ -55,7 +55,6 @@ interface SizeMaterialTabProps {
     duration: boolean;
     defaultDuration: boolean;
     format: boolean;
-    structuredFeature: boolean;
   };
   sizes: {
     rows: SizeForm[];
@@ -506,9 +505,6 @@ export default function SizeMaterialTab({
       </h3>
       <div style={PANEL}>
         <div style={FEATURE_GROUPS}>
-          {!visible.structuredFeature && (
-            <div style={FEATURE_GROUP_LABEL}>该类型的特性键都在下面按类型展示。</div>
-          )}
           {flagEntries.length > 0 && (
             <div>
               <div style={FEATURE_GROUP_LABEL}>开关</div>

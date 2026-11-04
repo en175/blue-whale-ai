@@ -12,14 +12,6 @@ const FEATURE_KEY_BY_CAMEL = new Map(KNOWN_FEATURE_KEYS.map((key) => [camelFeatu
 
 export const OBJECT_FEATURE_KEYS: ReadonlySet<string> = new Set(['task_types', 'video_dimensions']);
 
-export const pretty = (raw: unknown) => {
-  try {
-    return JSON.stringify(raw ?? {}, null, 2);
-  } catch {
-    return '{}';
-  }
-};
-
 export const pickFeatureBooleans = (features: Record<string, unknown> = {}): Record<string, boolean> => {
   const out: Record<string, boolean> = {};
   for (const key of Object.keys(FEATURE_BOOL_LABELS)) out[key] = readFeature(features, key) === true;

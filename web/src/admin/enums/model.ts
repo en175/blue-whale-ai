@@ -8,6 +8,7 @@ export const TYPE_TABS: { key: ModelType; label: string }[] = [
 ];
 
 export const FEATURE_BOOL_LABELS: Record<string, { label: string; types?: ModelType[] }> = {
+  watermark: { label: '水印 watermark' },
   reference_image: { label: '参考图 reference_image', types: ['image', 'video'] },
   stream: { label: '流式输出 stream', types: ['image'] },
   sequential_image_generation: { label: '顺序生成 sequential_image_generation', types: ['image'] },
@@ -19,6 +20,7 @@ export const FEATURE_BOOL_LABELS: Record<string, { label: string; types?: ModelT
   audio_reference: { label: '音频素材参考 audio_reference', types: ['video'] },
   tools: { label: '工具调用 tools' },
   omni_reference_task_type: { label: '显式任务类型 omni_reference_task_type', types: ['video'] },
+  sample_mode: { label: '样片模式 sample_mode', types: ['video'] },
 };
 
 export const FEATURE_NUMBER_LABELS: Record<
