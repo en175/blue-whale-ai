@@ -555,16 +555,17 @@ describe('ModelList 按类型分表单', () => {
     expect(payload.features.max_reference_image_ratio).toBe(3.5);
   });
 
-  it('★ 样片模式是结构化开关：取消勾选写入 false，隐藏的死键与脏值原样保留', async () => {
+  it('★ 样片模式是结构化开关：取消勾选写入 false，脏值可见可删、合法死键隐藏', async () => {
     api.fetchAdminModels.mockResolvedValue([
-      { ...videoPriced, features: { sample_mode: true, tools: 'yes', legacy_key: 7 } },
+      { ...videoPriced, features: { sample_mode: true, watermark: true, tools: 'yes', legacy_key: 7 } },
     ]);
     await renderPage();
     await openRowEdit('视频');
     await openTab('尺寸与素材');
 
     expect(document.body.textContent).toContain('未识别字段');
-    expect(document.body.textContent).not.toContain('tools');
+    expect(document.body.textContent).not.toContain('watermark');
+    expect(document.body.textContent).toContain('tools');
     expect(document.body.textContent).toContain('legacy_key');
 
     await click(checkbox('样片模式 sample_mode'));

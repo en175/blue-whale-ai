@@ -4,7 +4,12 @@ import {
   FEATURE_NUMBER_LABELS,
   FEATURE_STRING_LABELS,
 } from '@/admin/enums';
-import { buildVideoDimensions, dropKnownFeatures, pickVideoDimensions } from './feature-fields';
+import {
+  OBJECT_FEATURE_KEYS,
+  buildVideoDimensions,
+  dropKnownFeatures,
+  pickVideoDimensions,
+} from './feature-fields';
 import { KNOWN_FEATURE_KEYS } from './model-form';
 
 describe('结构化控件与 KNOWN 键集合必须对齐', () => {
@@ -16,6 +21,24 @@ describe('结构化控件与 KNOWN 键集合必须对齐', () => {
       ...Object.keys(FEATURE_STRING_LABELS),
     ];
     expect(controlled.filter((key) => !known.has(key))).toEqual([]);
+  });
+
+  it('KNOWN 里除对象键外都必须有结构化控件，否则保存时会被静默丢弃', () => {
+    const controlled = new Set([
+      ...Object.keys(FEATURE_BOOL_LABELS),
+      ...Object.keys(FEATURE_NUMBER_LABELS),
+      ...Object.keys(FEATURE_STRING_LABELS),
+      ...OBJECT_FEATURE_KEYS,
+    ]);
+    expect(KNOWN_FEATURE_KEYS.filter((key) => !controlled.has(key))).toEqual([]);
+  });
+
+  it('隐藏的死键按原样回写，不被丢弃', () => {
+    expect(dropKnownFeatures({ watermark: true, tools: 'yes', quantity_max: 1 })).toEqual({
+      watermark: true,
+      tools: 'yes',
+      quantity_max: 1,
+    });
   });
 
   it('无消费方的键不提供结构化控件', () => {
