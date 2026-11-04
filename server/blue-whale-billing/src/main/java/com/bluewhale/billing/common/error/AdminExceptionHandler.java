@@ -33,16 +33,6 @@ public class AdminExceptionHandler {
                 .body(new ErrorBody(BillingErrorTaxonomy.Code.INVALID_ARGUMENT.wire(), message));
     }
 
-    @ExceptionHandler(DuplicateGrantKeyException.class)
-    public ResponseEntity<ErrorBody> duplicateGrant(DuplicateGrantKeyException e) {
-        return ResponseEntity.status(BillingErrorTaxonomy.Code.DUPLICATE.httpStatus())
-                .body(new ErrorBody(BillingErrorTaxonomy.Code.DUPLICATE.wire(),
-                        e.getMessage(), e.existingBizId()));
-    }
-
-    public record ErrorBody(String code, String message, String existingBizId) {
-        public ErrorBody(String code, String message) {
-            this(code, message, null);
-        }
+    public record ErrorBody(String code, String message) {
     }
 }

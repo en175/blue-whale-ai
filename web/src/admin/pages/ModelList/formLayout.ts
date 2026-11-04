@@ -15,4 +15,22 @@ export const SIZE_ROW: CSSProperties = {
 export const INLINE_ROW: CSSProperties = { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 };
 export const CHIP_LIST: CSSProperties = { display: 'flex', flexWrap: 'wrap', gap: 8 };
 export const FULL: CSSProperties = { width: '100%' };
-export const CHECK_STACK: CSSProperties = { display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 18 };
+export const PANEL: CSSProperties = {
+  padding: 'var(--admin-space-4)',
+  border: '1px solid var(--admin-divider)',
+  borderRadius: 'var(--admin-radius-surface)',
+  background: 'var(--admin-surface-sunken)',
+};
+export const FEATURE_GROUPS: CSSProperties = { display: 'grid', gap: 'var(--admin-space-5)' };
+export const FEATURE_GROUP_LABEL: CSSProperties = {
+  fontSize: 'var(--admin-font-xs)',
+  fontWeight: 600,
+  color: 'var(--admin-text-muted)',
+  marginBottom: 'var(--admin-space-2)',
+};
+export const FEATURE_FLAG_GRID: CSSProperties = {
+  ...formGrid(2),
+  gap: 'var(--admin-space-3) var(--admin-space-5)',
+  marginBottom: 0,
+};
+export const FEATURE_FIELD_GRID: CSSProperties = { ...formGrid(2), marginBottom: 0 };

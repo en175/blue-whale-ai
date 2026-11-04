@@ -23,7 +23,21 @@ import {
 import { Badge, Button, Checkbox, Chip, Field, Input, Segmented, Select, Table } from '../../ui';
 import DimensionMatrix from './DimensionMatrix';
 import { Hint } from '../../ui';
-import { CHIP_LIST, CHECK_STACK, FULL, GRID2, GRID3, INLINE_ROW, LABEL, SECTION, SIZE_ROW } from './formLayout';
+import {
+  CHIP_LIST,
+  FEATURE_FIELD_GRID,
+  FEATURE_FLAG_GRID,
+  FEATURE_GROUP_LABEL,
+  FEATURE_GROUPS,
+  FULL,
+  GRID2,
+  GRID3,
+  INLINE_ROW,
+  LABEL,
+  PANEL,
+  SECTION,
+  SIZE_ROW,
+} from './formLayout';
 
 interface SizeMaterialTabProps {
   type: ModelType;
@@ -41,7 +55,6 @@ interface SizeMaterialTabProps {
     duration: boolean;
     defaultDuration: boolean;
     format: boolean;
-    structuredFeature: boolean;
   };
   sizes: {
     rows: SizeForm[];
@@ -78,6 +91,8 @@ interface SizeMaterialTabProps {
     strings: Record<string, string>;
     setString: (key: string, value: string) => void;
   };
+  unrecognised: Record<string, unknown>;
+  onRemoveUnrecognised: (key: string) => void;
   taskTypes: {
     ratios: Record<string, string[]>;
     enabled: Record<string, boolean>;
@@ -105,9 +120,15 @@ export default function SizeMaterialTab({
   durations,
   formats,
   features,
+  unrecognised,
+  onRemoveUnrecognised,
   taskTypes,
 }: SizeMaterialTabProps) {
   const parser = channelOf(channel).parser ?? 'seedream';
+  const flagEntries = Object.entries(FEATURE_BOOL_LABELS).filter(([, meta]) => featureApplies(meta, type));
+  const numberEntries = Object.entries(FEATURE_NUMBER_LABELS).filter(([, meta]) => featureApplies(meta, type));
+  const stringEntries = Object.entries(FEATURE_STRING_LABELS).filter(([, meta]) => featureApplies(meta, type));
+  const unrecognisedEntries = Object.entries(unrecognised);
   return (
     <>
       {visible.sizeRatio && (
@@ -416,51 +437,7 @@ export default function SizeMaterialTab({
       )}
 
       {}
-      <h3 style={SECTION}>
-        特性 features（结构化）
-        {!visible.structuredFeature && (
-          <Hint>该类型没有专属的结构化特性键，可直接去「高级」用 JSON 配置。</Hint>
-        )}
-      </h3>
-      <div style={CHECK_STACK}>
-        {Object.entries(FEATURE_BOOL_LABELS)
-          .filter(([, meta]) => featureApplies(meta, type))
-          .map(([key, meta]) => (
-            <Checkbox key={key} checked={!!features.flags[key]} onChange={() => features.toggle(key)} label={meta.label} />
-          ))}
-      </div>
-      <div style={GRID2}>
-        {Object.entries(FEATURE_NUMBER_LABELS)
-          .filter(([, meta]) => featureApplies(meta, type))
-          .map(([key, meta]) => (
-            <Field key={key} label={<>{meta.label} <span>（留空不写入）</span></>}>
-              <Input
-                type="number"
-                min={0}
-                placeholder={meta.placeholder}
-                value={features.numbers[key] ?? ''}
-                onChange={(e) => features.setNumber(key, e.target.value)}
-                style={FULL}
-              />
-            </Field>
-          ))}
-      </div>
-      <div style={GRID2}>
-        {Object.entries(FEATURE_STRING_LABELS)
-          .filter(([, meta]) => featureApplies(meta, type))
-          .map(([key, meta]) => (
-            <Field key={key} label={<>{meta.label} <span>（留空不写入）</span></>}>
-              <Input
-                placeholder={meta.placeholder}
-                value={features.strings[key] ?? ''}
-                onChange={(e) => features.setString(key, e.target.value)}
-                style={FULL}
-              />
-            </Field>
-          ))}
-      </div>
 
-      {}
       {type === 'video' && (
         <>
           <h3 style={SECTION}>视频模式 task_types <Hint>勾选 = 该模式对模型开放；未勾选的模式不出现。比例留空 = 该模式沿用基础「比例选项」。时长策略逐模式配置：指定秒数 = 只能选基础范围；仅自动 = 用户不可选秒数；自动或指定 = 用户可二选一。</Hint></h3>
@@ -520,6 +497,93 @@ export default function SizeMaterialTab({
           </Table>
         </>
       )}
+
+      <h3 style={SECTION}>
+        特性 features（结构化） <Hint>开关、数值、文本直接对应 features 里的同名键，留空 = 不写入该键。老数据里形态对不上的键会列在「未识别字段」，可按原样保留或删除。</Hint>
+      </h3>
+      <div style={PANEL}>
+        <div style={FEATURE_GROUPS}>
+          {flagEntries.length > 0 && (
+            <div>
+              <div style={FEATURE_GROUP_LABEL}>开关</div>
+              <div style={FEATURE_FLAG_GRID}>
+                {flagEntries.map(([key, meta]) => (
+                  <Checkbox key={key} checked={!!features.flags[key]} onChange={() => features.toggle(key)} label={meta.label} />
+                ))}
+              </div>
+            </div>
+          )}
+          {numberEntries.length > 0 && (
+            <div>
+              <div style={FEATURE_GROUP_LABEL}>数值</div>
+              <div style={FEATURE_FIELD_GRID}>
+                {numberEntries.map(([key, meta]) => (
+                  <Field key={key} label={meta.label}>
+                    <Input
+                      type="number"
+                      min={meta.min ?? 0}
+                      {...(meta.step !== undefined ? { step: meta.step } : {})}
+                      aria-label={meta.label}
+                      placeholder={meta.placeholder}
+                      value={features.numbers[key] ?? ''}
+                      onChange={(e) => features.setNumber(key, e.target.value)}
+                      style={FULL}
+                    />
+                  </Field>
+                ))}
+              </div>
+            </div>
+          )}
+          {stringEntries.length > 0 && (
+            <div>
+              <div style={FEATURE_GROUP_LABEL}>文本</div>
+              <div style={FEATURE_FIELD_GRID}>
+                {stringEntries.map(([key, meta]) => (
+                  <Field key={key} label={meta.label}>
+                    <Input
+                      aria-label={meta.label}
+                      placeholder={meta.placeholder}
+                      value={features.strings[key] ?? ''}
+                      onChange={(e) => features.setString(key, e.target.value)}
+                      style={FULL}
+                    />
+                  </Field>
+                ))}
+              </div>
+            </div>
+          )}
+          {unrecognisedEntries.length > 0 && (
+            <div>
+              <div style={FEATURE_GROUP_LABEL}>
+                未识别字段 <Hint>老数据里形态对不上的键（如类型不符的脏值）。按原样保留，保存时合并回 features；确认无用可点右侧删除。</Hint>
+              </div>
+              <div style={FEATURE_FIELD_GRID}>
+                {unrecognisedEntries.map(([key, value]) => (
+                  <Field
+                    key={key}
+                    label={
+                      <>
+                        {key}
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          title="删除这个键"
+                          style={{ marginLeft: 'auto' }}
+                          onClick={() => onRemoveUnrecognised(key)}
+                        >
+                          删除
+                        </Button>
+                      </>
+                    }
+                  >
+                    <Input readOnly value={JSON.stringify(value)} style={FULL} />
+                  </Field>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
     </>
   );
 }

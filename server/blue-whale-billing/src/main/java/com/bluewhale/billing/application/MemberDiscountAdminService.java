@@ -8,13 +8,11 @@ import com.bluewhale.billing.common.error.AdminNotFoundException;
 import com.bluewhale.billing.domain.discount.DiscountRules;
 import com.bluewhale.billing.infrastructure.persistence.mapper.MemberDiscountMapper;
 import com.bluewhale.billing.infrastructure.persistence.po.MemberDiscountEntity;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
 
 @Service
-@ConditionalOnProperty(name = "billing.admin.enabled", havingValue = "true")
 public class MemberDiscountAdminService {
 
     private final MemberDiscountMapper mapper;

@@ -76,36 +76,27 @@ import {
   type SizeForm,
   type TaskTypeDurationStrategy,
 } from './model-form';
-import {
-  FEATURE_BOOL_LABELS,
-  FEATURE_NUMBER_LABELS,
-  FEATURE_STRING_LABELS,
-  type ModelType,
-} from '@/admin/enums';
+import { type ModelType } from '@/admin/enums';
 import {
   buildVideoDimensions,
   dropKnownFeatures,
-  featureApplies,
   omitEmpty,
   omitEmptyStrings,
   pickFeatureBooleans,
   pickFeatureNumbers,
   pickFeatureStrings,
   pickVideoDimensions,
-  pretty,
   readTaskTypesBase,
 } from './feature-fields';
 import { Alert, Button, Modal, Tabs } from '../../ui';
 import BasicsTab from './BasicsTab';
 import SizeMaterialTab from './SizeMaterialTab';
 import PricingTab from './PricingTab';
-import AdvancedTab from './AdvancedTab';
 
 const TAB_ITEMS = [
   { key: 'basics', label: '基础' },
   { key: 'size', label: '尺寸与素材' },
   { key: 'pricing', label: '定价' },
-  { key: 'advanced', label: '高级' },
 ] as const;
 
 type TabKey = (typeof TAB_ITEMS)[number]['key'];
@@ -161,8 +152,8 @@ export default function ModelFormModal({ initial, models, defaultType, onClose, 
   const [videoDimensions, setVideoDimensions] = useState<KeyValueRow[]>(() =>
     pickVideoDimensions(initial?.features),
   );
-  const [extraFeatures, setExtraFeatures] = useState(
-    initial ? pretty(dropKnownFeatures(initial.features)) : '{}',
+  const [unrecognisedFeatures, setUnrecognisedFeatures] = useState<Record<string, unknown>>(
+    initial ? dropKnownFeatures(initial.features) : {},
   );
   const [defaultSize, setDefaultSize] = useState(initial?.default_size ?? '');
   const [defaultRatio, setDefaultRatio] = useState(initial?.default_aspect_ratio ?? '');
@@ -217,12 +208,6 @@ export default function ModelFormModal({ initial, models, defaultType, onClose, 
 
   const showDefaultDuration = type === 'video' || type === 'audio';
   const showFormat = type === 'audio' || type === 'video';
-  const hasStructuredFeature = [
-    ...Object.values(FEATURE_BOOL_LABELS),
-    ...Object.values(FEATURE_NUMBER_LABELS),
-    ...Object.values(FEATURE_STRING_LABELS),
-  ].some((meta) => featureApplies(meta, type));
-
 
 
 
@@ -291,7 +276,7 @@ export default function ModelFormModal({ initial, models, defaultType, onClose, 
     setTaskTypeDuration(pickTaskTypeDuration(src.features));
     setTaskTypesBase(readTaskTypesBase(src.features));
     setVideoDimensions(pickVideoDimensions(src.features));
-    setExtraFeatures(pretty(dropKnownFeatures(src.features)));
+    setUnrecognisedFeatures(dropKnownFeatures(src.features));
     setDefaultSize(src.default_size ?? '');
     setDefaultRatio(src.default_aspect_ratio ?? '');
     setDefaultFormat(src.default_format ?? '');
@@ -402,12 +387,6 @@ export default function ModelFormModal({ initial, models, defaultType, onClose, 
   };
 
   const snapshot = (): FormSnapshot => {
-    let extra: Record<string, unknown> = {};
-    try {
-      extra = JSON.parse(extraFeatures || '{}') as Record<string, unknown>;
-    } catch {
-      extra = {};
-    }
     const taskTypes = buildTaskTypes(taskTypesBase, taskTypeRatios, taskTypeEnabled, taskTypeDuration);
     const dimensions = buildVideoDimensions(videoDimensions);
     return {
@@ -430,7 +409,7 @@ export default function ModelFormModal({ initial, models, defaultType, onClose, 
       defaultDuration,
       enabled,
       features: {
-        ...extra,
+        ...unrecognisedFeatures,
         ...omitEmpty(featureNumbers),
         ...omitEmptyStrings(featureStrings),
         ...Object.fromEntries(
@@ -459,13 +438,6 @@ export default function ModelFormModal({ initial, models, defaultType, onClose, 
 
   const handleSave = async () => {
     if (saving) return;
-    try {
-      JSON.parse(extraFeatures || '{}');
-    } catch {
-      setError('其他特性 JSON 解析失败，请检查格式。');
-      setTab('advanced');
-      return;
-    }
     const built = buildCreateParams(snapshot());
     if (!built.ok) {
       setError(built.error);
@@ -562,7 +534,7 @@ export default function ModelFormModal({ initial, models, defaultType, onClose, 
             size: bananaSize,
             setSize: setBananaSize,
           }}
-          visible={{ sizeRatio: showSizeRatio, duration: showDuration, defaultDuration: showDefaultDuration, format: showFormat, structuredFeature: hasStructuredFeature }}
+          visible={{ sizeRatio: showSizeRatio, duration: showDuration, defaultDuration: showDefaultDuration, format: showFormat }}
           sizes={{ rows: sizes, add: addSizeRow, update: updateSize, remove: removeSize }}
           ratios={{
             rows: ratios,
@@ -599,6 +571,10 @@ export default function ModelFormModal({ initial, models, defaultType, onClose, 
             strings: featureStrings,
             setString: (key, value) => setFeatureStrings((p) => ({ ...p, [key]: value })),
           }}
+          unrecognised={unrecognisedFeatures}
+          onRemoveUnrecognised={(key) =>
+            setUnrecognisedFeatures((prev) => Object.fromEntries(Object.entries(prev).filter(([k]) => k !== key)))
+          }
           taskTypes={{
             ratios: taskTypeRatios,
             enabled: taskTypeEnabled,
@@ -629,8 +605,6 @@ export default function ModelFormModal({ initial, models, defaultType, onClose, 
           }}
         />
       )}
-
-      {tab === 'advanced' && <AdvancedTab extraFeatures={extraFeatures} setExtraFeatures={setExtraFeatures} />}
 
       {error && (
         <div style={{ marginTop: 12 }}>

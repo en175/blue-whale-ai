@@ -1,5 +1,23 @@
 import { describe, expect, it } from 'vitest';
+import {
+  FEATURE_BOOL_LABELS,
+  FEATURE_NUMBER_LABELS,
+  FEATURE_STRING_LABELS,
+} from '@/admin/enums';
 import { buildVideoDimensions, dropKnownFeatures, pickVideoDimensions } from './feature-fields';
+import { KNOWN_FEATURE_KEYS } from './model-form';
+
+describe('结构化控件与 KNOWN 键集合必须对齐', () => {
+  it('每个有控件的键都在 KNOWN_FEATURE_KEYS 里，否则会重复出现在「未识别字段」', () => {
+    const known = new Set<string>(KNOWN_FEATURE_KEYS);
+    const controlled = [
+      ...Object.keys(FEATURE_BOOL_LABELS),
+      ...Object.keys(FEATURE_NUMBER_LABELS),
+      ...Object.keys(FEATURE_STRING_LABELS),
+    ];
+    expect(controlled.filter((key) => !known.has(key))).toEqual([]);
+  });
+});
 
 describe('输出像素表 video_dimensions', () => {
   it('读回：认 snake_case 与 camelCase 两种写法', () => {
@@ -29,8 +47,8 @@ describe('输出像素表 video_dimensions', () => {
   });
 });
 
-describe('高级 JSON 与结构化控件的边界', () => {
-  it('★ 归结构化控件管的键不进高级 JSON（对象键与标量键都是）', () => {
+describe('结构化控件与未识别字段的边界', () => {
+  it('★ 归结构化控件管的键不进未识别字段（对象键与标量键都是）', () => {
     const extra = dropKnownFeatures({
       video_dimensions: { 'resolution=480p|aspect_ratio=16:9': '864x496' },
       videoDimensions: { 'resolution=480p|aspect_ratio=16:9': '864x496' },
@@ -41,7 +59,7 @@ describe('高级 JSON 与结构化控件的边界', () => {
     expect(extra).toEqual({});
   });
 
-  it('★ 类型不符的脏值留在高级 JSON 里原样回写（静默删掉比让人看到它更危险）', () => {
+  it('★ 类型不符的脏值留在未识别字段里原样回写（静默删掉比让人看到它更危险）', () => {
     const extra = dropKnownFeatures({
       video_dimensions: ['oops'],
       task_types: 'oops',

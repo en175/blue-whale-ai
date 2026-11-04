@@ -327,6 +327,24 @@ service BillingAdminService {
 
   // 当前生效的定价目录原文（运营页展示 + 排查「这个模型为什么算不出价」）。
   rpc AdminGetActiveCatalog(AdminGetActiveCatalogRequest) returns (AdminGetActiveCatalogResponse);
+
+  rpc AdminGrant(AdminGrantRequest) returns (AdminGrantResponse);
+
+  rpc AdminRefund(AdminRefundRequest) returns (AdminRefundResponse);
+
+  rpc AdminPublishCatalog(AdminPublishCatalogRequest) returns (AdminPublishCatalogResponse);
+
+  rpc AdminListPromotions(AdminListPromotionsRequest) returns (AdminListPromotionsResponse);
+
+  rpc AdminUpsertPromotion(AdminUpsertPromotionRequest) returns (AdminUpsertPromotionResponse);
+
+  rpc AdminDeletePromotion(AdminDeletePromotionRequest) returns (AdminDeletePromotionResponse);
+
+  rpc AdminListMemberDiscounts(AdminListMemberDiscountsRequest) returns (AdminListMemberDiscountsResponse);
+
+  rpc AdminUpsertMemberDiscount(AdminUpsertMemberDiscountRequest) returns (AdminUpsertMemberDiscountResponse);
+
+  rpc AdminDeleteMemberDiscount(AdminDeleteMemberDiscountRequest) returns (AdminDeleteMemberDiscountResponse);
 }
 
 message AdminListTransactionsRequest {
@@ -465,4 +483,153 @@ message AdminGetActiveCatalogResponse {
   // （`billing-admin-client.ts` 的 `fetchCreditsPerYuan` → 取不到即停，不回落默认值）：
   // 少了这个字段，「用户看到的积分」就没了核对基准。没有生效目录时 -1。
   int64  credits_per_yuan = 4;
+}
+
+message AdminGrantRequest {
+  int64  user_id    = 1;
+  string source     = 2;
+  int64  amount     = 3;
+  string biz_id     = 4;
+  string biz_type   = 5;
+  string grant_key  = 6;
+  string expires_at = 7;
+}
+
+message AdminGrantResponse {
+  int64  lot_id          = 1;
+  bool   duplicated      = 2;
+  string existing_biz_id = 3;
+}
+
+message AdminRefundRequest {
+  int64  job_id = 1;
+  string reason = 2;
+}
+
+message AdminRefundResponse {
+  int64  job_id = 1;
+  string status = 2;
+}
+
+message AdminPublishCatalogRequest {
+  string document_json = 1;
+  string published_by  = 2;
+  string note          = 3;
+}
+
+message AdminPublishCatalogResponse {
+  int64  catalog_version = 1;
+  string document_hash   = 2;
+  int64  credits_per_yuan = 3;
+}
+
+message AdminListPromotionsRequest {
+  string status = 1;
+}
+
+message AdminListPromotionsResponse {
+  repeated AdminPromotion items = 1;
+}
+
+message AdminUpsertPromotionRequest {
+  int64               id       = 1;
+  string              operator = 2;
+  AdminPromotionInput input    = 3;
+}
+
+message AdminUpsertPromotionResponse {
+  AdminPromotion promotion = 1;
+}
+
+message AdminDeletePromotionRequest {
+  int64 id = 1;
+}
+
+message AdminDeletePromotionResponse {
+  int64 id      = 1;
+  bool  deleted = 2;
+}
+
+message AdminPromotionInput {
+  string code        = 1;
+  string name        = 2;
+  int32  discount_bp = 3;
+  repeated string model_ids  = 4;
+  repeated string task_types = 5;
+  repeated string tier_scope = 6;
+  string start_at    = 7;
+  string end_at      = 8;
+  string daily_time_start = 9;
+  string daily_time_end   = 10;
+  repeated int32 days_of_week = 11;
+  string status      = 12;
+  int32  priority    = 13;
+}
+
+message AdminPromotion {
+  int64  id          = 1;
+  string code        = 2;
+  string name        = 3;
+  int32  discount_bp = 4;
+  repeated string model_ids  = 5;
+  repeated string task_types = 6;
+  repeated string tier_scope = 7;
+  string start_at    = 8;
+  string end_at      = 9;
+  string daily_time_start = 10;
+  string daily_time_end   = 11;
+  repeated int32 days_of_week = 12;
+  string status      = 13;
+  int32  priority    = 14;
+  string created_by  = 15;
+  string gmt_create  = 16;
+  string gmt_modified = 17;
+}
+
+message AdminListMemberDiscountsRequest {
+  string tier   = 1;
+  string status = 2;
+}
+
+message AdminListMemberDiscountsResponse {
+  repeated AdminMemberDiscount items = 1;
+}
+
+message AdminUpsertMemberDiscountRequest {
+  int64                    id    = 1;
+  AdminMemberDiscountInput input = 2;
+}
+
+message AdminUpsertMemberDiscountResponse {
+  AdminMemberDiscount discount = 1;
+}
+
+message AdminDeleteMemberDiscountRequest {
+  int64 id = 1;
+}
+
+message AdminDeleteMemberDiscountResponse {
+  int64 id      = 1;
+  bool  deleted = 2;
+}
+
+message AdminMemberDiscountInput {
+  string tier          = 1;
+  string model_pattern = 2;
+  string task_pattern  = 3;
+  int32  discount_bp   = 4;
+  int32  priority      = 5;
+  string status        = 6;
+}
+
+message AdminMemberDiscount {
+  int64  id            = 1;
+  string tier          = 2;
+  string model_pattern = 3;
+  string task_pattern  = 4;
+  int32  discount_bp   = 5;
+  int32  priority      = 6;
+  string status        = 7;
+  string gmt_create    = 8;
+  string gmt_modified  = 9;
 }

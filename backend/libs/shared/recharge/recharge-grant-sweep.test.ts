@@ -62,7 +62,6 @@ function warnRecord(spy: { mock: { calls: unknown[][] } }, event: string) {
 describe("RechargeService — 主动对账一轮", () => {
   beforeEach(() => {
     vi.stubEnv("PAY_SERVER_BASE_URL", "https://pay.example.com");
-    vi.stubEnv("BILLING_ADMIN_URL", "https://billing.example.com");
     vi.stubEnv(SYSTEM_SETTINGS_SECRET_ENV, "a".repeat(64));
     freshGrpcUrl();
   });
@@ -229,7 +228,7 @@ describe("RechargeService — 主动对账一轮", () => {
       skipped: 1,
       abandoned: 0,
     });
-    expect(http.calls.filter((c) => c.url.endsWith("/admin/credits/grants"))).toHaveLength(1);
+    expect(http.grantBodies).toHaveLength(1);
   });
 
   it("★ 超过重试窗口：不再重试（billing 一次都不打），也不再进扫描范围", async () => {
@@ -251,7 +250,7 @@ describe("RechargeService — 主动对账一轮", () => {
       skipped: 0,
       abandoned: 1,
     });
-    expect(http.calls.filter((c) => c.url.endsWith("/admin/credits/grants"))).toHaveLength(0);
+    expect(http.grantBodies).toHaveLength(0);
     expect(orders.get(created.tradeNo)?.status).toBe("paid_pending");
 
     const metric = logSpy.mock.calls

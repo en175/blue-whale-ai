@@ -32,7 +32,6 @@ const unifiedOrders = (http: ReturnType<typeof makeHttp>) =>
 describe("RechargeService — 下单防重", () => {
   beforeEach(() => {
     vi.stubEnv("PAY_SERVER_BASE_URL", "https://pay.example.com");
-    vi.stubEnv("BILLING_ADMIN_URL", "https://billing.example.com");
     vi.stubEnv(SYSTEM_SETTINGS_SECRET_ENV, "a".repeat(64));
     freshGrpcUrl();
   });

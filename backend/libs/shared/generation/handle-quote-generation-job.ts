@@ -113,7 +113,9 @@ export async function handleQuoteGenerationJob(
     }
   }
 
-  if (validateGenerationRequest(type, body, capability)) return ok(EMPTY_QUOTE);
+  if (validateGenerationRequest(type, body, capability, { requirePrompt: false })) {
+    return ok(EMPTY_QUOTE);
+  }
 
   const ruling = ruleSampleMode({
     type,
@@ -168,7 +170,7 @@ export async function handleQuoteGenerationJob(
   if (
     effectiveBody !== body &&
     (type === "video" || type === "audio") &&
-    validateGenerationRequest(type, effectiveBody, capability)
+    validateGenerationRequest(type, effectiveBody, capability, { requirePrompt: false })
   ) {
     return ok(EMPTY_QUOTE);
   }

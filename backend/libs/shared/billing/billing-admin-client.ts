@@ -2,17 +2,26 @@ import { create } from "@bufbuild/protobuf";
 import { Code, ConnectError, createClient, type Client } from "@connectrpc/connect";
 import { createGrpcTransport } from "@connectrpc/connect-node";
 import { wallClockRfc3339 } from "@lib/core";
-import { TRACE_ID_HEADER, getCurrentTraceId } from "@lib/core/logging";
 import {
   AdminConsumedCreditsRequestSchema,
+  AdminDeleteMemberDiscountRequestSchema,
+  AdminDeletePromotionRequestSchema,
   AdminGetActiveCatalogRequestSchema,
+  AdminGrantRequestSchema,
+  AdminListMemberDiscountsRequestSchema,
+  AdminListPromotionsRequestSchema,
   AdminListTransactionsRequestSchema,
+  AdminMemberDiscountInputSchema,
+  AdminPromotionInputSchema,
+  AdminPublishCatalogRequestSchema,
   AdminQueryUserStatsRequestSchema,
+  AdminUpsertMemberDiscountRequestSchema,
+  AdminUpsertPromotionRequestSchema,
   BillingAdminService,
+  type AdminMemberDiscount,
+  type AdminPromotion,
 } from "../../contracts/gen/billing/v1/billing_pb.js";
 import { BillingConfigError, billingEndpoint } from "./billing-client.js";
-
-export const BILLING_ADMIN_URL_ENV = "BILLING_ADMIN_URL";
 
 export class BillingAdminConfigError extends Error {
   constructor(message: string) {
@@ -35,19 +44,10 @@ export class CatalogRejectedError extends Error {
   }
 }
 
-export function billingAdminUrl(env: NodeJS.ProcessEnv = process.env): string {
-  const raw = (env[BILLING_ADMIN_URL_ENV] ?? "").trim();
-  if (!raw) {
-    throw new BillingAdminConfigError(
-      `计费管理端地址未配置（缺环境变量 ${BILLING_ADMIN_URL_ENV}）：充值到账必须能发放积分，` +
-        `不能在没有计费服务的情况下放行`,
-    );
-  }
-  return raw.replace(/\/+$/, "");
-}
-
 
 const adminClients = new Map<string, Client<typeof BillingAdminService>>();
+
+const ADMIN_CALL_OPTIONS = { timeoutMs: 10_000 } as const;
 
 function adminClient(env: NodeJS.ProcessEnv): Client<typeof BillingAdminService> {
   const baseUrl = billingEndpoint(env);
@@ -86,6 +86,7 @@ export async function fetchActiveCatalog(
   try {
     const active = await adminClient(env).adminGetActiveCatalog(
       create(AdminGetActiveCatalogRequestSchema, {}),
+      ADMIN_CALL_OPTIONS,
     );
     return {
       catalogVersion: Number(active.version),
@@ -126,29 +127,26 @@ export async function publishCatalog(
   input: PublishCatalogInput,
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<PublishCatalogResult> {
-  const params = new URLSearchParams({ publishedBy: input.publishedBy });
-  if (input.note) params.set("note", input.note);
-
-  const response = await send(`/admin/catalogs?${params.toString()}`, {
-    method: "POST",
-    body: input.document,
-    env,
-  });
-  if (response.status === 400) {
-    const detail = await errorDetail(response);
-    throw new CatalogRejectedError(`目录被拒${detail}`);
-  }
-  if (!response.ok) {
-    throw new BillingAdminError(
-      `发布定价目录失败：billing 管理端返回 HTTP ${response.status}${await errorDetail(response)}`,
+  try {
+    const response = await adminClient(env).adminPublishCatalog(
+      create(AdminPublishCatalogRequestSchema, {
+        documentJson: input.document,
+        publishedBy: input.publishedBy,
+        note: input.note ?? "",
+      }),
+      ADMIN_CALL_OPTIONS,
     );
+    return {
+      catalogVersion: Number(response.catalogVersion),
+      documentHash: response.documentHash,
+      creditsPerYuan: Number(response.creditsPerYuan),
+    };
+  } catch (error) {
+    if (error instanceof ConnectError && error.code === Code.InvalidArgument) {
+      throw new CatalogRejectedError(`目录被拒：${error.rawMessage}`);
+    }
+    throw asAdminError("发布定价目录", error);
   }
-  const data = (await response.json()) as Partial<PublishCatalogResult>;
-  return {
-    catalogVersion: data.catalogVersion ?? -1,
-    documentHash: data.documentHash ?? "",
-    creditsPerYuan: data.creditsPerYuan ?? -1,
-  };
 }
 
 
@@ -172,35 +170,27 @@ export async function grantCredits(
   input: GrantCreditsInput,
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<GrantCreditsResult> {
-  const path = "/admin/credits/grants";
-  const init: RequestInit & { env: NodeJS.ProcessEnv } = {
-    method: "POST",
-    body: JSON.stringify({
-      userId: input.userId,
-      source: input.source ?? "purchased",
-      amount: input.credits,
-      bizId: input.bizId,
-      bizType: input.bizType ?? "recharge",
-      ...(input.grantKey ? { grantKey: input.grantKey } : {}),
-      ...(input.expiresAt ? { expiresAt: input.expiresAt.toISOString() } : {}),
-    }),
-    env,
-  };
-
-  const response = await send(path, init);
-  if (response.status === 409) {
-    const body = (await response.json().catch(() => null)) as { existingBizId?: unknown } | null;
+  try {
+    const response = await adminClient(env).adminGrant(
+      create(AdminGrantRequestSchema, {
+        userId: BigInt(input.userId),
+        source: input.source ?? "purchased",
+        amount: BigInt(input.credits),
+        bizId: input.bizId,
+        bizType: input.bizType ?? "recharge",
+        grantKey: input.grantKey ?? "",
+        expiresAt: input.expiresAt ? input.expiresAt.toISOString() : "",
+      }),
+      ADMIN_CALL_OPTIONS,
+    );
     return {
-      lotId: "",
-      duplicated: true,
-      existingBizId: typeof body?.existingBizId === "string" ? body.existingBizId : null,
+      lotId: response.lotId === 0n ? "" : String(response.lotId),
+      duplicated: response.duplicated,
+      existingBizId: response.existingBizId === "" ? null : response.existingBizId,
     };
+  } catch (error) {
+    throw asAdminError("发放积分", error);
   }
-  if (!response.ok) {
-    throw new BillingAdminError(`发放积分失败：billing 管理端返回 HTTP ${response.status}`);
-  }
-  const data = (await response.json()) as { lotId?: number | string };
-  return { lotId: String(data.lotId ?? ""), duplicated: false, existingBizId: null };
 }
 
 
@@ -242,6 +232,7 @@ export async function listAdminTransactions(
         pageSize: query.pageSize ?? 0,
         page: query.page ?? 0,
       }),
+      ADMIN_CALL_OPTIONS,
     );
 
     return {
@@ -278,6 +269,7 @@ export async function fetchConsumedCredits(
         from: rfc3339(from),
         to: rfc3339(to),
       }),
+      ADMIN_CALL_OPTIONS,
     );
     return Number(response.consumedCredits);
   } catch (error) {
@@ -303,6 +295,7 @@ export async function fetchAdminUserStats(
       create(AdminQueryUserStatsRequestSchema, {
         userIds: userIds.map((id) => BigInt(id)),
       }),
+      ADMIN_CALL_OPTIONS,
     );
     const result = new Map<number, AdminUserStats>();
     for (const [userId, stats] of Object.entries(response.stats)) {
@@ -394,33 +387,29 @@ export interface PromotionInput {
   priority: number;
 }
 
-const MEMBER_DISCOUNTS_PATH = "/admin/member-discounts";
-const PROMOTIONS_PATH = "/admin/promotions";
-
 export async function listMemberDiscounts(
   query: { tier?: string; status?: string } = {},
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<BillingMemberDiscount[]> {
-  const params = new URLSearchParams();
-  if (query.tier) params.set("tier", query.tier);
-  if (query.status) params.set("status", query.status);
-  const qs = params.toString();
-  return discountRequest<BillingMemberDiscount[]>(
-    `${MEMBER_DISCOUNTS_PATH}${qs ? `?${qs}` : ""}`,
-    { method: "GET" },
-    env,
-  );
+  try {
+    const response = await adminClient(env).adminListMemberDiscounts(
+      create(AdminListMemberDiscountsRequestSchema, {
+        tier: query.tier ?? "",
+        status: query.status ?? "",
+      }),
+      ADMIN_CALL_OPTIONS,
+    );
+    return response.items.map(toMemberDiscount);
+  } catch (error) {
+    throw discountError(error);
+  }
 }
 
 export async function createMemberDiscount(
   input: MemberDiscountInput,
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<BillingMemberDiscount> {
-  return discountRequest<BillingMemberDiscount>(
-    MEMBER_DISCOUNTS_PATH,
-    { method: "POST", body: JSON.stringify(input) },
-    env,
-  );
+  return upsertMemberDiscount(0, input, env);
 }
 
 export async function updateMemberDiscount(
@@ -428,32 +417,65 @@ export async function updateMemberDiscount(
   input: MemberDiscountInput,
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<BillingMemberDiscount> {
-  return discountRequest<BillingMemberDiscount>(
-    `${MEMBER_DISCOUNTS_PATH}/${id}`,
-    { method: "PUT", body: JSON.stringify(input) },
-    env,
-  );
+  return upsertMemberDiscount(id, input, env);
+}
+
+async function upsertMemberDiscount(
+  id: number,
+  input: MemberDiscountInput,
+  env: NodeJS.ProcessEnv,
+): Promise<BillingMemberDiscount> {
+  try {
+    const response = await adminClient(env).adminUpsertMemberDiscount(
+      create(AdminUpsertMemberDiscountRequestSchema, {
+        id: BigInt(id),
+        input: create(AdminMemberDiscountInputSchema, {
+          tier: input.tier,
+          modelPattern: input.modelPattern,
+          taskPattern: input.taskPattern,
+          discountBp: input.discountBp,
+          priority: input.priority,
+          status: input.status,
+        }),
+      }),
+      ADMIN_CALL_OPTIONS,
+    );
+    if (response.discount === undefined) {
+      throw new BillingAdminError("billing 返回的会员折扣为空");
+    }
+    return toMemberDiscount(response.discount);
+  } catch (error) {
+    throw discountError(error);
+  }
 }
 
 export async function deleteMemberDiscount(
   id: number,
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<void> {
-  await discountRequest<unknown>(`${MEMBER_DISCOUNTS_PATH}/${id}`, { method: "DELETE" }, env);
+  try {
+    await adminClient(env).adminDeleteMemberDiscount(
+      create(AdminDeleteMemberDiscountRequestSchema, { id: BigInt(id) }),
+      ADMIN_CALL_OPTIONS,
+    );
+  } catch (error) {
+    throw discountError(error);
+  }
 }
 
 export async function listPromotions(
   query: { status?: string } = {},
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<BillingPromotion[]> {
-  const params = new URLSearchParams();
-  if (query.status) params.set("status", query.status);
-  const qs = params.toString();
-  return discountRequest<BillingPromotion[]>(
-    `${PROMOTIONS_PATH}${qs ? `?${qs}` : ""}`,
-    { method: "GET" },
-    env,
-  );
+  try {
+    const response = await adminClient(env).adminListPromotions(
+      create(AdminListPromotionsRequestSchema, { status: query.status ?? "" }),
+      ADMIN_CALL_OPTIONS,
+    );
+    return response.items.map(toPromotion);
+  } catch (error) {
+    throw discountError(error);
+  }
 }
 
 export async function createPromotion(
@@ -461,12 +483,7 @@ export async function createPromotion(
   operator: string,
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<BillingPromotion> {
-  const params = new URLSearchParams({ operator });
-  return discountRequest<BillingPromotion>(
-    `${PROMOTIONS_PATH}?${params.toString()}`,
-    { method: "POST", body: JSON.stringify(input) },
-    env,
-  );
+  return upsertPromotion(0, input, operator, env);
 }
 
 export async function updatePromotion(
@@ -474,63 +491,111 @@ export async function updatePromotion(
   input: PromotionInput,
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<BillingPromotion> {
-  return discountRequest<BillingPromotion>(
-    `${PROMOTIONS_PATH}/${id}`,
-    { method: "PUT", body: JSON.stringify(input) },
-    env,
-  );
+  return upsertPromotion(id, input, "admin", env);
+}
+
+async function upsertPromotion(
+  id: number,
+  input: PromotionInput,
+  operator: string,
+  env: NodeJS.ProcessEnv,
+): Promise<BillingPromotion> {
+  try {
+    const response = await adminClient(env).adminUpsertPromotion(
+      create(AdminUpsertPromotionRequestSchema, {
+        id: BigInt(id),
+        operator,
+        input: promotionInput(input),
+      }),
+      ADMIN_CALL_OPTIONS,
+    );
+    if (response.promotion === undefined) {
+      throw new BillingAdminError("billing 返回的活动为空");
+    }
+    return toPromotion(response.promotion);
+  } catch (error) {
+    throw discountError(error);
+  }
 }
 
 export async function deletePromotion(
   id: number,
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<void> {
-  await discountRequest<unknown>(`${PROMOTIONS_PATH}/${id}`, { method: "DELETE" }, env);
-}
-
-async function discountRequest<T>(
-  path: string,
-  init: RequestInit,
-  env: NodeJS.ProcessEnv,
-): Promise<T> {
-  const response = await send(path, { ...init, env });
-  if (response.status === 400) {
-    throw new DiscountRejectedError(`折扣配置被拒${await errorDetail(response)}`);
-  }
-  if (response.status === 404) {
-    throw new DiscountNotFoundError(`目标不存在${await errorDetail(response)}`);
-  }
-  if (!response.ok) {
-    throw new BillingAdminError(
-      `计费管理端 ${path} 返回 HTTP ${response.status}${await errorDetail(response)}`,
-    );
-  }
-  const text = await response.text();
-  return (text ? JSON.parse(text) : undefined) as T;
-}
-
-
-async function errorDetail(response: Response): Promise<string> {
   try {
-    const body = (await response.json()) as { message?: unknown };
-    return typeof body.message === "string" && body.message ? `：${body.message}` : "";
-  } catch {
-    return "";
+    await adminClient(env).adminDeletePromotion(
+      create(AdminDeletePromotionRequestSchema, { id: BigInt(id) }),
+      ADMIN_CALL_OPTIONS,
+    );
+  } catch (error) {
+    throw discountError(error);
   }
 }
 
-function send(
-  path: string,
-  init: RequestInit & { env: NodeJS.ProcessEnv },
-): Promise<Response> {
-  const { env, ...rest } = init;
-  const headers = new Headers(rest.headers);
-  headers.set("Content-Type", "application/json");
-  const traceId = getCurrentTraceId();
-  if (traceId && !headers.has(TRACE_ID_HEADER)) headers.set(TRACE_ID_HEADER, traceId);
-  return fetch(`${billingAdminUrl(env)}${path}`, {
-    ...rest,
-    headers,
-    signal: AbortSignal.timeout(10_000),
+function promotionInput(input: PromotionInput) {
+  return create(AdminPromotionInputSchema, {
+    code: input.code,
+    name: input.name,
+    discountBp: input.discountBp,
+    modelIds: input.modelIds,
+    taskTypes: input.taskTypes ?? [],
+    tierScope: input.tierScope ?? [],
+    startAt: input.startAt,
+    endAt: input.endAt,
+    dailyTimeStart: input.dailyTimeStart ?? "",
+    dailyTimeEnd: input.dailyTimeEnd ?? "",
+    daysOfWeek: input.daysOfWeek ?? [],
+    status: input.status,
+    priority: input.priority,
   });
+}
+
+function toPromotion(promotion: AdminPromotion): BillingPromotion {
+  return {
+    id: Number(promotion.id),
+    code: promotion.code,
+    name: promotion.name,
+    discountBp: promotion.discountBp,
+    modelIds: promotion.modelIds,
+    taskTypes: promotion.taskTypes.length === 0 ? null : promotion.taskTypes,
+    tierScope: promotion.tierScope.length === 0 ? null : promotion.tierScope,
+    startAt: promotion.startAt,
+    endAt: promotion.endAt,
+    dailyTimeStart: promotion.dailyTimeStart === "" ? null : promotion.dailyTimeStart,
+    dailyTimeEnd: promotion.dailyTimeEnd === "" ? null : promotion.dailyTimeEnd,
+    daysOfWeek: promotion.daysOfWeek.length === 0 ? null : promotion.daysOfWeek,
+    status: promotion.status,
+    priority: promotion.priority,
+    createdBy: promotion.createdBy,
+    gmtCreate: promotion.gmtCreate,
+    gmtModified: promotion.gmtModified,
+  };
+}
+
+function toMemberDiscount(discount: AdminMemberDiscount): BillingMemberDiscount {
+  return {
+    id: Number(discount.id),
+    tier: discount.tier,
+    modelPattern: discount.modelPattern,
+    taskPattern: discount.taskPattern,
+    discountBp: discount.discountBp,
+    priority: discount.priority,
+    status: discount.status,
+    gmtCreate: discount.gmtCreate,
+    gmtModified: discount.gmtModified,
+  };
+}
+
+function discountError(
+  error: unknown,
+): BillingAdminError | BillingAdminConfigError | DiscountNotFoundError | DiscountRejectedError {
+  if (error instanceof ConnectError) {
+    if (error.code === Code.InvalidArgument) {
+      return new DiscountRejectedError(`折扣配置被拒：${error.rawMessage}`);
+    }
+    if (error.code === Code.NotFound) {
+      return new DiscountNotFoundError(`目标不存在：${error.rawMessage}`);
+    }
+  }
+  return asAdminError("管理折扣配置", error);
 }

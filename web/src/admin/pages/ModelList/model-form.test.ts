@@ -614,7 +614,7 @@ describe('features 键形与类型（IKHBDO）', () => {
     expect(camelFeatureKey('max_prompt_length')).toBe('maxPromptLength');
   });
 
-  it('类型不符的脏值不归结构化控件管（会留在高级 JSON 里回写，而不是被删掉）', () => {
+  it('类型不符的脏值不归结构化控件管（会留在未识别字段里回写，而不是被删掉）', () => {
     expect(featureValueTypeOk('image_reference_max', 4)).toBe(true);
     expect(featureValueTypeOk('image_reference_max', '4')).toBe(false);
     expect(featureValueTypeOk('tools', true)).toBe(true);

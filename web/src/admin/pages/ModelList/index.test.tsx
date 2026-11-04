@@ -246,6 +246,14 @@ function button(label: string): HTMLButtonElement {
   return target;
 }
 
+function checkbox(label: string): HTMLButtonElement {
+  const target = [...document.body.querySelectorAll<HTMLButtonElement>('button[role="checkbox"]')].find((b) =>
+    b.textContent?.includes(label),
+  );
+  if (!target) throw new Error(`没有找到勾选框：${label}`);
+  return target;
+}
+
 async function click(el: HTMLElement | undefined | null) {
   if (!el) throw new Error('要点的元素不存在');
   await act(async () => el.click());
@@ -271,6 +279,12 @@ async function openSelect(trigger: HTMLElement | null) {
   await settle();
 }
 
+
+function tabNames(): string[] {
+  return [...document.body.querySelectorAll<HTMLButtonElement>('button[role="tab"]')].map(
+    (b) => b.textContent?.trim() ?? '',
+  );
+}
 
 async function openTab(label: string) {
   const tab = [...document.body.querySelectorAll<HTMLButtonElement>('button[role="tab"]')].find(
@@ -330,7 +344,7 @@ async function pickChannel(label: string) {
 function shownMatrix(): 'gpt' | 'banana' | 'seedream' | null {
   if ((document.body.textContent ?? '').includes('尺寸 → quality')) return 'banana';
   if (document.body.querySelector('input[aria-label*=" 行 "][aria-label$=" 列"]')) return 'seedream';
-  if ((document.body.textContent ?? '').includes('留空')) return 'gpt';
+  if (document.body.querySelector('[role="combobox"][aria-label*=" 行 "][aria-label$=" 列"]')) return 'gpt';
   return null;
 }
 
@@ -421,6 +435,12 @@ describe('ModelList 按类型分表单', () => {
     expect(document.body.textContent).toContain('视频模式 task_types');
     expect(document.body.textContent).toContain('first_last_frame');
     expect(document.body.textContent).toContain('extend');
+
+    const text = document.body.textContent ?? '';
+    expect(text.indexOf('特性 features（结构化）')).toBeGreaterThan(
+      text.indexOf('视频模式 task_types'),
+    );
+    expect(text).toContain('开关');
   });
 
   it('★ 切换渠道 → 下面换表（三种解析器各一次，都在「尺寸与素材」的「出站尺寸映射」）', async () => {
@@ -443,7 +463,7 @@ describe('ModelList 按类型分表单', () => {
     expect(shownMatrix()).toBe('seedream');
   });
 
-  it('新建文本模型：基础无供应商输入、尺寸与素材无尺寸/比例/时长，但 features 与高级 JSON 仍有出口', async () => {
+  it('新建文本模型：基础无供应商输入、尺寸与素材无尺寸/比例/时长，但 features 与未识别字段仍有出口', async () => {
     api.fetchAdminModels.mockResolvedValue([]);
     await renderPage();
     await openCreateModal();
@@ -457,11 +477,11 @@ describe('ModelList 按类型分表单', () => {
 
 
     expect(document.body.textContent).toContain('特性 features（结构化）');
-    await openTab('高级');
-    expect(document.body.textContent).toContain('高级 JSON');
+    expect(inputByLabel('提示词上限 max_prompt_length')).toBeInstanceOf(HTMLInputElement);
+    expect(tabNames()).not.toContain('高级');
   });
 
-  it('编辑音频行：身份字段在「基础」，默认时长/features 在「尺寸与素材」，高级 JSON 在「高级」', async () => {
+  it('编辑音频行：身份字段在「基础」，默认时长/features 都在「尺寸与素材」', async () => {
     api.fetchAdminModels.mockResolvedValue([audio]);
     await renderPage();
     await openRowEdit('音频');
@@ -479,8 +499,7 @@ describe('ModelList 按类型分表单', () => {
     expect(document.body.textContent).not.toContain('尺寸选项');
 
     expect(document.body.textContent).toContain('特性 features（结构化）');
-    await openTab('高级');
-    expect(document.body.textContent).toContain('高级 JSON');
+    expect(document.body.textContent).toContain('参考图大小上限字节 max_reference_image_bytes');
   });
 
   it('编辑 seedream 图片行：出现矩阵编辑器（在「尺寸与素材」）', async () => {
@@ -496,17 +515,100 @@ describe('ModelList 按类型分表单', () => {
     expect(cellInputs.length).toBe(1);
   });
 
-  it('「高级」tab 只剩 JSON 兜底：渠道控件与三张映射表都不在了', async () => {
-    api.fetchAdminModels.mockResolvedValue([gptImage]);
+  it('参考图上限三个新键与图片参考上限同处「数值」结构化分组（IKSLLC）', async () => {
+    api.fetchAdminModels.mockResolvedValue([videoPriced]);
     await renderPage();
-    await openRowEdit('图片');
-    await openTab('高级');
-    expect(document.body.textContent).toContain('高级 JSON');
-    expect(document.body.textContent).toContain('未识别字段');
+    await openRowEdit('视频');
+    await openTab('尺寸与素材');
 
-    expect(document.body.querySelector('button[aria-label="渠道"]')).toBeNull();
-    expect(matrixTable()).toBeUndefined();
-    expect(shownMatrix()).toBeNull();
+    for (const label of [
+      '图片参考上限 image_reference_max',
+      '参考图总像素上限 max_reference_image_pixels',
+      '参考图宽高比上限 max_reference_image_ratio',
+    ]) {
+      expect(inputByLabel(label)).toBeInstanceOf(HTMLInputElement);
+    }
+    expect(document.body.querySelector('textarea')).toBeNull();
+    expect(tabNames()).not.toContain('高级');
+  });
+
+  it('★ 参考图上限键预填 → 改宽高比 → 保存提交数值（含小数）', async () => {
+    api.fetchAdminModels.mockResolvedValue([
+      {
+        ...videoPriced,
+        features: { max_reference_image_pixels: 36_000_000, max_reference_image_ratio: 2.5 },
+      },
+    ]);
+    await renderPage();
+    await openRowEdit('视频');
+    await openTab('尺寸与素材');
+
+    expect(inputByLabel('参考图总像素上限 max_reference_image_pixels').value).toBe('36000000');
+    const ratioInput = inputByLabel('参考图宽高比上限 max_reference_image_ratio');
+    expect(ratioInput.value).toBe('2.5');
+
+    await type(ratioInput, '3.5');
+    await click(button('保存'));
+
+    const payload = api.updateAdminModel.mock.calls[0]?.[1] as { features: Record<string, unknown> };
+    expect(payload.features.max_reference_image_pixels).toBe(36_000_000);
+    expect(payload.features.max_reference_image_ratio).toBe(3.5);
+  });
+
+  it('★ 样片模式是结构化开关：取消勾选写入 false，未识别脏值原样保留', async () => {
+    api.fetchAdminModels.mockResolvedValue([
+      { ...videoPriced, features: { sample_mode: true, tools: 'yes', legacy_key: 7 } },
+    ]);
+    await renderPage();
+    await openRowEdit('视频');
+    await openTab('尺寸与素材');
+
+    expect(document.body.textContent).toContain('未识别字段');
+    expect(document.body.textContent).toContain('tools');
+    expect(document.body.textContent).toContain('legacy_key');
+
+    await click(checkbox('样片模式 sample_mode'));
+    await click(button('保存'));
+
+    const payload = api.updateAdminModel.mock.calls[0]?.[1] as { features: Record<string, unknown> };
+    expect(payload.features.sample_mode).toBe(false);
+    expect(payload.features.tools).toBe('yes');
+    expect(payload.features.legacy_key).toBe(7);
+  });
+
+  it('★ 水印勾选写入 true，未配置过的布尔键不写成 false', async () => {
+    api.fetchAdminModels.mockResolvedValue([{ ...videoPriced, features: {} }]);
+    await renderPage();
+    await openRowEdit('视频');
+    await openTab('尺寸与素材');
+
+    await click(checkbox('水印 watermark'));
+    await click(button('保存'));
+
+    const payload = api.updateAdminModel.mock.calls[0]?.[1] as { features: Record<string, unknown> };
+    expect(payload.features.watermark).toBe(true);
+    expect(payload.features.sample_mode).toBeUndefined();
+  });
+
+  it('★ 未识别字段删除按钮只删那一个键', async () => {
+    api.fetchAdminModels.mockResolvedValue([
+      { ...videoPriced, features: { tools: 'yes', legacy_key: 7 } },
+    ]);
+    await renderPage();
+    await openRowEdit('视频');
+    await openTab('尺寸与素材');
+
+    const removeButtons = [...document.body.querySelectorAll<HTMLButtonElement>('button')].filter(
+      (b) => b.textContent?.trim() === '删除',
+    );
+    expect(removeButtons.length).toBe(2);
+    await click(removeButtons[0]);
+
+    await click(button('保存'));
+
+    const payload = api.updateAdminModel.mock.calls[0]?.[1] as { features: Record<string, unknown> };
+    expect(payload.features.tools).toBeUndefined();
+    expect(payload.features.legacy_key).toBe(7);
   });
 
   it('gpt 行删掉一个尺寸行后，其它交叉格的值仍在', async () => {
@@ -1168,14 +1270,19 @@ describe('ModelList 渠道', () => {
     expect(payload.request_mapping).toEqual({ quality: {}, size: {} });
   });
 
-  it('★ 出站协议没有自由文本框、也不在高级 JSON 里（它由渠道决定，键已整键退役）', async () => {
-    api.fetchAdminModels.mockResolvedValue([gptOfficial]);
+  it('★ 出站协议没有可编辑文本框（它由渠道决定，键已整键退役）', async () => {
+    api.fetchAdminModels.mockResolvedValue([
+      { ...gptOfficial, features: { image_protocol: 'openai-images' } },
+    ]);
     await renderPage();
     await openRowEdit('图片');
     await openTab('尺寸与素材');
     expect(document.body.textContent).not.toContain('出站图片协议');
-    await openTab('高级');
+    expect(document.body.querySelector('textarea')).toBeNull();
 
-    expect(document.body.querySelector('textarea')?.value ?? '').not.toContain('image_protocol');
+    const editable = [...document.body.querySelectorAll<HTMLInputElement>('input:not([readonly])')].map(
+      (el) => el.value,
+    );
+    expect(editable.some((value) => value.includes('openai-images'))).toBe(false);
   });
 });

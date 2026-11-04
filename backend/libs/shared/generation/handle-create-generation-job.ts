@@ -7,7 +7,11 @@ import {
 import type { ReferenceItemInput } from "./reference-item-input.js";
 import { freezePromptPlans } from "./prompt-plan-snapshot.js";
 import { checkReferenceLimits } from "../generation-runtime/reference-limits.js";
-import { validateReferenceImages } from "../generation-runtime/image-reference-validation.js";
+import {
+  validateConfiguredReferenceImages,
+  validateReferenceImageMedia,
+  validateReferenceImages,
+} from "../generation-runtime/image-reference-validation.js";
 import {
   freezeReferenceLimits,
   validateReferences,
@@ -309,9 +313,14 @@ export type GenerationType = "image" | "video" | "audio";
 
 
 
+export interface ValidationOptions {
+  requirePrompt?: boolean;
+}
+
 function validateCommon(
   body: CreateGenerationJobBody,
   type: GenerationType,
+  options?: ValidationOptions,
 ): { code: string; message: string } | null {
 
   const hasTargetNode = body.target_node_id !== undefined;
@@ -321,18 +330,17 @@ function validateCommon(
   }
   const params = body.parameters as GenerationParameters | undefined;
 
+  if (!params) return { code: ERROR_INVALID_INPUT, message: "prompt 无效" };
 
-
-
-  if (
-    !params ||
-    (!isStr(params.prompt) && (params.prompt !== undefined || !hasTargetNode))
-  ) {
-    return { code: ERROR_INVALID_INPUT, message: "prompt 无效" };
-  }
-  const promptText = isStr(params.prompt) ? params.prompt : "";
-  if (!hasTargetNode && promptText.trim() === "") {
-    return { code: ERROR_INVALID_INPUT, message: "prompt 无效" };
+  const promptRequired = type === "audio" || options?.requirePrompt !== false;
+  if (promptRequired) {
+    if (!isStr(params.prompt) && (params.prompt !== undefined || !hasTargetNode)) {
+      return { code: ERROR_INVALID_INPUT, message: "prompt 无效" };
+    }
+    const promptText = isStr(params.prompt) ? params.prompt : "";
+    if (!hasTargetNode && promptText.trim() === "") {
+      return { code: ERROR_INVALID_INPUT, message: "prompt 无效" };
+    }
   }
   if (type !== "audio") {
 
@@ -717,14 +725,15 @@ interface ComposeInputContext {
 interface GenerationTypeStrategy {
   validate(
     body: CreateGenerationJobBody,
+    options?: ValidationOptions,
   ): { code: string; message: string } | null;
   composeInput(ctx: ComposeInputContext): Record<string, unknown>;
 }
 
 const imageStrategy: GenerationTypeStrategy = {
-  validate(body) {
+  validate(body, options) {
     return (
-      validateCommon(body, "image") ??
+      validateCommon(body, "image", options) ??
       validateRejectMaterialReferences(body) ??
       validateImageSingleRefs(body)
     );
@@ -757,9 +766,9 @@ const imageStrategy: GenerationTypeStrategy = {
 };
 
 const videoStrategy: GenerationTypeStrategy = {
-  validate(body) {
+  validate(body, options) {
 
-    return validateCommon(body, "video") ?? validateVideo(body);
+    return validateCommon(body, "video", options) ?? validateVideo(body);
   },
   composeInput({
     body,
@@ -898,11 +907,12 @@ export function validateGenerationRequest(
   type: GenerationType,
   body: CreateGenerationJobBody,
   capability?: ModelCapabilityView,
+  options?: ValidationOptions,
 ): { code: string; message: string } | null {
   const strategy = strategies[type];
   if (!strategy) return { code: ERROR_UNSUPPORTED_TYPE, message: "暂不支持该生成类型" };
   return (
-    strategy.validate(body) ?? validateCapabilityParams(type, body, capability)
+    strategy.validate(body, options) ?? validateCapabilityParams(type, body, capability)
   );
 }
 
@@ -2237,6 +2247,45 @@ export async function handleCreateGenerationJob(
           error instanceof Error ? error.message : "参考素材不受支持",
           { code },
         );
+      }
+      const legacyFrameIds = referencesProvided
+        ? []
+        : [assetId(body.first_frame_asset_id), assetId(body.last_frame_asset_id)].filter(
+            (id): id is string => id !== null,
+          );
+      const legacyFrameAssets =
+        legacyFrameIds.length > 0
+          ? await deps.assets.resolveInputAssets(legacyFrameIds, userId, projectId)
+          : [];
+      const imageAssets = [
+        ...ruling.assetsById.values(),
+        ...(referencesProvided ? [] : resolvedReferenceAssets),
+        ...legacyFrameAssets,
+      ].filter((asset) => asset.type === "image");
+      const imageLimitErr = validateConfiguredReferenceImages(
+        [...new Map(imageAssets.map((asset) => [asset.id, asset])).values()],
+        capability.features,
+      );
+      if (imageLimitErr) {
+        return fail(errorCodeToNumeric(ERROR_INVALID_REFERENCE), imageLimitErr.message, {
+          code: ERROR_INVALID_REFERENCE,
+          params: imageLimitErr.params,
+        });
+      }
+    }
+
+    if (type === "audio" && capability?.features) {
+      const maxBytes = capability.features.max_reference_image_bytes;
+      if (maxBytes != null) {
+        const imageMediaErr = validateReferenceImageMedia(
+          [...ruling.assetsById.values()].filter((asset) => asset.type === "image"),
+          maxBytes,
+        );
+        if (imageMediaErr) {
+          return fail(errorCodeToNumeric(imageMediaErr.code), imageMediaErr.message, {
+            code: imageMediaErr.code,
+          });
+        }
       }
     }
 
