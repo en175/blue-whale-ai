@@ -313,9 +313,14 @@ export type GenerationType = "image" | "video" | "audio";
 
 
 
+export interface ValidationOptions {
+  requirePrompt?: boolean;
+}
+
 function validateCommon(
   body: CreateGenerationJobBody,
   type: GenerationType,
+  options?: ValidationOptions,
 ): { code: string; message: string } | null {
 
   const hasTargetNode = body.target_node_id !== undefined;
@@ -325,18 +330,17 @@ function validateCommon(
   }
   const params = body.parameters as GenerationParameters | undefined;
 
+  if (!params) return { code: ERROR_INVALID_INPUT, message: "prompt 无效" };
 
-
-
-  if (
-    !params ||
-    (!isStr(params.prompt) && (params.prompt !== undefined || !hasTargetNode))
-  ) {
-    return { code: ERROR_INVALID_INPUT, message: "prompt 无效" };
-  }
-  const promptText = isStr(params.prompt) ? params.prompt : "";
-  if (!hasTargetNode && promptText.trim() === "") {
-    return { code: ERROR_INVALID_INPUT, message: "prompt 无效" };
+  const promptRequired = type === "audio" || options?.requirePrompt !== false;
+  if (promptRequired) {
+    if (!isStr(params.prompt) && (params.prompt !== undefined || !hasTargetNode)) {
+      return { code: ERROR_INVALID_INPUT, message: "prompt 无效" };
+    }
+    const promptText = isStr(params.prompt) ? params.prompt : "";
+    if (!hasTargetNode && promptText.trim() === "") {
+      return { code: ERROR_INVALID_INPUT, message: "prompt 无效" };
+    }
   }
   if (type !== "audio") {
 
@@ -721,14 +725,15 @@ interface ComposeInputContext {
 interface GenerationTypeStrategy {
   validate(
     body: CreateGenerationJobBody,
+    options?: ValidationOptions,
   ): { code: string; message: string } | null;
   composeInput(ctx: ComposeInputContext): Record<string, unknown>;
 }
 
 const imageStrategy: GenerationTypeStrategy = {
-  validate(body) {
+  validate(body, options) {
     return (
-      validateCommon(body, "image") ??
+      validateCommon(body, "image", options) ??
       validateRejectMaterialReferences(body) ??
       validateImageSingleRefs(body)
     );
@@ -761,9 +766,9 @@ const imageStrategy: GenerationTypeStrategy = {
 };
 
 const videoStrategy: GenerationTypeStrategy = {
-  validate(body) {
+  validate(body, options) {
 
-    return validateCommon(body, "video") ?? validateVideo(body);
+    return validateCommon(body, "video", options) ?? validateVideo(body);
   },
   composeInput({
     body,
@@ -902,11 +907,12 @@ export function validateGenerationRequest(
   type: GenerationType,
   body: CreateGenerationJobBody,
   capability?: ModelCapabilityView,
+  options?: ValidationOptions,
 ): { code: string; message: string } | null {
   const strategy = strategies[type];
   if (!strategy) return { code: ERROR_UNSUPPORTED_TYPE, message: "暂不支持该生成类型" };
   return (
-    strategy.validate(body) ?? validateCapabilityParams(type, body, capability)
+    strategy.validate(body, options) ?? validateCapabilityParams(type, body, capability)
   );
 }
 
