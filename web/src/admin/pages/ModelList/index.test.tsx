@@ -576,18 +576,18 @@ describe('ModelList 按类型分表单', () => {
     expect(payload.features.legacy_key).toBe(7);
   });
 
-  it('★ 水印勾选写入 true，未配置过的布尔键不写成 false', async () => {
+  it('★ 样片模式勾选写入 true，未配置过的布尔键不写成 false', async () => {
     api.fetchAdminModels.mockResolvedValue([{ ...videoPriced, features: {} }]);
     await renderPage();
     await openRowEdit('视频');
     await openTab('尺寸与素材');
 
-    await click(checkbox('水印 watermark'));
+    await click(checkbox('样片模式 sample_mode'));
     await click(button('保存'));
 
     const payload = api.updateAdminModel.mock.calls[0]?.[1] as { features: Record<string, unknown> };
-    expect(payload.features.watermark).toBe(true);
-    expect(payload.features.sample_mode).toBeUndefined();
+    expect(payload.features.sample_mode).toBe(true);
+    expect(payload.features.reference_image).toBeUndefined();
   });
 
   it('★ 未识别字段删除按钮只删那一个键', async () => {
