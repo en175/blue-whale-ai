@@ -18,3 +18,16 @@ export function readPersistedPanelWidth(viewportWidth: number): number {
 export function persistPanelWidth(width: number): void {
   localStorage.setItem(PANEL_WIDTH_STORAGE_KEY, String(width));
 }
+
+export interface AgentDrawerLayout {
+  open: boolean;
+  closing: boolean;
+  floating: boolean;
+  resizing: boolean;
+  width: number;
+}
+
+export function drawerPushOffset(layout: AgentDrawerLayout | null | undefined): number {
+  if (!layout || !layout.open || layout.closing || layout.floating) return 0;
+  return layout.width;
+}

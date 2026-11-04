@@ -13,6 +13,8 @@ import {
 import { Prisma } from "@prisma/client";
 import type { PrismaClient } from "@prisma/client";
 
+import { projectPublicError } from "@lib/shared/jobs/generation-job-error-projection.js";
+
 import type { CreatedJob } from "./generation-command-repo.js";
 import { nodeFromRow } from "./canvas-repo.js";
 import { projectVirtualOutputs, trustedAssetIdOf, type VirtualOutputProjection } from "./canvas-recovery-multi-output.js";
@@ -353,7 +355,7 @@ export interface RecoveryItemView {
   slot_id: string | null;
 }
 
-function jobDetailView(row: {
+export function jobDetailView(row: {
   id: bigint; type: string; status: string; progress: number;
   output_asset_ids: unknown; error: unknown; gmt_create: Date;
 }): Record<string, unknown> {
@@ -363,7 +365,12 @@ function jobDetailView(row: {
     status: row.status,
     progress: row.progress,
     output_asset_ids: row.output_asset_ids ?? [],
-    stored_error: row.error ?? null,
+    stored_error: row.status === "failed"
+      ? projectPublicError(
+          (row.error ?? null) as Record<string, unknown> | null,
+          row.type,
+        )
+      : null,
     created_at: wallClockRfc3339(row.gmt_create),
   };
 }

@@ -49,6 +49,7 @@ import {
   clampPanelWidth,
   persistPanelWidth,
   readPersistedPanelWidth,
+  type AgentDrawerLayout,
 } from './drawerWidth';
 import { showsTurnFooter } from '../../hooks/agent/sessionTimeline';
 import { collectKnownAssets } from './assetMentions';
@@ -120,6 +121,7 @@ interface AgentPanelProps {
   onPlaceFileOnCanvas: (file: File) => Promise<SidebarCanvasUpload>;
   onPickFromAssets?: () => void;
   externalAssetPicks?: { ts: number; blocks: import('@/custom/api/agentSessions').SessionContentBlock[] } | null;
+  onDrawerLayoutChange?: (layout: AgentDrawerLayout) => void;
 }
 
 function hasInlineVisualMention(blocks: SessionContentBlock[] | undefined, chipId: string): boolean {
@@ -139,7 +141,7 @@ function quoteTooltipOfChip(blocks: SessionContentBlock[] | undefined, chipId: s
   return text.length > 500 ? `${text.slice(0, 500)}…` : text;
 }
 
-export default function AgentPanel({ open = true, onClose, initialInput, initialCardLabel, inputVersion, autoSend, autoSendReady, autoSendPayload, projectId, onApplyToDock, appliedCardIds, initialSkillId, initialSkillName, mediaBlocks: initialMediaBlocks, onPlaceFileOnCanvas, onPickFromAssets, externalAssetPicks, candidateBlocks, onPrepareCandidate, onCancelCandidate }: AgentPanelProps) {
+export default function AgentPanel({ open = true, onClose, initialInput, initialCardLabel, inputVersion, autoSend, autoSendReady, autoSendPayload, projectId, onApplyToDock, appliedCardIds, initialSkillId, initialSkillName, mediaBlocks: initialMediaBlocks, onPlaceFileOnCanvas, onPickFromAssets, externalAssetPicks, onDrawerLayoutChange, candidateBlocks, onPrepareCandidate, onCancelCandidate }: AgentPanelProps) {
   useAssetUrlCache();
   const chipEditorRef = useRef<ChipTextEditorHandle>(null);
 
@@ -240,6 +242,14 @@ export default function AgentPanel({ open = true, onClose, initialInput, initial
   const resizeDragRef = useRef<{ startX: number; startWidth: number } | null>(null);
   const [closing, setClosing] = useState(false);
   const closeTimerRef = useRef<number | undefined>(undefined);
+  const drawerLayoutChangeRef = useRef(onDrawerLayoutChange);
+  drawerLayoutChangeRef.current = onDrawerLayoutChange;
+  useEffect(() => {
+    drawerLayoutChangeRef.current?.({ open, closing, floating, resizing, width: panelWidth });
+  }, [open, closing, floating, resizing, panelWidth]);
+  useEffect(() => () => {
+    drawerLayoutChangeRef.current?.({ open: false, closing: false, floating: false, resizing: false, width: 0 });
+  }, []);
   useEffect(() => {
     if (open) setClosing(false);
     else {

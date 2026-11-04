@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import UserDropdown from '@/custom/components/UserDropdown';
-import CreditsBadge from './components/CreditsBadge';
+import CreditsBadge from '@/custom/components/CreditsBadge';
 import CreditsShopButton from './components/CreditsShopButton';
 import ChatBox from './components/ChatBox';
 import CardGallery from './components/CardGallery';

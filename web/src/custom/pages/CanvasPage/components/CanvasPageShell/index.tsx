@@ -1,5 +1,6 @@
 import { type PickChannel as CanvasPickChannel, type VideoRefRole, type AssetsPickerTarget, type AssetCardKind } from '@/custom/enums';
 import type { ComponentProps, Dispatch, ReactNode, RefObject, SetStateAction } from 'react';
+import { useState } from 'react';
 import type { Node, Viewport } from '@xyflow/react';
 import { createCanvasToolSessions } from '../../tool-runtime/canvasToolSessions';
 import type { CanvasHistoryApi } from '../../hooks/document/useCanvasHistory';
@@ -9,6 +10,7 @@ import type { MediaNodeData } from '../MediaNode';
 import type { UploadedFile } from '../ImageDialog';
 import type { AssetCardNodeData } from '../AssetCardNode';
 import CanvasHeader from '../CanvasHeader';
+import type { AgentDrawerLayout } from '../AgentPanel/drawerWidth';
 import CanvasToolbar from '../CanvasToolbar';
 import CanvasBottomLeftActions from '../CanvasBottomLeftActions';
 import CanvasPickHint from '../CanvasPickHint';
@@ -275,6 +277,8 @@ export default function CanvasPageShell(props: CanvasPageShellProps) {
     shellTop,
   } = props;
 
+  const [agentDrawer, setAgentDrawer] = useState<AgentDrawerLayout | null>(null);
+
   const connectMenuKinds = () => {
     const menu = menus.connectMenu;
     if (!menu) return new Set<ConnectGenKind>();
@@ -295,6 +299,7 @@ export default function CanvasPageShell(props: CanvasPageShellProps) {
         onNewProject={projectHandlers.handleNewProject}
         onToggleAgent={() => agent.setShowAgent(!agent.showAgent)}
         hideAgentEntry={agent.showAgent}
+        agentDrawer={agentDrawer}
       />
       <AssetDetailModal
         asset={overlays.assetDetailTarget}
@@ -580,6 +585,7 @@ export default function CanvasPageShell(props: CanvasPageShellProps) {
           onPlaceFileOnCanvas={menus.placeNodeFile}
           onPickFromAssets={() => pick.openAssetsPicker('agentPanel')}
           externalAssetPicks={agent.agentAssetPicks}
+          onDrawerLayoutChange={setAgentDrawer}
         />
       )}
       {assetsPicker.showAssetsPicker && (
