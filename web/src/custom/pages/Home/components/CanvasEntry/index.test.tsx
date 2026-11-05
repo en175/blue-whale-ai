@@ -9,19 +9,26 @@ import type { ProjectRecord } from '@/custom/api/projects';
 const api = vi.hoisted(() => ({
   createProject: vi.fn(),
   fetchRecentProjects: vi.fn(),
+  fetchProjectListQuery: vi.fn(),
   navigate: vi.fn(),
 }));
 
 vi.mock('@/custom/api/projects', async () => {
   const actual = await vi.importActual<typeof import('@/custom/api/projects')>('@/custom/api/projects');
-  return { ...actual, createProject: api.createProject, fetchRecentProjects: api.fetchRecentProjects };
+  return {
+    ...actual,
+    createProject: api.createProject,
+    fetchRecentProjects: api.fetchRecentProjects,
+    fetchProjectListQuery: api.fetchProjectListQuery,
+  };
 });
 vi.mock('react-router-dom', async () => {
   const actual = await vi.importActual<typeof import('react-router-dom')>('react-router-dom');
   return { ...actual, useNavigate: () => api.navigate };
 });
-vi.mock('@/shared/utils/auth', () => ({ getCurrentUser: () => ({ id: 'u1' }) }));
+vi.mock('@/shared/utils/auth', () => ({ getCurrentUser: () => ({ id: 'u1', userId: 1 }) }));
 vi.mock('@/custom/components/LoginModal', () => ({ default: () => null }));
+vi.mock('@/custom/components/Toast', () => ({ showToast: vi.fn() }));
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -55,7 +62,9 @@ async function renderEntry() {
 
 beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  sessionStorage.clear();
   api.createProject.mockResolvedValue(record('42', 'new'));
+  api.fetchProjectListQuery.mockResolvedValue({ records: [], total: 0, size: 30, current: 1 });
   api.fetchRecentProjects.mockResolvedValue([
     record('1', '有图项目', [{ url: 'https://cdn.example.test/a.png', type: 'image' }]),
     record('2', '只有视频', [{ url: 'https://cdn.example.test/b.mp4', type: 'video' }]),
@@ -126,7 +135,92 @@ describe('CanvasEntry', () => {
       button.click();
       await Promise.resolve();
     });
-    expect(api.createProject).toHaveBeenCalledWith(expect.any(String), undefined, 'canvas');
+    expect(api.createProject).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({
+      headers: { 'Idempotency-Key': expect.any(String) },
+      silent: true,
+    }), 'canvas');
     expect(api.navigate).toHaveBeenCalledWith('/canvas?project=42');
+  });
+});
+
+describe('IKST3D 新建画布不留重复项目', () => {
+  function canvasButton() {
+    return [...mountNode.querySelectorAll('button')].find((b) => b.textContent?.includes('新建画布'))!;
+  }
+
+  function freshRecord(id: string, name: string, startedAt: number): ProjectRecord {
+    return {
+      id,
+      name,
+      previews: [],
+      created_at: new Date(startedAt + 1_000).toISOString(),
+      last_opened_at: null,
+      last_edited_at: new Date(startedAt + 1_000).toISOString(),
+      pinned_at: null,
+    };
+  }
+
+  it('上一次已建但未进入：再次点击直接进原项目，不再创建', async () => {
+    const startedAt = Date.now() - 5_000;
+    const name = '2026-11-05 10:00';
+    sessionStorage.setItem('bw:home:latest-create-attempt', JSON.stringify({
+      id: 'key-1',
+      name,
+      userId: 1,
+      startedAt,
+      unsure: false,
+      absent: false,
+      state: null,
+    }));
+    api.fetchProjectListQuery.mockResolvedValue({
+      records: [freshRecord('p5', name, startedAt)],
+      total: 1,
+      size: 30,
+      current: 1,
+    });
+
+    await renderEntry();
+    await act(async () => {
+      canvasButton().click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(api.fetchProjectListQuery).toHaveBeenCalledWith({ source: 'canvas' });
+    expect(api.createProject).not.toHaveBeenCalled();
+    expect(api.navigate).toHaveBeenCalledWith('/canvas?project=p5');
+  });
+
+  it('核对不到上次创建的项目：正常创建，并核销旧记录', async () => {
+    sessionStorage.setItem('bw:home:latest-create-attempt', JSON.stringify({
+      id: 'key-old',
+      name: '2026-11-05 09:00',
+      userId: 1,
+      startedAt: Date.now() - 60_000,
+      unsure: false,
+      absent: false,
+      state: null,
+    }));
+
+    await renderEntry();
+    await act(async () => {
+      canvasButton().click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(api.createProject).toHaveBeenCalledTimes(1);
+  });
+
+  it('创建成功后核销最新尝试，再次点击会重新创建', async () => {
+    await renderEntry();
+    await act(async () => {
+      canvasButton().click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(api.navigate).toHaveBeenCalledWith('/canvas?project=42');
+    expect(sessionStorage.getItem('bw:home:latest-create-attempt')).toBeNull();
   });
 });

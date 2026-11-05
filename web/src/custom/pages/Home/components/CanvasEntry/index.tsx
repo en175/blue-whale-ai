@@ -3,9 +3,19 @@ import { useNavigate } from 'react-router-dom';
 import { LayoutGrid, Plus } from 'lucide-react';
 import { createProject, fetchRecentProjects, projectPreviews, type ProjectRecord } from '@/custom/api/projects';
 import LoginModal from '@/custom/components/LoginModal';
+import { showToast } from '@/custom/components/Toast';
 import { getCurrentUser } from '@/shared/utils/auth';
 import { resolveMediaSrc } from '@/shared/utils/remoteImageCors';
 import { openCanvasTab } from '@/custom/utils/open-canvas-tab';
+import {
+  clearCreateAttempt,
+  clearLatestAttempt,
+  fetchRecentBySource,
+  matchCreatedProject,
+  newCreateAttempt,
+  readLatestAttempt,
+  writeLatestAttempt,
+} from '../ChatBox/createAttempt';
 import styles from './index.module.css';
 
 const RECENT_LIMIT = 3;
@@ -35,17 +45,44 @@ export default function CanvasEntry() {
     };
   }, []);
 
+  const resumeLatest = async (userId: number): Promise<boolean> => {
+    const attempt = readLatestAttempt(userId);
+    if (!attempt) return false;
+    try {
+      const created = matchCreatedProject(await fetchRecentBySource('canvas'), attempt);
+      if (!created) {
+        clearLatestAttempt();
+        return false;
+      }
+      clearLatestAttempt();
+      navigate(`/canvas?project=${created.id}`);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
   const createCanvas = async () => {
     if (creating) return;
-    if (!getCurrentUser()) {
+    const current = getCurrentUser();
+    if (!current) {
       setShowLogin(true);
       return;
     }
     setCreating(true);
     try {
-      const created = await createProject(makeProjectName(), undefined, 'canvas');
+      if (await resumeLatest(current.userId)) return;
+      const attempt = newCreateAttempt(current.userId, makeProjectName(), null);
+      writeLatestAttempt(attempt);
+      const created = await createProject(attempt.name, {
+        headers: { 'Idempotency-Key': attempt.id },
+        silent: true,
+      }, 'canvas');
+      clearLatestAttempt();
+      clearCreateAttempt();
       navigate(`/canvas?project=${created.id}`);
-    } catch {
+    } catch (error) {
+      showToast('error', error instanceof Error && error.message ? error.message : '创建项目失败，请稍后再试');
     } finally {
       setCreating(false);
     }
