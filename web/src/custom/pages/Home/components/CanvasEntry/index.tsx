@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom';
 import { LayoutGrid, Plus } from 'lucide-react';
 import { createProject, fetchRecentProjects, projectPreviews, type ProjectRecord } from '@/custom/api/projects';
 import LoginModal from '@/custom/components/LoginModal';
-import { showToast } from '@/custom/components/Toast';
 import { getCurrentUser } from '@/shared/utils/auth';
 import { resolveMediaSrc } from '@/shared/utils/remoteImageCors';
 import { openCanvasTab } from '@/custom/utils/open-canvas-tab';
@@ -47,7 +46,6 @@ export default function CanvasEntry() {
       const created = await createProject(makeProjectName(), undefined, 'canvas');
       navigate(`/canvas?project=${created.id}`);
     } catch {
-      showToast('warn', '项目创建失败，请稍后再试');
     } finally {
       setCreating(false);
     }

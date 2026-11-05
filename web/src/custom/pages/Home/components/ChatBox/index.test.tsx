@@ -2,6 +2,8 @@
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { toast } from 'sonner';
+import { ApiError } from '@/shared/api/http';
 import type { GenerationModel } from '@/custom/api/generation';
 import ChatBox from './index';
 import styles from './index.module.css';
@@ -477,8 +479,9 @@ describe('IKR63U 首页发送只提交一次', () => {
     expect(createProject).toHaveBeenCalledTimes(1);
   });
 
-  it('创建项目失败时保留正文，不跳转画布', async () => {
-    createProject.mockRejectedValue({ status: 500 });
+  it('创建项目失败时保留正文，不跳转画布，提示交给请求层', async () => {
+    createProject.mockRejectedValue(new ApiError(500, '项目创建失败，请稍后再试'));
+    const toastSpy = vi.spyOn(toast, 'error');
     await renderChatBox();
     await act(async () => { typePrompt('画一只猫'); });
 
@@ -487,8 +490,11 @@ describe('IKR63U 首页发送只提交一次', () => {
 
     expect(createProject).toHaveBeenCalledTimes(1);
     expect(navigate).not.toHaveBeenCalled();
+    expect(createProject.mock.calls[0][1]).toBeUndefined();
     expect((mountNode.querySelector('textarea') as HTMLTextAreaElement).value).toBe('画一只猫');
     expect(sendButton().disabled).toBe(false);
+    expect(toastSpy).not.toHaveBeenCalled();
+    toastSpy.mockRestore();
   });
 
   it('创建项目成功后跳到新画布，首页正文清空', async () => {
