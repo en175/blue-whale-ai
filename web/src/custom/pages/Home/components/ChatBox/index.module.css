@@ -869,3 +869,34 @@
   gap: 10px;
   flex-shrink: 0;
 }
+
+.createCheckBar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px 6px;
+  font-size: var(--font-size-xs);
+  color: var(--chat-fg-muted);
+}
+
+.createCheckText {
+  line-height: 1.4;
+}
+
+.createCheckBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--chat-control-border);
+  background: var(--chat-control-bg);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+}
+
+.createCheckBtn:disabled {
+  cursor: default;
+  opacity: 0.6;
+}

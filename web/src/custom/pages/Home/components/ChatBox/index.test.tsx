@@ -10,12 +10,13 @@ import styles from './index.module.css';
 import { OMNI_REFERENCE_FOLLOW_HINT } from '@/custom/utils/video-reference-hints';
 
 
-const { fetchGenerationModels, navigate, pickerOnSelect, createProject, authUser } = vi.hoisted(() => ({
+const { fetchGenerationModels, navigate, pickerOnSelect, createProject, fetchProjectListQuery, authUser } = vi.hoisted(() => ({
   fetchGenerationModels: vi.fn(),
   navigate: vi.fn(),
   pickerOnSelect: { current: null as null | ((assets: unknown[]) => void) },
   createProject: vi.fn(),
-  authUser: { current: { id: 'u1', name: 'tester' } as { id: string; name: string } | null },
+  fetchProjectListQuery: vi.fn(),
+  authUser: { current: { id: 'u1', userId: 1, name: 'tester' } as { id: string; userId: number; name: string } | null },
 }));
 
 vi.mock('@/custom/api/generation', () => ({ fetchGenerationModels }));
@@ -27,7 +28,7 @@ vi.mock('@/shared/utils/auth', () => ({
   subscribe: () => () => {},
 }));
 
-vi.mock('@/custom/api/projects', () => ({ createProject }));
+vi.mock('@/custom/api/projects', () => ({ createProject, fetchProjectListQuery }));
 
 vi.mock('../SkillModal', () => ({
   default: ({ open, onUseSkill }: { open: boolean; onUseSkill?: (skill: unknown) => void }) =>
@@ -179,9 +180,12 @@ async function switchToVideoTabAndInject(assets: unknown[]) {
 
 beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-  authUser.current = { id: 'u1', name: 'tester' };
+  authUser.current = { id: 'u1', userId: 1, name: 'tester' };
   fetchGenerationModels.mockResolvedValue([seedance25, seedance20]);
   createProject.mockReset();
+  fetchProjectListQuery.mockReset();
+  fetchProjectListQuery.mockResolvedValue({ records: [], total: 0, size: 30, current: 1 });
+  sessionStorage.clear();
   navigate.mockReset();
 });
 
@@ -479,8 +483,8 @@ describe('IKR63U 首页发送只提交一次', () => {
     expect(createProject).toHaveBeenCalledTimes(1);
   });
 
-  it('创建项目失败时保留正文，不跳转画布，提示交给请求层', async () => {
-    createProject.mockRejectedValue(new ApiError(500, '项目创建失败，请稍后再试'));
+  it('创建项目失败时保留正文，不跳转画布，明确失败直接提示后端文案', async () => {
+    createProject.mockRejectedValue(new ApiError(400, '项目名不合法'));
     const toastSpy = vi.spyOn(toast, 'error');
     await renderChatBox();
     await act(async () => { typePrompt('画一只猫'); });
@@ -490,10 +494,11 @@ describe('IKR63U 首页发送只提交一次', () => {
 
     expect(createProject).toHaveBeenCalledTimes(1);
     expect(navigate).not.toHaveBeenCalled();
-    expect(createProject.mock.calls[0][1]).toBeUndefined();
     expect((mountNode.querySelector('textarea') as HTMLTextAreaElement).value).toBe('画一只猫');
     expect(sendButton().disabled).toBe(false);
-    expect(toastSpy).not.toHaveBeenCalled();
+    expect(toastSpy).toHaveBeenCalledWith('项目名不合法');
+    expect(mountNode.querySelector('[data-testid="create-check-bar"]')).toBeNull();
+    expect(sessionStorage.getItem('bw:home:create-attempt')).toBeNull();
     toastSpy.mockRestore();
   });
 
@@ -515,6 +520,174 @@ describe('IKR63U 首页发送只提交一次', () => {
 function quoteBadge() {
   return mountNode.querySelector<HTMLElement>('[data-testid="home-quote"]')!;
 }
+
+describe('IKST39 创建结果不明的核对', () => {
+  function recentRecord(id: string, name: string, createdAt: string) {
+    return {
+      id,
+      name,
+      previews: [],
+      created_at: createdAt,
+      last_opened_at: null,
+      last_edited_at: createdAt,
+      pinned_at: null,
+    };
+  }
+
+  it('超时视为结果不明：不解锁发送，显示核对提示', async () => {
+    createProject.mockRejectedValue(new ApiError(408, '请求超时，请稍后重试'));
+    await renderChatBox();
+    await act(async () => { typePrompt('画一只猫'); });
+
+    await act(async () => { sendButton().click(); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    expect(navigate).not.toHaveBeenCalled();
+    expect(sendButton().disabled).toBe(true);
+    expect(mountNode.querySelector('[data-testid="create-check-bar"]')?.textContent).toContain('核对');
+    expect((mountNode.querySelector('textarea') as HTMLTextAreaElement).value).toBe('画一只猫');
+    expect(JSON.parse(sessionStorage.getItem('bw:home:create-attempt')!).unsure).toBe(true);
+  });
+
+  it('核对发现已创建：跳到原项目并清空尝试', async () => {
+    createProject.mockRejectedValue(new ApiError(408, '请求超时，请稍后重试'));
+    await renderChatBox();
+    await act(async () => { typePrompt('画一只猫'); });
+    await act(async () => { sendButton().click(); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    const attemptName = JSON.parse(sessionStorage.getItem('bw:home:create-attempt')!).name as string;
+    fetchProjectListQuery.mockResolvedValue({
+      records: [recentRecord('p1', attemptName, new Date().toISOString())],
+      total: 1,
+      size: 30,
+      current: 1,
+    });
+    await act(async () => {
+      mountNode.querySelector<HTMLButtonElement>('[data-testid="create-check-retry"]')!.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(navigate).toHaveBeenCalledWith('/canvas?project=p1', { state: { agentText: '画一只猫', skillId: '', skillName: '', agentAutoSend: true } });
+    expect(sessionStorage.getItem('bw:home:create-attempt')).toBeNull();
+  });
+
+  it('核对确认未创建：才解锁发送，仍保留正文', async () => {
+    createProject.mockRejectedValue(new ApiError(0, '网络请求失败，请检查网络后重试'));
+    await renderChatBox();
+    await act(async () => { typePrompt('画一只猫'); });
+    await act(async () => { sendButton().click(); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(sendButton().disabled).toBe(true);
+
+    await act(async () => {
+      mountNode.querySelector<HTMLButtonElement>('[data-testid="create-check-retry"]')!.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(navigate).not.toHaveBeenCalled();
+    expect(sendButton().disabled).toBe(false);
+    expect(mountNode.querySelector('[data-testid="create-check-bar"]')?.textContent).toContain('已确认未创建');
+    expect((mountNode.querySelector('textarea') as HTMLTextAreaElement).value).toBe('画一只猫');
+  });
+
+  it('核对接口也不可达：保持锁定并保留尝试', async () => {
+    createProject.mockRejectedValue(new ApiError(408, '请求超时，请稍后重试'));
+    fetchProjectListQuery.mockRejectedValue(new ApiError(502, '网关错误'));
+    await renderChatBox();
+    await act(async () => { typePrompt('画一只猫'); });
+    await act(async () => { sendButton().click(); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    await act(async () => {
+      mountNode.querySelector<HTMLButtonElement>('[data-testid="create-check-retry"]')!.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(sendButton().disabled).toBe(true);
+    expect(mountNode.querySelector('[data-testid="create-check-bar"]')?.textContent).toContain('无法核对');
+    expect(sessionStorage.getItem('bw:home:create-attempt')).not.toBeNull();
+  });
+
+  it('打开页面时自动核对未完成的创建，已创建直接进原项目', async () => {
+    const startedAt = Date.now() - 60_000;
+    sessionStorage.setItem('bw:home:create-attempt', JSON.stringify({
+      id: 'key-1',
+      name: '2026-11-05 10:00',
+      userId: 1,
+      startedAt,
+      unsure: true,
+      absent: false,
+      state: null,
+    }));
+    fetchProjectListQuery.mockResolvedValue({
+      records: [recentRecord('p7', '2026-11-05 10:00', new Date(startedAt + 1000).toISOString())],
+      total: 1,
+      size: 30,
+      current: 1,
+    });
+
+    await renderChatBox();
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    expect(fetchProjectListQuery).toHaveBeenCalledWith({ source: 'dialog' });
+    expect(navigate).toHaveBeenCalledWith('/canvas?project=p7', { state: null });
+    expect(sessionStorage.getItem('bw:home:create-attempt')).toBeNull();
+  });
+});
+
+describe('IKST39 创建尝试匹配', () => {
+  it('只认创建时间在尝试之后的同名项目', async () => {
+    const { matchCreatedProject } = await import('./createAttempt');
+    const base = {
+      previews: [],
+      last_opened_at: null,
+      last_edited_at: '',
+      pinned_at: null,
+    };
+    const attempt = {
+      id: 'k',
+      name: 'A',
+      userId: 1,
+      startedAt: 1_700_000_000_000,
+      unsure: true,
+      absent: false,
+      state: null,
+    };
+    const old = { ...base, id: 'old', name: 'A', created_at: new Date(attempt.startedAt - 60_000).toISOString() };
+    const fresh = { ...base, id: 'new', name: 'A', created_at: new Date(attempt.startedAt + 1_000).toISOString() };
+
+    expect(matchCreatedProject([old], attempt)).toBeNull();
+    expect(matchCreatedProject([old, fresh], attempt)?.id).toBe('new');
+  });
+
+  it('重名时按带后缀的项目兜底', async () => {
+    const { matchCreatedProject } = await import('./createAttempt');
+    const attempt = {
+      id: 'k',
+      name: 'A',
+      userId: 1,
+      startedAt: 1_700_000_000_000,
+      unsure: true,
+      absent: false,
+      state: null,
+    };
+    const suffixed = {
+      id: 's',
+      name: 'A (2)',
+      previews: [],
+      created_at: new Date(attempt.startedAt + 500).toISOString(),
+      last_opened_at: null,
+      last_edited_at: '',
+      pinned_at: null,
+    };
+
+    expect(matchCreatedProject([suffixed], attempt)?.id).toBe('s');
+  });
+});
 
 function requestsToQuoteApi(fetchMock: ReturnType<typeof vi.fn>): string[] {
   return fetchMock.mock.calls

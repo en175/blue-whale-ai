@@ -5,7 +5,7 @@ import { useState, useRef, useEffect, useLayoutEffect, useMemo, useSyncExternalS
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useDismissOnOutside } from '@/custom/pages/CanvasPage/hooks/shared/useDismissOnOutside';
 import { createPortal } from 'react-dom';
-import { Plus, ChevronUp, Loader2, Music, BookOpen, BookText, X, Upload, FolderOpen } from 'lucide-react';
+import { Plus, ChevronUp, Loader2, Music, BookOpen, BookText, X, Upload, FolderOpen, RotateCw } from 'lucide-react';
 import SkillModal from '../SkillModal';
 import LoginModal from '@/custom/components/LoginModal';
 import { useLoginDialogStore } from '@/shared/stores/loginDialog';
@@ -32,7 +32,7 @@ import { fetchGenerationModels, type GenerationModel } from '@/custom/api/genera
 import { aspectRatioOptions, hasAspectRatio, pickRatioForSize, ratiosForSelectedSize } from '@/custom/utils/image-size-ratios';
 import { pickDefaultVideoRatio, videoRatioLabel } from '@/custom/utils/video-aspect-ratio';
 import { type SkillRecord } from '@/custom/api/skills';
-import { createProject } from '@/custom/api/projects';
+import { createProject, fetchProjectListQuery, type ProjectRecord } from '@/custom/api/projects';
 import { setGenHandoff, type GenHandoff } from '@/custom/utils/gen-handoff';
 import { setAgentHandoff } from '@/custom/utils/agent-handoff';
 import { classifyRefOverflow } from '@/custom/utils/ref-overflow';
@@ -42,6 +42,20 @@ import { VIDEO_REFERENCE_NOT_APPROVED_MESSAGE, isUnapprovedVideoMaterialStatus }
 import { OMNI_REFERENCE_FOLLOW_HINT } from '@/custom/utils/video-reference-hints';
 import { showToast as pushToast } from '@/custom/components/Toast';
 import { resolveHomeLoginResume, type HomePendingAction } from './homeLoginResume';
+import {
+  CHECK_HINT,
+  CHECKED_ABSENT_HINT,
+  CHECKED_CREATED_HINT,
+  CHECKED_UNREACHABLE_HINT,
+  CHECKING_HINT,
+  clearCreateAttempt,
+  isAmbiguousCreateError,
+  matchCreatedProject,
+  newCreateAttempt,
+  readCreateAttempt,
+  writeCreateAttempt,
+  type CreateAttempt,
+} from './createAttempt';
 import { limitPromptInput } from './promptInput';
 import { imageParamsRejected, videoParamsRejected } from './sendParamGuard';
 import GenerationPreference, { type PreferenceField, type PreferenceToggle } from './GenerationPreference';
@@ -102,19 +116,56 @@ function probeVideoDuration(src: string): Promise<number | null> {
   });
 }
 
-async function navigateToNewProject(
+type CreateRunResult = { kind: 'ok' } | { kind: 'failed' } | { kind: 'ambiguous'; attempt: CreateAttempt };
+
+async function createProjectOnce(
   navigate: ReturnType<typeof useNavigate>,
   state: unknown,
+  userId: number,
   prepare?: () => void,
-): Promise<boolean> {
+): Promise<CreateRunResult> {
+  const attempt = newCreateAttempt(userId, makeProjectName(), state);
   try {
-    const created = await createProject(makeProjectName(), undefined, 'dialog');
+    const created = await createProject(attempt.name, {
+      headers: { 'Idempotency-Key': attempt.id },
+      silent: true,
+    }, 'dialog');
     prepare?.();
+    clearCreateAttempt();
     navigate(`/canvas?project=${created.id}`, { state });
-    return true;
-  } catch {
-    return false;
+    return { kind: 'ok' };
+  } catch (error) {
+    if (isAmbiguousCreateError(error)) {
+      const pending = { ...attempt, unsure: true };
+      writeCreateAttempt(pending);
+      return { kind: 'ambiguous', attempt: pending };
+    }
+    clearCreateAttempt();
+    pushToast('error', error instanceof Error && error.message ? error.message : '创建项目失败，请稍后再试');
+    return { kind: 'failed' };
   }
+}
+
+type ReconcileOutcome = 'created' | 'absent' | 'unreachable';
+
+async function reconcileCreateAttempt(
+  attempt: CreateAttempt,
+  navigate: ReturnType<typeof useNavigate>,
+): Promise<ReconcileOutcome> {
+  let records: ProjectRecord[];
+  try {
+    records = await fetchProjectListQuery({ source: 'dialog' }).then((page) => page.records);
+  } catch (error) {
+    if (!isAmbiguousCreateError(error)) clearCreateAttempt();
+    return 'unreachable';
+  }
+  const created = matchCreatedProject(records, attempt);
+  if (created) {
+    clearCreateAttempt();
+    navigate(`/canvas?project=${created.id}`, { state: attempt.state });
+    return 'created';
+  }
+  return 'absent';
 }
 
 export default function ChatBox({
@@ -136,6 +187,95 @@ export default function ChatBox({
   const navigate = useNavigate();
   const location = useLocation();
   const user = useSyncExternalStore(subscribe, getCurrentUser);
+
+  const [pendingCreate, setPendingCreate] = useState<CreateAttempt | null>(null);
+  const checkedRef = useRef(false);
+  const autoCheckRef = useRef('');
+  const pendingApplyRef = useRef<(() => void) | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [checkHint, setCheckHint] = useState('');
+
+  useEffect(() => {
+    if (!user || checkedRef.current) return;
+    checkedRef.current = true;
+    const attempt = readCreateAttempt(user.userId);
+    if (!attempt) return;
+    autoCheckRef.current = attempt.id;
+    setPendingCreate(attempt);
+    setCheckHint(attempt.unsure ? CHECK_HINT : CHECKING_HINT);
+  }, [user]);
+
+  const enterPendingProject = (outcome: ReconcileOutcome) => {
+    if (outcome === 'absent') {
+      setPendingCreate((prev) => (prev ? { ...prev, unsure: false, absent: true } : prev));
+    } else if (outcome === 'created') {
+      setPendingCreate(null);
+      setCheckHint(CHECKED_CREATED_HINT);
+      pendingApplyRef.current?.();
+    } else {
+      setPendingCreate((prev) => (prev ? { ...prev, unsure: true, absent: false } : prev));
+      setCheckHint(CHECKED_UNREACHABLE_HINT);
+    }
+    setChecking(false);
+  };
+
+  useEffect(() => {
+    if (!pendingCreate || pendingCreate.absent) return;
+    if (autoCheckRef.current !== pendingCreate.id) return;
+    autoCheckRef.current = '';
+    let alive = true;
+    reconcileCreateAttempt({ ...pendingCreate, unsure: false }, navigate).then((outcome) => {
+      if (alive) enterPendingProject(outcome);
+    });
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingCreate]);
+
+  const runCreate = async (state: unknown, prepare?: () => void): Promise<boolean> => {
+    if (!user) return false;
+    pendingApplyRef.current = prepare ?? null;
+    setPendingCreate(null);
+    setCheckHint('');
+    const result = await createProjectOnce(navigate, state, user.userId, prepare);
+    if (result.kind === 'ambiguous') {
+      setPendingCreate(result.attempt);
+      setCheckHint(CHECK_HINT);
+    }
+    return result.kind === 'ok';
+  };
+
+  const checkPendingCreate = async () => {
+    if (!pendingCreate || checking) return;
+    setChecking(true);
+    setCheckHint(CHECKING_HINT);
+    enterPendingProject(
+      await reconcileCreateAttempt({ ...pendingCreate, unsure: false, absent: false }, navigate),
+    );
+  };
+
+  const createBlocked = pendingCreate !== null && pendingCreate.unsure;
+  const sendDisabled = !inputValue.trim() || sending || createBlocked;
+  const checkBar = pendingCreate ? (
+    <div className={styles.createCheckBar} data-testid="create-check-bar" role="status">
+      <span className={styles.createCheckText}>
+        {pendingCreate.absent ? CHECKED_ABSENT_HINT : checkHint || CHECK_HINT}
+      </span>
+      {pendingCreate.unsure && (
+        <button
+          type="button"
+          className={styles.createCheckBtn}
+          data-testid="create-check-retry"
+          onClick={() => void checkPendingCreate()}
+          disabled={checking}
+        >
+          <RotateCw size={13} strokeWidth={2} className={checking ? styles.sendSpin : undefined} />
+          <span>{checking ? '核对中' : '核对结果'}</span>
+        </button>
+      )}
+    </div>
+  ) : null;
 
   const collapsed = workspace === 'canvas' && !expanded;
 
@@ -390,7 +530,7 @@ export default function ChatBox({
       navigate('/canvas', { state });
       return;
     }
-    await navigateToNewProject(navigate, state, applied);
+    await runCreate(state, applied);
   };
 
   const dispatchByTab = async (text: string, allowCreate = true) => {
@@ -457,7 +597,7 @@ export default function ChatBox({
         navigate('/canvas', { state: { genKind: 'video' } });
         return;
       }
-      await navigateToNewProject(navigate, { genKind: 'video' }, applied);
+      await runCreate({ genKind: 'video' }, applied);
       return;
     }
     if (activeTab === 'image') {
@@ -495,7 +635,7 @@ export default function ChatBox({
         navigate('/canvas', { state: { genKind: 'image' } });
         return;
       }
-      await navigateToNewProject(navigate, { genKind: 'image' }, applied);
+      await runCreate({ genKind: 'image' }, applied);
       return;
     }
     await goCanvasWithText(text, armedSkill?.id, armedSkill?.name, allowCreate);
@@ -521,6 +661,7 @@ export default function ChatBox({
     const text = inputValue.trim();
     if (!text) return;
     if (sendingRef.current) return;
+    if (pendingCreate?.unsure) return;
 
     if (keyframeSendHint) {
       showToast(keyframeSendHint);
@@ -1241,13 +1382,14 @@ export default function ChatBox({
                 type="button"
                 className={`${styles.sendBtn} ${inputValue.trim() ? styles.sendBtnActive : ''}`}
                 onClick={handleSend}
-                disabled={!inputValue.trim() || sending}
+                disabled={sendDisabled}
                 title="发送"
               >
                 {sending ? <Loader2 size={18} strokeWidth={2.5} className={styles.sendSpin} /> : <ChevronUp size={18} strokeWidth={2.5} />}
               </button>
             </div>
           </div>
+          {checkBar}
         </>
       ) : (
         <>
@@ -1413,7 +1555,7 @@ export default function ChatBox({
                 <button
                   className={`${styles.sendBtn} ${inputValue.trim() ? styles.sendBtnActive : ''}`}
                   onClick={handleSend}
-                  disabled={!inputValue.trim() || sending}
+                  disabled={sendDisabled}
                   title={keyframeSendHint || '发送'}
                 >
                   {sending ? <Loader2 size={18} strokeWidth={2.5} className={styles.sendSpin} /> : <ChevronUp size={18} strokeWidth={2.5} />}
@@ -1511,7 +1653,7 @@ export default function ChatBox({
                 <button
                   className={`${styles.sendBtn} ${inputValue.trim() ? styles.sendBtnActive : ''}`}
                   onClick={handleSend}
-                  disabled={!inputValue.trim() || sending}
+                  disabled={sendDisabled}
                 >
                   {sending ? <Loader2 size={18} strokeWidth={2.5} className={styles.sendSpin} /> : <ChevronUp size={18} strokeWidth={2.5} />}
                 </button>
@@ -1666,7 +1808,7 @@ export default function ChatBox({
                 <button
                   className={`${styles.sendBtn} ${inputValue.trim() ? styles.sendBtnActive : ''}`}
                   onClick={handleSend}
-                  disabled={!inputValue.trim() || sending}
+                  disabled={sendDisabled}
                 >
                   {sending ? <Loader2 size={18} strokeWidth={2.5} className={styles.sendSpin} /> : <ChevronUp size={18} strokeWidth={2.5} />}
                 </button>
@@ -1675,6 +1817,8 @@ export default function ChatBox({
           </>
         )}
       </div>
+
+      {checkBar}
 
       { }
       <SkillModal
