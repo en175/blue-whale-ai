@@ -40,8 +40,7 @@ import { videoReferenceMaxOf, audioReferenceMaxOf, imageReferenceMaxOf, supports
 import { promptCharCountLabel, promptMaxLengthOf } from '@/custom/utils/prompt-max-length';
 import { VIDEO_REFERENCE_NOT_APPROVED_MESSAGE, isUnapprovedVideoMaterialStatus } from '@/custom/utils/video-reference-compliance';
 import { OMNI_REFERENCE_FOLLOW_HINT } from '@/custom/utils/video-reference-hints';
-import { showToast as pushToast, toast } from '@/custom/components/Toast';
-import { isApiError, silentInit } from '@/shared/api/http';
+import { showToast as pushToast } from '@/custom/components/Toast';
 import { resolveHomeLoginResume, type HomePendingAction } from './homeLoginResume';
 import { limitPromptInput } from './promptInput';
 import { imageParamsRejected, videoParamsRejected } from './sendParamGuard';
@@ -109,16 +108,11 @@ async function navigateToNewProject(
   prepare?: () => void,
 ): Promise<boolean> {
   try {
-    const created = await createProject(makeProjectName(), silentInit({ silent: true }), 'dialog');
+    const created = await createProject(makeProjectName(), undefined, 'dialog');
     prepare?.();
     navigate(`/canvas?project=${created.id}`, { state });
     return true;
-  } catch (error) {
-    const message =
-      isApiError(error) && error.status >= 400 && error.status < 500
-        ? '项目创建失败，请稍后再试'
-        : '创建结果未知，请刷新查看后再试';
-    toast.error(message);
+  } catch {
     return false;
   }
 }
