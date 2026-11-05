@@ -684,6 +684,7 @@ export function useCanvasGenerationSubmission(host: CanvasGenerationSubmissionHo
         onMediaDims: handleMediaDims,
       },
     };
+    mediaNodesRef.current = [...mediaNodesRef.current, ...referenceNodes, node];
     setMediaNodes((prev) => [...prev, ...referenceNodes, node]);
     }
     const jobRefs = videoRefs?.references;
