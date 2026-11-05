@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { LayoutGrid, Plus } from 'lucide-react';
 import { createProject, fetchRecentProjects, projectPreviews, type ProjectRecord } from '@/custom/api/projects';
@@ -62,13 +62,16 @@ export default function CanvasEntry() {
     }
   };
 
+  const creatingRef = useRef(false);
+
   const createCanvas = async () => {
-    if (creating) return;
+    if (creatingRef.current) return;
     const current = getCurrentUser();
     if (!current) {
       setShowLogin(true);
       return;
     }
+    creatingRef.current = true;
     setCreating(true);
     try {
       if (await resumeLatest(current.userId)) return;
@@ -84,6 +87,7 @@ export default function CanvasEntry() {
     } catch (error) {
       showToast('error', error instanceof Error && error.message ? error.message : '创建项目失败，请稍后再试');
     } finally {
+      creatingRef.current = false;
       setCreating(false);
     }
   };
