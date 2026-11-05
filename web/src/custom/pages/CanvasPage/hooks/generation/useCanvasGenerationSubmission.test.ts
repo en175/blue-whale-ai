@@ -300,6 +300,18 @@ describe('startGenerationJob 创建生成任务', () => {
     expect(bag.runtime.submitCalls[0].payload.target_node_id).toBeUndefined();
   });
 
+  it('新建占位卡同帧写入 mediaNodesRef，避免随后建草稿卡按旧列表覆盖', async () => {
+    await mount([]);
+    bag.host.setMediaNodes = ((updater: unknown) => {
+      bag.nodes = typeof updater === 'function'
+        ? (updater as (prev: Node[]) => Node[])(bag.nodes)
+        : (updater as Node[]);
+    }) as CanvasGenerationSubmissionHost['setMediaNodes'];
+    expect(handles().startGenerationJob('video', { model_id: 'm', prompt: 'p', aspect_ratio: '16:9', duration: 5 })).toBe(true);
+    expect(bag.host.mediaNodesRef.current.map((n) => n.id)).toEqual(bag.nodes.map((n) => n.id));
+    expect(bag.host.mediaNodesRef.current).toHaveLength(1);
+  });
+
   it('创建失败为 401 时保留草稿且不重发', async () => {
     await mount([]);
     bag.runtime.nextError = new ApiError(401, '未登录');
