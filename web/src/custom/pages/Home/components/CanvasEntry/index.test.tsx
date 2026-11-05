@@ -191,6 +191,20 @@ describe('IKST3D 新建画布不留重复项目', () => {
     expect(api.navigate).toHaveBeenCalledWith('/canvas?project=p5');
   });
 
+  it('创建中连点「新建画布」只发一次创建请求', async () => {
+    api.createProject.mockImplementation(() => new Promise(() => {}));
+
+    await renderEntry();
+    await act(async () => {
+      canvasButton().click();
+      canvasButton().click();
+      canvasButton().click();
+      await Promise.resolve();
+    });
+
+    expect(api.createProject).toHaveBeenCalledTimes(1);
+  });
+
   it('核对不到上次创建的项目：正常创建，并核销旧记录', async () => {
     sessionStorage.setItem('bw:home:latest-create-attempt', JSON.stringify({
       id: 'key-old',
